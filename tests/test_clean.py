@@ -300,6 +300,32 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         self.assertTrue(any("sup3rS3cretPw" in t and "8f3a9c2e" in t for t in texts),
                         "no backup still holds the fully unmasked original")
 
+    def test_two_masks_in_one_clock_tick_keep_the_true_original(self):
+        """Microseconds only separate backups if the clock ticks between
+        them. On Windows before Python 3.13 it ticks every 1 to 16 ms, and
+        O_EXCL refused the second backup with FileExistsError."""
+        import datetime
+
+        class Frozen(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 9, 27, 12, 0, 0, 0)
+
+        root, path = _transcript(Masking.BODY)
+        fps = sorted(scan(root=root, apply=False)[0])
+        with mock.patch.object(clean.datetime, "datetime", Frozen):
+            scan_file(path, apply=True, only={fps[0]})
+            scan_file(path, apply=True, only={fps[1]})
+            scan_file(path, apply=True)   # nothing left to mask, no backup
+        self.assertEqual(sorted(os.listdir(self.root)),
+                         ["20260927-120000-000000", "20260927-120000-000000-1"])
+        first = [b for b in self._backups()
+                 if os.path.relpath(b, self.root).split(os.sep)[0]
+                 == "20260927-120000-000000"]
+        text = open(first[0], encoding="utf-8").read()
+        self.assertTrue("sup3rS3cretPw" in text and "8f3a9c2e" in text,
+                        "the first backup is not the unmasked original")
+
     def test_no_temp_file_is_left_behind(self):
         root, path = _transcript(Masking.BODY)
         scan(root=root, apply=True)

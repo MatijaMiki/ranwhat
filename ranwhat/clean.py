@@ -744,13 +744,24 @@ def _backup(path):
     way a secret should be: 0600, under a 0700 root nobody else can list.
     copy2 used to carry the source's mode across and makedirs left the tree
     0755. Microseconds in the stamp, and O_EXCL, keep two masks in the same
-    second from overwriting the true original with a half-masked copy."""
+    second from overwriting the true original with a half-masked copy.
+
+    Microseconds are only as fine as the clock: on Windows before Python
+    3.13 it ticks every 1 to 16 ms. A stamp already taken gets a counter,
+    stamp-1, stamp-2, rather than failing the mask."""
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
     os.chmod(BACKUP_ROOT, 0o700)
-    dest = _backup_dest(BACKUP_ROOT, stamp, path)
-    os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
-    fd = os.open(dest, _CREATE, 0o600)
+    for attempt in range(100):
+        name = "%s-%d" % (stamp, attempt) if attempt else stamp
+        dest = _backup_dest(BACKUP_ROOT, name, path)
+        os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
+        try:
+            fd = os.open(dest, _CREATE, 0o600)
+            break
+        except FileExistsError:
+            if attempt == 99:
+                raise
     with open(path, "rb") as src, os.fdopen(fd, "wb") as out:
         shutil.copyfileobj(src, out)
     return dest
