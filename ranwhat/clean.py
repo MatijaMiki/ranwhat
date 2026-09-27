@@ -956,7 +956,7 @@ def review(findings, scanned, stream=None):
 
         if cmd in ("show", "mask", "keep"):
             if cmd == "mask" and arg == "all":
-                changed_total += _mask(items, scanned, _print, GRN, RED)
+                changed_total += _mask(items, scanned, _print, GRN, RED, DIM)
                 items = []
                 continue
             if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
@@ -982,14 +982,14 @@ def review(findings, scanned, stream=None):
                 items.remove(target)
                 _print(DIM("  kept. %d left." % len(items)))
             else:
-                changed_total += _mask([target], scanned, _print, GRN, RED)
+                changed_total += _mask([target], scanned, _print, GRN, RED, DIM)
                 items.remove(target)
             continue
 
         _print(RED("  unknown command: %s" % cmd) + DIM("  (try 'help')"))
 
 
-def _mask(targets, scanned, _print, GRN, RED):
+def _mask(targets, scanned, _print, GRN, RED, DIM):
     """Re-walk only the files that hold these secrets, masking just them."""
     wanted = {t["fingerprint"] for t in targets}
     paths = set()

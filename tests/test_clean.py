@@ -4,6 +4,7 @@ The dangerous failure here is not missing a secret -- it is masking something
 that was never one, because the file being rewritten is the user's own agent
 history and a bad replacement is silent corruption.
 """
+import io
 import json
 import ntpath
 import os
@@ -419,3 +420,44 @@ class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):
                  self._line("JWT_ACCESS_SECRET=%s" % self.SECRET)]
         original, after, mask = self._apply(lines)
         self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
+
+
+class InteractiveReview(unittest.TestCase):
+    """`ranwhat clean` on a terminal with findings and no --apply lands in
+    review(). A mask there rewrote the file and then died on a NameError
+    printing the backup note, so the session ended in a traceback."""
+
+    def setUp(self):
+        self.backups = os.path.join(tempfile.mkdtemp(prefix="bk-"), "backups")
+        patch = mock.patch.object(clean, "BACKUP_ROOT", self.backups)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _review(self, *commands):
+        root, path = _transcript(Masking.BODY)
+        findings, scanned, _ = scan(root=root, apply=False)
+        replies = iter(commands)
+        out = io.StringIO()
+        with mock.patch("builtins.input", lambda prompt="": next(replies)):
+            changed = clean.review(findings, scanned, stream=out)
+        return path, changed, out.getvalue()
+
+    def test_mask_one_finishes_and_counts_the_file(self):
+        path, changed, out = self._review("mask 1", "quit")
+        self.assertEqual(changed, 1)
+        self.assertIn("masked in 1 file(s).", out)
+        self.assertIn("They still hold every masked value.", out)
+        self.assertEqual(open(path, encoding="utf-8").read().count(
+            "ranwhat:redacted:"), 1)
+
+    def test_mask_all_finishes_and_counts_the_file(self):
+        path, changed, out = self._review("mask all", "quit")
+        self.assertEqual(changed, 1)
+        self.assertIn("masked in 1 file(s).", out)
+        text = open(path, encoding="utf-8").read()
+        self.assertNotIn("sup3rS3cretPw", text)
+        self.assertNotIn("8f3a9c2e1b7d4f6a0c5e8b2d7f1a4c9e", text)
+
+    def test_masks_add_up_across_commands(self):
+        _path, changed, _out = self._review("mask 1", "mask 1", "quit")
+        self.assertEqual(changed, 2)
