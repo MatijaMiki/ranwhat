@@ -217,6 +217,12 @@ class ALineBreakInsideATokenIsNeverQuoted(unittest.TestCase):
         self.sent.append(dict(req.header_items()))
         raise urllib.error.URLError("offline")
 
+    def _tmp(self):
+        import shutil
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return d
+
     def _run(self, argv, tokens):
         import contextlib
         import io
@@ -224,7 +230,7 @@ class ALineBreakInsideATokenIsNeverQuoted(unittest.TestCase):
         from ranwhat import cli
         env = {k: v for k, v in os.environ.items() if not k.startswith("RANWHAT_")}
         env.update(tokens)
-        env["RANWHAT_HOME"] = tempfile.mkdtemp()
+        env["RANWHAT_HOME"] = self._tmp()
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, env, clear=True), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -249,7 +255,7 @@ class ALineBreakInsideATokenIsNeverQuoted(unittest.TestCase):
 
     def test_pull_usage_refuses_it_unsent_and_does_not_quote_it(self):
         import json
-        path = os.path.join(tempfile.mkdtemp(), "profile.json")
+        path = os.path.join(self._tmp(), "profile.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"agent": "t", "controls": {}, "credentials": [
                 {"provider": "stripe", "scopes": ["charges:write"]}]}, fh)
