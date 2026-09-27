@@ -169,12 +169,16 @@ def fetch(token, url=None, timeout=TIMEOUT):
     if len(body) > MAX_BYTES:
         raise FeedError("The feed is larger than any catalogue; not reading it.")
 
+    # RecursionError, as in load(): json gives up on nesting deeper than the
+    # stack, and the digest's json.dumps can give up on nesting that loaded.
     try:
         doc = json.loads(body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         raise FeedError("The feed returned something that is not JSON.")
-
-    return validate(doc)
+    try:
+        return validate(doc)
+    except RecursionError:
+        raise FeedError("The feed is nested deeper than any catalogue.")
 
 
 def validate(doc):

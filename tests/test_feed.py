@@ -9,6 +9,7 @@ import platform
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from ranwhat import catalog, cli, feed, score
 
@@ -539,6 +540,75 @@ class AMalformedCacheIsNoFeed(FeedHome):
         self.assertEqual(rc, 0)
         self.assertIn("No feed cached", out.getvalue())
         self.assertEqual(err.getvalue(), "")
+
+
+class _Body:
+    """What _open returns: a response that reads as `body`."""
+
+    def __init__(self, body):
+        self.body = body
+
+    def read(self, n=-1):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class AHostileFeedBodyIsAFeedError(FeedHome):
+    """The server is no more trusted than the cache. Whatever it answers,
+    `update` says what went wrong; it never ends in a traceback."""
+
+    URL = "https://example.invalid/v1/catalogue"
+
+    def _fetch(self, body):
+        with mock.patch.object(feed, "_open", lambda *a, **kw: _Body(body)):
+            return feed.fetch("tok", url=self.URL)
+
+    def test_a_body_nested_past_the_recursion_limit(self):
+        with self.assertRaises(feed.FeedError):
+            self._fetch(b"[" * 200000)
+
+    def test_nesting_json_can_read_but_the_digest_cannot_write(self):
+        """Nested a little shallower than json.loads gives up at, an extra
+        field in an entry loads and passes every type check, and then the
+        digest's json.dumps runs out of stack instead."""
+        head = json.dumps(_entry())[:-1]
+
+        def body(depth):
+            return ('{"schema":1,"digest":"0","catalogue":{"a":{"a:x":%s,'
+                    '"extra":%s%s}}}}' % (head, "[" * depth, "]" * depth))
+
+        def loads(depth):
+            try:
+                json.loads(body(depth))
+                return True
+            except RecursionError:
+                return False
+
+        low, high = 1, 2
+        while loads(high):
+            low, high = high, high * 2
+        while high - low > 1:
+            mid = (low + high) // 2
+            low, high = (mid, high) if loads(mid) else (low, mid)
+        for depth in range(max(1, low - 40), low + 2):
+            with self.subTest(depth=depth):
+                with self.assertRaises(feed.FeedError):
+                    self._fetch(body(depth).encode())
+
+    def test_update_prints_a_message_not_a_traceback(self):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(feed, "_open", lambda *a, **kw: _Body(b"[" * 200000)), \
+                mock.patch.dict(os.environ, {"RANWHAT_TOKEN": "tok"}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(["update"])
+        self.assertEqual(rc, 1)
+        self.assertIn("not JSON", err.getvalue())
+        self.assertIsNone(feed.load(), "nothing was cached")
 
 
 class TheTokenOnlyTravelsOverTLS(unittest.TestCase):
