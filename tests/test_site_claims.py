@@ -105,6 +105,16 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         for stale in ("GitHub Pages", "no backend", "no tracking pixels"):
             self.assertNotIn(stale, text)
 
+    def test_browser_and_server_report_the_same_event(self):
+        # X deduplicates a lead by event and conversion ID, so the pixel and
+        # the Conversions API must name the same event.
+        js = (SITE / "consent.js").read_text()
+        toml = (SITE.parent / "worker" / "wrangler.toml").read_text()
+        browser = re.search(r'lead: "([^"]*)"', js).group(1)
+        server = re.search(r'^X_EVENT_LEAD = "([^"]*)"', toml, re.M).group(1)
+        self.assertTrue(browser.startswith("tw-rfz6t-"), browser)
+        self.assertEqual(browser, server)
+
     def test_server_never_sends_x_the_message_or_address(self):
         src = (SITE.parent / "worker" / "src" / "index.js").read_text()
         body = src[src.index("async function reportLead"):src.index("async function handleContact")]

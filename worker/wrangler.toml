@@ -19,6 +19,6 @@ zone_name = "ranwhat.com"
 # `npx wrangler secret put <NAME>`, never here.
 
 # The X lead event's ID, from X Events Manager. Not a secret: the same ID is in
-# site/consent.js. Leave it unset and the Worker reports nothing to X.
-# [vars]
-# X_EVENT_LEAD = "tw-rfz6t-xxxxx"
+# site/consent.js. Remove it and the Worker reports nothing to X.
+[vars]
+X_EVENT_LEAD = "tw-rfz6t-rfz7z"

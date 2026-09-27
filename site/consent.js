@@ -17,7 +17,7 @@
   var PIXEL = "rfz6t";
   /* Event IDs come from X Events Manager. Empty means "not set up yet", and
      nothing is recorded for it. */
-  var EVENTS = { lead: "" };
+  var EVENTS = { lead: "tw-rfz6t-rfz7z" };
   var KEY = "ranwhat-consent";
   var CLICK = "ranwhat-twclid";
   var CLICK_DAYS = 30;
