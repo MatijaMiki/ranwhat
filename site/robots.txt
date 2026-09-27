@@ -1,4 +1,9 @@
+# Search engines, AI answer engines and model training are all allowed.
+# The code is MIT licensed and this site exists to be found.
+# GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, Claude-User,
+# PerplexityBot, Google-Extended, Applebot-Extended and Bingbot fall under * on purpose.
 User-agent: *
 Allow: /
+Disallow: /api/
 
 Sitemap: https://ranwhat.com/sitemap.xml

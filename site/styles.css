@@ -350,7 +350,9 @@ p .icode{overflow-wrap:anywhere}
 footer{border-top:1px solid var(--rule);background:var(--surface)}
 .fgrid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;
   padding-block:52px 34px}
-.fgrid h4{font-family:"IBM Plex Mono",Menlo,monospace;font-size:10.5px;
+/* Column labels are paragraphs, not h4: under each page's h2 an h4 skipped
+   a level, and a label for a list of links is not a heading anyway. */
+.fgrid .fh{font-family:"IBM Plex Mono",Menlo,monospace;font-size:10.5px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
   margin:0 0 14px;font-weight:500}
 .fgrid ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
@@ -473,6 +475,10 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
   outline:2px solid var(--mark,var(--brand));outline-offset:-1px;border-color:transparent}
 .form .act{margin-top:22px;align-self:flex-start;cursor:pointer}
 .form .fnote{margin-top:14px;max-width:46ch}
+/* Room for the Turnstile widget before its script arrives. It draws a 65px
+   iframe, and without the space held the Send button jumps down after the
+   page has settled. */
+.cf-turnstile{min-height:65px}
 @media(max-width:560px){.form .act{align-self:stretch;text-align:center}}
 
 /* Dimmed and inert for a beat after sending, so the send registers without

@@ -16,4 +16,4 @@ for asset in styles.css copy.js contact.js consent.js; do
 done
 
 echo "--- stamped references:"
-grep -ho '/[a-z.]*\.\(css\|js\)?v=[a-f0-9]*' site/*.html | sort | uniq -c
+grep -rho '/[a-z.]*\.\(css\|js\)?v=[a-f0-9]*' site --include='*.html' | sort | uniq -c

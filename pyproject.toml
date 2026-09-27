@@ -5,25 +5,35 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ranwhat"
 version = "0.3.0"
-description = "Flight recorder and authority scanner for AI agents. Reads locally, transmits nothing."
+description = "Reports risky actions in Claude Code and OpenClaw transcripts, finds secrets left in Claude Code transcripts, and scores AI agent credentials."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [{ name = "Matija Mikulinec" }]
-keywords = ["ai", "agents", "security", "audit", "observability", "least-privilege"]
+keywords = [
+  "ai-security", "ai-agents", "agent-security", "coding-agents", "claude-code",
+  "openclaw", "security", "secrets", "secret-scanning", "credentials",
+  "transcripts", "audit", "audit-log", "observability", "least-privilege", "cli",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
+  "Natural Language :: English",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Security",
+  "Topic :: System :: Logging",
   "Topic :: System :: Monitoring",
+  "Topic :: Utilities",
 ]
 # Deliberately empty. This is pointed at your own credentials; a dependency
 # tree is something a reviewer has to audit before that is reasonable.
@@ -31,6 +41,8 @@ dependencies = []
 
 [project.urls]
 Homepage = "https://ranwhat.com"
+Documentation = "https://ranwhat.com/install"
+Changelog = "https://github.com/MatijaMiki/ranwhat/commits/main"
 Source = "https://github.com/MatijaMiki/ranwhat"
 Issues = "https://github.com/MatijaMiki/ranwhat/issues"
 
