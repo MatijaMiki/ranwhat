@@ -363,7 +363,9 @@ def _update(args):
             % (st.get("version") or "?", st["providers"], st["scopes"], when))
         return 0
 
-    token = args.token or feed_mod.read_token()
+    # Stripped as every other token is: a \r from a CRLF file would make
+    # http.client quote the header, token and all, into its error.
+    token = (args.token or "").strip() or feed_mod.read_token()
     if not token:
         sys.stderr.write(
             "  No token. Set RANWHAT_TOKEN, or pass --token with --save-token\n"

@@ -139,6 +139,17 @@ def _open(req, timeout, context):
     return opener.open(req, timeout=timeout)
 
 
+def _check_token(token):
+    """http.client refuses a header value with a line break in it, or one
+    latin-1 cannot encode, and the error it raises quotes the header: the
+    token, printed to stderr and to any log that keeps it. A \\r left by a
+    CRLF file is enough. Refused here, and the message does not repeat it."""
+    if not all(" " <= c <= "~" or "\xa0" <= c <= "\xff" for c in token):
+        raise FeedError(
+            "The token contains a line break or another character a request "
+            "header cannot carry. Check how it was copied.")
+
+
 def fetch(token, url=None, timeout=TIMEOUT):
     """Ask the server for the current catalogue.
 
@@ -148,6 +159,7 @@ def fetch(token, url=None, timeout=TIMEOUT):
     """
     url = url or endpoint()
     _check_url(url)
+    _check_token(token)
     req = urllib.request.Request(url, headers={
         "Authorization": "Bearer %s" % token,
         "Accept": "application/json",
@@ -166,6 +178,10 @@ def fetch(token, url=None, timeout=TIMEOUT):
         raise FeedError("The feed server returned HTTP %s." % exc.code)
     except urllib.error.URLError as exc:
         raise FeedError("Could not reach the feed: %s" % exc.reason)
+    except ValueError:
+        # Whatever else http.client refuses in a header, its message quotes
+        # the header, token included. from None: not shown as the cause.
+        raise FeedError("The request to the feed could not be sent.") from None
     if len(body) > MAX_BYTES:
         raise FeedError("The feed is larger than any catalogue; not reading it.")
 

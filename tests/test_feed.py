@@ -611,6 +611,68 @@ class AHostileFeedBodyIsAFeedError(FeedHome):
         self.assertIsNone(feed.load(), "nothing was cached")
 
 
+class ATokenNeverReachesTheErrorOutput(FeedHome):
+    """http.client refuses a header value with a line break in it, and its
+    ValueError quotes the header: "Bearer <token>", printed to stderr and to
+    any log that keeps it. A trailing \\r from a CRLF file is enough."""
+
+    # Not token-shaped, so nothing here reads as a credential.
+    TOKEN = "FAKE" "_feed_token_1234"
+
+    def setUp(self):
+        super().setUp()
+        self.sent = []
+        patch = mock.patch.object(feed, "_open", self._open)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _open(self, req, *a, **kw):
+        # What http.client would do with the header, so the test sees the
+        # same failure the real request would.
+        value = req.get_header("Authorization")
+        value.encode("latin-1")
+        if "\r" in value or "\n" in value:
+            raise ValueError("Invalid header value %r" % value.encode("latin-1"))
+        self.sent.append(value)
+        return _Body(json.dumps(_doc()).encode())
+
+    def _update(self, argv=(), env=None):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, env or {}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(["update"] + list(argv))
+        return rc, out.getvalue() + err.getvalue()
+
+    def test_a_trailing_return_on_the_flag_is_stripped(self):
+        rc, text = self._update(["--token", self.TOKEN + "\r"])
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.sent, ["Bearer " + self.TOKEN])
+
+    def test_a_line_break_inside_the_token_is_refused_unsent(self):
+        for token in (self.TOKEN[:6] + "\n" + self.TOKEN[6:],
+                      self.TOKEN[:6] + "\r" + self.TOKEN[6:],
+                      self.TOKEN + "\x00", self.TOKEN + "\u0107"):
+            routes = [(["--token", token], None)]
+            if "\x00" not in token:   # the environment cannot hold one
+                routes.append(((), {"RANWHAT_TOKEN": token}))
+            for argv, env in routes:
+                with self.subTest(token=token, env=bool(env)):
+                    rc, text = self._update(argv, env)
+                    self.assertEqual(rc, 1)
+                    self.assertEqual(self.sent, [])
+                    self.assertNotIn(self.TOKEN[6:], text)
+
+    def test_a_header_refused_anyway_is_not_quoted(self):
+        def refuse(req, *a, **kw):
+            raise ValueError("Invalid header value %r"
+                             % req.get_header("Authorization"))
+        with mock.patch.object(feed, "_open", refuse):
+            with self.assertRaises(feed.FeedError) as caught:
+                feed.fetch(self.TOKEN, url="https://example.invalid/v1")
+        self.assertNotIn(self.TOKEN, str(caught.exception))
+        self.assertTrue(caught.exception.__suppress_context__)
+
+
 class TheTokenOnlyTravelsOverTLS(unittest.TestCase):
 
     def test_plain_http_is_refused_before_anything_is_sent(self):
