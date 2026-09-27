@@ -636,13 +636,17 @@ class AMalformedCacheIsNoFeed(FeedHome):
 
 
 class _Body:
-    """What _open returns: a response that reads as `body`."""
+    """What _open returns: a response that reads as `body`, and remembers
+    how much each read asked for."""
 
     def __init__(self, body):
         self.body = body
+        self.reads = []
 
     def read(self, n=-1):
-        return self.body
+        n = -1 if n is None else n
+        self.reads.append(n)
+        return self.body if n < 0 else self.body[:n]
 
     def __enter__(self):
         return self
@@ -1061,23 +1065,123 @@ class ATokenNeverReachesTheErrorOutput(FeedHome):
 
 class TheTokenOnlyTravelsOverTLS(unittest.TestCase):
 
+    # Each of these fails in fetch() anyway once it is tried: file:// reads
+    # the file and finds no JSON, the rest find no server. So the test holds
+    # _open to never being called, and to the message naming https.
+    REFUSED = (
+        "http://feed.example.com/v1", "file:///etc/passwd",
+        "ftp://feed.example.com/", "https:///v1/catalogue",
+        # Lookalikes of the local exception, which name another host.
+        "http://localhost.evil.example/v1", "http://127.0.0.1.evil.example/v1",
+        "http://127.0.0.1@evil.example/v1", "http://localhost:8787@evil.example/v1",
+        "http://evil.example/127.0.0.1", "http://evil.example/?localhost",
+        "http://evil.example#@127.0.0.1",
+    )
+
     def test_plain_http_is_refused_before_anything_is_sent(self):
-        for url in ("http://feed.example.com/v1", "file:///etc/passwd",
-                    "ftp://feed.example.com/"):
-            with self.assertRaises(feed.FeedError, msg=url):
-                feed.fetch("tok", url=url)
+        opened = []
+
+        def spy(req, *a, **kw):
+            opened.append(req.full_url)
+            raise AssertionError("fetch() opened %s" % req.full_url)
+
+        with mock.patch.object(feed, "_open", spy):
+            for url in self.REFUSED:
+                with self.subTest(url=url):
+                    with self.assertRaises(feed.FeedError) as caught:
+                        feed.fetch("tok", url=url)
+                    self.assertIn("must be https", str(caught.exception))
+                    with self.assertRaises(feed.FeedError):
+                        feed._check_url(url)
+        self.assertEqual(opened, [])
 
     def test_http_to_this_machine_is_allowed_for_local_testing(self):
         feed._check_url("http://localhost:8787/v1/catalogue")
         feed._check_url("http://127.0.0.1:8787/v1/catalogue")
+        feed._check_url("http://[::1]:8787/v1/catalogue")
+        feed._check_url("https://feed.ranwhat.com/v1/catalogue")
 
     def test_a_redirect_is_not_followed_with_the_token(self):
+        """Through fetch() against a server on this machine, so what is under
+        test is the opener fetch() builds. urllib's own redirect handler
+        copies Authorization to whatever host Location names."""
+        import http.server
+        import threading
         import urllib.request
-        h = feed._NoRedirect()
-        req = urllib.request.Request("https://feed.ranwhat.com/v1/catalogue",
-                                     headers={"Authorization": "Bearer tok"})
-        with self.assertRaises(feed.FeedError):
-            h.redirect_request(req, None, 302, "Found", {}, "http://evil.example/")
+
+        seen = []
+        body = json.dumps(_doc()).encode()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get("Authorization")))
+                if self.path.startswith("/v1/"):
+                    self.send_response(int(self.path.rsplit("/", 1)[1]))
+                    self.send_header("Location", "http://127.0.0.1:%d/elsewhere"
+                                     % self.server.server_port)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        # No proxy from the environment or the system: the request goes to
+        # the server above and nowhere else.
+        with mock.patch.object(urllib.request, "getproxies", dict):
+            for code in (301, 302, 303, 307, 308):
+                with self.subTest(code=code):
+                    del seen[:]
+                    with self.assertRaises(feed.FeedError):
+                        feed.fetch("tok", url="http://127.0.0.1:%d/v1/%d"
+                                   % (server.server_port, code))
+                    self.assertEqual(seen, [("/v1/%d" % code, "Bearer tok")])
+
+
+class AFeedLargerThanAnyCatalogueIsNotRead(FeedHome):
+    """fetch() asks for one byte more than MAX_BYTES and refuses a body that
+    has it, so a hostile server cannot fill memory before anything is
+    checked."""
+
+    URL = "https://example.invalid/v1/catalogue"
+
+    def _fetch(self, body):
+        self.resp = _Body(body)
+        with mock.patch.object(feed, "_open", lambda *a, **kw: self.resp):
+            return feed.fetch("tok", url=self.URL)
+
+    def _assert_bounded(self):
+        self.assertTrue(self.resp.reads, "fetch() never read the body")
+        for n in self.resp.reads:
+            self.assertTrue(0 <= n <= feed.MAX_BYTES + 1,
+                            "fetch() asked for %r bytes" % n)
+
+    def test_a_body_past_the_cap_is_refused_unread(self):
+        for extra in (1, 10, feed.MAX_BYTES):
+            with self.subTest(extra=extra):
+                with self.assertRaises(feed.FeedError) as caught:
+                    self._fetch(b" " * (feed.MAX_BYTES + extra))
+                self.assertIn("larger than any catalogue", str(caught.exception))
+                self._assert_bounded()
+                self.assertIsNone(feed.load(), "nothing was cached")
+
+    def test_a_catalogue_right_at_the_cap_is_read(self):
+        text = json.dumps(_doc()).encode()
+        doc = self._fetch(text + b" " * (feed.MAX_BYTES - len(text)))
+        self.assertEqual(doc["catalogue"], _doc()["catalogue"])
+        self._assert_bounded()
 
 
 if __name__ == "__main__":
