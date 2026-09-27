@@ -51,7 +51,12 @@ def _token(args, provider):
         print("  warning: --%s put a credential in this machine's process "
               "table. Use %s instead." % (provider, env_name), file=sys.stderr)
 
-    return value or os.environ.get(env_name)
+    # Stripped on every path, not only stdin. A token copied out of a CRLF
+    # .env keeps its \r, http.client rejects the header, and the ValueError
+    # it raises quotes the whole header, token included, into the error the
+    # user sees.
+    value = (value or os.environ.get(env_name) or "").strip()
+    return value or None
 
 
 def run_scan(profile, path=None):

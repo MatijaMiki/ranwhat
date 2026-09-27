@@ -158,5 +158,28 @@ class TempCopiesAreCleanedUp(unittest.TestCase):
         self.assertFalse([x for x in after - before if x.startswith("ranwhat-")])
 
 
+
+class TokensAreStrippedWhereverTheyComeFrom(unittest.TestCase):
+    """A trailing \r from a CRLF .env made http.client quote the whole
+    Authorization header, token included, into the printed error."""
+
+    def _resolve(self, flag, env):
+        from types import SimpleNamespace
+        from unittest import mock
+        from ranwhat.cli import _token
+        with mock.patch.dict(os.environ, env, clear=False):
+            return _token(SimpleNamespace(github=flag), "github")
+
+    def test_environment_variable(self):
+        self.assertEqual(self._resolve(None, {"RANWHAT_GITHUB_TOKEN": "ghp_x\r\n"}),
+                         "ghp_x")
+
+    def test_env_prefix(self):
+        self.assertEqual(self._resolve("env:MY_TOK", {"MY_TOK": " ghp_y\r"}), "ghp_y")
+
+    def test_blank_is_no_token(self):
+        self.assertIsNone(self._resolve(None, {"RANWHAT_GITHUB_TOKEN": "\r\n"}))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
