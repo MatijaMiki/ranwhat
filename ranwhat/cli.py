@@ -379,13 +379,14 @@ def _update(args):
             "  on this machine through the process table, and is written to\n"
             "  your shell history. Prefer RANWHAT_TOKEN.\n\n")
 
+    # save() too: a body can load and still be nested too deep to write.
     try:
         doc = feed_mod.fetch(token)
+        feed_mod.save(doc)
     except feed_mod.FeedError as exc:
         sys.stderr.write("  %s\n" % exc)
         return 1
 
-    feed_mod.save(doc)
     if args.save_token:
         try:
             path = feed_mod.save_token(token)

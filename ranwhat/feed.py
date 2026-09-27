@@ -269,10 +269,25 @@ def save(doc):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     doc = dict(doc)
     doc["fetched_at"] = int(time.time())
+    # Built before anything is opened. From Python 3.12 json.loads and the
+    # digest's encoder are bounded by the C stack, but indent=1 runs the
+    # pure-Python encoder, bounded by the recursion limit, so a body nested
+    # between the two gets through fetch() and fails only here.
+    try:
+        text = json.dumps(doc, indent=1, sort_keys=True)
+    except RecursionError:
+        raise FeedError("The feed is nested deeper than any catalogue.")
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=1, sort_keys=True)
-    os.replace(tmp, path)   # atomic: a killed update never leaves a half file
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)   # atomic: a killed update never leaves a half file
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     os.chmod(path, 0o600)
     return path
 

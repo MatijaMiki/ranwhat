@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -609,6 +610,114 @@ class AHostileFeedBodyIsAFeedError(FeedHome):
         self.assertEqual(rc, 1)
         self.assertIn("not JSON", err.getvalue())
         self.assertIsNone(feed.load(), "nothing was cached")
+
+
+class AFeedTooDeepToCacheIsAFeedError(FeedHome):
+    """From Python 3.12 json.loads is bounded by the C stack, but save()
+    wrote with json.dump(indent=1), which runs the pure-Python encoder,
+    bounded by the recursion limit. A body nested between the two, in a
+    field the digest never serializes, passed fetch() and validate(), and
+    `update` then ended in a RecursionError from save() with
+    catalogue.json.tmp left behind."""
+
+    # Deeper than any encoder writes: the pure-Python one stops near the
+    # recursion limit, the C one (3.14 with indent) at the C stack.
+    TOO_DEEP = 200000
+
+    def _nested(self, depth):
+        value = []
+        for _ in range(depth):
+            value = [value]
+        return value
+
+    def _feed_dir(self):
+        d = os.path.dirname(feed.feed_path())
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    def _update(self, body=None, doc=None):
+        out, err = io.StringIO(), io.StringIO()
+        if body is not None:
+            patch = mock.patch.object(feed, "_open", lambda *a, **kw: _Body(body))
+        else:
+            patch = mock.patch.object(feed, "fetch", lambda *a, **kw: doc)
+        with patch, mock.patch.dict(os.environ, {"RANWHAT_TOKEN": "tok"}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(["update"])
+        return rc, err.getvalue()
+
+    def _json_reads_up_to(self):
+        """The deepest nesting json.loads accepts on this interpreter."""
+        def loads(depth):
+            try:
+                json.loads("[" * depth + "]" * depth)
+                return True
+            except RecursionError:
+                return False
+        low, high = 1, 2
+        while loads(high):
+            low, high = high, high * 2
+        while high - low > 1:
+            mid = (low + high) // 2
+            low, high = (mid, high) if loads(mid) else (low, mid)
+        return low
+
+    def _depths(self):
+        # Past the recursion limit: inside the window on 3.12 and 3.13.
+        # Just under what json reads: inside it on 3.14, where the C encoder
+        # writes with indent and gives up a little before the decoder does.
+        limit = self._json_reads_up_to()
+        return sorted({sys.getrecursionlimit() + 100, limit - limit // 20})
+
+    def _assert_all_or_nothing(self, rc, err):
+        """Refused with a message and nothing on disk, or cached whole."""
+        self.assertNotIn(".tmp", " ".join(self._feed_dir()))
+        if rc == 1:
+            self.assertTrue(err.strip(), "update failed and said nothing")
+            self.assertEqual(self._feed_dir(), [])
+        else:
+            self.assertEqual(rc, 0, err)
+            self.assertIsNotNone(feed.load())
+
+    def test_save_refuses_it_and_writes_nothing(self):
+        doc = _doc()
+        doc["extra"] = self._nested(self.TOO_DEEP)
+        with self.assertRaises(feed.FeedError):
+            feed.save(doc)
+        self.assertEqual(self._feed_dir(), [])
+
+    def test_update_prints_a_message_when_fetch_let_it_through(self):
+        doc = _doc()
+        doc["extra"] = self._nested(self.TOO_DEEP)
+        rc, err = self._update(doc=doc)
+        self.assertEqual(rc, 1)
+        self.assertIn("nested deeper", err)
+        self.assertIsNone(feed.load())
+        self.assertEqual(self._feed_dir(), [])
+
+    def test_a_deep_top_level_field_the_digest_never_reads(self):
+        cat = {"acme": {"acme:x": _entry()}}
+        for depth in self._depths():
+            with self.subTest(depth=depth):
+                body = '{"schema":1,"catalogue":%s,"digest":"%s","extra":%s%s}' % (
+                    json.dumps(cat), feed.digest(cat), "[" * depth, "]" * depth)
+                self._assert_all_or_nothing(*self._update(body=body.encode()))
+                shutil.rmtree(os.path.dirname(feed.feed_path()), ignore_errors=True)
+
+    def test_a_deep_field_in_an_entry_with_no_digest(self):
+        head = json.dumps(_entry())[:-1]
+        for depth in self._depths():
+            with self.subTest(depth=depth):
+                body = ('{"schema":1,"catalogue":{"acme":{"acme:x":%s,'
+                        '"extra":%s%s}}}}' % (head, "[" * depth, "]" * depth))
+                self._assert_all_or_nothing(*self._update(body=body.encode()))
+                shutil.rmtree(os.path.dirname(feed.feed_path()), ignore_errors=True)
+
+    def test_a_write_that_fails_leaves_no_temp_file(self):
+        with mock.patch.object(feed.os, "replace",
+                               mock.Mock(side_effect=OSError("disk full"))):
+            with self.assertRaises(OSError):
+                feed.save(_doc())
+        self.assertEqual(self._feed_dir(), [])
 
 
 class ATokenNeverReachesTheErrorOutput(FeedHome):
