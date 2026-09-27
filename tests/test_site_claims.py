@@ -115,6 +115,10 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         csp = next(l for l in headers.splitlines()
                    if "Content-Security-Policy" in l)
         self.assertIn("https://static.ads-twitter.com", csp)
+        # uwt.js reports by fetch as well as by image, to both hosts.
+        connect = csp.split("connect-src", 1)[1].split(";", 1)[0]
+        for host in ("https://analytics.twitter.com", "https://t.co"):
+            self.assertIn(host, connect)
         self.assertNotIn("*", csp.replace("/*", ""), "no wildcard hosts")
 
     def test_privacy_page_describes_it(self):
@@ -123,6 +127,16 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         self.assertIn("Global Privacy Control", text)
         for stale in ("GitHub Pages", "no backend", "no tracking pixels"):
             self.assertNotIn(stale, text)
+
+    def test_browser_and_server_report_the_same_event(self):
+        # X deduplicates a lead by event and conversion ID, so the pixel and
+        # the Conversions API must name the same event.
+        js = (SITE / "consent.js").read_text(encoding="utf-8")
+        toml = (SITE.parent / "worker" / "wrangler.toml").read_text(encoding="utf-8")
+        browser = re.search(r'lead: "([^"]*)"', js).group(1)
+        server = re.search(r'^X_EVENT_LEAD = "([^"]*)"', toml, re.M).group(1)
+        self.assertTrue(browser.startswith("tw-rfz6t-"), browser)
+        self.assertEqual(browser, server)
 
     def test_server_never_sends_x_the_message_or_address(self):
         src = (SITE.parent / "worker" / "src" / "index.js").read_text(encoding="utf-8")
