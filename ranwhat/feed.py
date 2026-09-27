@@ -82,13 +82,21 @@ def save_token(token):
     path = token_path()
     # 0600 before anything is written: a token readable by other users on the
     # machine is the problem this tool exists to report.
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    fd = os.open(path, flags, 0o600)
+    # O_NOFOLLOW: a symlink planted at ~/.ranwhat/token would otherwise send
+    # the token wherever it points, and chmod would follow it too.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
     try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        if os.path.islink(path):
+            raise FeedError("%s is a symlink; not writing a token through it." % path)
+        raise
+    try:
+        if hasattr(os, "fchmod"):   # an existing file keeps its old mode otherwise
+            os.fchmod(fd, 0o600)
         os.write(fd, (token.strip() + "\n").encode())
     finally:
         os.close(fd)
-    os.chmod(path, 0o600)
     return path
 
 

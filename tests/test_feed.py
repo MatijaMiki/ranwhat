@@ -154,6 +154,27 @@ class SendsNothing(FeedHome):
 
 
 
+
+class TokenIsNotWrittenThroughASymlink(FeedHome):
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "POSIX only")
+    def test_a_planted_symlink_is_refused(self):
+        target = os.path.join(self.dir, "elsewhere")
+        os.symlink(target, feed.token_path())
+        with self.assertRaises(feed.FeedError):
+            feed.save_token("tok_secret")
+        self.assertFalse(os.path.exists(target), "token followed the symlink")
+
+    @unittest.skipUnless(hasattr(os, "fchmod"), "POSIX only")
+    def test_an_existing_loose_file_is_tightened(self):
+        with open(feed.token_path(), "w") as fh:
+            fh.write("old\n")
+        os.chmod(feed.token_path(), 0o644)
+        feed.save_token("tok_new")
+        self.assertEqual(os.stat(feed.token_path()).st_mode & 0o777, 0o600)
+        self.assertEqual(open(feed.token_path()).read(), "tok_new\n")
+
+
 class FeedCannotLowerARating(FeedHome):
     """The feed is not signed, and ~/.ranwhat is writable by the agents being
     audited. Whatever it says, it must not make a report look safer than the

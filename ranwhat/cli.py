@@ -381,7 +381,11 @@ def _update(args):
 
     feed_mod.save(doc)
     if args.save_token:
-        path = feed_mod.save_token(token)
+        try:
+            path = feed_mod.save_token(token)
+        except feed_mod.FeedError as exc:
+            sys.stderr.write("  %s\n" % exc)
+            return 1
         sys.stdout.write("  Token saved to %s (0600)\n" % path)
     catalog_mod.reset_feed_cache()
 
