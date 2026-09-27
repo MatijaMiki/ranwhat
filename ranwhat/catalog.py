@@ -523,12 +523,32 @@ def providers(provider):
 
     The feed wins per scope rather than per provider, so a feed that has not
     caught up with a locally known scope cannot remove it.
+
+    It can add scopes and raise a rating, never lower one. A feed that says
+    delete_repo is a read, or that a bundled irreversible action can be
+    undone, is either wrong or tampered with, and the report would state it
+    with the confidence of the whole catalogue. The feed is not signed, and
+    ~/.ranwhat is writable by the agents this tool audits, so the bundled
+    rating is the floor.
     """
     merged = dict(CATALOG.get(provider, {}))
     fed = _feed_catalogue()
     if fed:
-        merged.update(fed.get(provider, {}))
+        for scope, entry in fed.get(provider, {}).items():
+            merged[scope] = _no_lower(merged.get(scope), entry)
     return merged
+
+
+def _no_lower(bundled, fed):
+    fed = {k: fed[k] for k in ("label", "authority", "reversible", "blast", "why")
+           if k in fed}
+    if bundled is None:
+        return fed
+    if AUTHORITY_RANK.get(fed.get("authority"), -1) < AUTHORITY_RANK[bundled["authority"]]:
+        return dict(bundled)
+    if fed.get("reversible") and not bundled["reversible"]:
+        fed["reversible"] = False
+    return fed
 
 
 def lookup(provider, scope):

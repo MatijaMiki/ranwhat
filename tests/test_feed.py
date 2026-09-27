@@ -127,12 +127,11 @@ class SendsNothing(FeedHome):
         seen = {}
 
         class FakeResp:
-            def read(self): return json.dumps(_doc()).encode()
+            def read(self, n=-1): return json.dumps(_doc()).encode()
             def __enter__(self): return self
             def __exit__(self, *a): return False
 
-        import urllib.request
-        real = urllib.request.urlopen
+        real = feed._open
 
         def spy(req, *a, **kw):
             seen["url"] = req.full_url
@@ -140,11 +139,11 @@ class SendsNothing(FeedHome):
             seen["body"] = req.data
             return FakeResp()
 
-        urllib.request.urlopen = spy
+        feed._open = spy
         try:
             feed.fetch("tok_xyz", url="https://example.invalid/v1/catalogue")
         finally:
-            urllib.request.urlopen = real
+            feed._open = real
 
         self.assertIsNone(seen["body"], "update sent a request body")
         values = " ".join(str(v) for v in seen["headers"].values())
@@ -152,6 +151,77 @@ class SendsNothing(FeedHome):
         for leak in (os.uname().nodename, os.path.expanduser("~")):
             self.assertNotIn(leak, values)
         self.assertNotIn("?", seen["url"], "no query string, so nothing smuggled in one")
+
+
+
+class FeedCannotLowerARating(FeedHome):
+    """The feed is not signed, and ~/.ranwhat is writable by the agents being
+    audited. Whatever it says, it must not make a report look safer than the
+    bundled catalogue already knows it is."""
+
+    SCOPE = "https://www.googleapis.com/auth/gmail.send"
+
+    def _fed(self, entry, provider="google", scope=None):
+        feed.save(_doc({provider: {scope or self.SCOPE: entry}}))
+        catalog.reset_feed_cache()
+        return catalog.lookup(provider, scope or self.SCOPE)
+
+    def test_a_downgrade_keeps_the_bundled_entry(self):
+        bundled = catalog.CATALOG["google"][self.SCOPE]
+        e = self._fed(_entry("Harmless", "read", True, "data_egress"))
+        self.assertEqual(e["authority"], bundled["authority"])
+        self.assertEqual(e["label"], bundled["label"])
+
+    def test_bundled_irreversible_stays_irreversible(self):
+        bundled = catalog.CATALOG["google"][self.SCOPE]
+        self.assertFalse(bundled["reversible"])
+        e = self._fed(_entry("Same", bundled["authority"], True, bundled["blast"]))
+        self.assertFalse(e["reversible"])
+
+    def test_extra_fields_cannot_reach_the_report_row(self):
+        entry = dict(_entry("X", "destructive"), usage="used", scope="other",
+                     provider="elsewhere")
+        feed.save(_doc({"acme": {"acme:delete": entry}}))
+        catalog.reset_feed_cache()
+        e = catalog.lookup("acme", "acme:delete")
+        for k in ("usage", "scope", "provider"):
+            self.assertNotIn(k, e)
+
+    def test_bad_values_reject_the_whole_feed(self):
+        for bad in (_entry(authority="admin"), _entry(blast="everything"),
+                    _entry(reversible="false"), _entry(label=None)):
+            with self.assertRaises(feed.FeedError, msg=bad):
+                feed.validate(_doc({"acme": {"acme:x": bad}}))
+
+    def test_a_rejected_cache_falls_back_to_the_bundle(self):
+        doc = _doc({"google": {self.SCOPE: _entry(authority="admin")}})
+        os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
+        with open(feed.feed_path(), "w") as fh:
+            json.dump(doc, fh)
+        catalog.reset_feed_cache()
+        self.assertEqual(catalog.lookup("google", self.SCOPE)["authority"],
+                         catalog.CATALOG["google"][self.SCOPE]["authority"])
+
+
+class TheTokenOnlyTravelsOverTLS(unittest.TestCase):
+
+    def test_plain_http_is_refused_before_anything_is_sent(self):
+        for url in ("http://feed.example.com/v1", "file:///etc/passwd",
+                    "ftp://feed.example.com/"):
+            with self.assertRaises(feed.FeedError, msg=url):
+                feed.fetch("tok", url=url)
+
+    def test_http_to_this_machine_is_allowed_for_local_testing(self):
+        feed._check_url("http://localhost:8787/v1/catalogue")
+        feed._check_url("http://127.0.0.1:8787/v1/catalogue")
+
+    def test_a_redirect_is_not_followed_with_the_token(self):
+        import urllib.request
+        h = feed._NoRedirect()
+        req = urllib.request.Request("https://feed.ranwhat.com/v1/catalogue",
+                                     headers={"Authorization": "Bearer tok"})
+        with self.assertRaises(feed.FeedError):
+            h.redirect_request(req, None, 302, "Found", {}, "http://evil.example/")
 
 
 if __name__ == "__main__":

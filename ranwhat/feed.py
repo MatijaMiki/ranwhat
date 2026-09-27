@@ -25,13 +25,26 @@ import os
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+
+from . import catalog
 
 DEFAULT_ENDPOINT = "https://feed.ranwhat.com/v1/catalogue"
 USER_AGENT = "ranwhat-feed/1"
 TIMEOUT = 20
 
 SCHEMA = 1
+
+# A catalogue is a few hundred kilobytes. Anything past this is not one, and
+# reading it all into memory first would let a hostile server exhaust it.
+MAX_BYTES = 8 * 1024 * 1024
+
+# The fields a feed entry may carry. Anything else is dropped rather than
+# merged, so a feed cannot overwrite a report row's scope, usage or provider.
+FIELDS = ("label", "authority", "reversible", "blast", "why")
+BLASTS = frozenset((catalog.MONETARY, catalog.EXTERNAL_COMMS, catalog.DATA_EGRESS,
+                    catalog.INFRASTRUCTURE, catalog.IDENTITY))
 
 
 def home():
@@ -89,6 +102,33 @@ class FeedError(Exception):
     pass
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """urllib copies every request header onto a redirect, Authorization
+    included, to whatever host the Location names, and will follow https to
+    http. The feed has one address; a redirect away from it is refused."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise FeedError("The feed server redirected to %s; not following it "
+                        "with your token." % newurl)
+
+
+def _check_url(url):
+    """https only. Plain http is allowed to this machine alone, for testing a
+    feed server locally; anywhere else it would send the token in clear."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https" and parts.hostname:
+        return
+    if parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1"):
+        return
+    raise FeedError("The feed URL must be https: %s" % url)
+
+
+def _open(req, timeout, context):
+    opener = urllib.request.build_opener(
+        _NoRedirect, urllib.request.HTTPSHandler(context=context))
+    return opener.open(req, timeout=timeout)
+
+
 def fetch(token, url=None, timeout=TIMEOUT):
     """Ask the server for the current catalogue.
 
@@ -97,6 +137,7 @@ def fetch(token, url=None, timeout=TIMEOUT):
     not a signature, and the docstring says so rather than implying more.
     """
     url = url or endpoint()
+    _check_url(url)
     req = urllib.request.Request(url, headers={
         "Authorization": "Bearer %s" % token,
         "Accept": "application/json",
@@ -104,8 +145,8 @@ def fetch(token, url=None, timeout=TIMEOUT):
     })
     ctx = ssl.create_default_context()
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            body = resp.read()
+        with _open(req, timeout, ctx) as resp:
+            body = resp.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
             raise FeedError(
@@ -115,6 +156,8 @@ def fetch(token, url=None, timeout=TIMEOUT):
         raise FeedError("The feed server returned HTTP %s." % exc.code)
     except urllib.error.URLError as exc:
         raise FeedError("Could not reach the feed: %s" % exc.reason)
+    if len(body) > MAX_BYTES:
+        raise FeedError("The feed is larger than any catalogue; not reading it.")
 
     try:
         doc = json.loads(body.decode("utf-8"))
@@ -141,10 +184,26 @@ def validate(doc):
         for scope, entry in scopes.items():
             if not isinstance(entry, dict):
                 raise FeedError("Scope %r/%r is not an object." % (provider, scope))
-            for field in ("label", "authority", "reversible", "blast", "why"):
+            for field in FIELDS:
                 if field not in entry:
                     raise FeedError(
                         "Scope %r/%r is missing %r." % (provider, scope, field))
+            # Checked here, not trusted later: an authority the scorer has no
+            # cost for raised KeyError in every scan until the cache was
+            # deleted, and a string "false" is truthy.
+            if entry["authority"] not in catalog.AUTHORITY_RANK:
+                raise FeedError("Scope %r/%r has authority %r." % (
+                    provider, scope, entry["authority"]))
+            if entry["blast"] not in BLASTS:
+                raise FeedError("Scope %r/%r has blast %r." % (
+                    provider, scope, entry["blast"]))
+            if not isinstance(entry["reversible"], bool):
+                raise FeedError("Scope %r/%r has a non-boolean reversible." % (
+                    provider, scope))
+            for field in ("label", "why"):
+                if not isinstance(entry[field], str):
+                    raise FeedError("Scope %r/%r has a non-text %s." % (
+                        provider, scope, field))
     stated = doc.get("digest")
     if stated and stated != digest(catalogue):
         raise FeedError("Feed digest does not match its catalogue.")
