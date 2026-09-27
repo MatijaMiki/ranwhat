@@ -92,6 +92,10 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         csp = next(l for l in (SITE / "_headers").read_text().splitlines()
                    if "Content-Security-Policy" in l)
         self.assertIn("https://static.ads-twitter.com", csp)
+        # uwt.js reports by fetch as well as by image, to both hosts.
+        connect = csp.split("connect-src", 1)[1].split(";", 1)[0]
+        for host in ("https://analytics.twitter.com", "https://t.co"):
+            self.assertIn(host, connect)
         self.assertNotIn("*", csp.replace("/*", ""), "no wildcard hosts")
 
     def test_privacy_page_describes_it(self):
