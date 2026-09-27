@@ -81,7 +81,7 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
     def test_pixel_loads_only_from_the_consent_path(self):
         js = (SITE / "consent.js").read_text()
         self.assertEqual(js.count("https://static.ads-twitter.com/uwt.js"), 1)
-        calls = re.findall(r"(?<![\w.])load\(\)", js)
+        calls = re.findall(r"(?<![\w.])load\(\);", js)
         self.assertEqual(len(calls), 2, "load() should be reachable only from "
                          "a stored yes and the Allow button")
         self.assertIn('now === "granted") load();', js)
