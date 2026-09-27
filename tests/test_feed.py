@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import shutil
+import stat
 import sys
 import tempfile
 import unittest
@@ -187,6 +188,68 @@ class TokenIsNotWrittenThroughASymlink(FeedHome):
         feed.save_token("tok_new")
         self.assertEqual(os.stat(feed.token_path()).st_mode & 0o777, 0o600)
         self.assertEqual(open(feed.token_path(), encoding="utf-8").read(), "tok_new\n")
+
+
+@unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+class TheCacheIsNotWrittenThroughASymlink(FeedHome):
+    """save() wrote catalogue.json.tmp with open(tmp, "w"), which follows a
+    symlink planted there: its target, any file the user owns, took the feed
+    JSON, os.replace installed the link as the cache, and chmod(path, 0600)
+    followed it to the target too. ~/.ranwhat is writable by the agents this
+    tool audits, so that was ~/.zshrc overwritten on the next `update`."""
+
+    RC = "export PATH=/usr/bin\n"
+
+    def _plant(self, name, target):
+        os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
+        os.symlink(target, os.path.join(os.path.dirname(feed.feed_path()), name))
+
+    def _victim(self):
+        victim = os.path.join(self.dir, "victim_rc")
+        with open(victim, "w", encoding="utf-8") as fh:
+            fh.write(self.RC)
+        os.chmod(victim, 0o644)
+        return victim
+
+    def _assert_cache_is_a_regular_0600_file(self):
+        st = os.lstat(feed.feed_path())
+        self.assertTrue(stat.S_ISREG(st.st_mode), "the cache is not a plain file")
+        self.assertEqual(oct(st.st_mode & 0o777), oct(0o600))
+        self.assertFalse(os.path.lexists(feed.feed_path() + ".tmp"))
+        self.assertIsNotNone(feed.load())
+
+    def test_a_symlink_at_the_temp_file_is_not_written_through(self):
+        victim = self._victim()
+        self._plant("catalogue.json.tmp", victim)
+        feed.save(_doc())
+        with open(victim, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), self.RC, "the feed overwrote the target")
+        self.assertEqual(oct(os.stat(victim).st_mode & 0o777), oct(0o644))
+        self._assert_cache_is_a_regular_0600_file()
+
+    def test_a_dangling_symlink_at_the_temp_file_creates_nothing(self):
+        target = os.path.join(self.dir, "created_elsewhere")
+        self._plant("catalogue.json.tmp", target)
+        feed.save(_doc())
+        self.assertFalse(os.path.lexists(target), "the feed followed the link")
+        self._assert_cache_is_a_regular_0600_file()
+
+    def test_a_symlink_at_the_cache_itself_is_replaced_not_followed(self):
+        victim = self._victim()
+        self._plant("catalogue.json", victim)
+        feed.save(_doc())
+        with open(victim, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), self.RC)
+        self.assertEqual(oct(os.stat(victim).st_mode & 0o777), oct(0o644))
+        self._assert_cache_is_a_regular_0600_file()
+
+    def test_mode_is_set_on_the_file_before_it_is_installed(self):
+        """chmod by path after the replace follows whatever is at the path by
+        then. The mode goes on the open file, before it has a public name."""
+        with mock.patch.object(feed.os, "chmod",
+                               mock.Mock(side_effect=AssertionError("chmod by path"))):
+            feed.save(_doc())
+        self._assert_cache_is_a_regular_0600_file()
 
 
 class FeedCannotLowerARating(FeedHome):

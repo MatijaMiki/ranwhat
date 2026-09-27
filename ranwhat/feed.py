@@ -46,6 +46,12 @@ FIELDS = ("label", "authority", "reversible", "blast", "why")
 BLASTS = frozenset((catalog.MONETARY, catalog.EXTERNAL_COMMS, catalog.DATA_EGRESS,
                     catalog.INFRASTRUCTURE, catalog.IDENTITY))
 
+# The cache's temp file, as clean creates its own: O_EXCL and O_NOFOLLOW so a
+# symlink planted at the path fails the write rather than redirecting it.
+# O_BINARY: on Windows the descriptor is otherwise in text mode.
+_CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+           | getattr(os, "O_BINARY", 0))
+
 
 def home():
     return os.environ.get("RANWHAT_HOME") or os.path.join(
@@ -280,7 +286,16 @@ def save(doc):
         raise FeedError("The feed is nested deeper than any catalogue.")
     tmp = path + ".tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as fh:
+        # Removed, never written through. open(tmp, "w") followed a symlink
+        # planted here, the feed overwrote its target, and os.replace then
+        # installed the link as the cache. The mode goes on the descriptor,
+        # not the path: chmod(path) after the replace followed the link too.
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        fd = os.open(tmp, _CREATE, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            if hasattr(os, "fchmod"):   # the umask may have taken the write bit
+                os.fchmod(fh.fileno(), 0o600)
             fh.write(text)
         os.replace(tmp, path)   # atomic: a killed update never leaves a half file
     except BaseException:
@@ -289,7 +304,6 @@ def save(doc):
         except OSError:
             pass
         raise
-    os.chmod(path, 0o600)
     return path
 
 
