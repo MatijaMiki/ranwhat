@@ -1,0 +1,53 @@
+name: tests
+
+# The README says the local tools "ship and are tested". Until this ran on
+# every push, that meant tested on whichever laptop last ran them.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # Windows is untested, and the site says so. It runs so that stops being
+    # a guess, but does not fail the build until it has passed once.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # No install step: there are no dependencies, and the tests import the
+      # package from the checkout.
+      - run: python -m unittest discover -s tests -v
+
+  worker:
+    name: Contact Worker parses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Both files are ES modules with no package.json saying so. Node 22
+      # detects that; the runner's default Node may not.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check worker/src/index.js && node --check functions/_middleware.js
