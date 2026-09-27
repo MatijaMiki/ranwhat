@@ -1,6 +1,7 @@
 """The site states numbers that come from the catalogue. Those numbers drift
 the moment a provider is added, and a marketing page that undercounts its own
 product is the kind of thing nobody notices for months."""
+import html.parser
 import importlib.util
 import os
 import pathlib
@@ -186,6 +187,79 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         self.assertIn("form.measure !== true", body)
         for field in ("form.message", "form.email", "replyTo", "hashed_email"):
             self.assertNotIn(field, body)
+
+
+def _csp():
+    """The site's Content-Security-Policy as {directive: [sources]}."""
+    headers = (SITE / "_headers").read_text(encoding="utf-8")
+    lines = [l for l in headers.splitlines() if "Content-Security-Policy:" in l]
+    assert len(lines) == 1, "one Content-Security-Policy line in _headers"
+    policy = {}
+    for directive in lines[0].split(":", 1)[1].split(";"):
+        words = directive.split()
+        if words:
+            policy[words[0].lower()] = words[1:]
+    return policy
+
+
+class _InlineScript(html.parser.HTMLParser):
+    """Collects what a script-src without 'unsafe-inline' refuses to run: a
+    <script> with no src, an on*= handler, a javascript: URL. A JSON-LD
+    block is data, which script-src does not govern."""
+
+    def __init__(self):
+        super().__init__()
+        self.found = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = [(k, v or "") for k, v in attrs]
+        if tag == "script":
+            given = dict(attrs)
+            if "src" not in given and \
+                    given.get("type", "").strip().lower() != "application/ld+json":
+                self.found.append("line %d: inline <script>" % self.getpos()[0])
+        for name, value in attrs:
+            if re.fullmatch(r"on[a-z]+", name):
+                self.found.append("line %d: %s=" % (self.getpos()[0], name))
+            if re.sub(r"\s", "", value).lower().startswith("javascript:"):
+                self.found.append("line %d: %s=javascript:" % (self.getpos()[0], name))
+
+
+class InlineScriptStaysBlocked(unittest.TestCase):
+    """script-src without 'unsafe-inline' is what leaves an injected <script>
+    or onerror= inert. main's policy had it, and a merge that brings that
+    line back, or a page that pastes X's inline base code, would otherwise
+    pass every other test here."""
+
+    def test_script_src_has_no_unsafe_inline(self):
+        policy = _csp()
+        self.assertIn("script-src", policy, "scripts would fall back to default-src")
+        for name, sources in policy.items():
+            if name.startswith("script-src") or name == "default-src":
+                with self.subTest(directive=name):
+                    self.assertNotIn("'unsafe-inline'", sources)
+                    self.assertNotIn("'unsafe-hashes'", sources)
+
+    def test_no_page_needs_inline_script(self):
+        pages = sorted(SITE.glob("*.html"))
+        self.assertTrue(pages)
+        for page in pages:
+            with self.subTest(page=page.name):
+                parser = _InlineScript()
+                parser.feed(page.read_text(encoding="utf-8"))
+                parser.close()
+                self.assertEqual(parser.found, [])
+
+    def test_the_parser_sees_what_it_is_looking_for(self):
+        """Or the page test would pass for the wrong reason."""
+        parser = _InlineScript()
+        parser.feed('<script type="application/ld+json">{}</script>'
+                    '<script src="/copy.js" defer></script>'
+                    '<SCRIPT>alert(1)</SCRIPT>'
+                    '<img src=x ONERROR="alert(1)">'
+                    '<a href=" JavaScript:alert(1)">x</a>')
+        parser.close()
+        self.assertEqual(len(parser.found), 3, parser.found)
 
 
 if __name__ == "__main__":
