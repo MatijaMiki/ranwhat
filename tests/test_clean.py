@@ -22,7 +22,8 @@ def n(text):
 class Detection(unittest.TestCase):
 
     def test_secret_shaped_values(self):
-        self.assertEqual(n("STRIPE=sk_live_51HxAbCdEfGhIjKlMnOpQr"), 1)
+        # Not an alphabet run: that is a fixture, see test_fixtures.py.
+        self.assertEqual(n("STRIPE=sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"), 1)
         self.assertEqual(n("AWS=AKIAIOSFODNN7REALKEY"), 1)
         self.assertEqual(n("JWT_ACCESS_SECRET=8f3a9c2e1b7d4f6a0c5e8b2d7f1a4c9e"), 1)
 

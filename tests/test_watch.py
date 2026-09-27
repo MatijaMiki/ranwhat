@@ -65,8 +65,9 @@ class NoFalseNegatives(unittest.TestCase):
         self.assertTrue(fires('find . -name "*.tmp" -delete'))
 
     def test_secret_literal_fires_even_in_a_search(self):
-        """A live key in a grep pattern is still a leaked key."""
-        self.assertTrue(fires('grep -r "AKIA1234567890ABCDEF" .'))
+        """A live key in a grep pattern is still a leaked key. (A sequential
+        AKIA1234567890ABCDEF is a fixture, and is pinned the other way.)"""
+        self.assertTrue(fires('grep -r "AKIA4TRUE7KEYX9QZ2WB" .'))
 
 
 class Evidence(unittest.TestCase):
@@ -194,7 +195,7 @@ class MentioningIsNotDoing(unittest.TestCase):
 
     def test_a_leaked_key_fires_even_inside_a_search(self):
         """Presence is the finding for this rule, so it reads the raw text."""
-        self.assertEqual(self.sev('grep -r "AKIA1234567890ABCDEF" .'),
+        self.assertEqual(self.sev('grep -r "AKIA4TRUE7KEYX9QZ2WB" .'),
                          watch.CRITICAL)
 
 

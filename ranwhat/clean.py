@@ -28,7 +28,7 @@ import shutil
 
 from .watch import CLAUDE_PROJECTS, discover
 
-from . import term
+from . import fixtures, term
 
 BACKUP_ROOT = os.path.expanduser("~/.ranwhat/backups")
 REDACTION = "<ranwhat:redacted:%s>"
@@ -64,8 +64,20 @@ _SHAPES_NAMED = [
 _SHAPES = [pattern for pattern, _name in _SHAPES_NAMED]
 
 # KEY=value / "key": "value" assignments.
+#
+# Tool output is often JSON held in a string ({"stdout": "KEY=...\nKEY=..."}),
+# so once the transcript line is decoded its escapes are still two
+# characters. A value stops at \n \r \t \" and \\ as it would at the
+# character they stand for, a key starts after the escape and not on its
+# letter (\nDB_PASSWORD is DB_PASSWORD), and \" quotes like ".
+#
+# A key starts only where a run of identifier characters does. Tried at
+# every letter, each start read to the end of the run: 20,000 characters of
+# hex took a second, and 200,000 of mixed case four and a half minutes.
+_KEY_START = r"(?:(?<![A-Za-z0-9_])(?!(?<=\\)[nrt])|(?<=\\[nrt]))[0-9]*"
 _ASSIGN = re.compile(
-    r"""(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*[:=]\s*(["']?)([^\s"',;}\)]{8,})\3""")
+    r"""(\\?["']|)""" + _KEY_START + r"""([A-Za-z_][A-Za-z0-9_]*)\1\s*[:=]\s*"""
+    r"""(\\?["']|)((?:[^\s"',;}\)\\]|\\(?![nrt"\\])){8,})\3""")
 
 # A password embedded in a connection string.
 _CONN = re.compile(r"(?P<pre>[a-z][a-z0-9+.-]*://[^:/\s]+:)(?P<secret>[^@\s/]{4,})(?P<post>@)")
@@ -121,22 +133,72 @@ def project_path(slug):
 
 
 # Paths whose contents are credentials, used to attribute a secret to the
-# file it was read out of.
-_ORIGIN = re.compile(
-    r"((?:[\w./~$-]*/)?(?:\.env[\w.-]*|credentials|\.netrc|"
-    r"id_[a-z0-9]+|[\w.-]*\.pem|[\w.-]*\.key))", re.I)
-
-
-# _ORIGIN is quadratic on long runs of word characters: its `[\w.-]*\.pem`
-# style alternatives make the engine rescan forward from every position, so
-# 16k characters of ordinary prose cost 1.7 seconds on their own. Agent
-# transcripts are mostly ordinary prose, and one 39MB file took 59 seconds
-# here before this check existed.
+# file it was read out of. The text scanned is a raw JSONL line, so JSON's
+# escapes are part of it: \\ is a Windows separator, and \n \t \" \uXXXX end
+# the previous token.
 #
-# Every branch of the pattern requires one of these literals, so a substring
-# test that finds none is proof the regex cannot match. The test is linear and
-# in C.
+# A wrong origin is worse than none, and code is full of names that look like
+# credential files: os.environ, process.env.KEY, d.key, id_token,
+# load_credentials. So every token needs a boundary on both sides, and the
+# shapes code can also produce (bare x.key, bare "credentials") are only taken
+# when something says they are files: a directory part, a quote around them,
+# or a command or flag in front.
+#
+# Linearity, since Python 3.9 has no atomic groups: the left boundary lets a
+# match start only at the first character of a run, and a stem quantifier
+# ([\w.-]*) never shares an alternative with a suffix loop ((?:[.-]\w+)*).
+# Nesting the two made "a/" + "b.env-c" * 7000 take five seconds.
+_SEP = r"(?:/|\\\\|\\(?![nrt\"\\]|u[0-9a-fA-F]{4}))"
+_LB = (r"(?:(?<![\w.$~/\\{}%-])"
+       r"|(?<=(?<!\\)\\[nrt\"])|(?<=(?<!\\)\\u[0-9a-fA-F]{4})"
+       r"|(?<=[\s\"'=]-[A-Za-z]))")          # ssh -i/home/u/.ssh/id_rsa
+_RB = r"(?![\w/(-]|\.\w|\\\\|\\(?![nrt\"\\]|u[0-9a-fA-F]{4}))"
+_DATA_EXT = r"(?:json|ya?ml|csv|ini|toml|txt|xml|conf|cfg|properties|db)"
+_BACKUP = r"(?:\.(?:bak|old|orig|backup|enc)|~)?"   # a copy holds the same secret
+_ENV_FILE = r"\.env(?:rc)?(?:[.-]\w+)*"
+_SSH = r"id_(?:rsa|dsa|ecdsa|ed25519)"
+_READER = (r"(?:(?:cat|less|more|head|tail|bat|type|vim?|nano)\s+"
+           r"|-{1,2}\w[\w-]*[\s=]|<\s*)")
+_ORIGIN = re.compile(_LB + r"(?P<path>"
+    # with a directory part: attribute access never has a separator
+    r"(?!-)(?:[A-Za-z]:)?(?:[\w.~${}%-]*" + _SEP + r")+(?:"
+        + _ENV_FILE +
+        r"|[\w.-]*\.env(?:rc)?"                   # secrets.env
+        r"|(?:[\w.-]*credentials(?:\." + _DATA_EXT + r")?"
+        r"|\.netrc|" + _SSH + r"(?:[_-][\w-]*)?(?:\.pub)?"
+        r"|[\w.-]+\.(?:pem|key))" + _BACKUP +
+    r")"
+    # bare names: only shapes an identifier cannot take
+    r"|" + _ENV_FILE +
+    r"|(?:\.[\w-]+credentials(?:\." + _DATA_EXT + r")?"   # .git-credentials
+    r"|[\w.-]*credentials\." + _DATA_EXT +
+    r"|\.netrc|" + _SSH + r"(?:_sk)?(?:-cert)?(?:\.pub)?"
+    r"|[\w.]*-[\w.-]*\.(?:pem|key)"                    # my-ec2-key.pem
+    r"|(?<=['\"`])[\w.-]+\.(?:pem|key)" + _BACKUP + r"(?=\\?['\"`])"
+    r")" + _BACKUP +
+    # server.key is also what attribute access looks like; a reading
+    # command or a flag in front of it says it is a file
+    r"|" + _READER + r"(?P<bare>[\w.-]+\.(?:pem|key)" + _BACKUP + r")"
+    r")" + _RB, re.I)
+
+
+# Every branch of the pattern requires one of these literals, so for ASCII
+# text a substring test that finds none proves the regex cannot match, in
+# linear time and in C. (Under re.I two Turkish i's fold to "i" and lower()
+# does not map them, so a homoglyph "İd_rsa" goes without an origin.)
+# Agent transcripts are mostly prose, and a 39MB file took 59 seconds before
+# this check existed.
 _ORIGIN_MARKERS = (".env", "credential", ".netrc", "id_", ".pem", ".key")
+
+# templates and public keys: named like credential files, holding none
+_NOT_SECRET = (".example", ".sample", ".template", ".tmpl", ".dist",
+               ".defaults", ".schema", ".pub")
+_SOURCE_EXT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rb",
+               ".go", ".rs", ".java", ".php", ".md", ".map")
+_BACKUP_TAIL = re.compile(r"(?:\.(?:bak|old|orig|backup|enc)|~)$", re.I)
+_ENV_VAR_NAME = re.compile(r"^\.env\.[A-Z][A-Z0-9_]*$")   # config .env.API_KEY
+_WIN_ROOT = re.compile(r"(?:[A-Za-z]:|%\w+%|\.{1,2}|~|\$\{?\w+\}?)\\")
+_VENV_BEFORE = re.compile(r"(?:venv|virtualenv)\s+$")     # a directory named .env
 
 
 def _origins(text):
@@ -147,14 +209,61 @@ def _origins(text):
         return []
     out = []
     for m in _ORIGIN.finditer(text):
-        v = m.group(1)
-        if not v.lower().endswith((".example", ".sample", ".template", ".pub")):
-            out.append(v)
+        name = "bare" if m.group("bare") else "path"
+        v, start = m.group(name), m.start(name)
+        before = lowered[max(0, start - 12):start]
+        if before.endswith(("http:", "https:")) or _VENV_BEFORE.search(before):
+            continue
+        v = v.replace("\\\\", "\\")
+        # Deno\.env in a regex is an escaped dot, not a Windows path. A real
+        # one starts at a root (C:, %USERPROFILE%, .) or goes deeper, and
+        # never doubles its separator (that is a string literal in source).
+        if "\\\\" in v or ("\\" in v and "/" not in v and v.count("\\") < 2
+                             and not _WIN_ROOT.match(v)):
+            continue
+        parts = re.split(r"[/\\]", v)
+        base = _BACKUP_TAIL.sub("", parts[-1]).lower()
+        if base.endswith(_NOT_SECRET + _SOURCE_EXT):
+            continue
+        if _ENV_VAR_NAME.match(parts[-1]) or base in ("process.env", "meta.env"):
+            continue
+        # Extensionless "credentials" is a file under a dot-directory
+        # (~/.aws/credentials). Anywhere else it is an import or a route.
+        if base == "credentials" and not (
+                len(parts) > 1 and re.match(r"\.\w", parts[-2])):
+            continue
+        out.append(v)
     return out
 
 
 def _fingerprint(value):
     return hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+_KEY_ID = re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}")
+
+
+def _hint(value):
+    """What a finding looks like on screen: enough to recognise it, never
+    enough to use it. A fixed 3+2 characters gave away 5 of an 11-character
+    password and showed nothing at all at 10, so the budget is a sixth of
+    the value, and below 8 characters (which the length beside it already
+    narrows) nothing. Never the fingerprint: for a short human-chosen
+    password that hash is a dictionary oracle.
+
+    AWS key IDs are the exception. A sixth of one is its fixed prefix, so
+    every key ID showed as AK…B, and a key ID is no secret without the
+    secret key beside it. It shows the prefix and the last four, the same
+    four `aws configure list` shows."""
+    if _KEY_ID.fullmatch(value):
+        return value[:4] + "…" + value[-4:]
+    n = len(value)
+    if n < 8:
+        return "•" * 3
+    k = min(5, max(1, n // 6))
+    head = (k + 1) // 2 if k > 1 else 1
+    tail = k - head
+    return value[:head] + "…" + (value[-tail:] if tail else "")
 
 
 # A secret is a literal. These are all things that merely *refer* to one, or
@@ -183,11 +292,43 @@ def _entropy(value):
     return -sum((c / n) * math.log(c / n, 2) for c in counts.values())
 
 
+# An AWS secret key is 40 characters of base64, so one in 64 starts with a
+# slash and reads as an absolute path. What tells them apart is the run. A
+# path is a chain of names, and a name is written in one case (usr, v1, a
+# hex digest) or in whole words (Desktop, SanDisk128GB). A generated key
+# flips between upper case, lower case and digits every character or two,
+# and never holds a dot, a dash or an underscore.
+_BASE64_PATH = re.compile(r"^/[A-Za-z0-9+/=]+$")
+_NAME_PART = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|[0-9]+|[^A-Za-z0-9]")
+# Characters that must read as generated before a slash value is a key.
+# Measured: it misses about 1 in 2,200 random slash keys, and reads none of
+# the 6,241 paths on a working Mac spelled only in these characters as one.
+_GENERATED_MIN = 16
+
+
+def _reads_as_name(segment):
+    if segment == segment.lower() or segment == segment.upper():
+        return True
+    per_part = len(segment) / len(_NAME_PART.findall(segment))
+    # A long name is a few long words. A random run that long averages three
+    # characters a part now and then, and three and a half all but never.
+    return per_part >= (3.5 if len(segment) >= 16 else 3.0)
+
+
+def _generated_not_path(value):
+    if not _BASE64_PATH.match(value):
+        return False
+    generated = sum(len(s) for s in value.split("/") if not _reads_as_name(s))
+    return generated >= _GENERATED_MIN
+
+
 def _looks_computed(value):
     """True when the value is code, a reference, a path or a pattern rather
     than a literal credential."""
     v = value.strip().strip("\"'")
-    if _CODE.search(v) or _REFERENCE.match(v) or _PATHLIKE.match(v):
+    if _CODE.search(v) or _REFERENCE.match(v):
+        return True
+    if _PATHLIKE.match(v) and not _generated_not_path(v):
         return True
     if _REGEXISH.search(v) or _MASKED.search(v):
         return True
@@ -197,8 +338,64 @@ def _looks_computed(value):
     return False
 
 
+# `token = args.token`: a variable read off an object, which _REFERENCE only
+# knows for a few fixed receivers. Deliberately narrow, because a dotted
+# lowercase passphrase (password: summer.monkey) has the same letters: every
+# segment starts lowercase, no digits, and the attribute must be named for
+# the very thing the key is, or be read off a request's headers.
+_MEMBER_CHAIN = re.compile(r"^[a-z_$][A-Za-z_]*(?:\??\.[a-z_][A-Za-z_]*)+$")
+_WORDS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+_SECRET_WORDS = {"token", "secret", "password", "passwd", "pwd", "pass",
+                 "key", "apikey", "auth", "authorization", "credential",
+                 "credentials", "dsn", "jwt", "bearer"}
+
+
+def _last_word(name):
+    words = _WORDS.findall(name)
+    return words[-1].lower() if words else ""
+
+
+def _is_member_access(key, quote, value):
+    if quote or len(value) >= 64:
+        return False                  # a quoted string is a literal
+    if not any(c.islower() for c in key):
+        return False                  # API_TOKEN=args.token is a .env line
+    if not _MEMBER_CHAIN.match(value):
+        return False
+    if any(p.search(value) for p in _SHAPES):
+        return False                  # letters-only JWTs fit the chain too
+    segments = value.replace("?.", ".").split(".")
+    word = _last_word(segments[-1])
+    if word not in _SECRET_WORDS:
+        return False                  # whisKEY, PASSport: whole words only
+    return word == _last_word(key) or segments[-2].lower() == "headers"
+
+
+# A private key is judged by its body, not by the text around it. Read out
+# of a service-account JSON file, the body is still escaped ("\n" between
+# lines), which the code check alone took for code. A stub ("...", "<your
+# key>", "xxx") has no body, and one assembled in code (" + body + ") has
+# only names. The shortest real body, an Ed25519 key's, is 64 characters of
+# base64, and the first 30 or so of any body are a fixed header, so a body
+# counts once it holds a generated run of 40.
+_PEM = re.compile(r"^-----BEGIN [A-Z ]*PRIVATE KEY-----([\s\S]*)"
+                  r"-----END [A-Z ]*PRIVATE KEY-----$")
+_LINE_BREAKS = re.compile(r"\s+|\\+[nrt]")
+_BASE64_RUN = re.compile(r"[A-Za-z0-9+/=]{40,}")
+
+
+def _pem_has_body(body):
+    for run in _BASE64_RUN.findall(_LINE_BREAKS.sub("", body)):
+        if _entropy(run) >= 3.0 and not _MASKED.search(run):
+            return True
+    return False
+
+
 def _is_placeholder(value):
     v = value.strip().strip("\"'")
+    pem = _PEM.match(v)
+    if pem:
+        return not _pem_has_body(pem.group(1))
     if len(v) < 8:
         return True
     if _PLACEHOLDER.match(v):
@@ -250,21 +447,47 @@ def find_secrets(text):
         text = text[:MAX_STRING]
 
     for pattern, name in _SHAPES_NAMED:
-        for m in pattern.finditer(text):
+        pos = 0
+        while True:
+            m = pattern.search(text, pos)
+            if not m:
+                break
             value = m.group(0)
-            if not _is_placeholder(value):
-                found.append((value, name))
+            if _is_placeholder(value) or fixtures.is_fixture(value):
+                # Resume just past the start, not the end: a fixed-length shape
+                # like AKIA+16 would otherwise swallow the "AKIA" of a real key
+                # glued on right after a fixture.
+                pos = m.start() + 1
+                continue
+            found.append((value, name))
+            pos = m.end()
 
-    for m in _ASSIGN.finditer(text):
+    pos = 0
+    while True:
+        m = _ASSIGN.search(text, pos)
+        if not m:
+            break
+        pos = m.end()
         key, value = m.group(2), m.group(4)
         if not _SECRET_KEY.search(key):
+            if m.group(3):
+                # {"stdout": "API_TOKEN=..."}: a quoted value can hold an
+                # assignment of its own. Quotes end a value, so this reads
+                # each one at most twice.
+                pos = m.start(4)
             continue
         if _is_placeholder(value):
             continue
+        if _is_member_access(key, m.group(3), value):
+            continue          # code reading a variable, not a literal
+        if fixtures.is_fixture(value):
+            continue          # a documentation example or a test fixture
         if _entropy(value) < 3.0 and not any(p.search(value) for p in _SHAPES):
             continue          # prose or a word, not a generated credential
         found.append((value, key))
 
+    # No fixture check here: a connection-string password is chosen by a
+    # person, and "acme-example-prod" is still that person's password.
     for m in _CONN.finditer(text):
         value = m.group("secret")
         if not _is_placeholder(value):
@@ -272,16 +495,52 @@ def find_secrets(text):
 
     # Longest first, so a JWT is masked before any substring of it -- and a
     # password that lives inside an already-matched connection string is not
-    # reported a second time on its own.
-    seen, unique = set(), []
+    # reported a second time on its own. Only when it lives nowhere else: a
+    # .env often repeats DB_PASSWORD inside DATABASE_URL, and dropping it for
+    # that left its own line in plaintext after masking. So this replays the
+    # masking in the same order and keeps what is still there to mask.
+    rest, unique = text, []
     for value, label in sorted(found, key=lambda p: len(p[0]), reverse=True):
-        if value in seen:
+        if value not in rest:
             continue
-        if any(value in bigger for bigger in seen):
-            continue
-        seen.add(value)
+        rest = rest.replace(value, "\0")
         unique.append((value, label))
     return unique
+
+
+# How a secret looks in text shown to the reader: its hint in angle brackets,
+# the way a placeholder is written, so it reads as removed and a second pass
+# finds nothing to mask.
+DISPLAY_MASK = "<%s>"
+
+
+def mask_for_display(text):
+    """`text` with every value find_secrets would report replaced by its
+    hint, for printing a command or its output without printing the
+    credential again. The same rules decide, so fixtures and placeholders
+    are shown as they are. Every occurrence is masked, and where two found
+    values overlap the whole stretch goes under one hint."""
+    spans = []
+    for value, _label in find_secrets(text):
+        at = text.find(value)
+        while at != -1:
+            spans.append((at, at + len(value)))
+            at = text.find(value, at + 1)
+    if not spans:
+        return text
+    merged = []
+    for lo, hi in sorted(spans):
+        if merged and lo < merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    out, pos = [], 0
+    for lo, hi in merged:
+        out.append(text[pos:lo])
+        out.append(DISPLAY_MASK % _hint(text[lo:hi]))
+        pos = hi
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _walk(node, collect, replace=None, only=None):
@@ -309,6 +568,43 @@ def _walk(node, collect, replace=None, only=None):
     return node
 
 
+def _content_blocks(obj):
+    msg = obj.get("message") if isinstance(obj, dict) else None
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if not isinstance(content, list):
+        return []
+    return [b for b in content if isinstance(b, dict)]
+
+
+def _origin_for_line(obj, here, recent, call_origins):
+    """The credential file a secret on this line was read out of, or None.
+
+    A tool result belongs to the call that produced it, so when the call is
+    known its own input decides: the output of `ls` gets no origin just
+    because `cat api/.env` ran three calls earlier. A call is judged by its
+    own input the same way. Anything else (prose, attachments, formats with
+    no call ids) falls back to the most recent credential path in the file.
+    """
+    result_ids, calls = [], False
+    for block in _content_blocks(obj):
+        if block.get("type") == "tool_use":
+            calls = True
+            if block.get("id"):
+                call_origins[block["id"]] = _origins(
+                    json.dumps(block.get("input"), ensure_ascii=False))
+        elif block.get("type") == "tool_result":
+            result_ids.append(block.get("tool_use_id"))
+    if calls:
+        # a secret in a call's own input goes with the paths that call names
+        return here[-1] if here else None
+    if result_ids and all(i in call_origins for i in result_ids):
+        # grep -r output names its own file ("api/.env:KEY=..."), so the
+        # result's own text counts when the call named nothing
+        named = [o for i in result_ids for o in call_origins[i]] or here
+        return named[-1] if named else None
+    return recent[-1] if recent else None
+
+
 def scan_file(path, apply=False, only=None):
     """Find (and optionally mask) secrets in one transcript.
 
@@ -320,13 +616,15 @@ def scan_file(path, apply=False, only=None):
     changed = False
 
     recent_origin = []          # most recent credential path seen in this file
+    call_origins = {}           # tool_use id -> credential paths in its input
+    origin_now = [None]         # what a secret on the current line is credited to
 
     def collect(value, label):
         entry = findings.setdefault(_fingerprint(value), {
             "fingerprint": _fingerprint(value),
             "label": label,
             "length": len(value),
-            "hint": value[:3] + "…" + value[-2:] if len(value) > 10 else "…",
+            "hint": _hint(value),
             "files": set(),
             "origins": set(),
             "projects": set(),
@@ -334,8 +632,8 @@ def scan_file(path, apply=False, only=None):
         })
         entry["files"].add(path)
         entry["projects"].add(project_path(os.path.basename(os.path.dirname(path))))
-        if recent_origin:
-            entry["origins"].add(recent_origin[-1])
+        if origin_now[0]:
+            entry["origins"].add(origin_now[0])
         entry["count"] += 1
 
     try:
@@ -350,9 +648,11 @@ def scan_file(path, apply=False, only=None):
                 except ValueError:
                     rewritten.append(line)
                     continue
-                for o in _origins(stripped):
-                    recent_origin.append(o)
+                here = _origins(stripped)
+                recent_origin.extend(here)
                 del recent_origin[:-4]
+                origin_now[0] = _origin_for_line(obj, here, recent_origin,
+                                                 call_origins)
                 new = _walk(obj, collect, replace=apply, only=only)
                 if apply and new != obj:
                     changed = True
@@ -412,7 +712,12 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None):
     return merged, scanned, changed_files
 
 
-def render(findings, scanned, changed_files, applied):
+def render(findings, scanned, changed_files, applied, footer=True,
+           advice=True):
+    """check passes footer=False and advice=False: it prints one footer for
+    all sections, and its own next step, since "Run with --apply" is wrong
+    there. They gate only those lines; the rotation warning and every finding
+    always print."""
     from .report import BOLD, DIM, RED, YEL, GRN, CYA
 
     L = ["", BOLD("  ranwhat clean  ") + DIM("· secrets sitting in local transcripts"),
@@ -449,11 +754,13 @@ def render(findings, scanned, changed_files, applied):
     if applied:
         L.append("  " + GRN("Masked in %d file(s)." % len(changed_files)))
         L.append(DIM("  Backups: %s" % BACKUP_ROOT))
-    else:
+    elif advice:
         L.append("  " + YEL("Dry run. Nothing was changed."))
         L.append(DIM("  Run with --apply to mask them. Backups are written first."))
-    L += ["", DIM(term.rule("-")),
-          DIM("  Read locally. Nothing was transmitted."), ""]
+    if footer:
+        if L[-1]:
+            L.append("")
+        L += [DIM(term.rule("-")), DIM(term.FOOTER), ""]
     return "\n".join(L)
 
 

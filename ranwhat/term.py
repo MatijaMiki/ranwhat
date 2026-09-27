@@ -72,16 +72,81 @@ def brand(s, stream=None):
     return s
 
 
-def wrap(text, indent="  ", stream=None):
-    """Fold prose to the terminal, without importing textwrap for one job."""
-    limit = width(stream) - len(indent)
+def wrap(text, indent="  ", stream=None, first=None):
+    """Fold prose to the terminal, without importing textwrap for one job.
+
+    `first` replaces `indent` on the first line only, for a bullet or a label
+    with the rest of the text hanging under it. It counts against the width
+    like any other text. A word longer than the line gets a line to itself.
+    """
+    limit = width(stream)
+    start = indent if first is None else first
     out, line = [], ""
     for word in text.split():
-        if line and len(line) + 1 + len(word) > limit:
-            out.append(indent + line)
+        lead = indent if out else start
+        if line and len(lead) + len(line) + 1 + len(word) > limit:
+            out.append(lead + line)
             line = word
         else:
             line = word if not line else line + " " + word
     if line:
-        out.append(indent + line)
+        out.append((indent if out else start) + line)
     return out
+
+
+# One copy, so check can print it once instead of once per section. Kept at
+# 40 characters so it fits MIN_WIDTH without wrapping.
+FOOTER = "  Read locally. Nothing was transmitted."
+
+
+class Progress:
+    """A single self-overwriting status line on stderr, for terminals only.
+
+    Clearing with "\\r" plus spaces left a row of blanks at the top of the
+    report on a terminal, and every fragment in a redirected log. So nothing
+    is written unless the stream is a terminal, and the line is erased with
+    EL ("\\033[K") instead. A failure here must never cost the report: the
+    callback runs inside the scan, and an exception out of it means no
+    findings are printed at all.
+    """
+
+    def __init__(self, stream=None):
+        self.stream = stream if stream is not None else sys.stderr
+        self.dirty = False
+        try:
+            self.enabled = bool(self.stream.isatty()
+                                and os.environ.get("TERM") != "dumb")
+        except Exception:
+            self.enabled = False
+
+    def _columns(self):
+        # The stream's own terminal, not shutil.get_terminal_size(), which
+        # measures stdout: with stdout redirected it answers 80 on a narrow
+        # window, the line wraps, and "\r" can no longer reach its start.
+        try:
+            cols = os.get_terminal_size(self.stream.fileno()).columns
+        except (AttributeError, ValueError, OSError):
+            cols = 0
+        return cols if cols > 0 else 80
+
+    def update(self, text):
+        if not self.enabled:
+            return
+        # Set first: a write that fails halfway may still have put text up.
+        self.dirty = True
+        try:
+            self.stream.write("\r" + text[:max(1, self._columns() - 1)]
+                              + "\033[K")
+            self.stream.flush()
+        except Exception:
+            self.enabled = False
+
+    def clear(self):
+        if not self.dirty:
+            return
+        self.dirty = False
+        try:
+            self.stream.write("\r\033[K")
+            self.stream.flush()
+        except Exception:
+            pass

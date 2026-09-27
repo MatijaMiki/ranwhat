@@ -131,7 +131,9 @@ report says so rather than implying safety.
 
 Only masks a value when the key beside it names it as a secret or the value
 carries a recognisable credential shape. Placeholders, template files and
-ordinary config are left alone. Backups go to `~/.ranwhat/backups`, and the
+ordinary config are left alone, and so are published documentation examples
+(AWS's `AKIAIOSFODNN7EXAMPLE`) and obvious test fixtures such as
+`AKIA1234567890ABCDEF`. Backups go to `~/.ranwhat/backups`, and the
 rewritten file is parsed back before it replaces the original.
 
 ## Precision is the feature

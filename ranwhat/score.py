@@ -251,7 +251,15 @@ def verdict(authority, observability, reversibility):
     }
 
 
-def _coverage_findings(profile, rows):
+def _pull_usage_command(path):
+    """The re-scan that would evidence usage, spelled so it runs as printed.
+    Imported here, not at the top: cli imports this module."""
+    from .cli import invocation, _quote
+    return "%s scan %s --pull-usage" % (
+        invocation(), _quote(path) if path else "<profile>")
+
+
+def _coverage_findings(profile, rows, path=None):
     """Classify each provider's usage evidence, and say so.
 
     Three states, not two. A provider whose usage was hand-declared in the
@@ -296,8 +304,8 @@ def _coverage_findings(profile, rows):
             "title": "Usage is self-attested for %d provider(s)" % len(self_attested),
             "body": "Usage for these providers was declared in the profile rather "
                     "than pulled from the provider's own audit trail. The findings "
-                    "hold only as far as that declaration does. Run --pull-usage to "
-                    "make them independently evidenced.",
+                    "hold only as far as that declaration does. Run `%s` to make "
+                    "them independently evidenced." % _pull_usage_command(path),
             "evidence": self_attested,
         })
 
@@ -392,7 +400,9 @@ def findings(rows, controls, ba):
     return out
 
 
-def scan(profile):
+def scan(profile, path=None):
+    """`path` is the file the profile was read from, if any, so advice to
+    re-scan it can name it."""
     credentials, controls = _validate(profile)
     rows = _resolve(credentials)
 
@@ -408,7 +418,8 @@ def scan(profile):
                    "reversibility": _grade(r)},
         "verdict": verdict(a, o, r),
         "blast_radius": ba,
-        "findings": findings(rows, controls, ba) + _coverage_findings(profile, rows),
+        "findings": (findings(rows, controls, ba)
+                     + _coverage_findings(profile, rows, path)),
         "usage_coverage": profile.get("usage_coverage") or [],
         "scopes": rows,
         "counts": {

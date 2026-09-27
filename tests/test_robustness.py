@@ -92,26 +92,37 @@ class WatcherInputShapes(unittest.TestCase):
 
 class OneBadFileDoesNotStopTheScan(unittest.TestCase):
 
-    def _state_dir(self, write):
+    def _state_dir(self, text):
         root = tempfile.mkdtemp(prefix="oc-rb-")
         path = os.path.join(root, "agents", "a", "agent", "openclaw-agent.sqlite")
         os.makedirs(os.path.dirname(path))
-        write(path)
+        with open(path, "w") as fh:
+            fh.write(text)
         return root
+
+    def _scan(self, root):
+        # The warning is the behaviour under test, so it is captured and
+        # checked rather than left to print over the suite's output.
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            records, scanned = watch.scan_openclaw(state_dir=root)
+        self.assertIn("warning: cannot read", err.getvalue())
+        self.assertIn("file is not a database", err.getvalue())
+        return records, scanned
 
     def test_corrupt_database_is_skipped_not_fatal(self):
         """sqlite3.connect is lazy, so a non-database only fails on first
         query -- which used to happen outside any handler."""
-        root = self._state_dir(
-            lambda p: open(p, "w").write("this is not a database"))
-        records, scanned = watch.scan_openclaw(state_dir=root)
+        root = self._state_dir("this is not a database")
+        records, scanned = self._scan(root)
         self.assertEqual(records, [])
         self.assertEqual(scanned, 1)
 
     def test_good_database_beside_a_corrupt_one_still_reports(self):
         import json
-        root = self._state_dir(
-            lambda p: open(p, "w").write("garbage"))
+        root = self._state_dir("garbage")
         good = os.path.join(root, "agents", "b", "agent", "openclaw-agent.sqlite")
         os.makedirs(os.path.dirname(good))
         conn = sqlite3.connect(good)
@@ -120,7 +131,7 @@ class OneBadFileDoesNotStopTheScan(unittest.TestCase):
             {"name": "bash", "input": {"command": "rm -rf ~/gone"}}),))
         conn.commit()
         conn.close()
-        records, scanned = watch.scan_openclaw(state_dir=root)
+        records, scanned = self._scan(root)
         self.assertEqual(scanned, 2)
         self.assertEqual(len(records), 1, "the readable database must still report")
 
