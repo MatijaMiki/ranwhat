@@ -8,6 +8,13 @@ import unittest
 
 from ranwhat import clean
 
+# What a quadratic pattern costs here is seconds (10s to 24s on the shapes
+# below before the fix), so the budget only has to sit well under that. At
+# 50ms it failed on a loaded machine while the full suite ran, which on CI
+# is a red build for nothing. 0.5s still catches every regression these
+# exist for by a factor of twenty.
+BUDGET = 0.5
+
 
 class Linear(unittest.TestCase):
     def test_origin_scan_does_not_go_quadratic_on_prose(self):
@@ -16,7 +23,7 @@ class Linear(unittest.TestCase):
         text = "a" * 50000
         t = time.perf_counter()
         clean._origins(text)
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
 
     def test_origins_still_found_when_a_marker_is_present(self):
         self.assertIn("~/.ssh/id_rsa", clean._origins("then cat ~/.ssh/id_rsa here"))
@@ -47,13 +54,13 @@ class Linear(unittest.TestCase):
             with self.subTest(text=text[:24]):
                 t = time.perf_counter()
                 clean._origins(text)
-                self.assertLess(time.perf_counter() - t, 0.05)
+                self.assertLess(time.perf_counter() - t, BUDGET)
 
     def test_a_very_long_path_still_resolves(self):
         text = " " + "a/" * 100000 + ".env"
         t = time.perf_counter()
         found = clean._origins(text)
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0].endswith("/.env"))
 
@@ -62,7 +69,7 @@ class Linear(unittest.TestCase):
         text = json.dumps({"c": line})
         t = time.perf_counter()
         found = clean._origins(text)
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
         self.assertEqual(set(found), {"api/.env"})
 
 
@@ -72,7 +79,7 @@ class EmbeddedImages(unittest.TestCase):
     def test_embedded_png_is_not_scanned(self):
         t = time.perf_counter()
         self.assertEqual(clean.find_secrets(self.PNG), [])
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
 
     def test_image_data_cannot_produce_a_false_positive(self):
         """Random-looking base64 can contain an AKIA-shaped run by chance."""
