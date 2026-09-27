@@ -9,6 +9,14 @@ send_email = [
   { name = "CONTACT_EMAIL", destination_address = "ranwhatcom@gmail.com" }
 ]
 
+# Workers Builds runs `npx wrangler preview` for every branch other than main,
+# and that command stops with an error when this block is missing. It is empty
+# on purpose: a Preview inherits nothing from production, so a branch build
+# gets no email binding, no Turnstile secret and no X token. It cannot send
+# mail or report a lead, and Wrangler's warning that CONTACT_EMAIL is not
+# configured for Previews is expected. The route below stays production only.
+previews = {}
+
 # Takes precedence over the Pages project for this path, so the site and the
 # API share one origin and the browser never makes a cross-origin request.
 [[routes]]
