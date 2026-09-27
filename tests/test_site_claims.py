@@ -1,13 +1,26 @@
 """The site states numbers that come from the catalogue. Those numbers drift
 the moment a provider is added, and a marketing page that undercounts its own
 product is the kind of thing nobody notices for months."""
+import importlib.util
+import os
 import pathlib
 import re
+import shutil
+import tempfile
 import unittest
+from unittest import mock
 
-from ranwhat import catalog
+from ranwhat import catalog, feed
 
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
+
+
+def _example_report():
+    spec = importlib.util.spec_from_file_location(
+        "example_report", SITE.parent / "scripts" / "example_report.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def live():
@@ -63,15 +76,44 @@ class ExampleReportIsCurrent(unittest.TestCase):
     gives, which is the kind of drift nobody notices for months."""
 
     def test_published_report_matches_what_the_tool_writes(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "example_report", SITE.parent / "scripts" / "example_report.py")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
         self.assertEqual((SITE / "example-report.html").read_text(encoding="utf-8"),
-                         mod.build(),
+                         _example_report().build(),
                          "site/example-report.html is stale: "
                          "run python3 scripts/example_report.py")
+
+
+class ExampleReportIgnoresThisMachinesFeed(unittest.TestCase):
+    """build() scores the demo profile through the catalogue, which reads
+    any subscribed feed cached under RANWHAT_HOME. On a machine with one
+    that rates a demo scope, the test above failed though the page was
+    right, and the script would have baked that machine's ratings in."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="feed-home-")
+        self.addCleanup(shutil.rmtree, self.home, True)
+        patch = mock.patch.dict(os.environ, {"RANWHAT_HOME": self.home})
+        patch.start()
+        self.addCleanup(patch.stop)
+        cat = {"slack": {"chat:write": {
+            "label": "Pay anyone", "authority": "destructive",
+            "reversible": False, "blast": "monetary", "why": "a test feed"}}}
+        feed.save({"schema": feed.SCHEMA, "version": "t", "catalogue": cat,
+                   "digest": feed.digest(cat)})
+        catalog.reset_feed_cache()
+        self.addCleanup(catalog.reset_feed_cache)
+
+    def test_a_cached_feed_does_not_reach_the_page(self):
+        self.assertEqual(catalog.lookup("slack", "chat:write")["label"],
+                         "Pay anyone", "the test feed is not in use")
+        catalog.reset_feed_cache()
+        self.assertEqual((SITE / "example-report.html").read_text(encoding="utf-8"),
+                         _example_report().build())
+
+    def test_the_feed_is_back_afterwards(self):
+        _example_report().build()
+        self.assertEqual(os.environ["RANWHAT_HOME"], self.home)
+        self.assertEqual(catalog.lookup("slack", "chat:write")["label"],
+                         "Pay anyone")
 
 
 class AdMeasurementNeedsConsent(unittest.TestCase):
