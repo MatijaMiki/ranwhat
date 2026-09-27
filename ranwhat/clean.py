@@ -111,15 +111,25 @@ def _worth_scanning(text):
 # which is ambiguous the moment a directory name contains one: the slug
 # -Users-me-Desktop-birthday-planner could be .../birthday-planner or
 # .../birthday/planner. Resolved by asking the filesystem.
+#
+# On Windows the colon and backslash after the drive flatten too, so
+# C:\Users\me\app arrives as C--Users-me-app.
+_DRIVE_SLUG = re.compile(r"([A-Za-z])--(.*)")
+
+
 def project_path(slug):
-    if not slug.startswith("-"):
+    drive = _DRIVE_SLUG.fullmatch(slug) if os.name == "nt" else None
+    if drive:
+        path, rest = drive.group(1) + ":" + os.path.sep, drive.group(2)
+    elif slug.startswith("-"):
+        path, rest = os.path.sep, slug[1:]
+    else:
         return slug
-    parts = slug[1:].split("-")
-    path = ""
+    parts = rest.split("-")
     i = 0
     while i < len(parts):
         for take in range(len(parts) - i, 0, -1):
-            candidate = path + "/" + "-".join(parts[i:i + take])
+            candidate = os.path.join(path, "-".join(parts[i:i + take]))
             if os.path.isdir(candidate):
                 path = candidate
                 i += take
@@ -127,9 +137,9 @@ def project_path(slug):
         else:
             # Past the part that exists on this machine, the remainder is
             # most likely one directory name that happens to contain dashes.
-            path = path + "/" + "-".join(parts[i:])
+            path = os.path.join(path, "-".join(parts[i:]))
             break
-    return path or slug
+    return path
 
 
 # Paths whose contents are credentials, used to attribute a secret to the
@@ -716,6 +726,17 @@ def _write_like(original, tmp, lines):
             os.fchmod(fh.fileno(), mode)
 
 
+def _backup_dest(root, stamp, path):
+    """Where the backup of `path` goes: its absolute path, re-rooted under
+    root/stamp. Joining C:\\Users\\... onto the root would discard the root
+    and name the transcript itself, so on Windows the drive (or a UNC
+    server and share) becomes a directory of its own."""
+    drive, rest = os.path.splitdrive(os.path.abspath(path))
+    parts = [p for p in re.split(r"[\\/:?]+", drive) if p.strip(".")]
+    rest = rest.lstrip(os.path.sep + (os.path.altsep or ""))
+    return os.path.join(root, stamp, *parts, rest)
+
+
 def _backup(path):
     """Copy the unmasked transcript aside before rewriting it.
 
@@ -727,7 +748,7 @@ def _backup(path):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
     os.chmod(BACKUP_ROOT, 0o700)
-    dest = os.path.join(BACKUP_ROOT, stamp, path.lstrip("/"))
+    dest = _backup_dest(BACKUP_ROOT, stamp, path)
     os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
     fd = os.open(dest, _CREATE, 0o600)
     with open(path, "rb") as src, os.fdopen(fd, "wb") as out:

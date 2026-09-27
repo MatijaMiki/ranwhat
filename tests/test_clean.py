@@ -5,6 +5,7 @@ that was never one, because the file being rewritten is the user's own agent
 history and a bad replacement is silent corruption.
 """
 import json
+import ntpath
 import os
 import sys
 import tempfile
@@ -212,9 +213,29 @@ class WhereDidItComeFrom(unittest.TestCase):
         import tempfile as tf
         base = tf.mkdtemp()
         os.makedirs(os.path.join(base, "birthday-planner"))
-        slug = base.replace("/", "-") + "-birthday-planner"
+        # Flattened as Claude Code does it: every separator, and the colon
+        # after a Windows drive, becomes a dash.
+        drive, rest = os.path.splitdrive(base)
+        slug = (drive.replace(":", "-") + rest.replace(os.sep, "-")
+                + "-birthday-planner")
         self.assertEqual(project_path(slug),
                          os.path.join(base, "birthday-planner"))
+
+    def test_a_windows_slug_resolves_to_a_drive_path(self):
+        dirs = {"C:\\", r"C:\Users", r"C:\Users\me",
+                r"C:\Users\me\birthday-planner"}
+        with mock.patch.object(clean.os, "name", "nt"), \
+             mock.patch.object(clean.os, "path", ntpath), \
+             mock.patch.object(ntpath, "isdir", dirs.__contains__):
+            self.assertEqual(clean.project_path("C--Users-me-birthday-planner"),
+                             r"C:\Users\me\birthday-planner")
+            self.assertEqual(clean.project_path("C--Users-me-gone-app"),
+                             r"C:\Users\me\gone-app")
+
+    def test_a_drive_shaped_slug_is_left_alone_off_windows(self):
+        with mock.patch.object(clean.os, "name", "posix"):
+            self.assertEqual(clean.project_path("C--Users-me-app"),
+                             "C--Users-me-app")
 
     def test_unknown_slug_keeps_dashes_rather_than_splitting_every_one(self):
         from ranwhat.clean import project_path
@@ -296,6 +317,37 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         with open(backups[0], "rb") as fh:
             self.assertEqual(fh.read(), original)
+
+
+class WhereTheBackupGoes(unittest.TestCase):
+    """The backup is the transcript's absolute path re-rooted under the
+    backup directory. On Windows, joining C:\\... onto the root discarded
+    the root, so the "backup" was the transcript itself, and O_EXCL was all
+    that stopped clean --apply from truncating it."""
+
+    def test_a_posix_path(self):
+        import posixpath
+        with mock.patch.object(clean.os, "path", posixpath):
+            self.assertEqual(
+                clean._backup_dest("/home/me/.ranwhat/backups", "20260927",
+                                   "/home/me/.claude/projects/-app/s.jsonl"),
+                "/home/me/.ranwhat/backups/20260927/home/me/.claude/projects/"
+                "-app/s.jsonl")
+
+    def test_a_windows_drive_becomes_a_directory(self):
+        with mock.patch.object(clean.os, "path", ntpath):
+            self.assertEqual(
+                clean._backup_dest(r"C:\Users\me\.ranwhat\backups", "20260927",
+                                   r"C:\Users\me\.claude\projects\C--app\s.jsonl"),
+                r"C:\Users\me\.ranwhat\backups\20260927\C\Users\me"
+                r"\.claude\projects\C--app\s.jsonl")
+
+    def test_a_windows_share_becomes_directories(self):
+        with mock.patch.object(clean.os, "path", ntpath):
+            self.assertEqual(
+                clean._backup_dest(r"C:\b", "20260927",
+                                   r"\\server\share\p\s.jsonl"),
+                r"C:\b\20260927\server\share\p\s.jsonl")
 
 
 class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):
