@@ -28,6 +28,12 @@ const SUBJECTS = {
 
 const LIMITS = { message: 8000, email: 200 };
 
+/* X's Conversions API, for the pixel on the site. The token is a Worker
+   secret (X_PIXEL_TOKEN) and the lead event's ID a plain variable
+   (X_EVENT_LEAD); until both are set this does nothing. */
+const X_PIXEL = "rfz6t";
+const X_CONVERSIONS = `https://ads-api.x.com/12/measurement/conversions/${X_PIXEL}`;
+
 const json = (status, body) =>
   new Response(JSON.stringify(body), {
     status,
@@ -38,7 +44,48 @@ const json = (status, body) =>
    their own, e.g. a Bcc. Strip CR and LF from anything that lands in one. */
 const header = (s) => String(s || "").replace(/[\r\n]+/g, " ").trim();
 
-async function handleContact(request, env) {
+/* Tells X a contact message was sent, so an ad can be credited with it. Only
+   when the visitor allowed ad measurement on the page, and never with the
+   message or the address: the ad-click ID if there is one, plus the IP address
+   and browser X accepts in its place. It runs after the reply has gone back,
+   and nothing here can fail the form. */
+async function reportLead(request, env, form) {
+  if (form.measure !== true || !env.X_PIXEL_TOKEN || !env.X_EVENT_LEAD) return;
+
+  const id = {
+    ip_address: request.headers.get("cf-connecting-ip") || undefined,
+    user_agent: header(request.headers.get("user-agent")).slice(0, 512) || undefined,
+  };
+  if (typeof form.twclid === "string" && /^[A-Za-z0-9_-]{8,200}$/.test(form.twclid)) {
+    id.twclid = form.twclid;
+  }
+  const conversionId =
+    typeof form.conversion_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(form.conversion_id)
+      ? form.conversion_id
+      : crypto.randomUUID();
+
+  try {
+    const res = await fetch(X_CONVERSIONS, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-pixel-token": env.X_PIXEL_TOKEN },
+      body: JSON.stringify({
+        conversions: [{
+          conversion_time: new Date().toISOString(),
+          event_id: env.X_EVENT_LEAD,
+          event_source_url: "https://ranwhat.com/contact",
+          conversion_id: conversionId,
+          identifiers: [id],
+        }],
+      }),
+    });
+    /* Status only: `wrangler tail` shows whether X took it, never the token. */
+    if (!res.ok) console.log(`x conversions: ${res.status}`);
+  } catch (err) {
+    console.log("x conversions: unreachable");
+  }
+}
+
+async function handleContact(request, env, ctx) {
   let form;
   try {
     form = await request.json();
@@ -109,11 +156,12 @@ async function handleContact(request, env) {
     return json(502, { error: "The message could not be sent. Write to hello@ranwhat.com instead." });
   }
 
+  ctx.waitUntil(reportLead(request, env, form));
   return json(200, { ok: true });
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname !== "/api/contact") return json(404, { error: "Not found." });
     if (request.method !== "POST") {
@@ -122,6 +170,6 @@ export default {
         headers: { "content-type": "application/json; charset=utf-8", allow: "POST" },
       });
     }
-    return handleContact(request, env);
+    return handleContact(request, env, ctx);
   },
 };

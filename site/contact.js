@@ -64,6 +64,20 @@
       "cf-turnstile-response": token ? token.value : "",
     };
 
+    /* Ad measurement rides along only when the visitor allowed it
+       (consent.js). One ID for the message, so X counts the pixel's event and
+       the server's report of it as a single lead rather than two. */
+    var ads = window.ranwhatAds;
+    var conversion = null;
+    if (ads && ads.allowed()) {
+      conversion = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+        : String(Date.now()) + "-" + Math.random().toString(36).slice(2);
+      payload.measure = true;
+      payload.conversion_id = conversion;
+      var clickId = ads.click();
+      if (clickId) payload.twclid = clickId;
+    }
+
     if (!payload.message) { say("Add a message first.", "warn"); return; }
     if (!payload.email) { say("Add an email so we can reply.", "warn"); return; }
     if (!payload["cf-turnstile-response"]) {
@@ -90,6 +104,7 @@
           if (el) el.value = "";
         });
         say("Sent. We read everything, and a day or two is a normal reply time.", "sent");
+        if (conversion && ads) ads.lead(conversion);
         sent = true;
         return;
       }

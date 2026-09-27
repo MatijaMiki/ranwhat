@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; manifest-src 'self'; connect-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.ads-twitter.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.co https://analytics.twitter.com https://ads-twitter.com; manifest-src 'self'; connect-src 'self' https://analytics.twitter.com https://ads-twitter.com https://ads-api.twitter.com https://ads-api.x.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
   # Strict-Transport-Security deliberately omitted. Enabling it is a one-way
   # door: browsers cache the policy, and `preload` ships inside Chrome and
   # Firefox and takes months to undo. Turn it on as a separate decision,
@@ -10,11 +10,16 @@
   Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
+  # The X hosts above are reached only after a visitor allows ad measurement
+  # (site/consent.js). Until then the page asks nothing of them.
 
 /styles.css
   Cache-Control: public, max-age=3600
 
 /copy.js
+  Cache-Control: public, max-age=3600
+
+/consent.js
   Cache-Control: public, max-age=3600
 
 /favicon-16.png
