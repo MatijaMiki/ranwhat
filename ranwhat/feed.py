@@ -270,9 +270,10 @@ def save(doc):
     doc = dict(doc)
     doc["fetched_at"] = int(time.time())
     # Built before anything is opened. From Python 3.12 json.loads and the
-    # digest's encoder are bounded by the C stack, but indent=1 runs the
-    # pure-Python encoder, bounded by the recursion limit, so a body nested
-    # between the two gets through fetch() and fails only here.
+    # digest's encoder are bounded by the C stack, but up to 3.13 indent=1
+    # runs the pure-Python encoder, bounded by the recursion limit, and on
+    # 3.14 the C encoder with indent gives up a little before the decoder.
+    # A body nested between the two gets through fetch() and fails here.
     try:
         text = json.dumps(doc, indent=1, sort_keys=True)
     except RecursionError:
