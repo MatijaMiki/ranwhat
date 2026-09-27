@@ -665,23 +665,59 @@ def scan_file(path, apply=False, only=None):
     if apply and changed:
         _backup(path)
         tmp = path + ".ranwhat-tmp"
-        with open(tmp, "w") as fh:
-            fh.writelines(rewritten)
-        # refuse to install a file we cannot read back
-        with open(tmp) as fh:
-            for line in fh:
-                if line.strip():
-                    json.loads(line)
-        os.replace(tmp, path)
+        try:
+            _write_like(path, tmp, rewritten)
+            # refuse to install a file we cannot read back
+            with open(tmp) as fh:
+                for line in fh:
+                    if line.strip():
+                        json.loads(line)
+            os.replace(tmp, path)
+        finally:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
 
     return findings, changed
 
 
+# O_NOFOLLOW where the platform has it: a symlink planted at a path we are
+# about to create must fail the write, not redirect it.
+_CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _write_like(original, tmp, lines):
+    """Write the rewritten transcript with the original's permissions.
+
+    open(tmp, "w") took the umask default, so a 0600 transcript came back
+    0644 after masking: the one command meant to reduce exposure widened it.
+    The file is created 0600 and only then given the original's mode, so it
+    is never readable by anyone the original was not. A stale tmp from an
+    interrupted run is removed first rather than written through."""
+    mode = os.stat(original).st_mode & 0o777
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    fd = os.open(tmp, _CREATE, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.writelines(lines)
+        os.fchmod(fh.fileno(), mode)
+
+
 def _backup(path):
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    """Copy the unmasked transcript aside before rewriting it.
+
+    The backup holds every secret the rewrite removes, so it is written the
+    way a secret should be: 0600, under a 0700 root nobody else can list.
+    copy2 used to carry the source's mode across and makedirs left the tree
+    0755. Microseconds in the stamp, and O_EXCL, keep two masks in the same
+    second from overwriting the true original with a half-masked copy."""
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
+    os.chmod(BACKUP_ROOT, 0o700)
     dest = os.path.join(BACKUP_ROOT, stamp, path.lstrip("/"))
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    shutil.copy2(path, dest)
+    os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
+    fd = os.open(dest, _CREATE, 0o600)
+    with open(path, "rb") as src, os.fdopen(fd, "wb") as out:
+        shutil.copyfileobj(src, out)
     return dest
 
 
@@ -754,6 +790,8 @@ def render(findings, scanned, changed_files, applied, footer=True,
     if applied:
         L.append("  " + GRN("Masked in %d file(s)." % len(changed_files)))
         L.append(DIM("  Backups: %s" % BACKUP_ROOT))
+        L.append(DIM("  They still hold every masked value. Delete them once"
+                     " the transcripts look right."))
     elif advice:
         L.append("  " + YEL("Dry run. Nothing was changed."))
         L.append(DIM("  Run with --apply to mask them. Backups are written first."))
@@ -920,6 +958,8 @@ def _mask(targets, scanned, _print, GRN, RED):
     if changed:
         _print(GRN("  masked in %d file(s)." % changed)
                + (" Backups: %s" % BACKUP_ROOT))
+        _print(DIM("  They still hold every masked value. Delete them once"
+                   " the transcripts look right."))
     else:
         _print(RED("  nothing changed."))
     return changed

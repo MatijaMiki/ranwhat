@@ -218,3 +218,63 @@ class WhereDidItComeFrom(unittest.TestCase):
         from ranwhat.clean import project_path
         out = project_path("-nonexistent-root-some-project-name")
         self.assertTrue(out.endswith("some-project-name"), out)
+
+
+class MaskingDoesNotWidenExposure(unittest.TestCase):
+    """clean exists to reduce where a secret can be read from. A rewrite
+    that loosens the transcript's mode, or a backup anyone can read, makes
+    it the opposite."""
+
+    def setUp(self):
+        from unittest import mock
+        from ranwhat import clean
+        self.root = os.path.join(tempfile.mkdtemp(prefix="bk-"), "backups")
+        patch = mock.patch.object(clean, "BACKUP_ROOT", self.root)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _backups(self):
+        return [os.path.join(base, f) for base, _d, files in os.walk(self.root)
+                for f in files]
+
+    def test_a_private_transcript_stays_private(self):
+        root, path = _transcript(Masking.BODY)
+        os.chmod(path, 0o600)
+        scan(root=root, apply=True)
+        self.assertIn("ranwhat:redacted:", open(path).read())
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    def test_the_original_mode_is_kept_not_tightened_either(self):
+        root, path = _transcript(Masking.BODY)
+        os.chmod(path, 0o640)
+        scan(root=root, apply=True)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
+
+    def test_backups_are_readable_only_by_the_owner(self):
+        root, path = _transcript(Masking.BODY)
+        os.chmod(path, 0o644)
+        scan(root=root, apply=True)
+        self.assertEqual(os.stat(self.root).st_mode & 0o777, 0o700)
+        backups = self._backups()
+        self.assertTrue(backups)
+        for b in backups:
+            self.assertEqual(os.stat(b).st_mode & 0o777, 0o600, b)
+
+    def test_two_masks_in_one_second_keep_the_true_original(self):
+        """Masking one finding and then another used to reuse the same
+        backup path, so the second backup (already half masked) replaced
+        the only unmasked copy."""
+        root, path = _transcript(Masking.BODY)
+        findings, _, _ = scan(root=root, apply=False)
+        fps = sorted(findings)
+        scan_file(path, apply=True, only={fps[0]})
+        scan_file(path, apply=True, only={fps[1]})
+        texts = [open(b).read() for b in self._backups()]
+        self.assertEqual(len(texts), 2)
+        self.assertTrue(any("sup3rS3cretPw" in t and "8f3a9c2e" in t for t in texts),
+                        "no backup still holds the fully unmasked original")
+
+    def test_no_temp_file_is_left_behind(self):
+        root, path = _transcript(Masking.BODY)
+        scan(root=root, apply=True)
+        self.assertEqual(os.listdir(os.path.dirname(path)), ["s.jsonl"])
