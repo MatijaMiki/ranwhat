@@ -704,16 +704,9 @@ class AHostileFeedBodyIsAFeedError(FeedHome):
         self.assertIsNone(feed.load(), "nothing was cached")
 
 
-class FeedTextCannotDriveTheTerminal(FeedHome):
-    """A feed entry that rates a scope as the bundle does keeps its own
-    label, and the report writes that label to the terminal as it is. ESC
-    sequences in it could move the cursor up and erase the scores and the
-    findings above it, or through OSC 52 write the clipboard. The feed is
-    unsigned and the cache is writable by the agents being audited, so text
-    carrying the characters watch strips from transcripts is no feed."""
-
-    ESC = "\x1b[999A\x1b[J\x1b]52;c;ZWNobyBwd25lZA==\x07"
-    CONTROLS = ("\x1b", "\x9b", "\x07", "\x00", "\n", "\r", "\t", "\x7f")
+class _FeedText:
+    """An entry rated exactly as the bundle rates github/workflow, cached or
+    served, and the commands that print it."""
 
     def _bundled(self):
         return catalog.CATALOG["github"]["workflow"]
@@ -744,6 +737,18 @@ class FeedTextCannotDriveTheTerminal(FeedHome):
             stack.enter_context(contextlib.redirect_stderr(err))
             rc = cli.main(argv)
         return rc, out.getvalue(), err.getvalue()
+
+
+class FeedTextCannotDriveTheTerminal(_FeedText, FeedHome):
+    """A feed entry that rates a scope as the bundle does keeps its own
+    label, and the report writes that label to the terminal as it is. ESC
+    sequences in it could move the cursor up and erase the scores and the
+    findings above it, or through OSC 52 write the clipboard. The feed is
+    unsigned and the cache is writable by the agents being audited, so text
+    carrying the characters watch strips from transcripts is no feed."""
+
+    ESC = "\x1b[999A\x1b[J\x1b]52;c;ZWNobyBwd25lZA==\x07"
+    CONTROLS = ("\x1b", "\x9b", "\x07", "\x00", "\n", "\r", "\t", "\x7f")
 
     def test_the_same_entry_in_plain_text_is_used(self):
         """Or every case below would pass for the wrong reason."""
@@ -796,6 +801,92 @@ class FeedTextCannotDriveTheTerminal(FeedHome):
         self.assertTrue(err.strip(), "update failed and said nothing")
         self.assertNotIn("\x1b", out + err)
         self.assertIsNone(feed.load(), "nothing was cached")
+
+
+class FeedTextTheTerminalCannotEncodeIsNoFeed(_FeedText, FeedHome):
+    """JSON can spell half of a UTF-16 surrogate pair on its own, "\\ud800",
+    and json.loads turns it into a str no UTF-8 stream will write. It passed
+    every check, save() escaped it back into the cache, and then every report
+    showing that entry, the terminal and --html alike, ended in
+    UnicodeEncodeError: a feed that stopped `demo` and `scan` for good."""
+
+    SURROGATES = ("\ud800", "\udbff", "\udc00", "\udfff")
+
+    def _printable(self, text):
+        # What the terminal does with it. StringIO takes a lone surrogate
+        # without complaint, so the capture alone would not notice.
+        text.encode("utf-8")
+
+    def test_a_lone_surrogate_in_label_or_why_means_no_feed(self):
+        for field in ("label", "why"):
+            for ch in self.SURROGATES:
+                with self.subTest(field=field, ch=ch):
+                    doc = self._doc(**{field: "Update workflows " + ch})
+                    with self.assertRaises(feed.FeedError):
+                        feed.validate(doc)
+                    self._cache(doc)
+                    self.assertIsNone(feed.load())
+                    e = catalog.lookup("github", "workflow")
+                    self.assertEqual(e["label"], self._bundled()["label"])
+                    self.assertEqual(e["why"], self._bundled()["why"])
+
+    def test_a_lone_surrogate_in_a_key_or_the_version_means_no_feed(self):
+        b = self._bundled()
+        entry = _entry(b["label"], b["authority"], b["reversible"], b["blast"],
+                       b["why"])
+        for where, doc in (
+                ("scope", self._doc(key="workflow\ud800")),
+                ("provider", _doc({"github\udfff": {"workflow": entry}})),
+                ("version", self._doc(version="2026.09.26\ud800"))):
+            with self.subTest(where=where):
+                with self.assertRaises(feed.FeedError):
+                    feed.validate(doc)
+                self._cache(doc)
+                self.assertIsNone(feed.load())
+
+    def test_a_surrogate_pair_is_an_ordinary_character(self):
+        """Escaped as a pair, as json.dump writes anything past U+FFFF, it
+        loads as the one character it spells, and that is plain text."""
+        self._cache(self._doc(label="Update workflows \U0001F512"))
+        with open(feed.feed_path(), encoding="utf-8") as fh:
+            self.assertIn("\\ud83d\\udd12", fh.read())
+        self.assertIsNotNone(feed.load())
+        self.assertEqual(catalog.lookup("github", "workflow")["label"],
+                         "Update workflows \U0001F512")
+
+    def test_demo_still_prints_and_writes_html(self):
+        self._cache(self._doc(label="Update GitHub Actions workflows \ud800"))
+        html = os.path.join(self.dir, "report.html")
+        rc, out, err = self._run(["demo", "--html", html])
+        self.assertEqual(rc, 0, err)
+        self._printable(out + err)
+        self.assertIn(self._bundled()["label"].split()[0], out)
+        with open(html, encoding="utf-8") as fh:
+            self.assertNotIn("\ud800", fh.read())
+
+    def test_update_status_says_no_feed(self):
+        self._cache(self._doc(version="2026.09.26\udc00"))
+        rc, out, err = self._run(["update", "--status"])
+        self.assertEqual(rc, 0, err)
+        self._printable(out + err)
+        self.assertIn("No feed cached", out)
+
+    def test_update_refuses_it_from_the_server(self):
+        for where, doc in (
+                ("label", self._doc(label="Update workflows \ud800")),
+                ("version", self._doc(version="2026.09.26\ud800"))):
+            with self.subTest(where=where):
+                body = json.dumps(doc).encode()
+                self.assertIn(b"\\ud800", body)
+                with mock.patch.object(feed, "_open",
+                                       lambda *a, **kw: _Body(body)):
+                    with self.assertRaises(feed.FeedError):
+                        feed.fetch("tok", url="https://example.invalid/v1")
+                rc, out, err = self._run(["update"], body=body)
+                self.assertEqual(rc, 1)
+                self.assertTrue(err.strip(), "update failed and said nothing")
+                self._printable(out + err)
+                self.assertIsNone(feed.load(), "nothing was cached")
 
 
 class AFeedTooDeepToCacheIsAFeedError(FeedHome):

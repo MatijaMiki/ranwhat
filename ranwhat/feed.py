@@ -51,7 +51,11 @@ BLASTS = frozenset((catalog.MONETARY, catalog.EXTERNAL_COMMS, catalog.DATA_EGRES
 # label is written to the terminal as it is, and one carrying ESC can move the
 # cursor up and erase the scores above it, or write the clipboard through
 # OSC 52. No catalogue text needs one, so text with any is no feed.
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# And half of a UTF-16 surrogate pair: JSON can spell one alone ("\ud800"),
+# json.loads hands it back as a str no UTF-8 stream will encode, and every
+# report showing it, terminal and --html, ends in UnicodeEncodeError. A pair
+# decodes to the one character it spells, so only a lone half can match.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 
 # The cache's temp file, as clean creates its own: O_EXCL and O_NOFOLLOW so a
 # symlink planted at the path fails the write rather than redirecting it.
@@ -250,8 +254,9 @@ def validate(doc):
             # %r in the message: it names the scope without replaying it.
             for field in ("label", "why"):
                 if not _plain(entry[field]):
-                    raise FeedError("Scope %r/%r has a control character in "
-                                    "its %s." % (provider, scope, field))
+                    raise FeedError("Scope %r/%r has a control character or "
+                                    "a lone surrogate in its %s." % (
+                                        provider, scope, field))
             # Checked here, not trusted later: an authority the scorer has no
             # cost for raised KeyError in every scan until the cache was
             # deleted, and a string "false" is truthy.
@@ -273,7 +278,7 @@ def validate(doc):
 
 
 def _plain(value):
-    """Text with no terminal control character in it."""
+    """Text with no terminal control character or lone surrogate in it."""
     return isinstance(value, str) and not _CONTROL.search(value)
 
 
