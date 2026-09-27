@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import unittest
 
-from ranwhat import catalog, feed
+from ranwhat import catalog, feed, score
 
 
 def _entry(label="X", authority="write", reversible=False,
@@ -222,6 +222,80 @@ class FeedCannotLowerARating(FeedHome):
         catalog.reset_feed_cache()
         self.assertEqual(catalog.lookup("google", self.SCOPE)["authority"],
                          catalog.CATALOG["google"][self.SCOPE]["authority"])
+
+
+class FeedCannotLowerABlast(FeedHome):
+    """Blast is a rating too. A feed that moves a Stripe charge from monetary
+    to data_egress takes "Unbounded financial authority" out of the report
+    while leaving the authority and reversible floors untouched."""
+
+    def _fed(self, provider, scope, entry):
+        feed.save(_doc({provider: {scope: entry}}))
+        catalog.reset_feed_cache()
+        return catalog.lookup(provider, scope)
+
+    def _scan(self, provider, scope):
+        return score.scan({"credentials": [
+            {"provider": provider, "scopes": [scope]}]})
+
+    def test_a_charge_stays_monetary(self):
+        bundled = catalog.CATALOG["stripe"]["charges:write"]
+        self.assertEqual(bundled["blast"], catalog.MONETARY)
+        e = self._fed("stripe", "charges:write",
+                      _entry("Harmless", "financial", False, "data_egress"))
+        self.assertEqual(e["blast"], catalog.MONETARY)
+        self.assertEqual(e["label"], bundled["label"],
+                         "the feed's text was written for a blast it did not get")
+        result = self._scan("stripe", "charges:write")
+        self.assertEqual(result["blast_radius"]["monetary"], "unbounded")
+        self.assertIn("Unbounded financial authority",
+                      [f["title"] for f in result["findings"]])
+
+    def test_a_read_scope_stays_data_egress(self):
+        """Weighed by authority, not by name: the scorer drops a read scope
+        whose blast is anything but data_egress, so for a read, monetary is
+        the lower rating."""
+        self.assertEqual(catalog.CATALOG["stripe"]["customers:read"]["blast"],
+                         catalog.DATA_EGRESS)
+        e = self._fed("stripe", "customers:read",
+                      _entry("Harmless", "read", True, "monetary"))
+        self.assertEqual(e["blast"], catalog.DATA_EGRESS)
+        self.assertIn(catalog.DATA_EGRESS, self._scan(
+            "stripe", "customers:read")["blast_radius"]["dimensions"])
+
+    def test_a_sideways_move_keeps_the_bundled_dimension(self):
+        """infrastructure and identity count the same, so moving one to the
+        other only drops a dimension from the report."""
+        bundled = catalog.CATALOG["aws"]["*"]
+        self.assertEqual(bundled["blast"], catalog.INFRASTRUCTURE)
+        e = self._fed("aws", "*", _entry("X", "destructive", False, "identity"))
+        self.assertEqual(e["blast"], catalog.INFRASTRUCTURE)
+
+    def test_a_feed_can_still_raise_a_blast(self):
+        bundled = catalog.CATALOG["stripe"]["customers:write"]
+        self.assertEqual(bundled["blast"], catalog.IDENTITY)
+        e = self._fed("stripe", "customers:write",
+                      _entry("Reclassified", "write", True, "monetary"))
+        self.assertEqual(e["blast"], catalog.MONETARY)
+        self.assertEqual(e["label"], "Reclassified")
+
+    def test_a_raise_survives_a_refused_lowering(self):
+        e = self._fed("stripe", "charges:write",
+                      _entry("X", "destructive", False, "data_egress"))
+        self.assertEqual(e["authority"], catalog.DESTRUCTIVE)
+        self.assertEqual(e["blast"], catalog.MONETARY)
+
+    def test_the_ordering_is_the_scorers(self):
+        """If score.blast_radius starts counting blast differently, the
+        ordering the merge keeps has to move with it."""
+        for authority in catalog.AUTHORITY_RANK:
+            for blast in feed.BLASTS:
+                row = {"authority": authority, "blast": blast,
+                       "reversible": True, "scope": "s"}
+                ba = score.blast_radius([row], {})
+                counted = 2 if ba["monetary"] else 1 if ba["dimensions"] else 0
+                self.assertEqual(catalog.blast_weight(authority, blast),
+                                 counted, (authority, blast))
 
 
 class TheTokenOnlyTravelsOverTLS(unittest.TestCase):

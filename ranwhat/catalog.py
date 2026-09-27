@@ -525,11 +525,11 @@ def providers(provider):
     caught up with a locally known scope cannot remove it.
 
     It can add scopes and raise a rating, never lower one. A feed that says
-    delete_repo is a read, or that a bundled irreversible action can be
-    undone, is either wrong or tampered with, and the report would state it
-    with the confidence of the whole catalogue. The feed is not signed, and
-    ~/.ranwhat is writable by the agents this tool audits, so the bundled
-    rating is the floor.
+    delete_repo is a read, that a bundled irreversible action can be undone,
+    or that a Stripe charge risks data rather than money, is either wrong or
+    tampered with, and the report would state it with the confidence of the
+    whole catalogue. The feed is not signed, and ~/.ranwhat is writable by
+    the agents this tool audits, so the bundled rating is the floor.
     """
     merged = dict(CATALOG.get(provider, {}))
     fed = _feed_catalogue()
@@ -539,16 +539,45 @@ def providers(provider):
     return merged
 
 
+def blast_weight(authority, blast):
+    """How much a blast value counts in score.blast_radius, for a scope of
+    this authority. Read off that function, and a test holds the two together.
+
+    Not a ranking of the values alone, because the scorer counts the same
+    value differently by authority: it skips a read scope unless its blast is
+    data_egress, so for a read, monetary counts for nothing. Past that,
+    monetary is the one value that also yields the monetary result and its
+    "Unbounded financial authority" finding, and the rest each open one
+    dimension and count the same.
+    """
+    if authority == READ and blast != DATA_EGRESS:
+        return 0
+    if blast == MONETARY:
+        return 2
+    return 1
+
+
 def _no_lower(bundled, fed):
+    """A feed entry over a bundled one: the more severe of the two on each
+    rating, so raising one rating cannot carry the lowering of another."""
     fed = {k: fed[k] for k in ("label", "authority", "reversible", "blast", "why")
            if k in fed}
     if bundled is None:
         return fed
-    if AUTHORITY_RANK.get(fed.get("authority"), -1) < AUTHORITY_RANK[bundled["authority"]]:
-        return dict(bundled)
-    if fed.get("reversible") and not bundled["reversible"]:
-        fed["reversible"] = False
-    return fed
+    merged = dict(fed)
+    if AUTHORITY_RANK[fed["authority"]] < AUTHORITY_RANK[bundled["authority"]]:
+        merged["authority"] = bundled["authority"]
+    merged["reversible"] = bundled["reversible"] and fed["reversible"]
+    # Weighed at the authority the scorer will see. A tie keeps the bundled
+    # value: infrastructure moved to identity counts the same, and only drops
+    # a dimension from the report.
+    at = merged["authority"]
+    if blast_weight(at, fed["blast"]) <= blast_weight(at, bundled["blast"]):
+        merged["blast"] = bundled["blast"]
+    if any(merged[k] != fed[k] for k in ("authority", "reversible", "blast")):
+        # The feed's text describes ratings it was not given.
+        merged["label"], merged["why"] = bundled["label"], bundled["why"]
+    return merged
 
 
 def lookup(provider, scope):
