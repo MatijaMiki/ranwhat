@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Privacy | ranwhat</title>
-<meta name="description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, no form backend, and nothing sent when you run it.">
+<meta name="description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, a contact form that keeps no copy, and nothing sent when you run it.">
 <link rel="canonical" href="https://ranwhat.com/privacy">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -18,7 +18,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/privacy">
 <meta property="og:title" content="Privacy | ranwhat">
-<meta property="og:description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, no form backend, and nothing sent when you run it.">
+<meta property="og:description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, a contact form that keeps no copy, and nothing sent when you run it.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -26,7 +26,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="Privacy | ranwhat">
-<meta name="twitter:description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, no form backend, and nothing sent when you run it.">
+<meta name="twitter:description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, a contact form that keeps no copy, and nothing sent when you run it.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
@@ -107,22 +107,29 @@
           <span class="v">None. No analytics, no tracking pixels, no consent
             banner, because there is nothing to consent to.</span></div>
         <div class="row"><span class="k">Forms</span>
-          <span class="v">The contact page has no backend. It opens a message in
-            your own mail app, so nothing is submitted to this site and nothing
-            is stored here.</span></div>
+          <span class="v">The contact form sends your email address, your topic
+            and your message to a Cloudflare Worker on this domain, which
+            checks the challenge and forwards the message to our mailbox. The
+            Worker keeps no copy. What arrives is kept as described under
+            Email below.</span></div>
         <div class="row"><span class="k">Server logs</span>
-          <span class="v">Cloudflare sits in front of the site and GitHub Pages
-            serves it. Both log request metadata, including your IP address, to
-            deliver pages and absorb abuse. That is our legitimate interest in
+          <span class="v">Cloudflare hosts and serves the site. It logs request
+            metadata, including your IP address, to deliver pages and absorb
+            abuse. That is our legitimate interest in
             running a website, and neither log is used to profile anyone.</span></div>
         <div class="row"><span class="k">Third parties</span>
-          <span class="v">None in the page itself. Typefaces are served from this
-            domain rather than Google Fonts, so rendering a page sends your IP
-            address to nobody but the host above.</span></div>
+          <span class="v">One, on the contact page only: Cloudflare Turnstile,
+            the challenge that keeps the form from being used by bots. It loads
+            from challenges.cloudflare.com and reads signals from your browser
+            to tell a person from a script. No other page loads anything from
+            anywhere else. Typefaces are served from this domain rather than
+            Google Fonts.</span></div>
         <div class="row"><span class="k">Email</span>
-          <span class="v">If you write to us we keep the message and your address
-            for as long as the conversation is useful, and delete it when it is
-            not. We do not add you to any list.</span></div>
+          <span class="v">Mail, whether written directly or sent through the form,
+            is kept in a Gmail mailbox, so Google holds it too and may store it
+            outside the EU. We keep the message and your
+            address for as long as the conversation is useful, and delete it when
+            it is not. We do not add you to any list.</span></div>
       </div>
 
       <div class="grid2" style="margin-top:30px">
