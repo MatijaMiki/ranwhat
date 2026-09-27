@@ -636,8 +636,12 @@ def scan_file(path, apply=False, only=None):
             entry["origins"].add(origin_now[0])
         entry["count"] += 1
 
+    # UTF-8 whatever the locale says: Windows would otherwise decode as
+    # cp1252 and write the mojibake back. newline="" hands each line over
+    # with its own ending, so a rewrite keeps \r\n where it found \r\n.
     try:
-        with open(path, "r", errors="replace") as fh:
+        with open(path, "r", encoding="utf-8", errors="replace",
+                  newline="") as fh:
             for line in fh:
                 stripped = line.strip()
                 if not stripped:
@@ -656,7 +660,8 @@ def scan_file(path, apply=False, only=None):
                 new = _walk(obj, collect, replace=apply, only=only)
                 if apply and new != obj:
                     changed = True
-                    rewritten.append(json.dumps(new, ensure_ascii=False) + "\n")
+                    ending = line[len(line.rstrip("\r\n")):]
+                    rewritten.append(json.dumps(new, ensure_ascii=False) + ending)
                 else:
                     rewritten.append(line)
     except OSError:
@@ -668,7 +673,7 @@ def scan_file(path, apply=False, only=None):
         try:
             _write_like(path, tmp, rewritten)
             # refuse to install a file we cannot read back
-            with open(tmp) as fh:
+            with open(tmp, encoding="utf-8") as fh:
                 for line in fh:
                     if line.strip():
                         json.loads(line)
@@ -681,8 +686,11 @@ def scan_file(path, apply=False, only=None):
 
 
 # O_NOFOLLOW where the platform has it: a symlink planted at a path we are
-# about to create must fail the write, not redirect it.
-_CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+# about to create must fail the write, not redirect it. O_BINARY on Windows,
+# where a descriptor from os.open is otherwise in text mode and every \n
+# written through it gains a \r: a backup would no longer be the original.
+_CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+           | getattr(os, "O_BINARY", 0))
 
 
 def _write_like(original, tmp, lines):
@@ -692,14 +700,20 @@ def _write_like(original, tmp, lines):
     0644 after masking: the one command meant to reduce exposure widened it.
     The file is created 0600 and only then given the original's mode, so it
     is never readable by anyone the original was not. A stale tmp from an
-    interrupted run is removed first rather than written through."""
+    interrupted run is removed first rather than written through.
+
+    Lines are written exactly as given, endings included. Windows has no
+    mode bits to carry, only a read-only flag, which would leave a tmp that
+    could not be removed if the replace failed; there the new file takes
+    its directory's permissions."""
     mode = os.stat(original).st_mode & 0o777
     if os.path.lexists(tmp):
         os.unlink(tmp)
     fd = os.open(tmp, _CREATE, 0o600)
-    with os.fdopen(fd, "w") as fh:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
         fh.writelines(lines)
-        os.fchmod(fh.fileno(), mode)
+        if os.name != "nt":
+            os.fchmod(fh.fileno(), mode)
 
 
 def _backup(path):

@@ -9,10 +9,12 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ranwhat.clean import find_secrets, scan, scan_file
+from ranwhat import clean
+from ranwhat.clean import REDACTION, find_secrets, scan, scan_file
 
 
 def n(text):
@@ -281,3 +283,61 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         root, path = _transcript(Masking.BODY)
         scan(root=root, apply=True)
         self.assertEqual(os.listdir(os.path.dirname(path)), ["s.jsonl"])
+
+    def test_the_backup_is_the_original_byte_for_byte(self):
+        """On Windows a descriptor from os.open is in text mode unless told
+        otherwise, and a backup written through one would gain a \\r per
+        line."""
+        root, path = _transcript(Masking.BODY)
+        with open(path, "rb") as fh:
+            original = fh.read()
+        scan(root=root, apply=True)
+        backups = self._backups()
+        self.assertEqual(len(backups), 1)
+        with open(backups[0], "rb") as fh:
+            self.assertEqual(fh.read(), original)
+
+
+class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):
+    """Only the secret changes. Reading in text mode turned \\r\\n into \\n
+    on every line of a rewritten transcript, and the locale's encoding
+    (cp1252 on Windows) would have mangled everything outside ASCII."""
+
+    SECRET = "8f3a9c2e1b7d4f6a0c5e8b2d7f1a4c9e"
+
+    def setUp(self):
+        backups = os.path.join(tempfile.mkdtemp(prefix="bk-"), "backups")
+        patch = mock.patch.object(clean, "BACKUP_ROOT", backups)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _line(self, text):
+        return json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": text}]}}, ensure_ascii=False)
+
+    def _apply(self, lines):
+        d = tempfile.mkdtemp(prefix="bytes-")
+        path = os.path.join(d, "s.jsonl")
+        original = "".join(lines).encode("utf-8")
+        with open(path, "wb") as fh:
+            fh.write(original)
+        findings, changed = scan_file(path, apply=True)
+        self.assertTrue(changed)
+        (fp,) = findings
+        with open(path, "rb") as fh:
+            after = fh.read()
+        return original, after, (REDACTION % fp).encode("utf-8")
+
+    def test_crlf_and_text_beyond_ascii_survive(self):
+        lines = [self._line("Café ≠ café, 日本語 ✓") + "\r\n",
+                 self._line("JWT_ACCESS_SECRET=%s naïve" % self.SECRET) + "\r\n",
+                 self._line("Ωmega, untouched") + "\n",
+                 self._line("last line, no ending ✓")]
+        original, after, mask = self._apply(lines)
+        self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
+
+    def test_a_masked_last_line_gains_no_ending(self):
+        lines = [self._line("first ✓") + "\n",
+                 self._line("JWT_ACCESS_SECRET=%s" % self.SECRET)]
+        original, after, mask = self._apply(lines)
+        self.assertEqual(after, original.replace(self.SECRET.encode(), mask))

@@ -114,6 +114,12 @@ class TokenHandling(FeedHome):
         path = feed.save_token("tok_abc")
         self.assertEqual(oct(os.stat(path).st_mode & 0o777), oct(0o600))
 
+    def test_the_file_holds_the_token_and_one_newline(self):
+        # A descriptor from os.open is in text mode on Windows unless told
+        # otherwise, and the newline went down as \r\n.
+        with open(feed.save_token("tok_abc"), "rb") as fh:
+            self.assertEqual(fh.read(), b"tok_abc\n")
+
     def test_environment_beats_the_file(self):
         feed.save_token("from_file")
         os.environ["RANWHAT_TOKEN"] = "from_env"

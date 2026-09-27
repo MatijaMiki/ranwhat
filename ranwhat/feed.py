@@ -70,7 +70,7 @@ def read_token():
     if tok:
         return tok.strip()
     try:
-        with open(token_path()) as fh:
+        with open(token_path(), encoding="utf-8") as fh:
             return fh.read().strip() or None
     except OSError:
         return None
@@ -83,8 +83,10 @@ def save_token(token):
     # 0600 before anything is written: a token readable by other users on the
     # machine is the problem this tool exists to report.
     # O_NOFOLLOW: a symlink planted at ~/.ranwhat/token would otherwise send
-    # the token wherever it points, and chmod would follow it too.
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    # the token wherever it points, and chmod would follow it too. O_BINARY:
+    # on Windows the descriptor is otherwise in text mode and adds a \r.
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_BINARY", 0))
     try:
         fd = os.open(path, flags, 0o600)
     except OSError as exc:
@@ -94,7 +96,7 @@ def save_token(token):
     try:
         if hasattr(os, "fchmod"):   # an existing file keeps its old mode otherwise
             os.fchmod(fd, 0o600)
-        os.write(fd, (token.strip() + "\n").encode())
+        os.write(fd, (token.strip() + "\n").encode("utf-8"))
     finally:
         os.close(fd)
     return path
@@ -248,7 +250,7 @@ def save(doc):
     doc = dict(doc)
     doc["fetched_at"] = int(time.time())
     tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1, sort_keys=True)
     os.replace(tmp, path)   # atomic: a killed update never leaves a half file
     os.chmod(path, 0o600)
@@ -263,7 +265,7 @@ def load():
     type of every field, is no feed rather than an error.
     """
     try:
-        with open(feed_path()) as fh:
+        with open(feed_path(), encoding="utf-8") as fh:
             doc = validate(json.load(fh))
         _check_fetched_at(doc.get("fetched_at"))
         return doc

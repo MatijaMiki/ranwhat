@@ -45,6 +45,6 @@ def build():
 
 
 if __name__ == "__main__":
-    with open(OUT, "w") as fh:
+    with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(build())
     print("wrote", os.path.relpath(OUT, ROOT))

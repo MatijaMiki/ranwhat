@@ -69,9 +69,12 @@ def run_scan(profile, path=None):
 
 
 def _load(path):
-    """Read a profile, failing with a message rather than a traceback."""
+    """Read a profile, failing with a message rather than a traceback.
+
+    UTF-8, not the locale's encoding, and a leading byte-order mark allowed:
+    PowerShell 5 and older Notepad write one, and json refuses it."""
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8-sig") as fh:
             return json.load(fh)
     except FileNotFoundError:
         raise SystemExit("ranwhat: no such file: %s" % path)
@@ -87,7 +90,8 @@ def _bundled(name):
     """Load data shipped inside the package."""
     try:
         from importlib.resources import files
-        return json.loads(files("ranwhat").joinpath("demo", name).read_text())
+        return json.loads(files("ranwhat").joinpath("demo", name)
+                          .read_text(encoding="utf-8"))
     except Exception:
         here = os.path.dirname(os.path.abspath(__file__))
         return _load(os.path.join(here, "demo", name))
