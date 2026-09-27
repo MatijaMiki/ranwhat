@@ -110,6 +110,35 @@ class Merging(FeedHome):
         catalog.reset_feed_cache()
         self.assertFalse(catalog.lookup("aws", "s3:ListBucket").get("known"))
 
+    def test_the_merge_is_built_once_per_feed_read(self):
+        """lookup() runs once per grant. Merging the provider's feed scopes
+        on every call made a scan grants times feed entries."""
+        feed.save(_doc({"acme": {"acme:x": _entry("First")}}))
+        catalog.reset_feed_cache()
+        with mock.patch.object(catalog, "_no_lower",
+                               mock.Mock(wraps=catalog._no_lower)) as floor:
+            for _ in range(50):
+                catalog.lookup("acme", "acme:x")
+        # Once to merge the provider, and once per lookup for the scope
+        # itself when the bundle resolves it, which acme's never does.
+        self.assertEqual(floor.call_count, 1)
+
+    def test_a_new_feed_is_used_after_a_reset(self):
+        """`update` resets the cache after saving; the merged view goes too."""
+        feed.save(_doc({"acme": {"acme:x": _entry("First")}}))
+        catalog.reset_feed_cache()
+        self.assertEqual(catalog.lookup("acme", "acme:x")["label"], "First")
+        feed.save(_doc({"acme": {"acme:x": _entry("Second")}}))
+        catalog.reset_feed_cache()
+        self.assertEqual(catalog.lookup("acme", "acme:x")["label"], "Second")
+
+    def test_a_looked_up_entry_is_the_callers_to_change(self):
+        feed.save(_doc({"acme": {"acme:x": _entry("First")}}))
+        catalog.reset_feed_cache()
+        catalog.lookup("acme", "acme:x")["label"] = "Changed"
+        catalog.providers("acme")["acme:x"] = _entry("Replaced")
+        self.assertEqual(catalog.lookup("acme", "acme:x")["label"], "First")
+
 
 class TokenHandling(FeedHome):
     @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")

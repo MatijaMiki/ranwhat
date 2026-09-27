@@ -501,6 +501,7 @@ def _infer(provider, scope):
 
 
 _FEED_CACHE = []   # one slot; [] means "not looked yet", [None] means "no feed"
+_MERGED = {}       # provider -> its bundled entries under the feed's, floored
 
 
 def _feed_catalogue():
@@ -520,8 +521,10 @@ def _feed_catalogue():
 
 
 def reset_feed_cache():
-    """Drop the memoised feed. For tests, and after `ranwhat update`."""
+    """Drop the memoised feed, and every merge built from it. For tests, and
+    after `ranwhat update`."""
     del _FEED_CACHE[:]
+    _MERGED.clear()
 
 
 def providers(provider):
@@ -541,12 +544,27 @@ def providers(provider):
     same floor to whatever the bundle resolves a scope to, which may be a
     wildcard entry the feed never named.
     """
-    merged = dict(CATALOG.get(provider, {}))
+    return dict(_merged(provider))
+
+
+def _merged(provider):
+    """providers(provider), built once per read of the feed and not copied.
+
+    lookup() asks for it once per grant, and the floor runs in Python over
+    every feed scope of the provider: rebuilt on each call, a scan cost
+    grants times feed entries, 2.2s for 300 grants against 17,000 entries.
+    Callers must not change what it returns; _resolve copies what it hands
+    on, and providers() hands out a copy.
+    """
     fed = _feed_catalogue()
-    if fed:
+    if not fed:
+        return CATALOG.get(provider, {})
+    if provider not in _MERGED:
+        merged = dict(CATALOG.get(provider, {}))
         for scope, entry in fed.get(provider, {}).items():
             merged[scope] = _no_lower(merged.get(scope), entry)
-    return merged
+        _MERGED[provider] = merged
+    return _MERGED[provider]
 
 
 def blast_weight(authority, blast):
@@ -646,7 +664,7 @@ def lookup(provider, scope):
       may rate that scope as it likes; replacing guesses is what it is for.
     """
     bundled = _resolve(CATALOG.get(provider, {}), scope)
-    entry = _resolve(providers(provider), scope)
+    entry = _resolve(_merged(provider), scope)
     if entry is None:
         return _infer(provider, scope)
     if bundled is not None:
