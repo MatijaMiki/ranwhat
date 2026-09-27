@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Example report | ranwhat</title>
+<meta name="description" content="A full ranwhat authority report on an example support agent: scores, exposure, and every finding, exactly as the CLI writes it.">
+<link rel="canonical" href="https://ranwhat.com/example-report">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<style>
+:root{
+  --bg:#fbfaf8; --panel:#fff; --ink:#16150f; --muted:#6a675c; --line:#e5e2d9;
+  --bad:#b4331f; --bad-bg:#fbeeeb; --warn:#8a6100; --warn-bg:#fcf4e2;
+  --good:#1f6b43; --good-bg:#ebf5ee; --info:#2a5b8c; --info-bg:#eaf1f8;
+  --accent:#16150f;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+  --bg:#12120f; --panel:#1a1a16; --ink:#f2f0e9; --muted:#9a968a; --line:#2c2b25;
+  --bad:#f08b78; --bad-bg:#2b1a16; --warn:#e0b25c; --warn-bg:#2a2214;
+  --good:#7fc79b; --good-bg:#16261d; --info:#8fb8de; --info-bg:#172530;
+  --accent:#f2f0e9;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12120f; --panel:#1a1a16; --ink:#f2f0e9; --muted:#9a968a; --line:#2c2b25;
+  --bad:#f08b78; --bad-bg:#2b1a16; --warn:#e0b25c; --warn-bg:#2a2214;
+  --good:#7fc79b; --good-bg:#16261d; --info:#8fb8de; --info-bg:#172530;
+  --accent:#f2f0e9;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:48px 16px 80px}
+header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+.brand{font-weight:650;letter-spacing:-.01em}
+.brand span{color:var(--muted);font-weight:400}
+h1{font-size:26px;letter-spacing:-.02em;margin:14px 0 4px}
+.meta{color:var(--muted);font-size:13px}
+.verdict{display:flex;gap:14px;align-items:flex-start;padding:18px 20px;
+  border-radius:10px;border:1px solid var(--line);margin:24px 0}
+.verdict.bad{background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 32%,transparent)}
+.verdict.warn{background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
+.verdict.good{background:var(--good-bg);border-color:color-mix(in srgb,var(--good) 32%,transparent)}
+.badge{font-size:11px;font-weight:700;letter-spacing:.08em;padding:5px 9px;
+  border-radius:5px;white-space:nowrap;text-transform:uppercase}
+.bad .badge{background:var(--bad);color:var(--bg)}
+.warn .badge{background:var(--warn);color:var(--bg)}
+.good .badge{background:var(--good);color:var(--bg)}
+.verdict h2{margin:0 0 5px;font-size:16px;letter-spacing:-.01em}
+.verdict p{margin:0;color:var(--muted);font-size:13.5px}
+.scores{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:26px 0}
+.score{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.score .lab{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.score .num{font-size:30px;font-weight:650;letter-spacing:-.03em;margin:6px 0 2px;
+  font-variant-numeric:tabular-nums}
+.score .num small{font-size:14px;color:var(--muted);font-weight:400}
+.track{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:10px}
+.fill{height:100%;border-radius:3px}
+h3{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  margin:34px 0 12px;font-weight:600}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+.kv{display:flex;justify-content:space-between;gap:16px;padding:9px 0;
+  border-bottom:1px solid var(--line);font-size:14px}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--muted)}
+.kv .v{text-align:right;font-variant-numeric:tabular-nums}
+.finding{background:var(--panel);border:1px solid var(--line);border-left-width:3px;
+  border-radius:8px;padding:14px 16px;margin-bottom:10px}
+.finding.bad{border-left-color:var(--bad)}
+.finding.warn{border-left-color:var(--warn)}
+.finding.info{border-left-color:var(--info)}
+.finding.muted{border-left-color:var(--muted)}
+.finding .sev{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+.bad .sev{color:var(--bad)} .warn .sev{color:var(--warn)}
+.info .sev{color:var(--info)} .muted .sev{color:var(--muted)}
+.finding h4{margin:5px 0 6px;font-size:15px;letter-spacing:-.01em}
+.finding p{margin:0;color:var(--muted);font-size:13.5px}
+ul.ev{margin:10px 0 0;padding:0;list-style:none}
+ul.ev li{font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);
+  overflow-wrap:anywhere}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;padding:0 8px 9px 0;border-bottom:1px solid var(--line)}
+td{padding:9px 8px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.pill{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.04em;
+  padding:2px 7px;border-radius:4px;text-transform:uppercase}
+.p-read{background:var(--info-bg);color:var(--info)}
+.p-write{background:var(--warn-bg);color:var(--warn)}
+.p-financial{background:var(--bad-bg);color:var(--bad)}
+.p-destructive{background:var(--bad);color:var(--bg)}
+.u-unused{color:var(--bad);font-weight:600}
+.u-used{color:var(--muted)}
+footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
+  color:var(--muted);font-size:12px}
+@media(max-width:620px){
+  .wrap{padding:28px 16px 60px}
+  .scores{grid-template-columns:1fr}
+  .verdict{flex-direction:column;gap:10px}
+  table{display:block;overflow-x:auto}
+}
+</style></head>
+<body><div class="wrap">
+<p style="margin:0 0 22px;font-size:13px;color:var(--muted)">An example, not your data: this is what <code>uvx ranwhat demo --html report.html</code> writes for a bundled sample agent. <a style="color:var(--ink)" href="/scan">What the scores mean</a> &middot; <a style="color:var(--ink)" href="/install">Run it on your own</a></p>
+<header>
+  <div class="brand">ranwhat <span>· agent authority &amp; insurability</span></div>
+  <h1>support-copilot</h1>
+  <div class="meta">Generated by ranwhat demo · read-only credential introspection</div>
+</header>
+
+<div class="verdict bad">
+  <div class="badge">UNINSURABLE</div>
+  <div><h2>Cannot reconstruct past actions</h2><p>An underwriter cannot distinguish this deployment from the worst case, because it cannot produce the tool call, the authority used, and the guardrail decision for a named past action. Expect declined coverage or flat-rate penalty pricing regardless of how well the agent actually behaves.</p></div>
+</div>
+
+<div class="scores"><div class="score"><div class="lab">Authority</div><div class="num">19<small>/100 · F</small></div><div class="track"><div class="fill" style="width:19%;background:var(--bad)"></div></div></div><div class="score"><div class="lab">Observability</div><div class="num">25<small>/100 · F</small></div><div class="track"><div class="fill" style="width:25%;background:var(--bad)"></div></div></div><div class="score"><div class="lab">Reversibility</div><div class="num">24<small>/100 · F</small></div><div class="track"><div class="fill" style="width:24%;background:var(--bad)"></div></div></div></div>
+
+<h3>Exposure</h3>
+<div class="panel">
+  <div class="kv"><span class="k">Permissions granted</span><span class="v">23</span></div>
+  <div class="kv"><span class="k">Exercised in window</span><span class="v">8</span></div>
+  <div class="kv"><span class="k">Never exercised</span><span class="v" style="color:var(--bad);font-weight:600">15</span></div>
+  <div class="kv"><span class="k">Financial authority</span><span class="v">unbounded</span></div>
+  <div class="kv"><span class="k">Irreversible actions available</span><span class="v">13</span></div>
+  <div class="kv"><span class="k">Blast radius</span><span class="v">data_egress, external_comms, identity, infrastructure, monetary</span></div>
+</div>
+
+<h3>Usage coverage</h3>
+<div class="panel"><div style="color:var(--muted);font-size:13.5px">No usage pull was run. Granted permissions could not be compared against exercised ones.</div></div>
+
+<h3>Findings</h3>
+<div class="finding bad"><div class="sev">critical</div><h4>High-authority permissions granted but never used</h4><p>5 permission(s) that can move money or destroy data have not been exercised in the observed window. This is pure downside: full liability, zero utility.</p><ul class="ev"><li>· https://www.googleapis.com/auth/drive</li><li>· charges:write</li><li>· transfers:write</li><li>· workflow</li><li>· s3:*</li></ul></div><div class="finding bad"><div class="sev">critical</div><h4>Actions are not reconstructable</h4><p>Traces do not carry tool name, arguments, credential identity and guardrail decision. You cannot answer the question an underwriter or a plaintiff will ask: what exactly did the agent do, and under whose authority.</p></div><div class="finding bad"><div class="sev">critical</div><h4>Destructive authority held</h4><p>These permissions allow irreversible destruction of data or infrastructure. Several also allow deletion of the records that would evidence the action.</p><ul class="ev"><li>· https://www.googleapis.com/auth/drive</li><li>· workflow</li><li>· s3:*</li></ul></div><div class="finding bad"><div class="sev">critical</div><h4>Unbounded financial authority</h4><p>The agent can move money with no per-action spend cap configured.</p><ul class="ev"><li>· charges:write</li><li>· refunds:write</li><li>· transfers:write</li></ul></div><div class="finding warn"><div class="sev">high</div><h4>No human approval gate</h4><p>Documented human oversight is becoming a condition of coverage, not a best practice. Its absence shifts liability squarely onto the operator who configured the agent.</p></div><div class="finding warn"><div class="sev">high</div><h4>No kill switch</h4><p>There is no documented mechanism to halt the agent mid-task.</p></div><div class="finding info"><div class="sev">medium</div><h4>Unclassified permissions</h4><p>1 scope(s) are not in the capability catalog and were classified by action verb. Confirm these manually.</p><ul class="ev"><li>· dynamodb:PutItem</li></ul></div><div class="finding muted"><div class="sev">low</div><h4>Usage is self-attested for 5 provider(s)</h4><p>Usage for these providers was declared in the profile rather than pulled from the provider&#x27;s own audit trail. The findings hold only as far as that declaration does. Run `uvx ranwhat scan &lt;profile&gt; --pull-usage` to make them independently evidenced.</p><ul class="ev"><li>· aws</li><li>· github</li><li>· google</li><li>· slack</li><li>· stripe</li></ul></div>
+
+<h3>Granted permissions</h3>
+<div class="panel">
+<table><thead><tr><th>Scope</th><th>Provider</th><th>Authority</th><th>Reversible</th><th>Usage</th></tr></thead>
+<tbody><tr><td><code>s3:*</code><br><span style='color:var(--muted)'>Full S3 control</span></td><td>aws</td><td><span class='pill p-destructive'>destructive</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>workflow</code><br><span style='color:var(--muted)'>Update GitHub Actions workflows</span></td><td>github</td><td><span class='pill p-destructive'>destructive</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>https://www.googleapis.com/auth/drive</code><br><span style='color:var(--muted)'>Full Drive access</span></td><td>google</td><td><span class='pill p-destructive'>destructive</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>charges:write</code><br><span style='color:var(--muted)'>Create and capture charges</span></td><td>stripe</td><td><span class='pill p-financial'>financial</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>refunds:write</code><br><span style='color:var(--muted)'>Issue refunds</span></td><td>stripe</td><td><span class='pill p-financial'>financial</span></td><td>no</td><td class='u-used'>used</td></tr><tr><td><code>transfers:write</code><br><span style='color:var(--muted)'>Move money to connected accounts</span></td><td>stripe</td><td><span class='pill p-financial'>financial</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>ses:SendEmail</code><br><span style='color:var(--muted)'>Send email</span></td><td>aws</td><td><span class='pill p-write'>write</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>lambda:InvokeFunction</code><br><span style='color:var(--muted)'>Invoke functions</span></td><td>aws</td><td><span class='pill p-write'>write</span></td><td>yes</td><td class='u-used'>used</td></tr><tr><td><code>dynamodb:PutItem</code><br><span style='color:var(--muted)'>dynamodb:PutItem</span></td><td>aws</td><td><span class='pill p-write'>write</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>repo</code><br><span style='color:var(--muted)'>Full control of private repositories</span></td><td>github</td><td><span class='pill p-write'>write</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>gist</code><br><span style='color:var(--muted)'>Create gists</span></td><td>github</td><td><span class='pill p-write'>write</span></td><td>no</td><td class='u-unused'>unused</td></tr><tr><td><code>https://www.googleapis.com/auth/gmail.modify</code><br><span style='color:var(--muted)'>Read, send, modify and label mail</span></td><td>google</td><td><span class='pill p-write'>write</span></td><td>no</td><td class='u-used'>used</td></tr><tr><td><code>https://www.googleapis.com/auth/gmail.send</code><br><span style='color:var(--muted)'>Send mail as the user</span></td><td>google</td><td><span class='pill p-write'>write</span></td><td>no</td><td class='u-used'>used</td></tr><tr><td><code>https://www.googleapis.com/auth/calendar</code><br><span style='color:var(--muted)'>Read/write calendar</span></td><td>google</td><td><span class='pill p-write'>write</span></td><td>yes</td><td class='u-unused'>unused</td></tr><tr><td><code>https://www.googleapis.com/auth/contacts</code><br><span style='color:var(--muted)'>Read/write contacts</span></td><td>google</td><td><span class='pill p-write'>write</span></td><td>yes</td><td class='u-unused'>unused</td></tr><tr><td><code>chat:write</code><br><span style='color:var(--muted)'>Post messages</span></td><td>slack</td><td><span class='pill p-write'>write</span></td><td>no</td><td class='u-used'>used</td></tr><tr><td><code>customers:write</code><br><span style='color:var(--muted)'>Modify customer records</span></td><td>stripe</td><td><span class='pill p-write'>write</span></td><td>yes</td><td class='u-unused'>unused</td></tr><tr><td><code>read:org</code><br><span style='color:var(--muted)'>Read org membership</span></td><td>github</td><td><span class='pill p-read'>read</span></td><td>yes</td><td class='u-used'>used</td></tr><tr><td><code>channels:history</code><br><span style='color:var(--muted)'>Read public channel history</span></td><td>slack</td><td><span class='pill p-read'>read</span></td><td>yes</td><td class='u-used'>used</td></tr><tr><td><code>groups:history</code><br><span style='color:var(--muted)'>Read private channel history</span></td><td>slack</td><td><span class='pill p-read'>read</span></td><td>yes</td><td class='u-unused'>unused</td></tr><tr><td><code>im:history</code><br><span style='color:var(--muted)'>Read direct messages</span></td><td>slack</td><td><span class='pill p-read'>read</span></td><td>yes</td><td class='u-unused'>unused</td></tr><tr><td><code>files:read</code><br><span style='color:var(--muted)'>Read files</span></td><td>slack</td><td><span class='pill p-read'>read</span></td><td>yes</td><td class='u-unused'>unused</td></tr><tr><td><code>customers:read</code><br><span style='color:var(--muted)'>Read customer records</span></td><td>stripe</td><td><span class='pill p-read'>read</span></td><td>yes</td><td class='u-used'>used</td></tr></tbody></table>
+</div>
+
+<footer>
+No credential, prompt, message body or customer record was transmitted to
+produce this report. Scope classification is advisory; permissions marked
+unclassified were inferred from their action verb and should be confirmed
+manually before this report is relied on for underwriting.
+</footer>
+</div></body></html>

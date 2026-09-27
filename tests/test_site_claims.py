@@ -55,5 +55,22 @@ class NoEmDashes(unittest.TestCase):
             self.assertNotIn("—", page.read_text(), "%s has an em dash" % page.name)
 
 
+
+class ExampleReportIsCurrent(unittest.TestCase):
+    """The example report shows scores. A catalogue change that moves them
+    would otherwise leave the site showing numbers the tool no longer
+    gives, which is the kind of drift nobody notices for months."""
+
+    def test_published_report_matches_what_the_tool_writes(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "example_report", SITE.parent / "scripts" / "example_report.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertEqual((SITE / "example-report.html").read_text(), mod.build(),
+                         "site/example-report.html is stale: "
+                         "run python3 scripts/example_report.py")
+
+
 if __name__ == "__main__":
     unittest.main()
