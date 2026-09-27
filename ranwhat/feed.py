@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import ssl
 import time
 import urllib.error
@@ -45,6 +46,12 @@ MAX_BYTES = 8 * 1024 * 1024
 FIELDS = ("label", "authority", "reversible", "blast", "why")
 BLASTS = frozenset((catalog.MONETARY, catalog.EXTERNAL_COMMS, catalog.DATA_EGRESS,
                     catalog.INFRASTRUCTURE, catalog.IDENTITY))
+
+# Terminal control characters: the class watch strips from transcripts. A
+# label is written to the terminal as it is, and one carrying ESC can move the
+# cursor up and erase the scores above it, or write the clipboard through
+# OSC 52. No catalogue text needs one, so text with any is no feed.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 # The cache's temp file, as clean creates its own: O_EXCL and O_NOFOLLOW so a
 # symlink planted at the path fails the write rather than redirecting it.
@@ -216,17 +223,22 @@ def validate(doc):
         raise FeedError(
             "This feed needs ranwhat with schema %s support; got %r. Upgrade "
             "with: uvx ranwhat" % (SCHEMA, schema))
-    if doc.get("version") is not None and not isinstance(doc["version"], str):
-        raise FeedError("Feed version is not text.")
+    if doc.get("version") is not None and not _plain(doc["version"]):
+        raise FeedError("Feed version is not plain text.")
     catalogue = doc.get("catalogue")
     if not isinstance(catalogue, dict) or not catalogue:
         raise FeedError("Feed contains no catalogue.")
     for provider, scopes in catalogue.items():
         if not isinstance(scopes, dict):
             raise FeedError("Provider %r is not an object." % provider)
+        if not _plain(provider):
+            raise FeedError("Provider %r is not plain text." % provider)
         for scope, entry in scopes.items():
             if not isinstance(entry, dict):
                 raise FeedError("Scope %r/%r is not an object." % (provider, scope))
+            # A wildcard key reaches the report as "(matched <key>)".
+            if not _plain(scope):
+                raise FeedError("Scope %r/%r is not plain text." % (provider, scope))
             for field in FIELDS:
                 if field not in entry:
                     raise FeedError(
@@ -235,6 +247,11 @@ def validate(doc):
                 if not isinstance(entry[field], str):
                     raise FeedError("Scope %r/%r has a non-text %s." % (
                         provider, scope, field))
+            # %r in the message: it names the scope without replaying it.
+            for field in ("label", "why"):
+                if not _plain(entry[field]):
+                    raise FeedError("Scope %r/%r has a control character in "
+                                    "its %s." % (provider, scope, field))
             # Checked here, not trusted later: an authority the scorer has no
             # cost for raised KeyError in every scan until the cache was
             # deleted, and a string "false" is truthy.
@@ -253,6 +270,11 @@ def validate(doc):
     if stated is not None and stated != digest(catalogue):
         raise FeedError("Feed digest does not match its catalogue.")
     return doc
+
+
+def _plain(value):
+    """Text with no terminal control character in it."""
+    return isinstance(value, str) and not _CONTROL.search(value)
 
 
 def _is_int(value):

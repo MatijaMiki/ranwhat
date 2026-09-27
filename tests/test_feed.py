@@ -675,6 +675,100 @@ class AHostileFeedBodyIsAFeedError(FeedHome):
         self.assertIsNone(feed.load(), "nothing was cached")
 
 
+class FeedTextCannotDriveTheTerminal(FeedHome):
+    """A feed entry that rates a scope as the bundle does keeps its own
+    label, and the report writes that label to the terminal as it is. ESC
+    sequences in it could move the cursor up and erase the scores and the
+    findings above it, or through OSC 52 write the clipboard. The feed is
+    unsigned and the cache is writable by the agents being audited, so text
+    carrying the characters watch strips from transcripts is no feed."""
+
+    ESC = "\x1b[999A\x1b[J\x1b]52;c;ZWNobyBwd25lZA==\x07"
+    CONTROLS = ("\x1b", "\x9b", "\x07", "\x00", "\n", "\r", "\t", "\x7f")
+
+    def _bundled(self):
+        return catalog.CATALOG["github"]["workflow"]
+
+    def _doc(self, key="workflow", version="2026.09.26", **fields):
+        """An entry rated exactly as the bundle rates it, so the floor keeps
+        its text: only the characters under test can make it no feed."""
+        b = self._bundled()
+        entry = _entry(b["label"], b["authority"], b["reversible"], b["blast"],
+                       b["why"])
+        entry.update(fields)
+        return _doc({"github": {key: entry}}, version=version)
+
+    def _cache(self, doc):
+        os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
+        with open(feed.feed_path(), "w", encoding="utf-8") as fh:
+            json.dump(dict(doc, fetched_at=1790000000), fh)
+        catalog.reset_feed_cache()
+
+    def _run(self, argv, body=None):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.ExitStack() as stack:
+            if body is not None:
+                stack.enter_context(mock.patch.object(
+                    feed, "_open", lambda *a, **kw: _Body(body)))
+                stack.enter_context(mock.patch.dict(os.environ, {"RANWHAT_TOKEN": "tok"}))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            stack.enter_context(contextlib.redirect_stderr(err))
+            rc = cli.main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_the_same_entry_in_plain_text_is_used(self):
+        """Or every case below would pass for the wrong reason."""
+        self._cache(self._doc(label="Plain label", why="Plain why"))
+        e = catalog.lookup("github", "workflow")
+        self.assertEqual((e["label"], e["why"]), ("Plain label", "Plain why"))
+        self.assertIn("Feed 2026.09.26", self._run(["update", "--status"])[1])
+
+    def test_a_control_character_in_label_or_why_means_no_feed(self):
+        for field in ("label", "why"):
+            for ch in self.CONTROLS:
+                with self.subTest(field=field, ch=ch):
+                    doc = self._doc(**{field: "Update workflows%s[J" % ch})
+                    with self.assertRaises(feed.FeedError):
+                        feed.validate(doc)
+                    self._cache(doc)
+                    self.assertIsNone(feed.load())
+                    e = catalog.lookup("github", "workflow")
+                    self.assertEqual(e["label"], self._bundled()["label"])
+                    self.assertEqual(e["why"], self._bundled()["why"])
+
+    def test_a_control_character_in_a_scope_key_means_no_feed(self):
+        """A wildcard key reaches the label as "(matched <key>)"."""
+        doc = self._doc(key="repo\x1b[2J*")
+        with self.assertRaises(feed.FeedError):
+            feed.validate(doc)
+
+    def test_the_report_carries_no_escape_from_a_cached_label(self):
+        self._cache(self._doc(label="Update GitHub Actions workflows" + self.ESC))
+        rc, out, _ = self._run(["demo"])
+        self.assertEqual(rc, 0)
+        self.assertIn(self._bundled()["label"].split()[0], out)
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("ZWNobyBwd25lZA", out)
+
+    def test_update_status_carries_no_escape_from_the_version(self):
+        doc = self._doc(version="2026.09.26\x1b[2J")
+        with self.assertRaises(feed.FeedError):
+            feed.validate(doc)
+        self._cache(doc)
+        rc, out, err = self._run(["update", "--status"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("\x1b", out + err)
+        self.assertIn("No feed cached", out)
+
+    def test_update_refuses_it_from_the_server_and_does_not_echo_it(self):
+        body = json.dumps(self._doc(label="Update workflows" + self.ESC)).encode()
+        rc, out, err = self._run(["update"], body=body)
+        self.assertEqual(rc, 1)
+        self.assertTrue(err.strip(), "update failed and said nothing")
+        self.assertNotIn("\x1b", out + err)
+        self.assertIsNone(feed.load(), "nothing was cached")
+
+
 class AFeedTooDeepToCacheIsAFeedError(FeedHome):
     """From Python 3.12 json.loads is bounded by the C stack, but save()
     wrote with json.dump(indent=1), which runs the pure-Python encoder,
