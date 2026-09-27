@@ -72,5 +72,62 @@ class ExampleReportIsCurrent(unittest.TestCase):
                          "run python3 scripts/example_report.py")
 
 
+class AdMeasurementNeedsConsent(unittest.TestCase):
+    """The X pixel sets cookies and reports the visit, so it may only load
+    after a yes. These pin the parts of that which a later edit could quietly
+    undo: a page pasting X's base code straight in, a page missing the way to
+    withdraw, or the server sending X more than the privacy page says."""
+
+    PAGES = sorted(SITE.glob("*.html"))
+    X_HOSTS = ("ads-twitter.com", "twq(", "uwt.js", "analytics.twitter.com")
+
+    def test_no_page_loads_x_directly(self):
+        for page in self.PAGES:
+            text = page.read_text()
+            for host in self.X_HOSTS:
+                self.assertNotIn(host, text.replace("static.ads-twitter.com</span>", ""),
+                                 "%s references %s outside consent.js" % (page.name, host))
+
+    def test_every_page_offers_consent_and_a_way_back(self):
+        # Pages with the site footer. The example report is a standalone
+        # document the tool writes, and loads nothing from X at all.
+        for page in self.PAGES:
+            text = page.read_text()
+            if 'class="fbase"' not in text:
+                continue
+            self.assertIn('src="/consent.js', text, page.name)
+            self.assertIn("data-consent-open", text, page.name)
+
+    def test_pixel_loads_only_from_the_consent_path(self):
+        js = (SITE / "consent.js").read_text()
+        self.assertEqual(js.count("https://static.ads-twitter.com/uwt.js"), 1)
+        calls = re.findall(r"(?<![\w.])load\(\);", js)
+        self.assertEqual(len(calls), 2, "load() should be reachable only from "
+                         "a stored yes and the Allow button")
+        self.assertIn('now === "granted") load();', js)
+        self.assertIn('answer === "granted") { load();', js)
+        self.assertIn("globalPrivacyControl", js)
+
+    def test_csp_allows_the_pixel_and_nothing_broader(self):
+        csp = next(l for l in (SITE / "_headers").read_text().splitlines()
+                   if "Content-Security-Policy" in l)
+        self.assertIn("https://static.ads-twitter.com", csp)
+        self.assertNotIn("*", csp.replace("/*", ""), "no wildcard hosts")
+
+    def test_privacy_page_describes_it(self):
+        text = (SITE / "privacy.html").read_text()
+        self.assertIn('id="ads"', text)
+        self.assertIn("Global Privacy Control", text)
+        for stale in ("GitHub Pages", "no backend", "no tracking pixels"):
+            self.assertNotIn(stale, text)
+
+    def test_server_never_sends_x_the_message_or_address(self):
+        src = (SITE.parent / "worker" / "src" / "index.js").read_text()
+        body = src[src.index("async function reportLead"):src.index("async function handleContact")]
+        self.assertIn("form.measure !== true", body)
+        for field in ("form.message", "form.email", "replyTo", "hashed_email"):
+            self.assertNotIn(field, body)
+
+
 if __name__ == "__main__":
     unittest.main()

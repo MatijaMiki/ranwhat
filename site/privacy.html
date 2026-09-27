@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Privacy | ranwhat</title>
-<meta name="description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, a contact form that keeps no copy, and nothing sent when you run it.">
+<meta name="description" content="What the tool does with your data, and what this website collects: no analytics, an X ad pixel only if you allow it, and nothing sent when you run the tool.">
 <link rel="canonical" href="https://ranwhat.com/privacy">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -18,7 +18,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/privacy">
 <meta property="og:title" content="Privacy | ranwhat">
-<meta property="og:description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, a contact form that keeps no copy, and nothing sent when you run it.">
+<meta property="og:description" content="What the tool does with your data, and what this website collects: no analytics, an X ad pixel only if you allow it, and nothing sent when you run the tool.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -26,7 +26,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="Privacy | ranwhat">
-<meta name="twitter:description" content="What the tool does with your data, and what this website collects: no cookies, no analytics, a contact form that keeps no copy, and nothing sent when you run it.">
+<meta name="twitter:description" content="What the tool does with your data, and what this website collects: no analytics, an X ad pixel only if you allow it, and nothing sent when you run the tool.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
@@ -104,8 +104,25 @@
             </details>
           </span></div>
         <div class="row"><span class="k">Cookies</span>
-          <span class="v">None. No analytics, no tracking pixels, no consent
-            banner, because there is nothing to consent to.</span></div>
+          <span class="v">None of ours. X&rsquo;s ad pixel sets its own, and only
+            if you allow it (next row). Your answer is kept in your browser&rsquo;s
+            local storage so the question is asked once.</span></div>
+        <div class="row" id="ads"><span class="k">Ad measurement</span>
+          <span class="v">We advertise on X, and ask before measuring whether it
+            works. If you allow it, X&rsquo;s pixel loads from
+            <span class="icode">static.ads-twitter.com</span> and tells X which
+            pages you visited, with your IP address, your browser details and X&rsquo;s
+            own cookies, so X can connect the visit to an ad it showed you and, if
+            you are signed in to X, to your account. If you then send the contact
+            form, our server tells X that a message was sent, with the ad-click
+            ID if an ad brought you here, your IP address and your browser. Never
+            the message and never your email address. The legal basis is your
+            consent (GDPR art.&nbsp;6(1)(a), and art.&nbsp;100 of the Croatian
+            Electronic Communications Act). If you decline, or your browser sends
+            Global Privacy Control, nothing from X loads. Change your answer any
+            time with <a href="#ads" data-consent-open>Privacy choices</a>, also in
+            the footer. What X does with it is in
+            <a href="https://x.com/en/privacy">X&rsquo;s privacy policy</a>.</span></div>
         <div class="row"><span class="k">Forms</span>
           <span class="v">The contact form sends your email address, your topic
             and your message to a Cloudflare Worker on this domain, which
@@ -115,21 +132,21 @@
         <div class="row"><span class="k">Server logs</span>
           <span class="v">Cloudflare hosts and serves the site. It logs request
             metadata, including your IP address, to deliver pages and absorb
-            abuse. That is our legitimate interest in
-            running a website, and neither log is used to profile anyone.</span></div>
+            abuse. That is our legitimate interest in running a website, and the
+            logs are not used to profile anyone.</span></div>
         <div class="row"><span class="k">Third parties</span>
-          <span class="v">One, on the contact page only: Cloudflare Turnstile,
-            the challenge that keeps the form from being used by bots. It loads
-            from challenges.cloudflare.com and reads signals from your browser
-            to tell a person from a script. No other page loads anything from
-            anywhere else. Typefaces are served from this domain rather than
-            Google Fonts.</span></div>
+          <span class="v">Cloudflare Turnstile, on the contact page only: the
+            challenge that keeps the form from being used by bots. It loads from
+            challenges.cloudflare.com and reads signals from your browser to tell
+            a person from a script. X, only if you allow ad measurement (above).
+            Nothing else loads from anywhere else. Typefaces are served from this
+            domain rather than Google Fonts.</span></div>
         <div class="row"><span class="k">Email</span>
           <span class="v">Mail, whether written directly or sent through the form,
             is kept in a Gmail mailbox, so Google holds it too and may store it
-            outside the EU. We keep the message and your
-            address for as long as the conversation is useful, and delete it when
-            it is not. We do not add you to any list.</span></div>
+            outside the EU. We keep the message and your address for as long as
+            the conversation is useful, and delete it when it is not. We do not
+            add you to any list.</span></div>
       </div>
 
       <div class="grid2" style="margin-top:30px">
@@ -205,9 +222,11 @@
       <span>ranwhat.com</span>
       <span>Runs locally &middot; transmits nothing</span>
       <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>
   </div>
 </footer>
 <script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
 </body>
 </html>

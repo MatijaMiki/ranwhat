@@ -15,4 +15,10 @@ send_email = [
 pattern = "ranwhat.com/api/*"
 zone_name = "ranwhat.com"
 
-# TURNSTILE_SECRET is set as an encrypted secret in the dashboard, never here.
+# TURNSTILE_SECRET and X_PIXEL_TOKEN are encrypted secrets, set with
+# `npx wrangler secret put <NAME>`, never here.
+
+# The X lead event's ID, from X Events Manager. Not a secret: the same ID is in
+# site/consent.js. Leave it unset and the Worker reports nothing to X.
+# [vars]
+# X_EVENT_LEAD = "tw-rfz6t-xxxxx"
