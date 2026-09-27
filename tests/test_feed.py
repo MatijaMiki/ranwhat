@@ -310,6 +310,133 @@ class FeedCannotLowerABlast(FeedHome):
                                  counted, (authority, blast))
 
 
+class FeedCannotLowerWhatTheBundleResolves(FeedHome):
+    """The floor used to hold only where the feed and the bundle used the
+    same key. A longer feed wildcard beat the bundled one, because the
+    longest pattern wins, and a new exact key for a wildcard grant was
+    matched before any wildcard. Either made s3:Delete* a reversible read."""
+
+    READ = _entry("List", "read", True, "identity", "x")
+    PROFILE = {"agent": "a", "credentials": [
+        {"provider": "aws", "label": "agent", "scopes": ["s3:Delete*", "iam:Put*"]}],
+        "controls": {}}
+
+    def _save(self, catalogue):
+        feed.save(_doc(catalogue))
+        catalog.reset_feed_cache()
+
+    def _no_feed_scan(self):
+        catalog.reset_feed_cache()
+        self.assertIsNone(feed.load())
+        return score.scan(self.PROFILE)
+
+    def test_a_longer_feed_wildcard_does_not_beat_the_bundled_one(self):
+        before = self._no_feed_scan()
+        self.assertEqual(before["blast_radius"]["irreversible_actions"],
+                         ["iam:Put*", "s3:Delete*"])
+        self._save({"aws": {"s3:D*": self.READ, "iam:P*": self.READ}})
+        e = catalog.lookup("aws", "s3:Delete*")
+        self.assertEqual(e["authority"], catalog.DESTRUCTIVE)
+        self.assertFalse(e["reversible"])
+        self.assertIn("matched s3:*", e["label"],
+                      "the feed's text was written for a rating it did not get")
+        self.assertEqual(score.scan(self.PROFILE), before)
+
+    def test_a_new_exact_key_for_a_wildcard_grant_does_not_either(self):
+        before = self._no_feed_scan()
+        self._save({"aws": {"s3:Delete*": self.READ, "iam:Put*": self.READ}})
+        self.assertEqual(catalog.lookup("aws", "iam:Put*")["authority"],
+                         catalog.DESTRUCTIVE)
+        self.assertEqual(score.scan(self.PROFILE), before)
+
+    def test_a_feed_wildcard_can_still_raise(self):
+        self._save({"aws": {"s3:D*": _entry("Delete S3", "destructive", False,
+                                            "monetary")}})
+        e = catalog.lookup("aws", "s3:Delete*")
+        self.assertEqual(e["blast"], catalog.MONETARY)
+        self.assertIn("matched s3:D*", e["label"])
+
+
+class FeedCannotLowerWhatTheNameSays(FeedHome):
+    """A scope the bundle lacks is rated from its own name. When the name
+    says something (a delete verb, a payment, a read), the feed may confirm
+    or raise that, not contradict it: s3:DeleteBucket is not a read however
+    the cache describes it. An entry that tries is ignored whole, and the
+    scope stays unclassified, as it was with no feed."""
+
+    READ = _entry("Harmless", "read", True, "data_egress", "x")
+    SCOPES = ("s3:DeleteBucket", "dynamodb:DeleteTable")
+
+    def _scan(self, provider, scopes):
+        return score.scan({"credentials": [
+            {"provider": provider, "scopes": list(scopes)}]})
+
+    def _save(self, catalogue):
+        feed.save(_doc(catalogue))
+        catalog.reset_feed_cache()
+
+    def test_a_delete_verb_stays_destructive(self):
+        before = self._scan("aws", self.SCOPES)
+        self.assertIn("Unclassified permissions",
+                      [f["title"] for f in before["findings"]])
+        self._save({"aws": {s: self.READ for s in self.SCOPES}})
+        e = catalog.lookup("aws", "s3:DeleteBucket")
+        self.assertEqual(e["authority"], catalog.DESTRUCTIVE)
+        self.assertFalse(e["reversible"])
+        self.assertFalse(e["known"])
+        self.assertEqual(self._scan("aws", self.SCOPES), before)
+
+    def test_a_payment_stays_monetary(self):
+        scope = "payouts_v2:create"
+        before = self._scan("stripe", [scope])
+        self._save({"stripe": {scope: _entry("Harmless", "destructive", False,
+                                             "data_egress")}})
+        self.assertEqual(catalog.lookup("stripe", scope)["blast"], catalog.MONETARY)
+        self.assertEqual(self._scan("stripe", [scope]), before)
+
+    def test_a_read_verb_keeps_counting_as_egress(self):
+        """The scorer drops a read whose blast is not data_egress."""
+        scope = "s3:GetBucketTagging"
+        self._save({"aws": {scope: _entry("Tags", "read", True, "identity")}})
+        self.assertEqual(catalog.lookup("aws", scope)["blast"], catalog.DATA_EGRESS)
+
+    def test_a_feed_may_rate_what_the_name_only_hints_at(self):
+        """Agreeing on what the name says, it may still move the blast
+        between dimensions the scorer counts the same, and name the scope."""
+        self._save({"aws": {"iam:DeleteUser": _entry(
+            "Delete IAM users", "destructive", False, "identity")}})
+        e = catalog.lookup("aws", "iam:DeleteUser")
+        self.assertTrue(e["known"])
+        self.assertEqual((e["label"], e["blast"]), ("Delete IAM users", "identity"))
+
+    def test_no_entry_under_any_key_lowers_a_scope(self):
+        """Every rating a feed can give, under the scope's own key and under
+        wildcards longer than the bundle's, against scopes the bundle rates
+        exactly, by wildcard, and only by name."""
+        grants = ("s3:Delete*", "s3:DeleteObject", "iam:Put*", "*",
+                  "s3:DeleteBucket", "dynamodb:DeleteTable", "payouts:create",
+                  "s3:GetBucketTagging")
+        keys = grants + ("s3:D*", "s3:Del*", "iam:P*")
+        before = {g: catalog.lookup("aws", g) for g in grants}
+        for authority in catalog.AUTHORITY_RANK:
+            for reversible in (True, False):
+                for blast in feed.BLASTS:
+                    fed = _entry("Fed", authority, reversible, blast)
+                    self._save({"aws": {k: fed for k in keys}})
+                    for g in grants:
+                        with self.subTest(grant=g, fed=(authority, reversible, blast)):
+                            self.assertFalse(catalog._below(
+                                before[g], catalog.lookup("aws", g)))
+
+    def test_a_name_that_says_nothing_is_the_feeds_to_rate(self):
+        """The write guess for a verb nobody recognised is not evidence, and
+        replacing guesses is what the feed is for."""
+        self._save({"acme": {"acme:widgets": self.READ}})
+        e = catalog.lookup("acme", "acme:widgets")
+        self.assertTrue(e["known"])
+        self.assertEqual(e["authority"], catalog.READ)
+
+
 class AMalformedCacheIsNoFeed(FeedHome):
     """The cache is as untrusted as the network: anything running as this
     user, the agents being audited included, can write ~/.ranwhat. Valid JSON

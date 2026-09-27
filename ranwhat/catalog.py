@@ -471,19 +471,25 @@ _DESTRUCTIVE_VERBS = ("delete", "terminate", "destroy", "remove", "purge", "revo
 _FINANCIAL_HINTS = ("payment", "charge", "refund", "payout", "transfer", "invoice", "billing")
 
 
-def _infer(provider, scope):
-    """Classify an unrecognised scope from its action verb."""
+def _from_name(scope):
+    """What a scope's own name says it does: (authority, reversible, blast)
+    for a payment, a destructive verb or a read verb, else None."""
     tail = scope.split(":")[-1].split(".")[-1].split("/")[-1].lower()
     lowered = scope.lower()
 
     if any(h in lowered for h in _FINANCIAL_HINTS) and not tail.startswith(_READ_VERBS):
-        authority, reversible, blast = FINANCIAL, False, MONETARY
-    elif tail.startswith(_DESTRUCTIVE_VERBS):
-        authority, reversible, blast = DESTRUCTIVE, False, INFRASTRUCTURE
-    elif tail.startswith(_READ_VERBS):
-        authority, reversible, blast = READ, True, DATA_EGRESS
-    else:
-        authority, reversible, blast = WRITE, False, DATA_EGRESS
+        return FINANCIAL, False, MONETARY
+    if tail.startswith(_DESTRUCTIVE_VERBS):
+        return DESTRUCTIVE, False, INFRASTRUCTURE
+    if tail.startswith(_READ_VERBS):
+        return READ, True, DATA_EGRESS
+    return None
+
+
+def _infer(provider, scope):
+    """Classify an unrecognised scope from its action verb. A name that says
+    nothing is guessed to be an irreversible write."""
+    authority, reversible, blast = _from_name(scope) or (WRITE, False, DATA_EGRESS)
 
     entry = _s(
         scope, authority, reversible, blast,
@@ -530,6 +536,10 @@ def providers(provider):
     tampered with, and the report would state it with the confidence of the
     whole catalogue. The feed is not signed, and ~/.ranwhat is writable by
     the agents this tool audits, so the bundled rating is the floor.
+
+    This merge floors only a key the bundle also has. lookup() applies the
+    same floor to whatever the bundle resolves a scope to, which may be a
+    wildcard entry the feed never named.
     """
     merged = dict(CATALOG.get(provider, {}))
     fed = _feed_catalogue()
@@ -580,6 +590,37 @@ def _no_lower(bundled, fed):
     return merged
 
 
+def _resolve(entries, scope):
+    """The entry a granted scope resolves to among `entries`, or None.
+
+    An exact hit wins. A granted scope that is itself a wildcard (e.g.
+    "s3:*") matches the longest catalog wildcard it falls under. A narrow
+    granted scope is never widened to a wildcard entry.
+    """
+    if scope in entries:
+        return dict(entries[scope])
+    if scope.endswith("*"):
+        wildcards = sorted([s for s in entries if s.endswith("*")], key=len, reverse=True)
+        for pattern in wildcards:
+            if scope.startswith(pattern[:-1]):
+                entry = dict(entries[pattern])
+                entry["label"] = "%s (matched %s)" % (entry["label"], pattern)
+                return entry
+    return None
+
+
+def _below(floor, entry):
+    """Whether entry rates lower than floor on any rating, blast weighed as
+    the scorer weighs it. Unlike _no_lower, moving the blast to a dimension
+    that counts the same is not lower."""
+    if AUTHORITY_RANK[entry["authority"]] < AUTHORITY_RANK[floor["authority"]]:
+        return True
+    if entry["reversible"] and not floor["reversible"]:
+        return True
+    at = entry["authority"]
+    return blast_weight(at, entry["blast"]) < blast_weight(at, floor["blast"])
+
+
 def lookup(provider, scope):
     """Resolve a granted scope to its capability entry.
 
@@ -590,22 +631,29 @@ def lookup(provider, scope):
     make the whole report untrustworthy.
 
     A subscribed feed entry overrides the bundled one for the same scope, and
-    adds scopes the bundle never had. Everything below is unchanged by that:
-    the feed supplies data, not different rules.
+    adds scopes the bundle never had. It never rates a scope below what the
+    report would say without it:
+
+      Where the bundle resolves the scope, what the feed resolves it to is
+      floored at that entry, rating by rating. The bundle's key and the
+      feed's need not be the same: a longer feed wildcard, or a feed key
+      equal to a wildcard grant, is matched before the bundled wildcard.
+
+      Where only the scope's name rates it (a delete verb, a payment, a
+      read), a feed entry that rates it lower is ignored whole: nothing it
+      says about a scope it has wrong is used, and the scope stays
+      unclassified. A name that says nothing is only a guess, and the feed
+      may rate that scope as it likes; replacing guesses is what it is for.
     """
-    prov = providers(provider)
-    if scope in prov:
-        entry = dict(prov[scope])
-        entry["known"] = True
-        return entry
-
-    if scope.endswith("*"):
-        wildcards = sorted([s for s in prov if s.endswith("*")], key=len, reverse=True)
-        for pattern in wildcards:
-            if scope.startswith(pattern[:-1]):
-                entry = dict(prov[pattern])
-                entry["known"] = True
-                entry["label"] = "%s (matched %s)" % (entry["label"], pattern)
-                return entry
-
-    return _infer(provider, scope)
+    bundled = _resolve(CATALOG.get(provider, {}), scope)
+    entry = _resolve(providers(provider), scope)
+    if entry is None:
+        return _infer(provider, scope)
+    if bundled is not None:
+        entry = _no_lower(bundled, entry)
+    else:
+        guess = _infer(provider, scope)
+        if _from_name(scope) and _below(guess, entry):
+            return guess
+    entry["known"] = True
+    return entry
