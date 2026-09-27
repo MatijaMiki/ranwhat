@@ -267,7 +267,7 @@ class RepeatedCallsAreReportedOnce(unittest.TestCase):
         for name in ("a", "b"):
             d = os.path.join(root, "proj-%s" % name)
             os.makedirs(d)
-            with open(os.path.join(d, "s.jsonl"), "w") as fh:
+            with open(os.path.join(d, "s.jsonl"), "w", encoding="utf-8") as fh:
                 fh.write(entry + "\n")
         records, scanned = watch.scan_all(root=root)
         self.assertEqual(scanned, 2)

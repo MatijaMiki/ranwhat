@@ -27,21 +27,23 @@ class ReportsAreNotWorldReadable(unittest.TestCase):
     exist, which go unused, what the blast radius is. That is useful to an
     attacker, so it does not get mode 644."""
 
+    @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")
     def test_written_owner_only(self):
         path = os.path.join(tempfile.mkdtemp(), "r.html")
         write_html(_result(), path)
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
+    @unittest.skipIf(os.name == "nt", "no O_NOFOLLOW on Windows")
     def test_refuses_to_write_through_a_symlink(self):
         d = tempfile.mkdtemp()
         target = os.path.join(d, "target.txt")
         link = os.path.join(d, "report.html")
-        with open(target, "w") as fh:
+        with open(target, "w", encoding="utf-8") as fh:
             fh.write("PROTECTED")
         os.symlink(target, link)
         with self.assertRaises(SystemExit):
             write_html(_result(), link)
-        with open(target) as fh:
+        with open(target, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "PROTECTED")
 
 

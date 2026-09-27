@@ -138,7 +138,7 @@ class OnlyExecutedTextIsJudged(unittest.TestCase):
     def test_a_workflow_call_in_a_transcript_is_not_reported(self):
         root = tempfile.mkdtemp(prefix="scope-")
         os.makedirs(os.path.join(root, "p"))
-        with open(os.path.join(root, "p", "s.jsonl"), "w") as fh:
+        with open(os.path.join(root, "p", "s.jsonl"), "w", encoding="utf-8") as fh:
             fh.write(json.dumps({"timestamp": "2026-09-20T10:00:00Z", "message": {
                 "content": [{"type": "tool_use", "id": "w", "name": "Workflow",
                              "input": {"script": WORKFLOW_SCRIPT}}]}}) + "\n")

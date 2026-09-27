@@ -114,11 +114,18 @@ class PullUsageAdvice(unittest.TestCase):
         with mock.patch.object(cli, "invocation", return_value="ranwhat"):
             body = self.self_attested(
                 score.scan(self.profile(), path="my agent.json"))["body"]
-        self.assertIn("ranwhat scan 'my agent.json' --pull-usage", body)
+        # Quoted for the reader's shell: cmd and PowerShell take double quotes.
+        quoted = '"my agent.json"' if os.name == "nt" else "'my agent.json'"
+        self.assertIn("ranwhat scan %s --pull-usage" % quoted, body)
+
+    def test_windows_quoting_is_what_cmd_and_powershell_read(self):
+        with mock.patch.object(cli.os, "name", "nt"):
+            self.assertEqual(cli._quote("my agent.json"), '"my agent.json"')
+            self.assertEqual(cli._quote(r"C:\agents\a.json"), r"C:\agents\a.json")
 
     def test_scan_command_passes_its_path(self):
         import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json",
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
                                          delete=False) as fh:
             json.dump(self.profile(), fh)
         self.addCleanup(os.unlink, fh.name)

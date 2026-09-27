@@ -31,7 +31,7 @@ def n(text):
 def _scan(body):
     d = tempfile.mkdtemp(prefix="preview-")
     path = os.path.join(d, "s.jsonl")
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"type": "user", "message": {"content": [
             {"type": "tool_result", "content": body}]}}) + "\n")
     findings, _changed = scan_file(path, apply=False)

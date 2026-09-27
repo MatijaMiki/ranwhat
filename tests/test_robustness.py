@@ -96,7 +96,7 @@ class OneBadFileDoesNotStopTheScan(unittest.TestCase):
         root = tempfile.mkdtemp(prefix="oc-rb-")
         path = os.path.join(root, "agents", "a", "agent", "openclaw-agent.sqlite")
         os.makedirs(os.path.dirname(path))
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         return root
 

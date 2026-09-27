@@ -102,7 +102,7 @@ def _transcript(body):
     d = os.path.join(root, "proj")
     os.makedirs(d)
     path = os.path.join(d, "s.jsonl")
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"type": "user", "message": {"content": [
             {"type": "tool_result", "content": body}]}}) + "\n")
     return root, path
@@ -116,19 +116,19 @@ class Masking(unittest.TestCase):
 
     def test_dry_run_changes_nothing(self):
         root, path = _transcript(self.BODY)
-        before = open(path).read()
+        before = open(path, encoding="utf-8").read()
         findings, scanned, changed = scan(root=root, apply=False)
         self.assertEqual(len(findings), 2)
         self.assertEqual(changed, [])
-        self.assertEqual(open(path).read(), before)
+        self.assertEqual(open(path, encoding="utf-8").read(), before)
 
     def test_apply_masks_and_leaves_valid_json(self):
         root, path = _transcript(self.BODY)
         scan(root=root, apply=True)
-        for line in open(path):
+        for line in open(path, encoding="utf-8"):
             if line.strip():
                 json.loads(line)          # must still parse
-        text = open(path).read()
+        text = open(path, encoding="utf-8").read()
         self.assertNotIn("sup3rS3cretPw", text)
         self.assertNotIn("8f3a9c2e1b7d4f6a0c5e8b2d7f1a4c9e", text)
         self.assertIn("NODE_ENV=production", text)
@@ -144,25 +144,25 @@ class Masking(unittest.TestCase):
                 if f == "s.jsonl":
                     hits.append(os.path.join(base, f))
         self.assertTrue(hits, "no backup was written")
-        self.assertIn("sup3rS3cretPw", open(sorted(hits)[-1]).read())
+        self.assertIn("sup3rS3cretPw", open(sorted(hits)[-1], encoding="utf-8").read())
 
     def test_running_twice_is_a_no_op(self):
         """A masked value must not be treated as a new secret to mask."""
         root, path = _transcript(self.BODY)
         scan(root=root, apply=True)
-        after_first = open(path).read()
+        after_first = open(path, encoding="utf-8").read()
         findings, _scanned, changed = scan(root=root, apply=True)
         self.assertEqual(findings, {})
         self.assertEqual(changed, [])
-        self.assertEqual(open(path).read(), after_first)
+        self.assertEqual(open(path, encoding="utf-8").read(), after_first)
 
     def test_transcript_without_secrets_is_untouched(self):
         root, path = _transcript("NODE_ENV=production\nPORT=3100\n")
-        before = open(path).read()
+        before = open(path, encoding="utf-8").read()
         findings, _s, changed = scan(root=root, apply=True)
         self.assertEqual(findings, {})
         self.assertEqual(changed, [])
-        self.assertEqual(open(path).read(), before)
+        self.assertEqual(open(path, encoding="utf-8").read(), before)
 
 
 if __name__ == "__main__":
@@ -177,7 +177,7 @@ class WhereDidItComeFrom(unittest.TestCase):
         root = tempfile.mkdtemp(prefix="where-")
         d = os.path.join(root, slug)
         os.makedirs(d)
-        with open(os.path.join(d, "s.jsonl"), "w") as fh:
+        with open(os.path.join(d, "s.jsonl"), "w", encoding="utf-8") as fh:
             for r in rows:
                 fh.write(json.dumps(r) + "\n")
         return root
@@ -237,19 +237,22 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         return [os.path.join(base, f) for base, _d, files in os.walk(self.root)
                 for f in files]
 
+    @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")
     def test_a_private_transcript_stays_private(self):
         root, path = _transcript(Masking.BODY)
         os.chmod(path, 0o600)
         scan(root=root, apply=True)
-        self.assertIn("ranwhat:redacted:", open(path).read())
+        self.assertIn("ranwhat:redacted:", open(path, encoding="utf-8").read())
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
+    @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")
     def test_the_original_mode_is_kept_not_tightened_either(self):
         root, path = _transcript(Masking.BODY)
         os.chmod(path, 0o640)
         scan(root=root, apply=True)
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
 
+    @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")
     def test_backups_are_readable_only_by_the_owner(self):
         root, path = _transcript(Masking.BODY)
         os.chmod(path, 0o644)
@@ -269,7 +272,7 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         fps = sorted(findings)
         scan_file(path, apply=True, only={fps[0]})
         scan_file(path, apply=True, only={fps[1]})
-        texts = [open(b).read() for b in self._backups()]
+        texts = [open(b, encoding="utf-8").read() for b in self._backups()]
         self.assertEqual(len(texts), 2)
         self.assertTrue(any("sup3rS3cretPw" in t and "8f3a9c2e" in t for t in texts),
                         "no backup still holds the fully unmasked original")

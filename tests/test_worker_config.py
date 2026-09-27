@@ -18,7 +18,7 @@ WRANGLER = pathlib.Path(__file__).resolve().parent.parent / "worker" / "wrangler
 
 
 def _uncommented():
-    return "\n".join(line for line in WRANGLER.read_text().splitlines()
+    return "\n".join(line for line in WRANGLER.read_text(encoding="utf-8").splitlines()
                      if not line.lstrip().startswith("#"))
 
 

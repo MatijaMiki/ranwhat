@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import platform
 import shutil
 import tempfile
 import unittest
@@ -69,7 +70,7 @@ class Offline(FeedHome):
 
     def test_corrupt_cache_degrades_silently(self):
         os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
-        with open(feed.feed_path(), "w") as fh:
+        with open(feed.feed_path(), "w", encoding="utf-8") as fh:
             fh.write("{not json")
         self.assertIsNone(feed.load())
 
@@ -108,6 +109,7 @@ class Merging(FeedHome):
 
 
 class TokenHandling(FeedHome):
+    @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")
     def test_saved_token_is_not_world_readable(self):
         path = feed.save_token("tok_abc")
         self.assertEqual(oct(os.stat(path).st_mode & 0o777), oct(0o600))
@@ -150,7 +152,9 @@ class SendsNothing(FeedHome):
         self.assertIsNone(seen["body"], "update sent a request body")
         values = " ".join(str(v) for v in seen["headers"].values())
         self.assertIn("Bearer tok_xyz", values)
-        for leak in (os.uname().nodename, os.path.expanduser("~")):
+        # platform.node, not os.uname: Windows has no uname, and says "" when
+        # it cannot tell, which is in every string.
+        for leak in filter(None, (platform.node(), os.path.expanduser("~"))):
             self.assertNotIn(leak, values)
         self.assertNotIn("?", seen["url"], "no query string, so nothing smuggled in one")
 
@@ -167,14 +171,14 @@ class TokenIsNotWrittenThroughASymlink(FeedHome):
             feed.save_token("tok_secret")
         self.assertFalse(os.path.exists(target), "token followed the symlink")
 
-    @unittest.skipUnless(hasattr(os, "fchmod"), "POSIX only")
+    @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")
     def test_an_existing_loose_file_is_tightened(self):
-        with open(feed.token_path(), "w") as fh:
+        with open(feed.token_path(), "w", encoding="utf-8") as fh:
             fh.write("old\n")
         os.chmod(feed.token_path(), 0o644)
         feed.save_token("tok_new")
         self.assertEqual(os.stat(feed.token_path()).st_mode & 0o777, 0o600)
-        self.assertEqual(open(feed.token_path()).read(), "tok_new\n")
+        self.assertEqual(open(feed.token_path(), encoding="utf-8").read(), "tok_new\n")
 
 
 class FeedCannotLowerARating(FeedHome):
@@ -219,7 +223,7 @@ class FeedCannotLowerARating(FeedHome):
     def test_a_rejected_cache_falls_back_to_the_bundle(self):
         doc = _doc({"google": {self.SCOPE: _entry(authority="admin")}})
         os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
-        with open(feed.feed_path(), "w") as fh:
+        with open(feed.feed_path(), "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         catalog.reset_feed_cache()
         self.assertEqual(catalog.lookup("google", self.SCOPE)["authority"],
@@ -346,7 +350,7 @@ class AMalformedCacheIsNoFeed(FeedHome):
 
     def _write(self, doc):
         os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
-        with open(feed.feed_path(), "w") as fh:
+        with open(feed.feed_path(), "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         catalog.reset_feed_cache()
 
@@ -389,7 +393,7 @@ class AMalformedCacheIsNoFeed(FeedHome):
 
     def test_a_cache_nested_past_the_recursion_limit_is_no_feed(self):
         os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
-        with open(feed.feed_path(), "w") as fh:
+        with open(feed.feed_path(), "w", encoding="utf-8") as fh:
             fh.write("[" * 100000)
         self.assertIsNone(feed.load())
 

@@ -18,12 +18,12 @@ def live():
 class SiteMatchesCatalogue(unittest.TestCase):
     def test_about_page_counts_are_current(self):
         n_prov, n_scopes = live()
-        text = (SITE / "about.html").read_text()
+        text = (SITE / "about.html").read_text(encoding="utf-8")
         self.assertIn("%d providers and %d permissions" % (n_prov, n_scopes), text,
                       "about.html coverage numbers are stale")
 
     def test_about_page_lists_every_provider(self):
-        text = (SITE / "about.html").read_text()
+        text = (SITE / "about.html").read_text(encoding="utf-8")
         display = {
             "google": "Google Workspace", "github": "GitHub", "gitlab": "GitLab",
             "microsoft": "Microsoft 365", "slack": "Slack", "discord": "Discord",
@@ -42,7 +42,7 @@ class SiteMatchesCatalogue(unittest.TestCase):
 
     def test_pricing_does_not_understate_provider_count(self):
         n_prov, _ = live()
-        text = (SITE / "pricing.html").read_text()
+        text = (SITE / "pricing.html").read_text(encoding="utf-8")
         self.assertNotIn("all five providers", text)
         self.assertIn("twelve providers" if n_prov == 12 else str(n_prov), text)
 
@@ -52,7 +52,8 @@ class NoEmDashes(unittest.TestCase):
 
     def test_no_page_contains_an_em_dash(self):
         for page in sorted(SITE.glob("*.html")):
-            self.assertNotIn("—", page.read_text(), "%s has an em dash" % page.name)
+            self.assertNotIn("—", page.read_text(encoding="utf-8"),
+                             "%s has an em dash" % page.name)
 
 
 
@@ -67,7 +68,8 @@ class ExampleReportIsCurrent(unittest.TestCase):
             "example_report", SITE.parent / "scripts" / "example_report.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        self.assertEqual((SITE / "example-report.html").read_text(), mod.build(),
+        self.assertEqual((SITE / "example-report.html").read_text(encoding="utf-8"),
+                         mod.build(),
                          "site/example-report.html is stale: "
                          "run python3 scripts/example_report.py")
 
@@ -83,7 +85,7 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
 
     def test_no_page_loads_x_directly(self):
         for page in self.PAGES:
-            text = page.read_text()
+            text = page.read_text(encoding="utf-8")
             for host in self.X_HOSTS:
                 self.assertNotIn(host, text.replace("static.ads-twitter.com</span>", ""),
                                  "%s references %s outside consent.js" % (page.name, host))
@@ -92,14 +94,14 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         # Pages with the site footer. The example report is a standalone
         # document the tool writes, and loads nothing from X at all.
         for page in self.PAGES:
-            text = page.read_text()
+            text = page.read_text(encoding="utf-8")
             if 'class="fbase"' not in text:
                 continue
             self.assertIn('src="/consent.js', text, page.name)
             self.assertIn("data-consent-open", text, page.name)
 
     def test_pixel_loads_only_from_the_consent_path(self):
-        js = (SITE / "consent.js").read_text()
+        js = (SITE / "consent.js").read_text(encoding="utf-8")
         self.assertEqual(js.count("https://static.ads-twitter.com/uwt.js"), 1)
         calls = re.findall(r"(?<![\w.])load\(\);", js)
         self.assertEqual(len(calls), 2, "load() should be reachable only from "
@@ -109,20 +111,21 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         self.assertIn("globalPrivacyControl", js)
 
     def test_csp_allows_the_pixel_and_nothing_broader(self):
-        csp = next(l for l in (SITE / "_headers").read_text().splitlines()
+        headers = (SITE / "_headers").read_text(encoding="utf-8")
+        csp = next(l for l in headers.splitlines()
                    if "Content-Security-Policy" in l)
         self.assertIn("https://static.ads-twitter.com", csp)
         self.assertNotIn("*", csp.replace("/*", ""), "no wildcard hosts")
 
     def test_privacy_page_describes_it(self):
-        text = (SITE / "privacy.html").read_text()
+        text = (SITE / "privacy.html").read_text(encoding="utf-8")
         self.assertIn('id="ads"', text)
         self.assertIn("Global Privacy Control", text)
         for stale in ("GitHub Pages", "no backend", "no tracking pixels"):
             self.assertNotIn(stale, text)
 
     def test_server_never_sends_x_the_message_or_address(self):
-        src = (SITE.parent / "worker" / "src" / "index.js").read_text()
+        src = (SITE.parent / "worker" / "src" / "index.js").read_text(encoding="utf-8")
         body = src[src.index("async function reportLead"):src.index("async function handleContact")]
         self.assertIn("form.measure !== true", body)
         for field in ("form.message", "form.email", "replyTo", "hashed_email"):
