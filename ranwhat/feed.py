@@ -177,12 +177,19 @@ def fetch(token, url=None, timeout=TIMEOUT):
 
 def validate(doc):
     """Reject anything malformed before it can reach a report."""
+    # Every check is on type before value. A list or object where a string
+    # belongs is valid JSON, and a membership test on it raises TypeError,
+    # which neither `update` nor load() would have caught.
     if not isinstance(doc, dict):
         raise FeedError("Feed payload is not an object.")
-    if doc.get("schema") != SCHEMA:
+    schema = doc.get("schema")
+    # isinstance, not only ==: true == 1 in Python.
+    if not _is_int(schema) or schema != SCHEMA:
         raise FeedError(
             "This feed needs ranwhat with schema %s support; got %r. Upgrade "
-            "with: uvx ranwhat" % (SCHEMA, doc.get("schema")))
+            "with: uvx ranwhat" % (SCHEMA, schema))
+    if doc.get("version") is not None and not isinstance(doc["version"], str):
+        raise FeedError("Feed version is not text.")
     catalogue = doc.get("catalogue")
     if not isinstance(catalogue, dict) or not catalogue:
         raise FeedError("Feed contains no catalogue.")
@@ -196,6 +203,10 @@ def validate(doc):
                 if field not in entry:
                     raise FeedError(
                         "Scope %r/%r is missing %r." % (provider, scope, field))
+            for field in ("label", "authority", "blast", "why"):
+                if not isinstance(entry[field], str):
+                    raise FeedError("Scope %r/%r has a non-text %s." % (
+                        provider, scope, field))
             # Checked here, not trusted later: an authority the scorer has no
             # cost for raised KeyError in every scan until the cache was
             # deleted, and a string "false" is truthy.
@@ -208,14 +219,27 @@ def validate(doc):
             if not isinstance(entry["reversible"], bool):
                 raise FeedError("Scope %r/%r has a non-boolean reversible." % (
                     provider, scope))
-            for field in ("label", "why"):
-                if not isinstance(entry[field], str):
-                    raise FeedError("Scope %r/%r has a non-text %s." % (
-                        provider, scope, field))
+    # Absent is allowed. Present is checked, whatever it is: a truth test let
+    # 0, [] or {} skip the comparison.
     stated = doc.get("digest")
-    if stated and stated != digest(catalogue):
+    if stated is not None and stated != digest(catalogue):
         raise FeedError("Feed digest does not match its catalogue.")
     return doc
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _check_fetched_at(value):
+    """save() writes an int. `update --status` hands it to time.localtime,
+    which raises on anything else, and on a number past the platform's range."""
+    if not (_is_int(value) or isinstance(value, float)):
+        raise FeedError("The cached feed has no fetch time.")
+    try:
+        time.localtime(value)
+    except (OverflowError, OSError, ValueError):
+        raise FeedError("The cached feed's fetch time is out of range.")
 
 
 def save(doc):
@@ -232,12 +256,20 @@ def save(doc):
 
 
 def load():
-    """Return the cached feed, or None. Never raises, never touches the network."""
+    """Return the cached feed, or None. Never raises, never touches the network.
+
+    The cache is no more trusted than the network: anything running as this
+    user can write it. So a cache that is not what save() writes, down to the
+    type of every field, is no feed rather than an error.
+    """
     try:
         with open(feed_path()) as fh:
-            doc = json.load(fh)
-        return validate(doc)
-    except (OSError, ValueError, FeedError):
+            doc = validate(json.load(fh))
+        _check_fetched_at(doc.get("fetched_at"))
+        return doc
+    # RecursionError: json gives up on nesting deeper than the stack, and a
+    # cache of a hundred thousand "[" is still a file anyone could write.
+    except (OSError, ValueError, RecursionError, FeedError):
         return None
 
 

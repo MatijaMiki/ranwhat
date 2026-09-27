@@ -1,13 +1,15 @@
 """The feed must not be able to break the three things the tool promises:
 that it works offline, that it sends nothing, and that a bad payload can
 never reach a report."""
+import contextlib
+import io
 import json
 import os
 import shutil
 import tempfile
 import unittest
 
-from ranwhat import catalog, feed, score
+from ranwhat import catalog, cli, feed, score
 
 
 def _entry(label="X", authority="write", reversible=False,
@@ -296,6 +298,110 @@ class FeedCannotLowerABlast(FeedHome):
                 counted = 2 if ba["monetary"] else 1 if ba["dimensions"] else 0
                 self.assertEqual(catalog.blast_weight(authority, blast),
                                  counted, (authority, blast))
+
+
+class AMalformedCacheIsNoFeed(FeedHome):
+    """The cache is as untrusted as the network: anything running as this
+    user, the agents being audited included, can write ~/.ranwhat. Valid JSON
+    with the wrong type in any field must read as no feed, never as a
+    traceback from `update --status` or from a scan."""
+
+    WRONG = (None, True, 0, 1.5, "text", [], ["x"], {}, {"k": "v"})
+
+    # Every field, and the values from WRONG that are right there.
+    PATHS = {
+        (): (),
+        ("schema",): (),
+        ("version",): (None, "text"),
+        ("digest",): (None,),
+        ("fetched_at",): (0, 1.5),
+        ("catalogue",): (),
+        ("catalogue", "acme"): ({},),
+        ("catalogue", "acme", "acme:x"): (),
+        ("catalogue", "acme", "acme:x", "label"): ("text",),
+        ("catalogue", "acme", "acme:x", "authority"): (),
+        ("catalogue", "acme", "acme:x", "reversible"): (True,),
+        ("catalogue", "acme", "acme:x", "blast"): (),
+        ("catalogue", "acme", "acme:x", "why"): ("text",),
+    }
+
+    # Numbers the status line cannot turn into a date.
+    UNPRINTABLE = (10 ** 30, float("inf"), float("nan"))
+
+    def _valid(self):
+        return dict(_doc({"acme": {"acme:x": _entry()}}), fetched_at=1790000000)
+
+    def _put(self, path, value):
+        doc = self._valid()
+        if not path:
+            return value
+        target = doc
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        if path[0] == "catalogue":
+            # Recomputed, so the only thing wrong is the type under test.
+            doc["digest"] = feed.digest(doc["catalogue"])
+        return doc
+
+    def _write(self, doc):
+        os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
+        with open(feed.feed_path(), "w") as fh:
+            json.dump(doc, fh)
+        catalog.reset_feed_cache()
+
+    @staticmethod
+    def _same(a, b):
+        return type(a) is type(b) and a == b
+
+    def test_the_unmodified_cache_is_active(self):
+        """Or every case below would pass for the wrong reason."""
+        self._write(self._valid())
+        self.assertIsNotNone(feed.load())
+        self.assertTrue(feed.status()["active"])
+        self.assertTrue(catalog.lookup("acme", "acme:x")["known"])
+
+    def test_a_wrong_type_anywhere_means_no_feed(self):
+        for path, allowed in self.PATHS.items():
+            wrong = [v for v in self.WRONG
+                     if not any(self._same(v, a) for a in allowed)]
+            if path == ("fetched_at",):
+                wrong += self.UNPRINTABLE
+            for value in wrong:
+                with self.subTest(path=path, value=value):
+                    doc = self._put(path, value)
+                    self._write(doc)
+                    self.assertIsNone(feed.load())
+                    self.assertEqual(feed.status(), {"active": False})
+                    self.assertFalse(catalog.lookup("acme", "acme:x")["known"])
+                    if path != ("fetched_at",):
+                        # the same check guards a payload from the server,
+                        # where a TypeError would escape `update` as a traceback
+                        with self.assertRaises(feed.FeedError):
+                            feed.validate(doc)
+
+    def test_the_allowed_values_really_are_allowed(self):
+        for path, allowed in self.PATHS.items():
+            for value in allowed:
+                with self.subTest(path=path, value=value):
+                    self._write(self._put(path, value))
+                    self.assertTrue(feed.status()["active"])
+
+    def test_a_cache_nested_past_the_recursion_limit_is_no_feed(self):
+        os.makedirs(os.path.dirname(feed.feed_path()), exist_ok=True)
+        with open(feed.feed_path(), "w") as fh:
+            fh.write("[" * 100000)
+        self.assertIsNone(feed.load())
+
+    def test_update_status_says_no_feed_instead_of_crashing(self):
+        self._write(self._put(
+            ("catalogue", "acme", "acme:x", "authority"), ["write"]))
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(["update", "--status"])
+        self.assertEqual(rc, 0)
+        self.assertIn("No feed cached", out.getvalue())
+        self.assertEqual(err.getvalue(), "")
 
 
 class TheTokenOnlyTravelsOverTLS(unittest.TestCase):
