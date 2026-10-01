@@ -842,5 +842,24 @@ class GuidesHangTogether(unittest.TestCase):
                              page.name)
 
 
+class ThemeSwitch(unittest.TestCase):
+    """Every page in the site chrome offers the light/dark switch, and loads
+    theme.js in <head> without defer so a saved choice paints first."""
+
+    def test_every_page_has_the_switch_and_loads_it_early(self):
+        for page in sorted(SITE.rglob("*.html")):
+            text = page.read_text(encoding="utf-8")
+            if 'class="shell nav"' not in text:
+                continue
+            head = text.split("</head>", 1)[0]
+            self.assertRegex(head, r'<script src="/theme\.js[^"]*"></script>', page.name)
+            self.assertNotRegex(head, r'<script src="/theme\.js[^"]*" (defer|async)', page.name)
+            self.assertIn("data-theme-toggle", text, page.name)
+
+    def test_switch_sits_before_github(self):
+        text = (SITE / "index.html").read_text(encoding="utf-8")
+        self.assertLess(text.index("data-theme-toggle"), text.index('class="ghost"'))
+
+
 if __name__ == "__main__":
     unittest.main()

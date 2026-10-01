@@ -7,7 +7,7 @@
 # build. Keep it here rather than inline in either, so the two cannot drift.
 set -euo pipefail
 
-for asset in styles.css copy.js contact.js consent.js; do
+for asset in styles.css copy.js contact.js consent.js theme.js; do
   [ -f "site/$asset" ] || continue
   hash=$(sha256sum "site/$asset" | cut -c1-10)
   grep -rlF "/$asset\"" site --include='*.html' \

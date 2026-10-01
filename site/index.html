@@ -32,6 +32,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
 <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://ranwhat.com/#website","name":"ranwhat","url":"https://ranwhat.com/","publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"Organization","@id":"https://ranwhat.com/#org","name":"ranwhat","url":"https://ranwhat.com/","logo":{"@type":"ImageObject","url":"https://ranwhat.com/icon-512.png","width":512,"height":512},"sameAs":["https://github.com/MatijaMiki/ranwhat","https://pypi.org/project/ranwhat/","https://x.com/ranwhatcom"],"founder":{"@id":"https://ranwhat.com/about#matija","@type":"Person","name":"Matija Mikulinec"}},{"@type":"SoftwareApplication","@id":"https://ranwhat.com/#app","name":"ranwhat","applicationCategory":"DeveloperApplication","applicationSubCategory":"Security","operatingSystem":"macOS, Linux","url":"https://ranwhat.com/","installUrl":"https://ranwhat.com/install","downloadUrl":"https://pypi.org/project/ranwhat/","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"description":"ranwhat is an open-source command-line tool for AI coding agent security. It reads the transcripts Claude Code writes to disk, reports the risky actions in them, finds credentials left in those transcripts, and scores the authority of an agent's credentials.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@id":"https://ranwhat.com/#org"},"publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"SoftwareSourceCode","codeRepository":"https://github.com/MatijaMiki/ranwhat","programmingLanguage":"Python","license":"https://opensource.org/licenses/MIT","targetProduct":{"@id":"https://ranwhat.com/#app"}}]}</script>
 </head>
 <body>
@@ -47,6 +48,10 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>

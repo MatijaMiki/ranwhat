@@ -233,7 +233,8 @@ header{
    full row of their own: two rows instead of three. */
 @media(max-width:760px){
   .nav{flex-wrap:wrap;height:auto;padding-block:10px;gap:10px 16px}
-  .nav > .ghost{order:2;margin-left:auto}
+  .nav > .ghost{order:2;margin-left:0}
+  .nav > .theme{order:2;margin-left:auto}
   .nav nav{order:3;width:100%;margin-left:0;flex-wrap:wrap;gap:10px 18px}
   .nav nav a{font-size:14px}
 }
@@ -579,3 +580,21 @@ ul.follow a span{color:var(--muted);font-size:13px;font-weight:400;
 @media(max-width:520px){.consent{left:12px;right:12px;bottom:12px;max-width:none}}
 .fbase .choices{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .fbase .choices:hover{color:var(--ink)}
+
+/* ---------- theme switch ---------- */
+/* Sits just before GitHub. The moon shows in light mode (switch to dark),
+   the sun in dark mode, whether dark came from the system or a choice. */
+.theme{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;
+  padding:0;margin-right:-12px;border:1px solid var(--rule);background:transparent;
+  color:var(--muted);cursor:pointer}
+.theme:hover{color:var(--ink);border-color:var(--ink)}
+.theme:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.theme svg{display:block}
+.theme .icon-sun{display:none}
+:root[data-theme="dark"] .theme .icon-sun{display:block}
+:root[data-theme="dark"] .theme .icon-moon{display:none}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .theme .icon-sun{display:block}
+  :root:not([data-theme="light"]) .theme .icon-moon{display:none}
+}
+@media(max-width:760px){ .theme{margin-right:0} }
