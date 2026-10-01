@@ -32,7 +32,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Where Claude Code keeps your conversation history","description":"Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.","datePublished":"2026-09-27","dateModified":"2026-09-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Where Claude Code keeps your conversation history","description":"Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
 </head>
 <body>
 <header>
@@ -70,7 +70,7 @@
       </div>
     </div>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code documentation, <time datetime="2026-09-27">27 September 2026</time>.
+      Checked against the Claude Code documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -238,7 +238,7 @@ grep -rlsF 'first-8-chars' ~/.claude/projects ~/.claude/history.jsonl \
         <div class="row"><span class="k">Never swept</span>
           <span class="v"><span class="icode">history.jsonl</span> and <span class="icode">stats-cache.json</span> stay until you delete them, so every prompt you have typed, in every project, is still there.</span></div>
         <div class="row"><span class="k">Desktop</span>
-          <span class="v">Transcripts of sessions you started or last continued in Claude Desktop or Cowork are kept at any age, unless you set <span class="icode">desktopSessionCleanupPeriodDays</span> in user or managed settings. Each is then deleted once it is older than both limits. Claude Code v2.1.248 or later; earlier versions delete them after <span class="icode">cleanupPeriodDays</span>.</span></div>
+          <span class="v">Transcripts of sessions you started or last continued in Claude Desktop or Cowork are kept at any age, unless you set <span class="icode">desktopSessionCleanupPeriodDays</span> in user or managed settings, or in a file passed with <span class="icode">--settings</span>. Each is then deleted once it is older than both limits. If managed settings set <span class="icode">cleanupPeriodDays</span>, that period applies to them instead. Claude Code v2.1.248 or later; earlier versions delete them after <span class="icode">cleanupPeriodDays</span>.</span></div>
         <div class="row"><span class="k">Paused</span>
           <span class="v">If Claude Code cannot work out the retention period, it pauses the sweep rather than guess. A settings file that cannot be read or parsed is one cause, and shows a warning in <span class="icode">/status</span>. Runs with <span class="icode">claude -p --bare</span> skip the sweep.</span></div>
       </div>
@@ -366,11 +366,11 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
         <div class="row"><span class="k">Reads</span>
           <span class="v">Only the top-level session files, <span class="icode">~/.claude/projects/*/*.jsonl</span>. Not <span class="icode">subagents/</span>, <span class="icode">tool-results/</span>, <span class="icode">file-history/</span>, <span class="icode">paste-cache/</span> or <span class="icode">history.jsonl</span>. The <span class="icode">grep</span> above covers those.</span></div>
         <div class="row"><span class="k">Window</span>
-          <span class="v"><span class="icode">--days</span>, default 30, by file modification time. That matches Claude Code's default retention. If you raised <span class="icode">cleanupPeriodDays</span> or keep Desktop sessions, widen it: <span class="icode">ranwhat check --days 365</span>.</span></div>
+          <span class="v"><span class="icode">--days</span>, default 30. A transcript is read if it was written to inside the window, and the watch half then keeps only the actions that happened inside it. That matches Claude Code's default retention. If you raised <span class="icode">cleanupPeriodDays</span> or keep Desktop sessions, widen it: <span class="icode">ranwhat check --days 365</span>.</span></div>
         <div class="row"><span class="k">Moved config</span>
-          <span class="v">It does not read <span class="icode">CLAUDE_CONFIG_DIR</span>. Pass <span class="icode">--root "$CLAUDE_CONFIG_DIR/projects"</span>.</span></div>
+          <span class="v">When <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead. <span class="icode">--root PATH</span> reads any other directory.</span></div>
         <div class="row"><span class="k">Zero</span>
-          <span class="v"><strong>Check the counts in the report.</strong> <span class="icode">0 transcript(s) scanned</span>, or <span class="icode">0 source(s)</span> from the watch half, means it read nothing. That is not a clean machine: check the directory and the window.</span></div>
+          <span class="v"><strong>Read the top of the report.</strong> A run that reads nothing says that nothing was checked, rather than that nothing was found. That is not a clean machine: check the directory and the window.</span></div>
       </div>
       <p style="margin-top:26px;font-size:14.5px;color:var(--muted)">
         To stop the values reaching a transcript in the first place, see

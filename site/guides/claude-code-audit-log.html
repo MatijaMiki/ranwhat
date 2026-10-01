@@ -32,7 +32,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"A Claude Code audit log from what is already on disk","description":"By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit log, add a hook or OpenTelemetry for the future, and know the gaps.","datePublished":"2026-09-27","dateModified":"2026-10-01","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code audit log","item":"https://ranwhat.com/guides/claude-code-audit-log"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"A Claude Code audit log from what is already on disk","description":"By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit log, add a hook or OpenTelemetry for the future, and know the gaps.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code audit log","item":"https://ranwhat.com/guides/claude-code-audit-log"}]}]}</script>
 </head>
 <body>
 <header>
@@ -62,8 +62,8 @@
       wrote down: every tool call from the last 30 days, by default.
     </p>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
-      Checked against Claude Code's documentation and ranwhat's source on
-      <time datetime="2026-10-01">1 October 2026</time>.
+      Checked against Claude Code's documentation and ranwhat's source.
+      Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -146,9 +146,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        <span class="icode">uvx</span> runs it without installing it. It reads
-        OpenClaw's database as well when one exists;
-        <span class="icode">--source claude-code</span> limits it to Claude Code.
+        <span class="icode">uvx</span> runs it without installing it.
         <span class="icode">--days 90</span> finds more only if
         <span class="icode">cleanupPeriodDays</span> was already above 30, or
         for sessions started or last continued in Claude Desktop or Cowork,
@@ -160,7 +158,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <thead><tr><th>Rule</th><th>Severity</th><th>For example</th></tr></thead>
         <tbody>
           <tr><td><strong>Credential access</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>cat ~/.aws/credentials</code>, Read on <code>.env</code></td></tr>
-          <tr><td><strong>Secret-shaped string in a command</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>sk_live_…</code> <code>ghp_…</code> <code>AKIA…</code></td></tr>
+          <tr><td><strong>Secret-shaped string in a tool call</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>sk_live_…</code> <code>ghp_…</code> <code>AKIA…</code></td></tr>
           <tr><td><strong>Package or release published</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>npm publish</code> <code>twine upload</code> <code>docker push</code></td></tr>
           <tr><td><strong>Cloud resource destroyed or modified</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>terraform destroy</code> <code>kubectl delete</code> <code>aws iam attach-…</code></td></tr>
           <tr><td><strong>Financial API called</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example">Stripe charges, refunds, transfers or payouts</td></tr>
@@ -211,11 +209,11 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <div class="row"><span class="k">Once each</span>
           <span class="v">A call replayed by a resumed session is reported once, not once per transcript that carries it.</span></div>
         <div class="row"><span class="k">Not actions</span>
-          <span class="v"><span class="icode">grep "rm -rf" src/</span> and other searches, <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies, <span class="icode">python -c</span> and <span class="icode">node -e</span> payloads, comments, and <span class="icode">git rm --cached</span>. A <span class="icode">bash -c</span> payload is parsed, because it really is shell. A secret-shaped string in a shell command is the exception: it is reported in <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies and <span class="icode">-c</span> or <span class="icode">-e</span> payloads too, because it is in the transcript either way.</span></div>
+          <span class="v"><span class="icode">grep "rm -rf" src/</span> and other searches, <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies, <span class="icode">python -c</span> and <span class="icode">node -e</span> payloads, comments, and <span class="icode">git rm --cached</span>. A <span class="icode">bash -c</span> payload is parsed, because it really is shell. A secret-shaped string is the exception: it is reported wherever it appeared verbatim in a tool call, including <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies, <span class="icode">-c</span> or <span class="icode">-e</span> payloads and search patterns, because it is in the transcript either way.</span></div>
         <div class="row"><span class="k">Moved config</span>
-          <span class="v">ranwhat does not read <span class="icode">CLAUDE_CONFIG_DIR</span>. Pass <span class="icode">--root "$CLAUDE_CONFIG_DIR/projects"</span>.</span></div>
-        <div class="row"><span class="k">0 source(s)</span>
-          <span class="v">The report's header counts the files it read. If it says <span class="icode">0 source(s)</span>, it read nothing, which almost always means the wrong directory, not a clean history.</span></div>
+          <span class="v">When <span class="icode">CLAUDE_CONFIG_DIR</span> is set, ranwhat reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead. <span class="icode">--root PATH</span> reads any other directory.</span></div>
+        <div class="row"><span class="k">Nothing read</span>
+          <span class="v">The report's header counts the transcripts it read. A run that reads nothing says that nothing was checked, rather than that nothing was found. That almost always means the wrong directory or too short a window, not a clean history.</span></div>
         <div class="row"><span class="k">Not read yet</span>
           <span class="v">Subagent transcripts in <span class="icode">&lt;session&gt;/subagents/</span>, the spilled outputs in <span class="icode">&lt;session&gt;/tool-results/</span>, and <span class="icode">history.jsonl</span>.</span></div>
         <div class="row"><span class="k">Call, not result</span>

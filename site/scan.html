@@ -131,7 +131,8 @@
       <div class="term">
         <div class="term-body"><pre>ranwhat demo                                  <span class="c-mut">the bundled example, no setup</span>
 ranwhat scan profile.json --html report.html  <span class="c-mut">score a profile, write a report</span>
-export RANWHAT_GITHUB_TOKEN=ghp_...
+read -rs RANWHAT_GITHUB_TOKEN                 <span class="c-mut">paste it: not echoed, not saved to history</span>
+export RANWHAT_GITHUB_TOKEN
 ranwhat live                                  <span class="c-mut">ask each provider, read-only</span>
 ranwhat scan profile.json --pull-usage        <span class="c-mut">which grants were used</span></pre></div>
       </div>

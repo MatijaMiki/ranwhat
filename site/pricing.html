@@ -93,7 +93,7 @@
           <li>Everything in Free</li>
           <li><strong>A current capability catalogue</strong>, pulled as
               providers add scopes, rather than whatever shipped with your
-              version</li>
+              version. In development, and not available yet.</li>
           <li><strong>One view across every machine and CI runner</strong>,
               instead of a report per laptop</li>
           <li>13-month retention, kept by us rather than by your backups</li>
@@ -137,10 +137,12 @@
         only thing this product really sells is being believed.
       </p>
       <p style="color:var(--muted);font-size:15px">
-        On a real machine the first build reported fifteen findings. Eleven were
-        deletions of build and temp directories: all true, none worth reading.
-        Fixing that cut the report to four. Under per-finding pricing that fix
-        would have cost us money, which is exactly why the meter isn't there.
+        The first watch build flagged six findings on real history, and three
+        were false positives. A later release reported fifteen findings on one
+        machine's 90-day history. Eleven were deletions of build and temp
+        directories: all true, none worth reading. It reports four now. Under
+        per-finding pricing both fixes would have cost us money, which is
+        exactly why the meter isn't there.
       </p>
       <p style="color:var(--muted);font-size:15px">
         Nothing is held back from the free tier to make the paid ones look
@@ -196,11 +198,13 @@
       <div class="note" style="margin-top:22px">
         <h3>Honest status</h3>
         <p>Free ships today and is what the GitHub repository contains. Plus
-           and Team are being built. The catalogue feed, the cross-machine
-           collector, the retention store and the hash-chained records are not
-           written yet; everything listed under Free is, and you can read it
-           on GitHub today. The CLI already has an update command for that
-           feed; it has nothing to fetch until Plus launches. These prices are
+           and Team are being built. The Plus catalogue feed is in development
+           and not available yet: <span class="icode">ranwhat update</span> is
+           in the CLI, but <span class="icode">feed.ranwhat.com</span>, which
+           it fetches from, is not live. The cross-machine collector, the
+           retention store and the hash-chained records are not written yet.
+           Everything listed under Free is, and you can read it on GitHub
+           today. These prices are
            what the paid tiers will launch at. If you want either now, you'd
            be an early customer shaping them, and you should expect to be
            treated like one.</p>

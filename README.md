@@ -1,7 +1,7 @@
 # ranwhat
 
 **A flight recorder for AI agents, and a scanner for the authority they hold.**
-AI coding agent security for Claude Code and OpenClaw, run on your own machine.
+AI coding agent security for Claude Code, run on your own machine.
 No account, no telemetry, no dependencies.
 
 Website and docs: https://ranwhat.com
@@ -15,7 +15,7 @@ $ ranwhat watch --days 90
 
   ranwhat watch  · local agent flight recorder
   --------------------------------------------------------------
-  4 source(s) over 90 days
+  4 transcript(s) scanned, last 90 days
 
   1 critical  3 high
 
@@ -64,14 +64,14 @@ Python 3.9+. No dependencies, and nothing is built on your machine.
 
 Runs watch and clean together and changes nothing.
 
-### `ranwhat watch`: audit what Claude Code and OpenClaw ran
+### `ranwhat watch`: audit what Claude Code ran
 
-Reads transcripts your agents already wrote to disk. No wrapper, no proxy,
-nothing in your critical path.
+Reads what Claude Code already wrote to disk. No wrapper, no proxy, nothing in
+your critical path.
 
 | Source | Location | Format |
 |---|---|---|
-| Claude Code | `~/.claude/projects/*/*.jsonl` | JSONL |
+| Claude Code | `~/.claude/projects/*/*.jsonl`, or `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
 | OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite` | SQLite |
 
 Nine rules: credential access, secret-shaped strings in tool calls, package
@@ -80,7 +80,7 @@ destructive git, recursive deletion, and local files uploaded with curl.
 
 ```bash
 ranwhat watch --days 30
-ranwhat watch --source openclaw
+ranwhat watch --source claude-code
 ranwhat watch --json
 ```
 
@@ -147,10 +147,12 @@ own tool calls is indistinguishable from the worst case.
 ranwhat demo                                # see it on a worked example
 ranwhat scan profile.json --html report.html
 
-export RANWHAT_GITHUB_TOKEN="ghp_..."
+read -rs RANWHAT_GITHUB_TOKEN                # paste it: not echoed, not saved to history
+export RANWHAT_GITHUB_TOKEN
 ranwhat live                                # read-only introspection
 
-export RANWHAT_STRIPE_TOKEN="rk_live_..."
+read -rs RANWHAT_STRIPE_TOKEN
+export RANWHAT_STRIPE_TOKEN
 ranwhat scan profile.json --pull-usage
 ```
 
@@ -185,10 +187,13 @@ recurses into it. And severity follows the **target**, not the verb:
 `rm -rf /tmp/x` is silent, `rm -rf ~/Documents` is high, `rm -rf /` is
 critical.
 
-Every row above came from running the tool against a real machine and finding
-it wrong. On that machine's 90-day history the first build reported 15
-findings, and 11 were true deletions of build and temp directories that nobody
-would want to read. It reports 4 now, and all four are real.
+The grep, Python, heredoc and build rows came from running the tool on real
+history and finding it wrong; the others came from probing a released build.
+The first watch build flagged 6 findings, and 3 were false positives: a grep
+for `rm -rf`, the same string inside a Python one-liner, and a heredoc being
+written to a file. A later release reported 15 findings on one machine's
+90-day history, and 11 were true deletions of build and temp directories that
+nobody would want to read. It reports 4 now, and all four are real.
 
 ## Handling credentials
 
@@ -197,12 +202,14 @@ readable by every user on the machine through the process table, and is written
 to your shell history.
 
 ```bash
-export RANWHAT_STRIPE_TOKEN="rk_live_..."
+read -rs RANWHAT_STRIPE_TOKEN       # paste it: not echoed, not saved to history
+export RANWHAT_STRIPE_TOKEN
 ranwhat scan profile.json --pull-usage
 ```
 
-`export` it first, because `VAR=x ranwhat ...` on one line still puts the value in
-that shell's own command line. `--stripe env:MY_VAR` and `--stripe -` (read one
+Read it in and `export` it first, because `VAR=x ranwhat ...` on one line still
+puts the value in that shell's own command line, and a typed `export VAR=x`
+puts it in your shell history. `--stripe env:MY_VAR` and `--stripe -` (read one
 line from stdin) also work. Passing a token as a flag value still works and
 prints a warning saying why it shouldn't.
 
@@ -225,12 +232,16 @@ locally and sends nothing.
 - Claude Code subagent transcripts (`<session>/subagents/`) and the large
   tool outputs Claude Code stores in `<session>/tool-results/`
 - `~/.claude/history.jsonl`
-- OpenClaw events stored compressed (`event_zstd`); and `--days` does not
-  apply to OpenClaw, whose whole stored history is read
-- Codex
+- Events the SQLite source stores compressed (`event_zstd`), and the cold
+  transcript archives in `agents/<agentId>/sessions/cold/` under the same
+  state directory, which
+  [its database layout](https://docs.openclaw.ai/reference/database-schemas/layout)
+  says also hold history
 
-`CLAUDE_CONFIG_DIR` is not read: pass `--root "$CLAUDE_CONFIG_DIR/projects"`
-and check the `source(s)` line. A run that read 0 sources has read nothing.
+When `CLAUDE_CONFIG_DIR` is set, transcripts are read from
+`$CLAUDE_CONFIG_DIR/projects`, and `--root PATH` reads any other directory. A
+run that reads nothing says that nothing was checked, rather than that nothing
+was found.
 
 ## Say what you don't know
 

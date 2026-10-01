@@ -1,6 +1,6 @@
 # ranwhat
 
-> ranwhat is an open-source command-line tool for AI coding agent security. It reads the transcripts Claude Code and OpenClaw write to disk and reports what the agents actually did: credential reads, destructive commands, package publishing and other risky actions. It finds credentials left in Claude Code transcripts and scores the authority of an agent's credentials. MIT licence, Python 3.9 or newer, no dependencies.
+> ranwhat is an open-source command-line tool for AI coding agent security. It reads the transcripts Claude Code writes to disk and reports what the agent actually did: credential reads, destructive commands, package publishing and other risky actions. It finds credentials left in those transcripts and scores the authority of an agent's credentials. MIT licence, Python 3.9 or newer, no dependencies.
 
 Run it without installing: `uvx ranwhat check`. Or install it: `pipx install ranwhat` or `pip install ranwhat`. No account is needed.
 
@@ -9,20 +9,20 @@ What goes online: `live` and `--pull-usage` ask only the provider that issued ea
 Commands:
 
 - `ranwhat check`: watch and clean in one read-only pass. It never changes anything.
-- `ranwhat watch`: nine rules over what agents ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, and local files uploaded with curl. Reads Claude Code (`~/.claude/projects/*/*.jsonl`) and OpenClaw (`$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite`, default `~/.openclaw`). `--json` prints one record per flagged call.
+- `ranwhat watch`: nine rules over what the agent ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, and local files uploaded with curl. `--json` prints one record per flagged call.
 - `ranwhat clean`: finds credentials in Claude Code transcripts, says what to rotate, and masks them only when asked (`--apply`, or `mask` in the review session). Backups go to `~/.ranwhat/backups`.
 - `ranwhat scan profile.json`: scores authority, observability and reversibility for the credentials an agent holds. `--html report.html` writes a report. `--pull-usage` checks which grants were used, against the provider's own audit trail.
 - `ranwhat live`: the same, from read-only token introspection. Pass tokens in the environment (`RANWHAT_GITHUB_TOKEN`, `RANWHAT_GOOGLE_TOKEN`, `RANWHAT_SLACK_TOKEN`, `RANWHAT_STRIPE_TOKEN`), not as flags.
 - `ranwhat demo`: an authority scan on a bundled example, with no setup.
 - `ranwhat update`: refreshes the capability catalogue. Needs a Plus subscription, and Plus is not available yet.
 
-`check`, `watch` and `clean` read the last 30 days of Claude Code history by default (`--days N`); OpenClaw's whole stored history is read. `--root PATH` points at a Claude Code transcript directory other than `~/.claude/projects`, for example after moving it with `CLAUDE_CONFIG_DIR`.
+`check`, `watch` and `clean` read Claude Code transcripts, `~/.claude/projects/*/*.jsonl` or `$CLAUDE_CONFIG_DIR/projects` when that is set, for the last 30 days by default (`--days N`). `--root PATH` reads another directory. `watch` and `check` also read OpenClaw's per-agent database, `$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite` (default `~/.openclaw`).
 
-Not read yet: Claude Code subagent transcripts (`<session>/subagents/`), large tool outputs Claude Code stores in `<session>/tool-results/`, and OpenClaw events stored compressed. Codex is not supported yet.
+Not read yet: Claude Code subagent transcripts (`<session>/subagents/`), large tool outputs Claude Code stores in `<session>/tool-results/`, `~/.claude/history.jsonl`, the events that database stores compressed, and the cold transcript archives in `agents/<agentId>/sessions/cold/` under the same state directory.
 
 ## Docs
 
-- [watch](https://ranwhat.com/watch): the nine rules, their severities, the false positives it suppresses, and supported agents
+- [watch](https://ranwhat.com/watch): the nine rules, their severities, the false positives it suppresses, and where it reads from
 - [clean](https://ranwhat.com/clean): how secrets are found, why masking is not remediation, and the review session
 - [scan](https://ranwhat.com/scan): the three scores, evidence states, and the providers the catalogue covers
 - [Install](https://ranwhat.com/install): uvx, pipx or pip, and what it reads and writes

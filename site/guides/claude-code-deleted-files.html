@@ -16,8 +16,8 @@
 <meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
-<meta property="article:published_time" content="2026-09-27">
-<meta property="article:modified_time" content="2026-09-27">
+<meta property="article:published_time" content="2026-10-02">
+<meta property="article:modified_time" content="2026-10-02">
 <meta property="og:url" content="https://ranwhat.com/guides/claude-code-deleted-files">
 <meta property="og:title" content="Claude Code deleted my files: what to do now | ranwhat">
 <meta property="og:description" content="Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.">
@@ -34,7 +34,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Claude Code deleted my files. What now?","description":"Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.","datePublished":"2026-09-27","dateModified":"2026-10-01","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-deleted-files"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Deleted files","item":"https://ranwhat.com/guides/claude-code-deleted-files"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Claude Code deleted my files. What now?","description":"Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-deleted-files"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Deleted files","item":"https://ranwhat.com/guides/claude-code-deleted-files"}]}]}</script>
 </head>
 <body>
 <header>
@@ -64,7 +64,7 @@
       soon: the transcript that records it is deleted after 30 days by default.
     </p>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code and Git documentation on <time datetime="2026-10-01">1 October 2026</time>.
+      Checked against the Claude Code and Git documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -212,7 +212,8 @@ git restore --source=HEAD~1 docs/guide.md   <span class="c-mut">from a commit</s
       <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
         <span class="icode">git restore .</span> brings back everything under
         the current directory, and also throws away unstaged edits to tracked
-        files there. Give <span class="icode">--source</span> a directory and it
+        files there. With <span class="icode">--source</span> and a directory,
+        as in <span class="icode">git restore --source=HEAD~1 docs/</span>, it
         does the same under that path, and also removes tracked files there
         that the commit did not have. Read <span class="icode">git status</span>
         first.

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ranwhat: AI agent security for Claude Code and OpenClaw</title>
-<meta name="description" content="Open-source AI coding agent security: see what Claude Code and OpenClaw ran, find secrets left in Claude Code transcripts, and score what agent tokens can do.">
+<title>ranwhat: AI coding agent security for Claude Code</title>
+<meta name="description" content="Open-source AI coding agent security: see what Claude Code ran, find secrets left in its transcripts, and score what agent tokens can do.">
 <link rel="canonical" href="https://ranwhat.com/">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -17,8 +17,8 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/">
-<meta property="og:title" content="ranwhat: AI agent security for Claude Code and OpenClaw">
-<meta property="og:description" content="Open-source AI coding agent security: see what Claude Code and OpenClaw ran, find secrets left in Claude Code transcripts, and score what agent tokens can do.">
+<meta property="og:title" content="ranwhat: AI coding agent security for Claude Code">
+<meta property="og:description" content="Open-source AI coding agent security: see what Claude Code ran, find secrets left in its transcripts, and score what agent tokens can do.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -26,13 +26,13 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="ranwhat: AI agent security for Claude Code and OpenClaw">
-<meta name="twitter:description" content="Open-source AI coding agent security: see what Claude Code and OpenClaw ran, find secrets left in Claude Code transcripts, and score what agent tokens can do.">
+<meta name="twitter:title" content="ranwhat: AI coding agent security for Claude Code">
+<meta name="twitter:description" content="Open-source AI coding agent security: see what Claude Code ran, find secrets left in its transcripts, and score what agent tokens can do.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://ranwhat.com/#website","name":"ranwhat","url":"https://ranwhat.com/","publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"Organization","@id":"https://ranwhat.com/#org","name":"ranwhat","url":"https://ranwhat.com/","logo":{"@type":"ImageObject","url":"https://ranwhat.com/icon-512.png","width":512,"height":512},"sameAs":["https://github.com/MatijaMiki/ranwhat","https://pypi.org/project/ranwhat/","https://x.com/ranwhatcom"]},{"@type":"SoftwareApplication","@id":"https://ranwhat.com/#app","name":"ranwhat","applicationCategory":"DeveloperApplication","applicationSubCategory":"Security","operatingSystem":"macOS, Linux","url":"https://ranwhat.com/","installUrl":"https://ranwhat.com/install","downloadUrl":"https://pypi.org/project/ranwhat/","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"description":"ranwhat is an open-source command-line tool for AI coding agent security. It reads the transcripts Claude Code and OpenClaw write to disk, reports the risky actions in them, finds credentials left in Claude Code transcripts, and scores the authority of an agent's credentials.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@id":"https://ranwhat.com/#org"},"publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"SoftwareSourceCode","codeRepository":"https://github.com/MatijaMiki/ranwhat","programmingLanguage":"Python","license":"https://opensource.org/licenses/MIT","targetProduct":{"@id":"https://ranwhat.com/#app"}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://ranwhat.com/#website","name":"ranwhat","url":"https://ranwhat.com/","publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"Organization","@id":"https://ranwhat.com/#org","name":"ranwhat","url":"https://ranwhat.com/","logo":{"@type":"ImageObject","url":"https://ranwhat.com/icon-512.png","width":512,"height":512},"sameAs":["https://github.com/MatijaMiki/ranwhat","https://pypi.org/project/ranwhat/","https://x.com/ranwhatcom"]},{"@type":"SoftwareApplication","@id":"https://ranwhat.com/#app","name":"ranwhat","applicationCategory":"DeveloperApplication","applicationSubCategory":"Security","operatingSystem":"macOS, Linux","url":"https://ranwhat.com/","installUrl":"https://ranwhat.com/install","downloadUrl":"https://pypi.org/project/ranwhat/","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"description":"ranwhat is an open-source command-line tool for AI coding agent security. It reads the transcripts Claude Code writes to disk, reports the risky actions in them, finds credentials left in those transcripts, and scores the authority of an agent's credentials.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@id":"https://ranwhat.com/#org"},"publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"SoftwareSourceCode","codeRepository":"https://github.com/MatijaMiki/ranwhat","programmingLanguage":"Python","license":"https://opensource.org/licenses/MIT","targetProduct":{"@id":"https://ranwhat.com/#app"}}]}</script>
 </head>
 <body>
 <header>
@@ -59,9 +59,9 @@
       <div>
         <h1>Find out what your AI agents actually did.</h1>
         <p class="lede">
-          Your coding agent has your shell, your keys and your repo. ranwhat
-          reads what it ran, surfaces the handful of actions worth knowing about,
-          and does it on your own machine.
+          Claude Code has your shell, your keys and your repo. ranwhat reads
+          what it ran, surfaces the handful of actions worth knowing about, and
+          does it on your own machine.
         </p>
         <div class="cmdrow">
           <div class="cmd">
@@ -74,18 +74,18 @@
       </div>
 
       <div class="term" aria-label="Example ranwhat output">
-        <div class="term-bar"><span>ranwhat watch</span><span style="margin-left:auto">4 sources · 30 days</span></div>
-        <div class="term-body"><pre><span class="c-crit c-b">1 critical</span>  <span class="c-warn c-b">4 high</span>
+        <div class="term-bar"><span>ranwhat watch</span><span style="margin-left:auto">4 transcripts · 30 days</span></div>
+        <div class="term-body"><pre><span class="c-crit c-b">2 critical</span>  <span class="c-warn c-b">3 high</span>
 
 <span class="c-crit">*</span> <span class="c-b">Credential material accessed</span>   <span class="c-mut">18:13  Bash</span>
     <span class="c-mut">cat ~/.ssh/id_rsa</span>
     <span class="c-mut">-> Whatever it read is now in a model
        context you do not control.</span>
 
-<span class="c-warn">*</span> <span class="c-b">Bulk or recursive deletion</span>      <span class="c-mut">15:13  Bash</span>
+<span class="c-warn">*</span> <span class="c-b">Bulk or recursive deletion</span>     <span class="c-mut">15:13  Bash</span>
     <span class="c-mut">rm -rf .frames ; printf 'node_mod…</span>
 
-<span class="c-warn">*</span> <span class="c-b">Package published</span>               <span class="c-mut">14:58  Bash</span>
+<span class="c-crit">*</span> <span class="c-b">Package or release published</span>   <span class="c-mut">14:58  Bash</span>
     <span class="c-mut">npm publish --access public</span>
 
 <span class="c-mut">────────────────────────────────────────</span>
@@ -102,10 +102,8 @@
       <p class="lede">
         ranwhat is an open-source command-line tool for
         <a href="/guides/ai-coding-agent-security">AI coding agent
-        security</a>. It reads the transcripts Claude Code and OpenClaw write to
-        disk, reports the risky actions in them, finds credentials left in
-        Claude Code transcripts, and scores the authority of an agent's
-        credentials. Only clean changes your files, and only when you ask it to.
+        security</a>. It reads what Claude Code has already written to disk.
+        Only clean changes your files, and only when you ask it to.
       </p>
       <div class="grid2">
         <div class="cell">
@@ -168,7 +166,7 @@
       <h2>Before you run it.</h2>
       <div class="faqs">
         <div class="faq"><h3>Does it send anything anywhere?</h3><p>Not unless you ask it to. <span class="icode">check</span>, <span class="icode">watch</span>, <span class="icode">clean</span>, <span class="icode">scan</span> and <span class="icode">demo</span> read files on disk and print to your terminal. <span class="icode">live</span> and <span class="icode">--pull-usage</span> ask only the provider that issued each token. <span class="icode">update</span> fetches the capability catalogue for Plus subscribers and sends only the subscription token. There is no telemetry and no account.</p></div>
-        <div class="faq"><h3>Which agents does it read?</h3><p>Claude Code and OpenClaw today. <span class="icode">watch</span> and <span class="icode">check</span> read both; <span class="icode">clean</span> reads Claude Code transcripts only. Codex and an OTLP receiver are next, which will cover anything emitting OpenTelemetry GenAI spans. It reads files the agent already wrote, so there is no wrapper, no proxy and nothing in your critical path.</p></div>
+        <div class="faq"><h3>Does it read everything Claude Code writes?</h3><p>Not yet. It reads the session transcripts, <span class="icode">~/.claude/projects/*/*.jsonl</span>, for the last 30 days by default. Subagent transcripts, the large tool outputs Claude Code stores in separate files, and <span class="icode">~/.claude/history.jsonl</span> are not read yet. If <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead, and <span class="icode">--root PATH</span> points it at any other directory. A run that reads nothing says that nothing was checked, rather than that nothing was found. The <a href="/guides/claude-code-history">Claude Code history guide</a> lists what each of those files holds and how long it stays.</p></div>
         <div class="faq"><h3>If I mask a secret, is it safe now?</h3><p>No, and the tool says so. The value was already written to disk in plaintext and already sat in a model context you do not control. Masking stops it leaking a second time. Rotating it is the actual fix, which is why the report leads with what to rotate and where.</p></div>
         <div class="faq"><h3>What does it cost?</h3><p>Nothing on your own machine, forever, and the code is MIT licensed with no dependencies. Paid tiers, being built now, are for collecting records across machines and for evidence retention. We never charge per finding, because a tool paid by the alert has a reason to cry wolf.</p></div>
       </div>

@@ -124,7 +124,7 @@ pip install ranwhat</pre></div>
       <h2>What it reads, and what it writes.</h2>
       <div class="rows">
         <div class="row"><span class="k">Claude Code</span>
-          <span class="v">Reads <span class="icode">~/.claude/projects/*/*.jsonl</span>, the last 30 days by default (<span class="icode">--days N</span>). If you moved Claude Code's config with <span class="icode">CLAUDE_CONFIG_DIR</span>, which ranwhat does not read, pass <span class="icode">--root "$CLAUDE_CONFIG_DIR/projects"</span>. <a href="/guides/claude-code-history">Where Claude Code keeps its history</a> covers what else is in that directory.</span></div>
+          <span class="v">Reads <span class="icode">~/.claude/projects/*/*.jsonl</span>, the last 30 days by default (<span class="icode">--days N</span>). If <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead, and <span class="icode">--root PATH</span> points it at any other directory. <a href="/guides/claude-code-history">Where Claude Code keeps its history</a> covers what else is in that directory.</span></div>
         <div class="row"><span class="k">OpenClaw</span>
           <span class="v">Reads <span class="icode">$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</span>, read-only, through a temporary copy if the agent holds a lock. The state directory defaults to <span class="icode">~/.openclaw</span>; <span class="icode">--state-dir</span> overrides it.</span></div>
         <div class="row"><span class="k">Writes</span>
