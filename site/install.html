@@ -52,6 +52,7 @@
 </header>
 
 <main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Install</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">Install</p>
@@ -105,12 +106,12 @@ uv tool install ranwhat     <span class="c-mut">upgrade with: uv tool upgrade ra
 pip install ranwhat</pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        Then <span class="icode">ranwhat check</span>, or one half at a time:
-        <a href="/watch">ranwhat watch</a> for what your agents ran,
-        <a href="/clean">ranwhat clean</a> for secrets in Claude Code
-        transcripts, and <a href="/scan">ranwhat scan</a> for what their
-        credentials allow. A bare <span class="icode">ranwhat</span> lists
-        every command.
+        Then <span class="icode">ranwhat check</span>, which runs two commands
+        together: <a href="/watch">ranwhat watch</a> for what your agents ran,
+        and <a href="/clean">ranwhat clean</a> for secrets in Claude Code
+        transcripts. <a href="/scan">ranwhat scan</a> is separate, and scores
+        what their credentials allow. A bare <span class="icode">ranwhat</span>
+        lists every command.
       </p>
     </div>
   </div>

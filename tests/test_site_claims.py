@@ -452,6 +452,19 @@ def _csp():
     return policy
 
 
+class HeaderRulesAreNotRepeated(unittest.TestCase):
+    """Pages joins a header applied twice to one path with a comma. A merge
+    once left /contact.js with two Cache-Control rules, a year immutable and
+    an hour, which a cache may read either way."""
+
+    def test_each_path_has_one_block(self):
+        headers = (SITE / "_headers").read_text(encoding="utf-8")
+        paths = [l.strip() for l in headers.splitlines()
+                 if l.strip() and not l[0].isspace() and not l.startswith("#")]
+        self.assertIn("/contact.js", paths)
+        self.assertEqual(sorted(p for p in set(paths) if paths.count(p) > 1), [])
+
+
 class _InlineScript(html.parser.HTMLParser):
     """Collects what a script-src without 'unsafe-inline' refuses to run: a
     <script> with no src, an on*= handler, a javascript: URL. A JSON-LD
@@ -713,20 +726,31 @@ class GuidesHangTogether(unittest.TestCase):
             self.assertEqual(meta(text, "property", "og:type"), ["article"], page.name)
 
     def test_visible_breadcrumbs_match_their_markup(self):
-        trails = 0
+        # Structured data may only describe what a reader can see, so every
+        # page that carries a BreadcrumbList shows the same trail. Ten pages
+        # once had the markup and no trail.
+        trails = marked_pages = 0
         for page in all_pages():
             text = read(page)
             found = re.findall(r'<nav class="crumbs" aria-label="Breadcrumb">(.*?)</nav>',
                                text, re.S)
             name = page.relative_to(SITE).as_posix()
+            if graph(text, "BreadcrumbList"):
+                marked_pages += 1
+                self.assertEqual(len(found), 1, "%s has a BreadcrumbList but shows "
+                                 "no breadcrumb trail" % name)
             if page.parent == SITE / "guides" or page.name == "guides.html":
                 self.assertEqual(len(found), 1, "%s shows no breadcrumb trail" % name)
             if not found:
                 continue
             trails += 1
             self.assertEqual(len(found), 1, name)
-            # The trail sits above the first section, not inside one.
-            self.assertLess(text.index('class="crumbs"'), text.index("<section"), name)
+            # The trail sits above the heading and the first section, not
+            # inside one. The example report has no <section> at all.
+            start = text.index('class="crumbs"')
+            self.assertLess(start, re.search(r"<h1[\s>]", text).start(), name)
+            if "<section" in text:
+                self.assertLess(start, text.index("<section"), name)
             links = [(ORIGIN + href if href != "/" else ORIGIN + "/", plain(label))
                      for href, label in
                      re.findall(r'<a href="([^"]+)">(.*?)</a>', found[0])]
@@ -738,7 +762,23 @@ class GuidesHangTogether(unittest.TestCase):
             marked = [(i["item"], i["name"]) for i in crumbs[0]["itemListElement"]]
             self.assertEqual(marked, shown, "%s: the trail and its "
                              "BreadcrumbList disagree" % name)
-        self.assertGreaterEqual(trails, len(guide_pages()) + 1)
+        self.assertEqual(trails, marked_pages)
+        interior = [p for p in all_pages() if indexable(p) and p.name != "index.html"]
+        self.assertGreaterEqual(trails, len(interior))
+
+    def test_guide_dates_agree_on_the_page_in_the_markup_and_the_sitemap(self):
+        # Search engines are told to expect the visible date and the
+        # structured one to match; four guides once said "checked on 1
+        # October" over markup and a sitemap that said 27 September.
+        lastmod = dict(re.findall(r"<loc>([^<]+)</loc><lastmod>([^<]+)</lastmod>",
+                                  read(SITE / "sitemap.xml")))
+        for page in guide_pages():
+            text = read(page)
+            article = graph(text, "Article")[0]
+            shown = re.findall(r'<time datetime="([^"]+)">', text)
+            self.assertEqual(shown, [article["dateModified"]], page.name)
+            self.assertEqual(lastmod.get(url_for(page)), article["dateModified"],
+                             page.name)
 
 
 if __name__ == "__main__":

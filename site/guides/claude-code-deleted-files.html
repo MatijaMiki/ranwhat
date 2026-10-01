@@ -34,7 +34,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Claude Code deleted my files. What now?","description":"Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.","datePublished":"2026-09-27","dateModified":"2026-09-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-deleted-files"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Deleted files","item":"https://ranwhat.com/guides/claude-code-deleted-files"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Claude Code deleted my files. What now?","description":"Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.","datePublished":"2026-09-27","dateModified":"2026-10-01","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-deleted-files"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Deleted files","item":"https://ranwhat.com/guides/claude-code-deleted-files"}]}]}</script>
 </head>
 <body>
 <header>
@@ -64,7 +64,7 @@
       soon: the transcript that records it is deleted after 30 days by default.
     </p>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code and Git documentation on 1 October 2026.
+      Checked against the Claude Code and Git documentation on <time datetime="2026-10-01">1 October 2026</time>.
     </p>
   </div>
 </section>
@@ -112,7 +112,7 @@
         <div class="row"><span class="k">Deletion</span>
           <span class="v"><span class="icode">rm</span> told to recurse and to force, in any spelling: <span class="icode">-rf</span>, <span class="icode">-Rf</span>, <span class="icode">-r -f</span>, <span class="icode">--recursive --force</span>. Also <span class="icode">find … -delete</span>, <span class="icode">git rm -r</span>, <span class="icode">shred</span> and <span class="icode">truncate -s 0</span>. <span class="icode">/bin/rm</span> counts, and the payload of <span class="icode">bash -c</span> is read as shell.</span></div>
         <div class="row"><span class="k">Severity</span>
-          <span class="v">Follows the target. <span class="icode">rm -rf build</span> and <span class="icode">rm -rf /tmp/x</span> are not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical. Removing a <span class="icode">.git</span> directory is also reported as critical log or history tampering.</span></div>
+          <span class="v">Follows the target. <span class="icode">rm -rf build</span> and <span class="icode">rm -rf /tmp/x</span> are not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical. <span class="icode">rm -rf .git</span> or <span class="icode">rm -r .git</span> is also reported as critical log or history tampering. Other spellings, such as <span class="icode">rm -fr .git</span>, are reported as high recursive deletion.</span></div>
         <div class="row"><span class="k">Destructive git</span>
           <span class="v"><span class="icode">push --force</span> or <span class="icode">-f</span> (not <span class="icode">--force-with-lease</span>), <span class="icode">reset --hard</span>, <span class="icode">branch -D</span>, <span class="icode">clean -f</span>, <span class="icode">filter-branch</span> and <span class="icode">remote remove</span>.</span></div>
         <div class="row"><span class="k">Not reported</span>

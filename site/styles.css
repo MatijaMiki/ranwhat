@@ -331,8 +331,24 @@ td{padding:13px 14px 13px 0;border-bottom:1px solid var(--rule-2);
   vertical-align:top;color:var(--ink-2)}
 td code,.icode{font-family:"IBM Plex Mono",Menlo,monospace;font-size:12.5px;
   color:var(--ink);background:var(--raise);padding:1px 5px}
-p .icode{overflow-wrap:anywhere}
+p .icode,.row .v .icode{overflow-wrap:anywhere}
 .scroll{overflow-x:auto}
+/* On a phone a path or a rule in a table cell breaks, rather than pushing the
+   other columns out of the box and cutting their text off. */
+@media(max-width:620px){td code,td .icode{overflow-wrap:anywhere}}
+/* A comparison too wide for a phone becomes one block per record, each value
+   under its column's name, which the cell carries in data-label. */
+@media(max-width:620px){
+  table.stack,.stack tbody,.stack tr,.stack td{display:block}
+  .stack thead{position:absolute;width:1px;height:1px;overflow:hidden;
+    clip-path:inset(50%);white-space:nowrap}
+  .stack tr{padding:14px 0 6px;border-bottom:1px solid var(--rule-2)}
+  .stack tr:first-child{border-top:1px solid var(--rule)}
+  .stack td{border-bottom:0;padding:0 0 10px}
+  .stack td[data-label]::before{content:attr(data-label);display:block;
+    font-family:"IBM Plex Mono",Menlo,monospace;font-size:10.5px;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+}
 
 .scores{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
   background:var(--rule-2);border:1px solid var(--rule-2)}
@@ -393,6 +409,9 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 .crumbs a:hover{text-decoration-color:currentColor}
 .crumbs [aria-hidden]{color:var(--faint);margin-inline:2px}
 .crumbs + .pagehead{padding-top:36px}
+/* contact's header is a .band inside .pagehead, which would add the band's
+   own padding on top. */
+.crumbs + .pagehead > .band{padding-top:0}
 @media(max-width:620px){.crumbs{padding-top:18px}.crumbs + .pagehead{padding-top:28px}}
 
 /* ---------- pricing ---------- */

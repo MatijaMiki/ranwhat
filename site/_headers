@@ -26,9 +26,6 @@
 /contact.js
   Cache-Control: public, max-age=31536000, immutable
 
-/contact.js
-  Cache-Control: public, max-age=3600
-
 /consent.js
   Cache-Control: public, max-age=31536000, immutable
 

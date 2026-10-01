@@ -34,7 +34,10 @@ $ ranwhat watch --days 90
 
 Claude Code deletes transcripts older than
 [`cleanupPeriodDays`](https://code.claude.com/docs/en/settings-reference#cleanupperioddays),
-30 days by default, so `--days 90` only finds more if you raised it.
+30 days by default, so `--days 90` finds more only if you raised it, or for
+sessions started or last continued in Claude Desktop or Cowork, which Claude
+Code v2.1.248 and later
+[keep at any age by default](https://code.claude.com/docs/en/claude-directory#cleaned-up-automatically).
 
 ## Install
 
@@ -59,8 +62,7 @@ Python 3.9+. No dependencies, and nothing is built on your machine.
 
 ### `ranwhat check`: everything worth knowing, in one read-only pass
 
-Runs watch and clean together and changes nothing; it refuses `--apply`.
-`ranwhat check --json` prints `days`, `actions` and `secrets`.
+Runs watch and clean together and changes nothing.
 
 ### `ranwhat watch`: audit what Claude Code and OpenClaw ran
 
@@ -110,7 +112,7 @@ project that file belongs to, because a 64-character string is useless
 without knowing which `.env` it escaped:
 
 ```
-* AWS access key ID   AKI…WB  20 chars  seen 8x
+* AWS access key ID   AKIA…DFWB  20 chars  seen 8x
       read from api/.env
       in         /Users/you/Desktop/app
 ```
@@ -184,9 +186,9 @@ recurses into it. And severity follows the **target**, not the verb:
 critical.
 
 Every row above came from running the tool against a real machine and finding
-it wrong. On that machine the first build reported 15 findings; 3 were false
-positives and 11 were true deletions of build directories that nobody would
-want to read. It reports 4 now, and all four are real.
+it wrong. On that machine's 90-day history the first build reported 15
+findings, and 11 were true deletions of build and temp directories that nobody
+would want to read. It reports 4 now, and all four are real.
 
 ## Handling credentials
 

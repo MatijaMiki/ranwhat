@@ -66,7 +66,7 @@
     </p>
     <p style="margin:18px 0 0;font-size:14px;color:var(--muted)">
       Checked against the Claude Code, OpenClaw, GitHub, Stripe, AWS and MCP
-      docs on <time datetime="2026-09-27">27 September 2026</time>. ranwhat 0.3.0.
+      docs on <time datetime="2026-09-27">27 September 2026</time>.
     </p>
   </div>
 </section>
@@ -301,15 +301,14 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in Claude 
       </div>
       <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
         One read-only pass: the risky actions in Claude Code and OpenClaw
-        history, and the credentials left in Claude Code transcripts. It
-        refuses <span class="icode">--apply</span>. Every
+        history, and the credentials left in Claude Code transcripts. Every
         <span class="icode">ranwhat</span> command on this page also runs as
         <span class="icode">uvx ranwhat &hellip;</span> without installing
         anything.
       </p>
       <div class="term" style="margin-top:22px">
         <div class="term-body"><pre>ranwhat watch --days 30    <span class="c-mut">risky actions from the last 30 days</span>
-ranwhat watch --json       <span class="c-mut">one record per flagged call, secrets masked</span></pre></div>
+ranwhat watch --json       <span class="c-mut">one record per flagged call</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         <a href="/watch">ranwhat watch</a> reports nine kinds of action:

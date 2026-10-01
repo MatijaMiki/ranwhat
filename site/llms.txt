@@ -8,7 +8,7 @@ What goes online: `live` and `--pull-usage` ask only the provider that issued ea
 
 Commands:
 
-- `ranwhat check`: watch and clean in one read-only pass. It never changes anything. `--json` prints `days`, `actions` and `secrets`.
+- `ranwhat check`: watch and clean in one read-only pass. It never changes anything.
 - `ranwhat watch`: nine rules over what agents ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, and local files uploaded with curl. Reads Claude Code (`~/.claude/projects/*/*.jsonl`) and OpenClaw (`$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite`, default `~/.openclaw`). `--json` prints one record per flagged call.
 - `ranwhat clean`: finds credentials in Claude Code transcripts, says what to rotate, and masks them only when asked (`--apply`, or `mask` in the review session). Backups go to `~/.ranwhat/backups`.
 - `ranwhat scan profile.json`: scores authority, observability and reversibility for the credentials an agent holds. `--html report.html` writes a report. `--pull-usage` checks which grants were used, against the provider's own audit trail.

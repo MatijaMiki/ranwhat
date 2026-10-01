@@ -32,7 +32,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Check what the tokens your AI agent holds can do","description":"Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.","datePublished":"2026-09-27","dateModified":"2026-09-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-agent-token-scopes"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Token scopes","item":"https://ranwhat.com/guides/ai-agent-token-scopes"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Check what the tokens your AI agent holds can do","description":"Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.","datePublished":"2026-09-27","dateModified":"2026-10-01","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-agent-token-scopes"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Token scopes","item":"https://ranwhat.com/guides/ai-agent-token-scopes"}]}]}</script>
 </head>
 <body>
 <header>
@@ -63,7 +63,7 @@
       Stripe or AWS.
     </p>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the GitHub, Google, Slack, Stripe, AWS and MCP documentation, 1 October 2026.
+      Checked against the GitHub, Google, Slack, Stripe, AWS and MCP documentation, <time datetime="2026-10-01">1 October 2026</time>.
     </p>
   </div>
 </section>
@@ -175,7 +175,8 @@
         repositories, grant the minimal permissions, and set an expiration.
         Organisation owners can require approval before a fine-grained token
         reaches the organisation. Fine-grained tokens cannot yet reach Packages,
-        Projects, the Checks API or more than one organisation. Where an agent
+        Projects owned by a user account, the Checks API or more than one
+        organisation. Where an agent
         needs those, keep the classic token's scopes narrow and give it an
         expiration as well.
       </p>
@@ -253,11 +254,14 @@
         <span class="icode">bot_id</span> for a bot token.
       </p>
       <p style="color:var(--muted);font-size:15px">
-        To cut: Slack documents that there is no way to remove scopes from an
-        existing token without revoking it entirely. To narrow a Slack token,
-        issue a new one with fewer scopes and revoke the old one. Slack's advice
-        is to settle the minimum list of scopes the app needs while you build
-        it.
+        To cut: Slack documents that scopes requested when the app is
+        installed again are added to the scopes the token already has, and
+        that there is no way to remove scopes from an existing token without
+        revoking it entirely. So revoke the token first, with
+        <span class="icode">auth.revoke</span> or by uninstalling the app, then
+        install the app again requesting only the scopes it needs. Slack's
+        advice is to settle the minimum list of scopes the app needs while you
+        build it.
       </p>
     </div>
   </div>
@@ -449,7 +453,7 @@ ranwhat demo                                  <span class="c-mut"># the report o
         <div class="row"><span class="k">Google</span>
           <span class="v">The narrowest scope that works, <span class="icode">drive.file</span> rather than <span class="icode">drive</span>, requested when a feature first needs it.</span></div>
         <div class="row"><span class="k">Slack</span>
-          <span class="v">A new token with the minimum scopes, then revoke the old one. Scopes cannot be removed from an existing token.</span></div>
+          <span class="v">Revoke the token, then install the app again with the minimum scopes. Scopes cannot be removed from an existing token, and a reinstall adds to them.</span></div>
         <div class="row"><span class="k">Stripe</span>
           <span class="v">A restricted key tagged for the agent, or OAuth, and no <span class="icode">sk_</span> key. For Stripe MCP, before 31 October 2026. Stripe also recommends an access policy on every live key.</span></div>
         <div class="row"><span class="k">AWS</span>
@@ -486,9 +490,10 @@ ranwhat demo                                  <span class="c-mut"># the report o
         <li><a href="https://docs.github.com/en/enterprise-cloud@latest/rest/orgs/orgs#get-the-audit-log-for-an-organization">GitHub: get the audit log for an organisation<span>owner, read:audit_log</span></a></li>
         <li><a href="https://docs.cloud.google.com/docs/authentication/token-types">Google Cloud: token types<span>tokeninfo for user and service account tokens</span></a></li>
         <li><a href="https://developers.google.com/workspace/admin/reports/v1/appendix/activity/token">Google Workspace: OAuth Token audit activity<span>Admin SDK Reports events</span></a></li>
+        <li><a href="https://developers.google.com/workspace/admin/reports/v1/quickstart/python">Google Workspace: Reports API Python quickstart<span>an administrator account in the domain</span></a></li>
         <li><a href="https://developers.google.com/workspace/drive/api/guides/api-specific-auth">Google Drive API: choose scopes<span>drive.file, drive, narrowest scope</span></a></li>
         <li><a href="https://developers.google.com/identity/protocols/oauth2/web-server">Google: OAuth 2.0 for web server apps<span>incremental authorisation</span></a></li>
-        <li><a href="https://docs.slack.dev/authentication/installing-with-oauth/">Slack: installing with OAuth<span>x-oauth-scopes, removing scopes</span></a></li>
+        <li><a href="https://docs.slack.dev/authentication/installing-with-oauth/">Slack: installing with OAuth<span>x-oauth-scopes, additive scopes, auth.revoke</span></a></li>
         <li><a href="https://docs.slack.dev/reference/methods/auth.test">Slack: auth.test<span>no scope required, response fields</span></a></li>
         <li><a href="https://docs.stripe.com/keys">Stripe: API keys<span>key types, agent keys, access policies</span></a></li>
         <li><a href="https://docs.stripe.com/keys/restricted-api-keys">Stripe: restricted API keys<span>permissions, request logs, migration</span></a></li>

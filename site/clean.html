@@ -52,6 +52,7 @@
 </header>
 
 <main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Clean</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">ranwhat clean</p>
@@ -104,9 +105,9 @@
 model context you do not control. Masking them here stops
 them leaking again. It does not make them safe.</span>
 
-<span class="c-crit">*</span> <span class="c-b">AWS access key ID</span>        <span class="c-mut">AKI…AA   20 chars, seen 8x</span>
-<span class="c-crit">*</span> <span class="c-b">DATABASE_URL</span>             <span class="c-mut">pos…pp   42 chars, seen 8x</span>
-<span class="c-crit">*</span> <span class="c-b">PUSHER_APP_SECRET</span>        <span class="c-mut">b99…0a   64 chars, seen 2x</span>
+<span class="c-crit">*</span> <span class="c-b">AWS access key ID</span>        <span class="c-mut">AKIA…Q7AA  20 chars, seen 8x</span>
+<span class="c-crit">*</span> <span class="c-b">DATABASE_URL</span>             <span class="c-mut">pos…pp     42 chars, seen 8x</span>
+<span class="c-crit">*</span> <span class="c-b">PUSHER_APP_SECRET</span>        <span class="c-mut">b99…0a     64 chars, seen 2x</span>
 
 <span class="c-warn">Dry run. Nothing was changed.</span></pre></div>
       </div>
@@ -139,7 +140,6 @@ them leaking again. It does not make them safe.</span>
       <div class="term" style="margin-top:22px">
         <div class="term-body"><pre>ranwhat clean                   <span class="c-mut">report, then open the review</span>
 ranwhat clean --no-interactive  <span class="c-mut">report and exit</span>
-ranwhat clean --json            <span class="c-mut">the findings, machine readable</span>
 ranwhat clean --apply           <span class="c-mut">mask everything, backups first</span></pre></div>
       </div>
     </div>
