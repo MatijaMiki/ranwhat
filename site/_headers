@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' https://challenges.cloudflare.com https://static.ads-twitter.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.co https://analytics.twitter.com https://ads-twitter.com; manifest-src 'self'; connect-src 'self' https://analytics.twitter.com https://t.co https://ads-twitter.com https://ads-api.twitter.com https://ads-api.x.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://challenges.cloudflare.com https://static.ads-twitter.com https://*.googletagmanager.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.co https://analytics.twitter.com https://ads-twitter.com https://*.google-analytics.com https://*.googletagmanager.com; manifest-src 'self'; connect-src 'self' https://analytics.twitter.com https://t.co https://ads-twitter.com https://ads-api.twitter.com https://ads-api.x.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
   # Strict-Transport-Security deliberately omitted. Enabling it is a one-way
   # door: browsers cache the policy, and `preload` ships inside Chrome and
   # Firefox and takes months to undo. Turn it on as a separate decision,
@@ -10,8 +10,10 @@
   Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
-  # The X hosts above are reached only after a visitor allows ad measurement
-  # (site/consent.js). Until then the page asks nothing of them.
+  # The X and Google hosts above are reached only after a visitor allows ad
+  # measurement or visit statistics (site/consent.js). The Google wildcards are
+  # Google's own documented list for GA4, which serves from regional hosts.
+  # Until then the page asks nothing of them.
 
 # build.sh stamps every reference to these with ?v=<content hash>, so a
 # changed file is a new URL and the old one can be cached for good. HTML
