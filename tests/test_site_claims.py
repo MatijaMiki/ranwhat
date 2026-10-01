@@ -731,6 +731,24 @@ class GuidesHangTogether(unittest.TestCase):
             if path != HUB:
                 self.assertIn('href="%s"' % path, text, page.name)
 
+    def test_the_step_count_quoted_for_the_checklist_is_its_length(self):
+        # The home page and /guides said eleven steps when the checklist
+        # had fourteen.
+        text = read(resolve(HUB))
+        section = re.search(r'<section[^>]*id="checklist">(.*?)</section>',
+                            text, re.S).group(1)
+        numbers = re.findall(r'<li class="row"><span class="k">(\d+)</span>',
+                             section)
+        self.assertEqual([int(n) for n in numbers],
+                         list(range(1, len(numbers) + 1)))
+        words = {11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen",
+                 15: "fifteen", 16: "sixteen"}
+        count = words[len(numbers)]
+        self.assertIn("%s steps, in order" % count,
+                      plain(read(SITE / "index.html")))
+        self.assertIn("%s steps, in the order worth doing them"
+                      % count.capitalize(), plain(read(SITE / "guides.html")))
+
     def test_article_markup_matches_the_page(self):
         for page in guide_pages():
             text = read(page)

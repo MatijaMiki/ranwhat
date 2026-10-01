@@ -14,21 +14,32 @@ knowing about.
 $ ranwhat watch --days 90
 
   ranwhat watch  · local agent flight recorder
-  --------------------------------------------------------------
+  ----------------------------------------------------------------------------
   4 transcript(s) scanned, last 90 days
 
-  1 critical  3 high
+  2 critical  2 high
 
-  * Credential material accessed          18:13  Bash
+  * Credential material accessed   2026-09-30 18:13:00  Bash
       cat ~/.ssh/id_rsa
-      -> Whatever it read is now in a model context you do not control.
+      -> The agent read a file whose only purpose is to hold secrets. Whatever
+         it read is now in a model context you do not control.
 
-  * Bulk or recursive deletion            14:42  Bash
-      mv '@/components/'*.tsx src/components/ ; rm -rf '@'
-      -> Recursive deletion. Recoverable only if something else was
-         backing it up.
+  * Bulk or recursive deletion   2026-09-28 14:42:00  Bash
+      …rm -rf '@'
+      -> Recursive deletion. Recoverable only if something else was backing it
+         up.
 
-  --------------------------------------------------------------
+  * Package or release published   2026-09-21 11:05:00  Bash
+      npm publish
+      -> Something was pushed to a registry other people may install from.
+         Supply-chain reach, and usually irreversible.
+
+  * Destructive git operation   2026-09-15 17:30:00  Bash
+      git push --force origin main
+      -> History rewriting or branch deletion. This is the class of action
+         that destroys the record of what else happened.
+
+  ----------------------------------------------------------------------------
   Read locally. Nothing was transmitted.
 ```
 
@@ -193,7 +204,8 @@ The first watch build flagged 6 findings, and 3 were false positives: a grep
 for `rm -rf`, the same string inside a Python one-liner, and a heredoc being
 written to a file. A later release reported 15 findings on one machine's
 90-day history, and 11 were true deletions of build and temp directories that
-nobody would want to read. It reports 4 now, and all four are real.
+nobody would want to read. Once deletions were ranked by target, the same
+history gave 4, and all four were real.
 
 ## Handling credentials
 

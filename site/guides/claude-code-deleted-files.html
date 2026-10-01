@@ -272,11 +272,13 @@ git fsck --lost-found                 <span class="c-mut">dangling objects, stag
         deletes a cloud resource leaves nothing here to restore. On 24 April
         2026, a Cursor agent working in PocketOS's staging environment found a
         Railway API token in an unrelated file and used it to delete the
-        production volume, in about nine seconds. The backups went with it,
-        because Railway kept them in the same volume. Railway's CEO stepped in
-        two days later, and the data was back within the hour. On 1 May,
-        Railway made a volume deleted through its API recoverable for 48
-        hours, as one deleted in its dashboard already was.
+        production volume, in about nine seconds. The founder said the backups
+        went with it because Railway kept them in the same volume. Railway
+        says the legacy API path the agent called cascaded the delete, which
+        made the backups look unavailable. Railway's CEO stepped in two days
+        later, and the data was back within the hour. On 1 May, Railway made
+        a volume deleted through its API recoverable for 48 hours, as one
+        deleted in its dashboard already was.
       </p>
       <p>
         So the first question after a cloud delete is the provider's own undo

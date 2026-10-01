@@ -240,10 +240,14 @@ grep -rlsF 'first-8-chars' ~/.claude/projects ~/.claude/history.jsonl \
         commodity infostealers now collect AI coding tools' local data:
         access and refresh tokens, credentials in MCP configs, prompt
         histories and conversation databases. It names Claude among the
-        targets of the Remus and CallbackBeaver families, though not Claude
-        Code or any path, and says the data sits in predictable places, some
-        of it in plaintext. <span class="icode">~/.claude/projects</span> fits
-        that description. Retention is a security setting as well as an audit
+        targets of the Remus and CallbackBeaver families, and shows an STG
+        Stealer configuration that collects
+        <span class="icode">~/.claude/.credentials.json</span> and
+        <span class="icode">~/.claude.json</span>: the file Claude Code keeps
+        its login in when it cannot use the macOS Keychain, and its config. The
+        report says the data sits in predictable places, some of it in
+        plaintext. <span class="icode">~/.claude/projects</span> fits that
+        description. Retention is a security setting as well as an audit
         one: what a stealer cannot find, it cannot take.
       </p>
       <div class="rows" style="margin-top:22px">
@@ -254,7 +258,7 @@ grep -rlsF 'first-8-chars' ~/.claude/projects ~/.claude/history.jsonl \
         <div class="row"><span class="k">Purge</span>
           <span class="v"><span class="icode">claude project purge</span> for projects you have finished.</span></div>
         <div class="row"><span class="k">Login</span>
-          <span class="v">Claude Code keeps its own credentials, MCP OAuth tokens included, in the macOS Keychain where it can, and otherwise in <span class="icode">~/.claude/.credentials.json</span>, protected by file permissions. <span class="icode">~/.claude.json</span> holds settings such as an MCP server's URL, not the tokens.</span></div>
+          <span class="v">Claude Code keeps its login in the macOS Keychain where it can. On Linux and Windows, and on a Mac when the Keychain rejects the write, it goes in <span class="icode">~/.claude/.credentials.json</span>, protected by file permissions. That file is on the STG Stealer list above.</span></div>
       </div>
       <p style="margin-top:22px;color:var(--muted);font-size:15px">
         After an infection, rotate from a clean device: every credential the
@@ -456,7 +460,7 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
         <li><a href="https://code.claude.com/docs/en/env-vars">Environment variables<span>CLAUDE_CONFIG_DIR, CLAUDE_CODE_SKIP_PROMPT_HISTORY</span></a></li>
         <li><a href="https://code.claude.com/docs/en/data-usage#data-retention">Data usage<span>what Anthropic retains, and for how long</span></a></li>
         <li><a href="https://code.claude.com/docs/en/authentication">Authentication<span>Keychain and .credentials.json</span></a></li>
-        <li><a href="https://code.claude.com/docs/en/mcp">MCP<span>where MCP OAuth tokens are kept</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/mcp">MCP<span>MCP server configs in ~/.claude.json</span></a></li>
         <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-4vp2-6q8c-pvq2">GHSA-4vp2-6q8c-pvq2<span>CVE-2026-46406, /copy, fixed in 2.1.128</span></a></li>
         <li><a href="https://www.gendigital.com/blog/insights/research/infostealers-your-ai-agent">Gen Digital: infostealers and your AI agent<span>8 September 2026</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>watch.py and clean.py: what is read, and how masking works</span></a></li>

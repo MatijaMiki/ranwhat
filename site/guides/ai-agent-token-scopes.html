@@ -413,10 +413,11 @@ aws iam get-service-last-accessed-details --job-id "$JOB" --output json \
         <span class="icode">RAILWAY_API_TOKEN</span>. On 24 April 2026, a
         Cursor agent working in PocketOS's staging environment found a Railway
         token in an unrelated file and called <span class="icode">volumeDelete</span>
-        with it, removing the production database and the backups kept in the
-        same volume. The token had been made to manage custom domains through
-        the CLI, but it was an account token, so it could do anything the
-        account could.
+        with it, removing the production database. By Railway's account, the
+        legacy API path it called cascaded the delete, which made the volume's
+        backups look unavailable. The token had been made to manage custom
+        domains through the CLI, but it was an account token, so it could do
+        anything the account could.
       </p>
       <p style="color:var(--muted);font-size:15px">
         To cut: a project token for the one environment the agent works in,
