@@ -348,7 +348,7 @@ p .icode{overflow-wrap:anywhere}
 
 /* ---------- footer ---------- */
 footer{border-top:1px solid var(--rule);background:var(--surface)}
-.fgrid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;
+.fgrid{display:grid;grid-template-columns:1.6fr repeat(4,minmax(0,1fr));gap:32px;
   padding-block:52px 34px}
 /* Column labels are paragraphs, not h4: under each page's h2 an h4 skipped
    a level, and a label for a list of links is not a heading anyway. */
@@ -365,6 +365,13 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 .fbase{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;
   padding-block:18px;border-top:1px solid var(--rule-2);
   font-family:"IBM Plex Mono",Menlo,monospace;font-size:11.5px;color:var(--faint)}
+/* Five columns stop fitting their link text below about 1000px: the
+   wordmark and note take a row of their own, and the four lists share
+   the next. */
+@media(max-width:1000px){
+  .fgrid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .fgrid > div:first-child{grid-column:1/-1}
+}
 @media(max-width:780px){.fgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}}
 @media(max-width:460px){.fgrid{grid-template-columns:minmax(0,1fr)}}
 
@@ -374,6 +381,19 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 .pagehead{padding-block:64px 44px;border-top:0}
 .pagehead h1{font-size:clamp(34px,5vw,54px);max-width:20ch}
 .pagehead .lede{font-size:18px;max-width:58ch;margin-bottom:0}
+
+/* ---------- breadcrumb trail ---------- */
+/* The visible half of each page's BreadcrumbList. It sits outside .shell,
+   above the first section, so it carries the shell's width and gutter
+   itself, and takes some of the page header's top padding. */
+.crumbs{max-width:1120px;margin:0 auto;padding:24px 20px 0;
+  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12px;
+  line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
+.crumbs a{color:var(--ink);text-decoration-color:var(--rule);text-underline-offset:3px}
+.crumbs a:hover{text-decoration-color:currentColor}
+.crumbs [aria-hidden]{color:var(--faint);margin-inline:2px}
+.crumbs + .pagehead{padding-top:36px}
+@media(max-width:620px){.crumbs{padding-top:18px}.crumbs + .pagehead{padding-top:28px}}
 
 /* ---------- pricing ---------- */
 .plans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;

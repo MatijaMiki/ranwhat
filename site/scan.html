@@ -140,6 +140,11 @@ ranwhat scan profile.json --pull-usage        <span class="c-mut">which grants w
         as a flag still works, but prints a warning: argv is visible to every
         user on the machine through the process table.
       </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Once you know what an agent can do,
+        <a href="/guides/ai-coding-agent-security#tokens">scope the tokens it
+        holds</a> down to what it uses.
+      </p>
     </div>
   </div>
 </section>
@@ -185,6 +190,8 @@ ranwhat scan profile.json --pull-usage        <span class="c-mut">which grants w
       <div class="rows" style="margin-top:26px">
         <div class="row"><span class="k">Introspection</span>
           <span class="v">Google through tokeninfo, GitHub through the scopes header on an authenticated call, Slack through <span class="icode">auth.test</span>, and Stripe by key prefix, where an <span class="icode">sk_</span> key is treated as unrestricted. A token that comes back with no scope list, such as an <span class="icode">rk_</span> restricted key, is scored with none: declare its scopes in a profile and use <span class="icode">scan</span> instead.</span></div>
+        <div class="row"><span class="k">By hand</span>
+          <span class="v">To check a token's scopes yourself, provider by provider: <a href="/guides/ai-agent-token-scopes">AI agent token scopes</a>.</span></div>
         <div class="row"><span class="k">Usage pulls</span>
           <span class="v">Read-only, over the last 90 days by default (<span class="icode">--window-days</span>): AWS IAM service last accessed, the GitHub organisation audit log (<span class="icode">--github-org</span>), Stripe events, and Google Admin SDK reports. There is no Slack pull, so Slack usage is self-attested or unverified.</span></div>
         <div class="row"><span class="k">Where tokens go</span>
@@ -221,6 +228,18 @@ ranwhat scan profile.json --pull-usage        <span class="c-mut">which grants w
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/faq">FAQ</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
         </ul>
       </div>
       <div>

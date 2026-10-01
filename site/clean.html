@@ -59,8 +59,9 @@
     <p class="lede">
       When an agent runs <span class="icode">cat .env</span>, the result is written
       into its transcript in plaintext: your database password, your signing
-      secrets, your provider tokens, sitting in files Claude Code keeps for 30
-      days by default.
+      secrets, your provider tokens, sitting in
+      <a href="/guides/claude-code-history">files Claude Code keeps for 30
+      days by default</a>.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -181,7 +182,7 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
         <div class="row"><span class="k">Scope</span>
           <span class="v">Masking one finding rewrites only that value, not every other secret in the same file.</span></div>
         <div class="row"><span class="k">Reads</span>
-          <span class="v">Claude Code transcripts, <span class="icode">~/.claude/projects/*/*.jsonl</span>, for the last 30 days by default (<span class="icode">--days N</span>). Not OpenClaw, and not subagent transcripts yet.</span></div>
+          <span class="v"><a href="/guides/claude-code-history">Claude Code transcripts</a>, <span class="icode">~/.claude/projects/*/*.jsonl</span>, for the last 30 days by default (<span class="icode">--days N</span>). Not OpenClaw, and not subagent transcripts yet.</span></div>
         <div class="row"><span class="k">Recognises</span>
           <span class="v">Stripe <span class="icode">sk_live_</span> and <span class="icode">rk_live_</span> keys, <span class="icode">sk-</span> style OpenAI and Anthropic keys, GitHub <span class="icode">ghp_</span> and <span class="icode">github_pat_</span> tokens, Slack <span class="icode">xox</span> tokens, AWS <span class="icode">AKIA</span> and <span class="icode">ASIA</span> key IDs, Twilio SIDs, SendGrid keys, PEM private keys and JWTs, passwords inside connection strings, and <span class="icode">KEY=value</span> pairs whose key names a secret.</span></div>
       </div>
@@ -198,6 +199,12 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
         <span class="icode">clean</span> finds the values. <a href="/watch">ranwhat watch</a> finds the
         calls that read credential files in the first place, and
         <span class="icode">ranwhat check</span> runs both in one read-only pass.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Rotate first: <a href="/guides/ai-coding-agent-security#leaks">what to
+        do when a secret has already leaked</a>. To stop the next read,
+        <a href="/guides/claude-code-env-secrets">keep Claude Code out of your
+        .env file with deny rules and the sandbox</a>.
       </p>
     </div>
   </div>
@@ -230,6 +237,18 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/faq">FAQ</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
         </ul>
       </div>
       <div>

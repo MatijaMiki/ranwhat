@@ -491,10 +491,11 @@ class InlineScriptStaysBlocked(unittest.TestCase):
                     self.assertNotIn("'unsafe-hashes'", sources)
 
     def test_no_page_needs_inline_script(self):
-        pages = sorted(SITE.glob("*.html"))
-        self.assertTrue(pages)
+        # rglob: the guides live in site/guides/, under the same policy.
+        pages = all_pages()
+        self.assertTrue(any(p.parent != SITE for p in pages))
         for page in pages:
-            with self.subTest(page=page.name):
+            with self.subTest(page=page.relative_to(SITE).as_posix()):
                 parser = _InlineScript()
                 parser.feed(page.read_text(encoding="utf-8"))
                 parser.close()
@@ -510,6 +511,234 @@ class InlineScriptStaysBlocked(unittest.TestCase):
                     '<a href=" JavaScript:alert(1)">x</a>')
         parser.close()
         self.assertEqual(len(parser.found), 3, parser.found)
+
+
+# ---------------------------------------------------------------------------
+# Links. The guides live one directory down, in site/guides/, where a
+# relative href or src that worked at the top level points somewhere else,
+# and Pages serves a page only at its extensionless path. A broken internal
+# link is a dead end for a reader and a crawler alike.
+# ---------------------------------------------------------------------------
+
+class _Refs(html.parser.HTMLParser):
+    """Every href and src on a page, and every id it defines."""
+
+    def __init__(self):
+        super().__init__()
+        self.refs, self.ids = [], set()
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            if name in ("href", "src") and value is not None:
+                self.refs.append((self.getpos()[0], value))
+            if name == "id" and value:
+                self.ids.add(value)
+
+
+def refs(page):
+    parser = _Refs()
+    parser.feed(read(page))
+    parser.close()
+    return parser
+
+
+EXTERNAL = ("https://", "mailto:")
+
+
+def resolve(path):
+    """The file Pages serves for a root-relative path, or None."""
+    if path == "/" or path.endswith("/"):
+        target = SITE / path.lstrip("/") / "index.html"
+        return target if target.is_file() else None
+    target = SITE / path.lstrip("/")
+    if target.is_file() and not path.endswith(".html"):
+        return target
+    page = SITE / (path.lstrip("/") + ".html")
+    return page if page.is_file() else None
+
+
+def stamped_assets():
+    """The assets build.sh stamps with a content hash."""
+    build = (SITE.parent / "build.sh").read_text(encoding="utf-8")
+    return re.search(r"^for asset in ([^;]+);", build, re.M).group(1).split()
+
+
+class InternalLinksResolve(unittest.TestCase):
+
+    def test_every_internal_link_resolves_to_a_file(self):
+        for page in all_pages():
+            found = refs(page)
+            name = page.relative_to(SITE).as_posix()
+            for line, ref in found.refs:
+                with self.subTest(page=name, line=line, ref=ref):
+                    if ref.startswith(EXTERNAL):
+                        continue
+                    if ref.startswith("#"):
+                        self.assertIn(ref[1:], found.ids, "no such id on the page")
+                        continue
+                    # A relative path means one thing at site/ and another at
+                    # site/guides/; a protocol-relative one is an external
+                    # link in disguise.
+                    self.assertTrue(ref.startswith("/") and not ref.startswith("//"),
+                                    "not root-relative")
+                    path, _, fragment = ref.partition("#")
+                    path = path.split("?", 1)[0]
+                    self.assertFalse(path.endswith(".html"),
+                                     "Pages redirects .html; link the extensionless path")
+                    target = resolve(path)
+                    self.assertIsNotNone(target, "nothing in site/ is served there")
+                    if fragment:
+                        self.assertIn(fragment, refs(target).ids,
+                                      "%s has no id %r" % (path, fragment))
+
+    def test_the_resolver_sees_what_it_is_looking_for(self):
+        """Or the test above would pass for the wrong reason."""
+        self.assertEqual(resolve("/"), SITE / "index.html")
+        self.assertEqual(resolve("/guides"), SITE / "guides.html")
+        self.assertEqual(resolve("/guides/claude-code-history"),
+                         SITE / "guides" / "claude-code-history.html")
+        self.assertEqual(resolve("/styles.css"), SITE / "styles.css")
+        for missing in ("/nope", "/guides/nope", "/watch.html", "/guides/"):
+            self.assertIsNone(resolve(missing), missing)
+
+    def test_stamped_assets_are_referenced_from_the_root(self):
+        # build.sh rewrites each reference to /<asset>" across site/,
+        # subdirectories included, so a page under site/guides/ is stamped
+        # only if it names the asset the same way the top-level pages do.
+        assets = stamped_assets()
+        self.assertIn("styles.css", assets)
+        build = (SITE.parent / "build.sh").read_text(encoding="utf-8")
+        self.assertIn("grep -rlF", build, "build.sh must search site/ recursively")
+        for page in all_pages():
+            text = read(page)
+            for asset in assets:
+                for value in re.findall(r'(?:href|src)="([^"]*%s[^"]*)"'
+                                        % re.escape(asset), text):
+                    self.assertEqual(value, "/" + asset,
+                                     "%s: %s" % (page.relative_to(SITE), value))
+        guide = read(SITE / "guides" / "claude-code-history.html")
+        self.assertIn('href="/styles.css"', guide)
+        self.assertIn('src="/consent.js"', guide)
+
+
+# ---------------------------------------------------------------------------
+# The guides: an index at /guides, articles under /guides/, and the
+# breadcrumb trail each of them shows.
+# ---------------------------------------------------------------------------
+
+def guide_pages():
+    return sorted((SITE / "guides").glob("*.html"))
+
+
+def h1_text(text):
+    return plain(re.search(r"<h1[^>]*>(.*?)</h1>", text, re.S).group(1))
+
+
+def graph(text, kind):
+    return [b for block in json_ld(text) for b in block.get("@graph", [block])
+            if b.get("@type") == kind]
+
+
+HUB = "/guides/ai-coding-agent-security"
+
+
+class GuidesHangTogether(unittest.TestCase):
+
+    def test_there_are_guides(self):
+        self.assertGreaterEqual(len(guide_pages()), 6)
+        self.assertTrue((SITE / "guides.html").is_file())
+        self.assertFalse((SITE / "guides" / "index.html").exists(),
+                         "guides/index.html would make Pages redirect /guides "
+                         "to /guides/, away from its canonical")
+
+    def test_the_index_lists_every_guide_and_its_markup_matches(self):
+        text = read(SITE / "guides.html")
+        shown = [(ORIGIN + href, plain(name)) for href, name in
+                 re.findall(r'<h3><a href="(/guides/[^"]+)">(.*?)</a></h3>', text)]
+        self.assertEqual(sorted(u for u, _ in shown),
+                         sorted(url_for(p) for p in guide_pages()))
+        self.assertEqual(shown[0][0], ORIGIN + HUB, "the checklist comes first")
+        pages = graph(text, "CollectionPage")
+        self.assertEqual(len(pages), 1)
+        marked = [(i["url"], i["name"])
+                  for i in pages[0]["mainEntity"]["itemListElement"]]
+        self.assertEqual(marked, shown, "guides.html's ItemList has drifted "
+                         "from the cards on the page")
+        self.assertEqual([i["position"] for i in
+                          pages[0]["mainEntity"]["itemListElement"]],
+                         list(range(1, len(shown) + 1)))
+        self.assertEqual(pages[0]["url"], url_for(SITE / "guides.html"))
+        self.assertEqual([pages[0]["description"]], meta(text, "name", "description"))
+
+    def test_each_index_card_names_its_guide_by_its_h1(self):
+        text = read(SITE / "guides.html")
+        for href, name in re.findall(
+                r'<h3><a href="(/guides/[^"]+)">(.*?)</a></h3>', text):
+            self.assertEqual(plain(name), h1_text(read(resolve(href))), href)
+
+    def test_every_guide_is_in_the_shared_footer(self):
+        footer = re.search(r"<footer>.*?</footer>", read(SITE / "watch.html"),
+                           re.S).group(0)
+        self.assertIn('href="/guides"', footer)
+        for page in guide_pages():
+            self.assertIn('href="%s"' % url_for(page)[len(ORIGIN):], footer,
+                          page.name)
+
+    def test_every_guide_links_to_the_checklist_and_the_index(self):
+        for page in guide_pages():
+            main = re.search(r"<main.*?</main>", read(page), re.S).group(0)
+            self.assertIn('href="/guides"', main, page.name)
+            if url_for(page) != ORIGIN + HUB:
+                self.assertIn('href="%s"' % HUB, main, page.name)
+
+    def test_the_checklist_links_to_every_other_guide(self):
+        text = read(resolve(HUB))
+        for page in guide_pages():
+            path = url_for(page)[len(ORIGIN):]
+            if path != HUB:
+                self.assertIn('href="%s"' % path, text, page.name)
+
+    def test_article_markup_matches_the_page(self):
+        for page in guide_pages():
+            text = read(page)
+            articles = graph(text, "Article")
+            self.assertEqual(len(articles), 1, page.name)
+            article = articles[0]
+            self.assertEqual(article["headline"], h1_text(text), page.name)
+            self.assertEqual([article["description"]],
+                             meta(text, "name", "description"), page.name)
+            self.assertEqual(article["mainEntityOfPage"], url_for(page), page.name)
+            self.assertLessEqual(article["datePublished"], article["dateModified"],
+                                 page.name)
+            self.assertEqual(meta(text, "property", "og:type"), ["article"], page.name)
+
+    def test_visible_breadcrumbs_match_their_markup(self):
+        trails = 0
+        for page in all_pages():
+            text = read(page)
+            found = re.findall(r'<nav class="crumbs" aria-label="Breadcrumb">(.*?)</nav>',
+                               text, re.S)
+            name = page.relative_to(SITE).as_posix()
+            if page.parent == SITE / "guides" or page.name == "guides.html":
+                self.assertEqual(len(found), 1, "%s shows no breadcrumb trail" % name)
+            if not found:
+                continue
+            trails += 1
+            self.assertEqual(len(found), 1, name)
+            # The trail sits above the first section, not inside one.
+            self.assertLess(text.index('class="crumbs"'), text.index("<section"), name)
+            links = [(ORIGIN + href if href != "/" else ORIGIN + "/", plain(label))
+                     for href, label in
+                     re.findall(r'<a href="([^"]+)">(.*?)</a>', found[0])]
+            here = re.findall(r'<span aria-current="page">(.*?)</span>', found[0])
+            self.assertEqual(len(here), 1, name)
+            shown = links + [(url_for(page), plain(here[0]))]
+            crumbs = graph(text, "BreadcrumbList")
+            self.assertEqual(len(crumbs), 1, name)
+            marked = [(i["item"], i["name"]) for i in crumbs[0]["itemListElement"]]
+            self.assertEqual(marked, shown, "%s: the trail and its "
+                             "BreadcrumbList disagree" % name)
+        self.assertGreaterEqual(trails, len(guide_pages()) + 1)
 
 
 if __name__ == "__main__":

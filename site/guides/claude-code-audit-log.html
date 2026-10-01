@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code audit log: every command it ran | ranwhat</title>
+<meta name="description" content="By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit log, add a hook or OpenTelemetry for the future, and know the gaps.">
+<link rel="canonical" href="https://ranwhat.com/guides/claude-code-audit-log">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/claude-code-audit-log">
+<meta property="og:title" content="Claude Code audit log: every command it ran | ranwhat">
+<meta property="og:description" content="By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit log, add a hook or OpenTelemetry for the future, and know the gaps.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Claude Code audit log: every command it ran | ranwhat">
+<meta name="twitter:description" content="By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit log, add a hook or OpenTelemetry for the future, and know the gaps.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"A Claude Code audit log from what is already on disk","description":"By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit log, add a hook or OpenTelemetry for the future, and know the gaps.","datePublished":"2026-09-27","dateModified":"2026-09-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code audit log","item":"https://ranwhat.com/guides/claude-code-audit-log"}]}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/watch">Watch</a>
+      <a href="/clean">Clean</a>
+      <a href="/scan">Scan</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Claude Code audit log</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>A Claude Code audit log from what is already on disk</h1>
+    <p class="lede">
+      Before you install a logging hook, look at what Claude Code already
+      wrote down: every tool call from the last 30 days, by default.
+    </p>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against Claude Code's documentation and ranwhat 0.3.0 on
+      <time datetime="2026-10-01">1 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Record</div>
+    <div>
+      <h2>The record you already have</h2>
+      <p class="lede">
+        Claude Code saves each session to a transcript as you work. Its
+        documentation describes the file as the full conversation: every
+        message, every tool call and every tool result. That is an audit log
+        in all but name, and it is already on your disk.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Where</span>
+          <span class="v"><span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</span>, one JSON object per line. <span class="icode">&lt;project&gt;</span> is the working directory with every character that is not a letter or digit replaced by a hyphen, so <span class="icode">/Users/you/app</span> becomes <span class="icode">-Users-you-app</span>. With <span class="icode">CLAUDE_CONFIG_DIR</span> set, the whole tree lives under that directory instead.</span></div>
+        <div class="row"><span class="k">What</span>
+          <span class="v">Anything that passes through a tool: each Bash command and its output, each file the Read tool opened and what it contained, each Edit, Write and MCP call. Large outputs are spilled to <span class="icode">&lt;session&gt;/tool-results/</span>, and subagents keep their own transcripts in <span class="icode">&lt;session&gt;/subagents/</span>.</span></div>
+        <div class="row"><span class="k">How long</span>
+          <span class="v"><strong><span class="icode">cleanupPeriodDays</span>, 30 by default.</strong> After a session starts, a background sweep deletes older transcripts without a message. A session you last used five weeks ago has no record unless you raised the setting before it aged out.</span></div>
+        <div class="row"><span class="k">Prompts</span>
+          <span class="v"><span class="icode">~/.claude/history.jsonl</span> holds every prompt you typed, with a timestamp and the project path, and the sweep leaves it alone. It records what you asked for, not what ran.</span></div>
+        <div class="row"><span class="k">Missing</span>
+          <span class="v">A session started with <span class="icode">CLAUDE_CODE_SKIP_PROMPT_HISTORY=1</span>, or a <span class="icode">claude -p</span> run with <span class="icode">--no-session-persistence</span>, writes no transcript at all.</span></div>
+        <div class="row"><span class="k">Trust</span>
+          <span class="v">Plaintext, not encrypted at rest, and protected only by file permissions. Anything running as your user can edit or delete it. Treat it as evidence for yourself, not proof for a third party.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        To keep more than a month, raise the setting in
+        <span class="icode">~/.claude/settings.json</span>. The minimum is 1, and
+        <span class="icode">0</span> fails validation rather than meaning forever.
+        A higher value keeps what the sweep has not reached yet. It does not
+        bring back what it already deleted.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "cleanupPeriodDays": 365
+}</pre></div>
+      </div>
+      <h3 style="margin-top:34px">Look without installing anything</h3>
+      <div class="term">
+        <div class="term-body"><pre>ls -lt ~/.claude/projects/*/*.jsonl | head      <span class="c-mut"># newest sessions first</span>
+grep -lF -- 'git push --force' ~/.claude/projects/*/*.jsonl
+claude --resume &lt;session-id&gt;                   <span class="c-mut"># then /export to save it as text</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The file name is the session ID. <span class="icode">grep</span> tells
+        you which transcripts contain a string, not that the command ran: the
+        same text turns up in a file the agent read, in a search pattern or in
+        an <span class="icode">echo</span>. <span class="icode">/export</span>
+        writes the conversation as plain text with tool output rendered, which
+        reads better than raw JSON. Claude Code's documentation says the line
+        format is internal and changes between versions, so any script that
+        parses it can break on a release, ranwhat included.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Read</div>
+    <div>
+      <h2>Read it back with ranwhat watch</h2>
+      <p class="lede">
+        A month of transcripts is too long to read and mostly routine.
+        <a href="/watch">ranwhat watch</a> reads them where they are and
+        reports the calls worth a second look. No hook, no proxy, and it sends
+        nothing anywhere.
+      </p>
+      <div class="cmdrow">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="cmd-watch">uvx ranwhat watch --days 30</span>
+          <button class="copy" data-copy="#cmd-watch">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">uvx</span> runs it without installing it. It reads
+        OpenClaw's database as well when one exists;
+        <span class="icode">--source claude-code</span> limits it to Claude Code.
+        <span class="icode">--days 90</span> finds more only if
+        <span class="icode">cleanupPeriodDays</span> was already above 30.
+      </p>
+      <h3 style="margin-top:34px">Nine rules</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Rule</th><th>Severity</th><th>For example</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Credential access</strong></td><td><span class="chip crit">Critical</span></td><td><code>cat ~/.aws/credentials</code>, Read on <code>.env</code></td></tr>
+          <tr><td><strong>Secret-shaped string in a tool call</strong></td><td><span class="chip crit">Critical</span></td><td><code>sk_live_…</code> <code>ghp_…</code> <code>AKIA…</code></td></tr>
+          <tr><td><strong>Package or release published</strong></td><td><span class="chip crit">Critical</span></td><td><code>npm publish</code> <code>twine upload</code> <code>docker push</code></td></tr>
+          <tr><td><strong>Cloud resource destroyed or modified</strong></td><td><span class="chip crit">Critical</span></td><td><code>terraform destroy</code> <code>kubectl delete</code> <code>aws iam attach-…</code></td></tr>
+          <tr><td><strong>Financial API called</strong></td><td><span class="chip crit">Critical</span></td><td>Stripe charges, refunds, transfers or payouts</td></tr>
+          <tr><td><strong>Log or history tampering</strong></td><td><span class="chip crit">Critical</span></td><td><code>history -c</code> <code>aws cloudtrail stop-logging</code></td></tr>
+          <tr><td><strong>Destructive git</strong></td><td><span class="chip high">High</span></td><td><code>git push --force</code> <code>git reset --hard</code></td></tr>
+          <tr><td><strong>Recursive deletion</strong></td><td><span class="chip high">High</span></td><td><code>rm -rf ~/Documents/old-notes</code> <code>find . -delete</code></td></tr>
+          <tr><td><strong>Local file sent to the network</strong></td><td><span class="chip high">High</span></td><td><code>curl -d @dump.sql</code> <code>curl -F file=@notes.txt</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Severity follows the target, not the verb:
+        <span class="icode">rm -rf build</span> is not reported,
+        <span class="icode">rm -rf ~/Documents</span> is high and
+        <span class="icode">rm -rf "$HOME"</span> is critical.
+      </p>
+      <h3 style="margin-top:34px">As a log you can keep</h3>
+      <p>
+        <span class="icode">ranwhat watch --json</span> prints one record per
+        flagged call, with any secret in the evidence masked:
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>ranwhat watch --json</span><span style="margin-left:auto">one record</span></div>
+        <div class="term-body"><pre>{
+  "source": "claude-code",
+  "session": "3f2a9c1e-0b7d-4e55-9a10-2c6e8d4b7f01",
+  "project": "-Users-you-app",
+  "timestamp": "2026-09-26T14:42:10.000Z",
+  "tool_name": "Bash",
+  "tool_call_id": "toolu_01",
+  "payload_hash": "9006c7010e00d3a2",
+  "severity": "high",
+  "hits": [
+    {
+      "rule": "fs.destructive",
+      "severity": "high",
+      "title": "Bulk or recursive deletion",
+      "why": "Recursive deletion. Recoverable only if something else was backing it up.",
+      "evidence": "rm -rf ~/Documents/old-notes"
+    }
+  ]
+}</pre></div>
+      </div>
+      <div class="term" style="margin-top:10px">
+        <div class="term-body"><pre>ranwhat watch --json | jq -r '.[] | [.timestamp, .severity, .tool_name, .hits[0].evidence] | @tsv'</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Once each</span>
+          <span class="v">A call replayed by a resumed session is reported once, not once per transcript that carries it.</span></div>
+        <div class="row"><span class="k">Not actions</span>
+          <span class="v"><span class="icode">grep "rm -rf" src/</span> and other searches, <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies, <span class="icode">python -c</span> and <span class="icode">node -e</span> payloads, comments, and <span class="icode">git rm --cached</span>. A <span class="icode">bash -c</span> payload is parsed, because it really is shell. A secret-shaped string is the exception: it is reported wherever it appears in the call, because it is in the transcript either way.</span></div>
+        <div class="row"><span class="k">Moved config</span>
+          <span class="v">ranwhat does not read <span class="icode">CLAUDE_CONFIG_DIR</span>. Pass <span class="icode">--root "$CLAUDE_CONFIG_DIR/projects"</span>.</span></div>
+        <div class="row"><span class="k">0 source(s)</span>
+          <span class="v">The report's header counts the files it read. If it says <span class="icode">0 source(s)</span>, it read nothing, which almost always means the wrong directory, not a clean history.</span></div>
+        <div class="row"><span class="k">Not read yet</span>
+          <span class="v">Subagent transcripts in <span class="icode">&lt;session&gt;/subagents/</span>, the spilled outputs in <span class="icode">&lt;session&gt;/tool-results/</span>, and <span class="icode">history.jsonl</span>.</span></div>
+        <div class="row"><span class="k">Call, not result</span>
+          <span class="v">watch judges each call as the agent made it. It does not read the result, so a call you refused or one that failed is reported the same way as one that ran. The result is in the transcript beside it.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Hook</div>
+    <div>
+      <h2>Log every command from now on with a hook</h2>
+      <p class="lede">
+        The transcript keeps everything for a month. For one line per command,
+        kept as long as you like, Claude Code's hooks guide has a ready
+        example.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' &gt;&gt; ~/.claude/command-log.txt"
+          }
+        ]
+      }
+    ]
+  }
+}</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        In <span class="icode">~/.claude/settings.json</span> it covers every
+        project on this machine. In a repository's
+        <span class="icode">.claude/settings.json</span> it covers that project
+        and can be committed. If the file already has a
+        <span class="icode">hooks</span> key, merge into it. The command needs
+        <span class="icode">jq</span> on your path, and
+        <span class="icode">/hooks</span> lists what is registered.
+      </p>
+      <p style="margin-top:22px">
+        The hook's input also carries <span class="icode">session_id</span>,
+        <span class="icode">cwd</span> and <span class="icode">hook_event_name</span>.
+        For one JSON line per command with a time on it, use this as the
+        command instead:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>jq -c '{time: (now | todate), event: .hook_event_name, session: .session_id, cwd: .cwd, command: .tool_input.command}' &gt;&gt; ~/.claude/command-log.jsonl</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Failures</span>
+          <span class="v"><strong><span class="icode">PostToolUse</span> fires only after a tool call succeeds.</strong> A command that exits non-zero fires <span class="icode">PostToolUseFailure</span> instead, so add the same entry under that event or the log misses every failed command. A call refused at the permission prompt fires neither; <span class="icode">PreToolUse</span> sees it.</span></div>
+        <div class="row"><span class="k">Subagents</span>
+          <span class="v">Hooks fire inside subagents too, with an <span class="icode">agent_id</span> field in the input, so this log covers the commands that ranwhat watch does not read yet.</span></div>
+        <div class="row"><span class="k">transcript_path</span>
+          <span class="v">The input includes the session's transcript path. The transcript is written asynchronously and may not hold the current turn's latest messages when the hook fires, so log from the hook's own input rather than reading the file.</span></div>
+        <div class="row"><span class="k">Off switch</span>
+          <span class="v"><span class="icode">"disableAllHooks": true</span> in any settings file other than managed settings turns off user, project, local and plugin hooks, and a project's settings take precedence over yours. Hooks in managed settings keep running; yours do not.</span></div>
+        <div class="row"><span class="k">Same weakness</span>
+          <span class="v">The log is a plaintext file on the same machine. It is not on the retention sweep's list, so it grows until you rotate it, and anything running as you can edit it.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / OpenTelemetry</div>
+    <div>
+      <h2>Send it to your own collector</h2>
+      <p class="lede">
+        A hook writes to this machine. OpenTelemetry sends events to a
+        collector you run, as they happen. Claude Code's monitoring
+        documentation calls these events the audit data source for Claude Code
+        activity.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_LOG_TOOL_DETAILS=1
+claude</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Events</span>
+          <span class="v">Each tool call that runs produces a <span class="icode">claude_code.tool_result</span> event with <span class="icode">tool_name</span>, <span class="icode">success</span> and <span class="icode">duration_ms</span>. A refused call produces a <span class="icode">tool_decision</span> event with <span class="icode">decision</span> set to <span class="icode">reject</span>. Both carry the <span class="icode">tool_use_id</span> that hooks receive, so the two records can be joined.</span></div>
+        <div class="row"><span class="k">The gate</span>
+          <span class="v"><strong>Without <span class="icode">OTEL_LOG_TOOL_DETAILS=1</span>, neither the Bash command nor the tool input is logged.</strong> With it, <span class="icode">tool_parameters</span> carries the full command, and <span class="icode">tool_input</span> the arguments, with values over 512 characters truncated and the whole bounded to about 4K characters.</span></div>
+        <div class="row"><span class="k">Output</span>
+          <span class="v"><span class="icode">OTEL_LOG_TOOL_CONTENT=1</span> adds what the tool returned, such as file contents and command output, as a <span class="icode">tool.output</span> span event, truncated at 60 KB by default. It needs tracing: <span class="icode">CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1</span> and <span class="icode">OTEL_TRACES_EXPORTER</span>.</span></div>
+        <div class="row"><span class="k">Defaults</span>
+          <span class="v">Export is opt-in, and both <span class="icode">OTEL_LOG_TOOL_DETAILS</span> and <span class="icode">OTEL_LOG_TOOL_CONTENT</span> are off by default. The data goes only to the endpoint you configure, never to Anthropic. Commands can carry secrets, so filter at the collector if they will be stored.</span></div>
+        <div class="row"><span class="k">Repositories</span>
+          <span class="v">A repository's <span class="icode">.claude/settings.json</span> cannot turn telemetry on or send it elsewhere, but it can set <span class="icode">OTEL_LOGS_EXPORTER</span> to <span class="icode">none</span>, unless that variable comes from managed settings, a <span class="icode">--settings</span> file or the shell you start <span class="icode">claude</span> from. Export it in the shell.</span></div>
+        <div class="row"><span class="k">Nothing arrives</span>
+          <span class="v">Submit a prompt and look for <span class="icode">claude_code.user_prompt</span>. If it is not there, start with <span class="icode">claude --debug-file &lt;path&gt;</span> and look for <span class="icode">[3P telemetry]</span> errors. Claude Code emits the raw events only; alerting is the collector's job.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Choose</div>
+    <div>
+      <h2>Which one to use</h2>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Record</th><th>Covers</th><th>Lives</th><th>Watch for</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Transcript</strong></td>
+              <td>Already there: the last 30 days, or <span class="icode">cleanupPeriodDays</span></td>
+              <td>Local plaintext, editable by anything running as you</td>
+              <td>Silent deletion after the period; a format that changes between versions</td></tr>
+          <tr><td><strong>Hook</strong></td>
+              <td>From the moment you add it, for as long as you keep the file</td>
+              <td>A local file you define</td>
+              <td>Failed commands unless you add <span class="icode">PostToolUseFailure</span>; <span class="icode">disableAllHooks</span> in a project</td></tr>
+          <tr><td><strong>OpenTelemetry</strong></td>
+              <td>From the moment you enable it, for as long as your backend keeps it</td>
+              <td>Off the machine, at your collector</td>
+              <td>Only what the gates allow: no commands without <span class="icode">OTEL_LOG_TOOL_DETAILS=1</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px">
+        Most people want the first today and one of the other two going
+        forward. Run <span class="icode">uvx ranwhat watch --days 30</span> over
+        what is on disk now. Then add the hook if the record can stay on this
+        machine, or OpenTelemetry if it has to leave it, where a later edit
+        here cannot reach it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">06 / Next</div>
+    <div>
+      <h2>When the log shows a deletion</h2>
+      <p>
+        An <span class="icode">rm -rf</span> in the record tells you what ran.
+        Whether the files can come back is a separate question, and
+        checkpoints will not answer it: Claude Code's checkpointing does not
+        track files changed by Bash commands. Start with the guide to
+        <a href="/guides/claude-code-deleted-files">files Claude Code deleted</a>.
+        For everything else Claude Code keeps on disk, read the
+        <a href="/guides/claude-code-history">Claude Code history guide</a>;
+        for the controls around all of this, the
+        <a href="/guides/ai-coding-agent-security">AI coding agent security
+        checklist</a>. <a href="/watch">ranwhat watch</a> has the full rule
+        set, and the rest of the <a href="/guides">guides</a> are listed here.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/claude-directory#application-data">Explore the .claude directory<span>transcript contents, retention sweep, plaintext storage</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings-reference#cleanupperioddays">Settings reference: cleanupPeriodDays<span>default, minimum, the sweep</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/sessions#where-transcripts-are-stored">Manage sessions<span>transcript location, format, export</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/env-vars">Environment variables<span>CLAUDE_CONFIG_DIR, CLAUDE_CODE_SKIP_PROMPT_HISTORY</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/hooks-guide">Hooks guide<span>the command-log example, hook locations</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/hooks">Hooks reference<span>input fields, PostToolUseFailure, disableAllHooks</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/monitoring-usage">Monitoring usage<span>OpenTelemetry events and gates</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/checkpointing">Checkpointing<span>Bash changes are not tracked</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/watch.py">ranwhat/watch.py<span>the nine rules and the JSON record</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/README.md">ranwhat README<span>what is not treated as an action, what is not read</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <span>cenner</span></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <span>cenner</span>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

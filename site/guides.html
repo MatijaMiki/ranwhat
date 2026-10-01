@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guides: Claude Code and AI coding agent security | ranwhat</title>
+<meta name="description" content="Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<link rel="canonical" href="https://ranwhat.com/guides">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides">
+<meta property="og:title" content="Guides: Claude Code and AI coding agent security | ranwhat">
+<meta property="og:description" content="Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Guides: Claude Code and AI coding agent security | ranwhat">
+<meta name="twitter:description" content="Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"CollectionPage","@id":"https://ranwhat.com/guides#page","name":"Guides to AI coding agent security","description":"Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.","url":"https://ranwhat.com/guides","isPartOf":{"@id":"https://ranwhat.com/#website"},"mainEntity":{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"https://ranwhat.com/guides/ai-coding-agent-security","name":"AI coding agent security: a checklist for your own machine"},{"@type":"ListItem","position":2,"url":"https://ranwhat.com/guides/claude-code-history","name":"Where Claude Code keeps your conversation history"},{"@type":"ListItem","position":3,"url":"https://ranwhat.com/guides/claude-code-env-secrets","name":"How to stop Claude Code reading your .env file"},{"@type":"ListItem","position":4,"url":"https://ranwhat.com/guides/claude-code-audit-log","name":"A Claude Code audit log from what is already on disk"},{"@type":"ListItem","position":5,"url":"https://ranwhat.com/guides/claude-code-deleted-files","name":"Claude Code deleted my files. What now?"},{"@type":"ListItem","position":6,"url":"https://ranwhat.com/guides/ai-agent-token-scopes","name":"Check what the tokens your AI agent holds can do"}]}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"}]}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/watch">Watch</a>
+      <a href="/clean">Clean</a>
+      <a href="/scan">Scan</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Guides</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Guides</p>
+    <h1>Guides to AI coding agent security</h1>
+    <p class="lede">
+      Walk-throughs for the agent on your own machine: what Claude Code writes
+      to disk, what it can read, how to check what it ran, and how to cut what
+      its tokens allow. Each guide is checked against the vendors' own
+      documentation and lists its sources at the end.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Start here</div>
+    <div>
+      <h2>Start with the checklist.</h2>
+      <p class="lede">
+        The other guides go deeper on one item each. This one puts them in
+        order.
+      </p>
+      <div class="grid2">
+        <div class="cell" style="grid-column:1/-1">
+          <h3><a href="/guides/ai-coding-agent-security">AI coding agent security: a checklist for your own machine</a></h3>
+          <p>What a coding agent can reach, the boundary to put around it, what
+             it writes to disk, how to check what it already ran, and how to
+             scope the tokens it holds. Eleven steps, in the order worth doing
+             them.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Claude Code</div>
+    <div>
+      <h2>What Claude Code keeps, reads and runs.</h2>
+      <p class="lede">
+        Claude Code writes every session to a plaintext transcript under
+        <span class="icode">~/.claude/projects</span>. These four guides cover
+        what is in those files and what to do about it.
+      </p>
+      <div class="grid2">
+        <div class="cell">
+          <h3><a href="/guides/claude-code-history">Where Claude Code keeps your conversation history</a></h3>
+          <p>Where the transcripts are, what they hold, why they are deleted
+             after 30 days by default, how to change that, and how to purge
+             a project.</p>
+        </div>
+        <div class="cell">
+          <h3><a href="/guides/claude-code-env-secrets">How to stop Claude Code reading your .env file</a></h3>
+          <p>A Read deny rule stops <span class="icode">cat</span> and
+             Claude's file tools, not <span class="icode">grep&nbsp;-r</span> or a
+             Python script. The sandbox closes that gap. If it already read the
+             file, rotate first.</p>
+        </div>
+        <div class="cell">
+          <h3><a href="/guides/claude-code-audit-log">A Claude Code audit log from what is already on disk</a></h3>
+          <p>Read back the tool calls in the transcripts you already have, then
+             keep a record from now on with a hook or OpenTelemetry.</p>
+        </div>
+        <div class="cell">
+          <h3><a href="/guides/claude-code-deleted-files">Claude Code deleted my files. What now?</a></h3>
+          <p>Rewind does not restore files a Bash command removed. Find what
+             was deleted and when, restore from git or a backup, and block a
+             repeat.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Tokens</div>
+    <div>
+      <h2>What an agent's tokens allow.</h2>
+      <p class="lede">
+        Permission prompts decide which commands run. The token decides what
+        a command can do once it reaches the provider.
+      </p>
+      <div class="grid2">
+        <div class="cell" style="grid-column:1/-1">
+          <h3><a href="/guides/ai-agent-token-scopes">Check what the tokens your AI agent holds can do</a></h3>
+          <p>Check what GitHub, Google, Slack, Stripe and AWS credentials allow
+             with each provider's own tools, see which grants were ever used,
+             then cut them down.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Check now</div>
+    <div>
+      <h2>Or check your own machine now.</h2>
+      <p class="lede">
+        One read-only pass over Claude Code and OpenClaw history: the risky
+        actions the agents took, and the credentials left in Claude Code
+        transcripts. It changes nothing.
+      </p>
+      <div class="cmdrow">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="run-check">uvx ranwhat check</span>
+          <button class="copy" data-copy="#run-check">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        One half at a time: <a href="/watch">ranwhat watch</a> for what your
+        agents ran, <a href="/clean">ranwhat clean</a> for secrets in Claude
+        Code transcripts, and <a href="/scan">ranwhat scan</a> for what their
+        credentials allow.
+      </p>
+    </div>
+  </div>
+</section>
+</main>
+
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <span>cenner</span></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <span>cenner</span>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

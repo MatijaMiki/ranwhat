@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI coding agent security: a practical checklist | ranwhat</title>
+<meta name="description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.">
+<link rel="canonical" href="https://ranwhat.com/guides/ai-coding-agent-security">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/ai-coding-agent-security">
+<meta property="og:title" content="AI coding agent security: a practical checklist | ranwhat">
+<meta property="og:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="AI coding agent security: a practical checklist | ranwhat">
+<meta name="twitter:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"AI coding agent security: a checklist for your own machine","description":"What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.","datePublished":"2026-09-27","dateModified":"2026-09-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-security"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent security","item":"https://ranwhat.com/guides/ai-coding-agent-security"}]}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/watch">Watch</a>
+      <a href="/clean">Clean</a>
+      <a href="/scan">Scan</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Agent security</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Guide</p>
+    <h1>AI coding agent security: a checklist for your own machine</h1>
+    <p class="lede">
+      A coding agent runs commands on your machine, next to your files and the
+      tokens in your environment. This checklist covers what it can reach, what
+      it writes down, how to check what it did, and how to shrink what it could
+      do next. Claude Code is the worked example; the same questions apply to
+      OpenClaw.
+    </p>
+    <p style="margin:18px 0 0;font-size:14px;color:var(--muted)">
+      Checked against the Claude Code, OpenClaw, GitHub, Stripe, AWS and MCP
+      docs on <time datetime="2026-09-27">27 September 2026</time>. ranwhat 0.3.0.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1" id="reach">
+  <div class="shell band split">
+    <div class="marginal">01 / Reach</div>
+    <div>
+      <h2>Know what the agent can reach.</h2>
+      <p class="lede">
+        Most of the exposure sits in what the agent can do without asking you,
+        so start with the defaults.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Manual mode</span>
+          <span class="v">Claude Code starts with read-only permissions and asks before it edits a file or runs a command that can change your system. It can write only inside the folder it was started in and its subfolders, and asks before Read, Grep or Glob go outside it. Other modes change what asks: in auto mode a classifier reviews actions instead of you.</span></div>
+        <div class="row"><span class="k">No prompt</span>
+          <span class="v">A built-in set of read-only commands runs without a prompt in every mode: <span class="icode">ls</span>, <span class="icode">cat</span>, <span class="icode">grep</span>, <span class="icode">find</span>, <span class="icode">head</span>, <span class="icode">tail</span> and others. The set is not configurable. To make one of them ask, add an <span class="icode">ask</span> or <span class="icode">deny</span> rule for it.</span></div>
+        <div class="row"><span class="k">Environment</span>
+          <span class="v">Bash commands run with the environment Claude Code was started in. Even sandboxed commands inherit it by default, credentials included, so a token exported in that shell is in reach of every command the agent runs.</span></div>
+        <div class="row"><span class="k">Network</span>
+          <span class="v">Your prompts and the model's outputs go to the model provider, encrypted in transit with TLS 1.2 or later.</span></div>
+        <div class="row"><span class="k">MCP servers</span>
+          <span class="v">Anthropic reviews connectors against its listing criteria before adding them to its directory, but does not security-audit or manage any MCP server. The MCP specification's security guidance says clients should warn that a local MCP server runs with the same privileges as the client.</span></div>
+      </div>
+      <div class="term" style="margin-top:30px">
+        <div class="term-body"><pre>cd ~/code/myapp &amp;&amp; claude   <span class="c-mut">start in the project, not in ~</span>
+/permissions                <span class="c-mut">in the session: every rule, and the file it came from</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Started in your home directory, the folder boundary is your whole home
+        directory, and Claude Code does not save trust for it, so the trust
+        prompt comes back on every launch. To make the file tools refuse
+        anything outside the working directories in every permission mode, set
+        <span class="icode">permissions.blockReadsOutsideWorkingDirectories</span>.
+        It covers Read, Grep, Glob and LSP, needs Claude Code v2.1.257 or
+        later, and does not refuse shell commands the same way.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "permissions": {
+    "blockReadsOutsideWorkingDirectories": true
+  }
+}</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2" id="boundary">
+  <div class="shell band split">
+    <div class="marginal">02 / Boundary</div>
+    <div>
+      <h2>Put a boundary around it.</h2>
+      <p class="lede">
+        Permission rules decide what Claude Code's own tools may touch, and
+        Claude Code enforces them, not the model: a line in CLAUDE.md changes
+        nothing. The sandbox decides what every process may touch. Use both.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)"
+    ]
+  }
+}</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        In the project's <span class="icode">.claude/settings.json</span> the
+        rules travel with the repository; in
+        <span class="icode">~/.claude/settings.json</span> they apply to every
+        session you start. A <span class="icode">./</span> path is relative to
+        the directory you start in. A single leading slash is not: in user
+        settings, <span class="icode">Read(/secrets/**)</span> means
+        <span class="icode">~/.claude/secrets/**</span>. For a user-level rule
+        that reaches into your projects, write <span class="icode">//</span>
+        for an absolute path or <span class="icode">~/</span> for your home:
+        <span class="icode">Read(//**/.env)</span> matches any
+        <span class="icode">.env</span> on the filesystem.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Covers</span>
+          <span class="v">Claude's file tools, the Bash file commands Claude Code recognises (<span class="icode">cat</span>, <span class="icode">head</span>, <span class="icode">tail</span>, <span class="icode">sed</span>, <span class="icode">tee</span>), and redirection targets such as <span class="icode">&lt; .env</span>.</span></div>
+        <div class="row"><span class="k">Misses</span>
+          <span class="v"><span class="icode">grep -r pattern .</span> run from the folder that holds the file, and a Python or Node script that opens files itself.</span></div>
+        <div class="row"><span class="k">Bash rules</span>
+          <span class="v">They match the command as written. As a deny rule, <span class="icode">Bash(rm *)</span> stops <span class="icode">rm -rf build/</span>, not <span class="icode">/bin/rm -rf build/</span> or <span class="icode">bash -c 'rm -rf build/'</span>. They are not a security boundary around the program.</span></div>
+      </div>
+
+      <h3 style="margin-top:40px">The sandbox</h3>
+      <p style="font-size:15px;color:var(--ink-2)">
+        The sandbox is the OS-level boundary: the operating system enforces
+        which files and domains a sandboxed command and its child processes can
+        reach, whatever the command text says. Run
+        <span class="icode">/sandbox</span> in a session to turn it on. macOS
+        uses the built-in Seatbelt framework, with nothing to install. Linux
+        and WSL2 need <span class="icode">bubblewrap</span> and
+        <span class="icode">socat</span>. Native Windows is not supported.
+      </p>
+      <p style="font-size:15px;color:var(--ink-2)">
+        By default it still lets commands read
+        <span class="icode">~/.aws/credentials</span> and
+        <span class="icode">~/.ssh/</span>, and there is no built-in credential
+        deny list: only what you list is restricted. This is Anthropic's own
+        example.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "sandbox": {
+    "enabled": true,
+    "credentials": {
+      "files": [
+        { "path": "~/.aws/credentials", "mode": "deny" },
+        { "path": "~/.ssh", "mode": "deny" }
+      ],
+      "envVars": [
+        { "name": "GITHUB_TOKEN", "mode": "deny" },
+        { "name": "NPM_TOKEN", "mode": "deny" }
+      ]
+    }
+  }
+}</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">sandbox.credentials</span> covers sandboxed Bash
+        only. To strip credentials from every subprocess, sandboxed or not, set
+        <span class="icode">CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</span>. The Bash
+        tool, hooks and MCP stdio servers then run without Anthropic and cloud
+        provider credentials and any other variable Claude Code recognises as a
+        credential. It removes what it recognises, so keep naming your own
+        variables in <span class="icode">sandbox.credentials</span>.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Anthropic is plain about the limits. The sandbox reduces risk but is
+        not a complete isolation boundary. Its proxy allows a connection by
+        hostname and does not inspect TLS by default, so allowing a broad
+        domain such as <span class="icode">github.com</span> can open a path
+        for data exfiltration. And a command that fails in the sandbox can be
+        retried outside it, through the normal permission prompt, unless you
+        set <span class="icode">"allowUnsandboxedCommands": false</span>.
+      </p>
+      <p class="more" style="margin-top:14px"><a href="/guides/claude-code-env-secrets">Keep Claude Code out of your .env files: the full walk-through &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3" id="disk">
+  <div class="shell band split">
+    <div class="marginal">03 / Disk</div>
+    <div>
+      <h2>Know what it writes to disk.</h2>
+      <p class="lede">
+        Anything that passes through a tool is written to a transcript: file
+        contents, command output, pasted text. In plaintext, on your disk.
+      </p>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Path</th><th>What it holds</th></tr></thead>
+        <tbody>
+          <tr><td><code>~/.claude/<wbr>projects/<wbr>&lt;project&gt;/<wbr>&lt;session&gt;.jsonl</code></td>
+              <td>Every message, tool call and tool result in a session. A <span class="icode">.env</span> value a tool read is written here.</td></tr>
+          <tr><td><code>&lt;session&gt;/<wbr>subagents/</code></td>
+              <td>Subagent transcripts, removed with the parent transcript when it ages out.</td></tr>
+          <tr><td><code>&lt;session&gt;/<wbr>tool-results/</code></td>
+              <td>Large tool outputs, spilled to separate files.</td></tr>
+          <tr><td><code>~/.claude/<wbr>file-history/</code></td>
+              <td>Pre-edit snapshots of files Claude changed, kept for checkpoint restore.</td></tr>
+          <tr><td><code>~/.claude/<wbr>history.jsonl</code></td>
+              <td>Every prompt you typed, with timestamp and project path. The retention sweep does not remove it.</td></tr>
+          <tr><td><code>~/.openclaw/<wbr>agents/<wbr>&lt;agentId&gt;/<wbr>agent/<wbr>openclaw-agent.sqlite</code></td>
+              <td>OpenClaw's per-agent state, including session rows and transcripts.</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Claude Code's transcripts and history are not encrypted at rest. File
+        permissions are the only protection. Claude Code deletes transcripts
+        older than <span class="icode">cleanupPeriodDays</span>: 30 days by
+        default, and 1 at the least. Lower it to hold less on disk, or raise
+        it to keep a longer record to audit, but choose it.
+        <span class="icode">CLAUDE_CODE_SKIP_PROMPT_HISTORY=1</span> stops
+        Claude Code writing transcripts and prompt history at all, which also
+        leaves nothing to check afterwards.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        OpenClaw's own docs say its transcripts can include pasted secrets,
+        file contents, command output and links. They recommend
+        <span class="icode">700</span> on directories and
+        <span class="icode">600</span> on files under
+        <span class="icode">~/.openclaw</span>, and
+        <span class="icode">openclaw doctor</span> can warn and offer to
+        tighten them.
+      </p>
+      <div class="term" style="margin-top:22px">
+        <div class="term-body"><pre>ls -lt ~/.claude/projects | head      <span class="c-mut">the projects used most recently</span>
+ls -ld ~/.claude ~/.openclaw          <span class="c-mut">who else can read them</span>
+chmod 700 ~/.openclaw                 <span class="c-mut">OpenClaw's recommended mode</span>
+uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in Claude Code transcripts; changes nothing</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">ranwhat clean</span> reads session transcripts from
+        the last 30 days by default (<span class="icode">--days N</span>) and
+        names the file each credential was read out of. It does not read
+        <span class="icode">subagents/</span>,
+        <span class="icode">tool-results/</span> or
+        <span class="icode">history.jsonl</span> yet.
+      </p>
+      <p class="more" style="margin-top:14px"><a href="/guides/claude-code-history">Where Claude Code keeps its history, and for how long &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4" id="audit">
+  <div class="shell band split">
+    <div class="marginal">04 / Audit</div>
+    <div>
+      <h2>Check what it already ran.</h2>
+      <p class="lede">
+        The transcript is the record you already have, for as long as
+        retention keeps it. Read it before it ages out.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="run-check">uvx ranwhat check</span>
+        <button class="copy" data-copy="#run-check">Copy</button>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        One read-only pass: the risky actions in Claude Code and OpenClaw
+        history, and the credentials left in Claude Code transcripts. It
+        refuses <span class="icode">--apply</span>. Every
+        <span class="icode">ranwhat</span> command on this page also runs as
+        <span class="icode">uvx ranwhat &hellip;</span> without installing
+        anything.
+      </p>
+      <div class="term" style="margin-top:22px">
+        <div class="term-body"><pre>ranwhat watch --days 30    <span class="c-mut">risky actions from the last 30 days</span>
+ranwhat watch --json       <span class="c-mut">one record per flagged call, secrets masked</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <a href="/watch">ranwhat watch</a> reports nine kinds of action:
+        credential reads, secret-shaped strings in tool calls, package
+        publishing, cloud resource changes, payment API calls, log or history
+        tampering, destructive git, recursive deletion, and local files
+        uploaded with curl. It does not read subagent transcripts or the events
+        OpenClaw stores compressed yet, and <span class="icode">--days</span>
+        applies to Claude Code only.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Without ranwhat, a first look is one grep away, because each transcript
+        is one JSON event per line:
+        <span class="icode">grep -l 'rm -rf' ~/.claude/projects/*/*.jsonl</span>
+        lists the sessions that mention it, whether or not it ran.
+      </p>
+
+      <h3 style="margin-top:40px">A record from now on</h3>
+      <p style="font-size:15px;color:var(--ink-2)">
+        A <span class="icode">PostToolUse</span> hook runs after each tool call.
+        This one, from Claude Code's hooks guide, appends every Bash command to
+        a file. Put it in <span class="icode">~/.claude/settings.json</span>;
+        it needs <span class="icode">jq</span>.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' &gt;&gt; ~/.claude/command-log.txt"
+          }
+        ]
+      }
+    ]
+  }
+}</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The log holds each command as written, so a token passed on a command
+        line ends up in it too. Keep it as private as the transcripts.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Or export events with OpenTelemetry.
+        <span class="icode">CLAUDE_CODE_ENABLE_TELEMETRY=1</span> turns it on,
+        and Bash command strings are logged only with
+        <span class="icode">OTEL_LOG_TOOL_DETAILS=1</span>, which is off by
+        default.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_LOG_TOOL_DETAILS=1    <span class="c-mut">without it, Bash commands are not logged</span></pre></div>
+      </div>
+      <p class="more" style="margin-top:22px"><a href="/guides/claude-code-audit-log">Build an audit log for Claude Code &rarr;</a></p>
+      <p class="more"><a href="/guides/claude-code-deleted-files">If Claude Code deleted your files &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="tokens">
+  <div class="shell band split">
+    <div class="marginal">05 / Tokens</div>
+    <div>
+      <h2>Scope the tokens it holds.</h2>
+      <p class="lede">
+        A command the agent runs can do anything a token in its environment
+        allows. Rules and sandboxes have gaps, as section 02 shows. A token
+        that cannot delete a repository cannot be made to.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Where</span>
+          <span class="v">In the environment or a secrets manager, not on a command line. Arguments are visible to other users on the machine through the process table, and a typed command line lands in shell history.</span></div>
+        <div class="row"><span class="k">GitHub</span>
+          <span class="v">Fine-grained personal access tokens can be limited to specific repositories, each with specific permissions. GitHub recommends them over classic tokens wherever possible, and highly recommends an expiration date.</span></div>
+        <div class="row"><span class="k">Stripe</span>
+          <span class="v">A restricted key with only the permissions the agent needs, tagged as an agent key when you create it. Agent-tagged keys fall under Stripe's approval rules for sensitive actions such as refunds and payouts. <strong>From 31 October 2026 the Stripe MCP server refuses full-access secret keys and restricted keys without the Agent tag.</strong></span></div>
+        <div class="row"><span class="k">AWS</span>
+          <span class="v">IAM last accessed information shows which services, and for some services which actions, a role or user has used, so you can remove the rest. It counts attempts, denied ones included; CloudTrail is the authoritative record.</span></div>
+        <div class="row"><span class="k">MCP servers</span>
+          <span class="v">The MCP security guidance lists wildcard or omnibus scopes, such as <span class="icode">*</span>, <span class="icode">all</span> or <span class="icode">full-access</span>, as a common mistake. Grant a server the smallest set it needs.</span></div>
+      </div>
+      <div class="term" style="margin-top:30px">
+        <div class="term-body"><pre>read -rs RANWHAT_GITHUB_TOKEN    <span class="c-mut">paste it: not echoed, not saved to history</span>
+export RANWHAT_GITHUB_TOKEN
+ranwhat live                     <span class="c-mut">ask each token's own provider, read-only</span>
+ranwhat demo                     <span class="c-mut">the same report on a bundled example</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">ranwhat live</span> sends each token only to the
+        provider that issued it, and scores what it allows: scopes for Google,
+        classic GitHub and Slack tokens, and for Stripe whether the key is an
+        unrestricted <span class="icode">sk_</span> key. A fine-grained GitHub
+        token or an <span class="icode">rk_</span> restricted key comes back
+        with no scope list; declare its permissions in a profile and use
+        <a href="/scan">ranwhat scan</a>.
+        <span class="icode">ranwhat scan profile.json --pull-usage</span> then
+        marks which grants were used, from AWS IAM last accessed data, Stripe
+        events, the GitHub organisation audit log and Google Admin SDK reports.
+      </p>
+      <p class="more" style="margin-top:14px"><a href="/guides/ai-agent-token-scopes">AI agent token scopes: the longer guide &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="leaks">
+  <div class="shell band split">
+    <div class="marginal">06 / Leaks</div>
+    <div>
+      <h2>When a secret has already leaked.</h2>
+      <p class="lede">
+        Rotate first. Masking the transcript stops a second leak; it does not
+        undo the first. The value was already on disk and already in a model
+        context you do not control.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">AWS</span>
+          <span class="v">AWS's sequence: create a second access key, move every application to it, check when the old key was last used, deactivate it, then delete it.</span></div>
+        <div class="row"><span class="k">Stripe</span>
+          <span class="v">Rotating a key in the Dashboard keeps the old key working for up to 7 days unless you set its expiration to Now. For a key that leaked, every day of overlap is a day the copy still works.</span></div>
+      </div>
+      <div class="term" style="margin-top:30px">
+        <div class="term-bar"><span>AWS CLI</span></div>
+        <div class="term-body"><pre>aws iam create-access-key
+aws iam get-access-key-last-used --access-key-id &lt;old-key-id&gt;
+aws iam update-access-key --access-key-id &lt;old-key-id&gt; --status Inactive
+aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        For credentials in Claude Code transcripts,
+        <a href="/clean">ranwhat clean</a> opens a review session after its
+        report.
+        <span class="icode">rotate</span> lists what to rotate, grouped by
+        provider, and <span class="icode">mask all</span> masks every value
+        listed, after a backup to <span class="icode">~/.ranwhat/backups</span>.
+        The backups still hold every masked value: delete them once the
+        transcripts look right.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>ranwhat clean               <span class="c-mut">report, then open the review session</span>
+<span class="c-mut">ranwhat&gt;</span> rotate           <span class="c-mut">what to rotate, grouped by provider</span>
+<span class="c-mut">ranwhat&gt;</span> mask all         <span class="c-mut">mask everything listed, backups first</span></pre></div>
+      </div>
+      <p class="more" style="margin-top:22px"><a href="/guides/claude-code-env-secrets">What to do when Claude Code read your .env &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="checklist">
+  <div class="shell band split">
+    <div class="marginal">07 / Checklist</div>
+    <div>
+      <h2>The checklist.</h2>
+      <p class="lede">
+        One line each, in the order worth doing them. Each points back to its
+        section.
+      </p>
+      <ol class="rows" style="list-style:none;margin:0;padding:0">
+        <li class="row"><span class="k">01</span>
+          <span class="v">Start Claude Code in the project directory, not in <span class="icode">~</span>. <a href="#reach">Reach</a></span></li>
+        <li class="row"><span class="k">02</span>
+          <span class="v">Review <span class="icode">/permissions</span>, and which settings file each rule comes from. <a href="#reach">Reach</a></span></li>
+        <li class="row"><span class="k">03</span>
+          <span class="v"><a href="/guides/claude-code-env-secrets">Deny reads of <span class="icode">.env</span> files</a> and secrets directories. <a href="#boundary">Boundary</a></span></li>
+        <li class="row"><span class="k">04</span>
+          <span class="v">Turn on the sandbox and list your credential files and variables in <span class="icode">sandbox.credentials</span>. <a href="#boundary">Boundary</a></span></li>
+        <li class="row"><span class="k">05</span>
+          <span class="v">Set <span class="icode">CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</span>. <a href="#boundary">Boundary</a></span></li>
+        <li class="row"><span class="k">06</span>
+          <span class="v">Check who can read <span class="icode">~/.claude</span> and <span class="icode">~/.openclaw</span>. <a href="#disk">Disk</a></span></li>
+        <li class="row"><span class="k">07</span>
+          <span class="v">Set <span class="icode">cleanupPeriodDays</span> on purpose: <a href="/guides/claude-code-history">how long Claude Code keeps history</a>. <a href="#disk">Disk</a></span></li>
+        <li class="row"><span class="k">08</span>
+          <span class="v">Run <span class="icode">uvx ranwhat check</span> now, and again after anything odd. <a href="#audit">Audit</a></span></li>
+        <li class="row"><span class="k">09</span>
+          <span class="v"><a href="/guides/claude-code-audit-log">Log commands from now on</a>, with a hook or OpenTelemetry. <a href="#audit">Audit</a></span></li>
+        <li class="row"><span class="k">10</span>
+          <span class="v"><a href="/guides/ai-agent-token-scopes">Replace broad tokens</a> with fine-grained, restricted or agent-tagged ones. <a href="#tokens">Tokens</a></span></li>
+        <li class="row"><span class="k">11</span>
+          <span class="v">Rotate anything found in a transcript, then mask it. <a href="#leaks">Leaks</a></span></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="scope">
+  <div class="shell band split">
+    <div class="marginal">08 / Scope</div>
+    <div>
+      <h2>What ranwhat covers, and what it does not.</h2>
+      <p class="lede">
+        <a href="/">ranwhat</a> is the after-the-fact half: what already ran,
+        what is on disk, and what the credentials allow.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Covers</span>
+          <span class="v"><span class="icode">watch</span>: risky actions in Claude Code and OpenClaw history. <span class="icode">clean</span>: credentials in Claude Code transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries.</span></div>
+        <div class="row"><span class="k">Does not</span>
+          <span class="v">Block anything while the agent works: Claude Code's permission rules, hooks and sandbox do that. It does not scan MCP servers or skills for malicious content, and does not read Codex yet.</span></div>
+        <div class="row"><span class="k">Network</span>
+          <span class="v">Reads locally. <span class="icode">live</span> and <span class="icode">--pull-usage</span> ask only the provider that issued each token.</span></div>
+      </div>
+      <div class="cmdrow" style="margin-top:30px">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="run-check-2">uvx ranwhat check</span>
+          <button class="copy" data-copy="#run-check-2">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="sources">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Where each fact comes from.</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/security">Claude Code: Security<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/permissions">Claude Code: Configure permissions<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings-reference">Claude Code: Settings reference<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/sandboxing">Claude Code: Sandboxed Bash tool<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/env-vars">Claude Code: Environment variables<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/data-usage">Claude Code: Data usage<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/claude-directory">Claude Code: The .claude directory<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/hooks-guide">Claude Code: Hooks guide<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/monitoring-usage">Claude Code: Monitoring<span>code.claude.com</span></a></li>
+        <li><a href="https://docs.openclaw.ai/gateway/security/secrets-and-storage">OpenClaw: Secrets, storage and logs<span>docs.openclaw.ai</span></a></li>
+        <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices">MCP: Security best practices<span>modelcontextprotocol.io</span></a></li>
+        <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">GitHub: Managing personal access tokens<span>docs.github.com</span></a></li>
+        <li><a href="https://docs.stripe.com/mcp">Stripe: Model Context Protocol<span>docs.stripe.com</span></a></li>
+        <li><a href="https://docs.stripe.com/keys">Stripe: API keys<span>docs.stripe.com</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_last-accessed.html">AWS: Refine permissions using last accessed information<span>docs.aws.amazon.com</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id-credentials-access-keys-update.html">AWS: Update access keys<span>docs.aws.amazon.com</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat#readme">ranwhat: README<span>github.com</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <span>cenner</span></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <span>cenner</span>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

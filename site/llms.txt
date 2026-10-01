@@ -29,6 +29,16 @@ Not read yet: Claude Code subagent transcripts (`<session>/subagents/`), large t
 - [FAQ](https://ranwhat.com/faq): what it reads, what it sends, and what masking does
 - [README](https://github.com/MatijaMiki/ranwhat/blob/main/README.md): full command reference in Markdown
 
+## Guides
+
+- [Guides](https://ranwhat.com/guides): every guide, with a one-line summary
+- [AI coding agent security](https://ranwhat.com/guides/ai-coding-agent-security): what a coding agent can reach on your machine, the boundary around it, what it writes to disk, auditing what it ran, and scoping its tokens, as one checklist
+- [Claude Code history](https://ranwhat.com/guides/claude-code-history): where transcripts live, retention, and how to purge them
+- [Stop Claude Code reading .env](https://ranwhat.com/guides/claude-code-env-secrets): Read deny rules, what they miss, the sandbox, and what to do once a secret was read
+- [Claude Code audit log](https://ranwhat.com/guides/claude-code-audit-log): reading back what ran from the transcripts, then a hook or OpenTelemetry for a record from now on
+- [Claude Code deleted my files](https://ranwhat.com/guides/claude-code-deleted-files): finding what was deleted and when, what rewind cannot restore, recovering from git or backups, and blocking a repeat
+- [AI agent token scopes](https://ranwhat.com/guides/ai-agent-token-scopes): checking what GitHub, Google, Slack, Stripe and AWS credentials allow and have used, then cutting them
+
 ## Project
 
 - [Pricing](https://ranwhat.com/pricing): free on your own machine; Plus is $12 a month per organisation; Team is annual, by contact. Plus and Team are being built.
