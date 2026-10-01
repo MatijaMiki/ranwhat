@@ -62,8 +62,8 @@
       wrote down: every tool call from the last 30 days, by default.
     </p>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
-      Checked against Claude Code's documentation and ranwhat's source.
-      Published <time datetime="2026-10-02">2 October 2026</time>.
+      Checked against Claude Code's documentation, the advisories and
+      research under Sources, and ranwhat's source. Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -217,7 +217,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <div class="row"><span class="k">Not read yet</span>
           <span class="v">Subagent transcripts in <span class="icode">&lt;session&gt;/subagents/</span>, the spilled outputs in <span class="icode">&lt;session&gt;/tool-results/</span>, and <span class="icode">history.jsonl</span>.</span></div>
         <div class="row"><span class="k">Call, not result</span>
-          <span class="v">watch judges each call as the agent made it. It does not read the result, so a call you refused or one that failed is reported the same way as one that ran. The result is in the transcript beside it.</span></div>
+          <span class="v">watch judges each call as the agent made it. It does not read the result, so a call you refused or one that failed is reported the same way as one that ran. The result is in the transcript beside it, and the result before a call often explains it. In 0DIN's demonstration of 25 June 2026, Claude Code ran <span class="icode">python3 -m axiom init</span> because an error message told it to, and that command opened a reverse shell. watch does not flag it. When a session looks wrong, resume it, <span class="icode">/export</span> it, and read the result before each command.</span></div>
       </div>
     </div>
   </div>
@@ -353,6 +353,45 @@ claude</pre></div>
         machine, or OpenTelemetry if it has to leave it, where a later edit
         here cannot reach it.
       </p>
+
+      <h3 style="margin-top:34px">A policy is not a record</h3>
+      <p>
+        Settings say what should happen. The transcript says what did. Before
+        2.1.260, a Claude Code session signed in to a Team or Enterprise
+        account fetched the organisation's server-managed settings with an API
+        key it had stored earlier, from a past <span class="icode">/login</span>
+        or written into its config. When the settings endpoint rejected that
+        key, the session still ran as the organisation's account, but with
+        none of its server-managed policy (no deny rules, model restrictions
+        or managed-only locks), or with a stale cached copy
+        (CVE-2026-103012, published 29 September 2026). Enterprise was
+        affected from 2.0.68 and Team from 2.1.38. MDM and file-based managed
+        settings were not.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>claude --version               <span class="c-mut"># 2.1.260 or later</span>
+/permissions                   <span class="c-mut"># the organisation's rules should be listed</span>
+uvx ranwhat watch --days 30    <span class="c-mut"># what ran while they may not have applied</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        watch reads only what retention kept, so it reaches back
+        <span class="icode">cleanupPeriodDays</span> and no further.
+        Administrators can set <span class="icode">requiredMinimumVersion</span>
+        to 2.1.260 through MDM or a managed settings file.
+      </p>
+      <p>
+        Nor does the transcript record a change to the configuration itself.
+        Mitiga showed an npm <span class="icode">postinstall</span> script
+        marking common clone paths as trusted in
+        <span class="icode">~/.claude.json</span>, after which a hook in a
+        repository cloned there re-pointed an OAuth MCP server at a proxy on
+        localhost at every start, and read each token that passed. Anthropic
+        ruled it out of scope, since it needs code already running as you.
+        Mitiga's advice is to watch <span class="icode">~/.claude.json</span>
+        and a project's MCP and hook files for changes, and to keep a list of
+        the MCP endpoints you approved. <span class="icode">/hooks</span>
+        lists what is registered.
+      </p>
     </div>
   </div>
 </section>
@@ -393,6 +432,10 @@ claude</pre></div>
         <li><a href="https://code.claude.com/docs/en/hooks">Hooks reference<span>input fields, PostToolUseFailure, disableAllHooks</span></a></li>
         <li><a href="https://code.claude.com/docs/en/monitoring-usage">Monitoring usage<span>OpenTelemetry events and gates</span></a></li>
         <li><a href="https://code.claude.com/docs/en/checkpointing">Checkpointing<span>Bash changes are not tracked</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings-reference#requiredminimumversion">Settings reference: requiredMinimumVersion<span>managed only, 2.1.163 or later</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-gfvf-j8jh-jxxw">GHSA-gfvf-j8jh-jxxw<span>CVE-2026-103012, fixed in 2.1.260</span></a></li>
+        <li><a href="https://0din.ai/blog/clone-this-repo-and-i-own-your-machine">0DIN: Clone this repo and I own your machine<span>the error Claude followed</span></a></li>
+        <li><a href="https://www.mitiga.io/blog/claude-code-mcp-token-theft-mitm">Mitiga: stealing MCP tokens in Claude Code<span>the chain, the disclosure, what to watch</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/watch.py">ranwhat/watch.py<span>the nine rules and the JSON record</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/README.md">ranwhat README<span>what is not treated as an action, what is not read</span></a></li>
       </ul>

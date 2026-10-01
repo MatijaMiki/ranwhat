@@ -64,7 +64,7 @@
       soon: the transcript that records it is deleted after 30 days by default.
     </p>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code and Git documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
+      Checked against the Claude Code and Git documentation, and the advisories and reports under Sources. Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -265,6 +265,39 @@ git fsck --lost-found                 <span class="c-mut">dangling objects, stag
         pushed to it: clone it again beside the damaged copy, and move files
         across by hand.
       </p>
+
+      <h3 style="margin-top:34px">Deleted in the cloud</h3>
+      <p>
+        Git, rewind and your backups cover this machine. A command that
+        deletes a cloud resource leaves nothing here to restore. On 24 April
+        2026, a Cursor agent working in PocketOS's staging environment found a
+        Railway API token in an unrelated file and used it to delete the
+        production volume, in about nine seconds. The backups went with it,
+        because Railway kept them in the same volume. Railway's CEO stepped in
+        two days later, and the data was back within the hour. On 1 May,
+        Railway made a volume deleted through its API recoverable for 48
+        hours, as one deleted in its dashboard already was.
+      </p>
+      <p>
+        So the first question after a cloud delete is the provider's own undo
+        window, which runs from the moment of the call. If Claude Code made
+        it, the transcript holds the call and its time:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>uvx ranwhat watch --days 7                     <span class="c-mut">cloud deletes it knows, newest first</span>
+grep -rl 'volumeDelete' ~/.claude/projects     <span class="c-mut">Railway's; use your provider's delete call</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">ranwhat watch</span> flags cloud deletes such as
+        <span class="icode">aws ec2 delete-volume</span>,
+        <span class="icode">kubectl delete</span>,
+        <span class="icode">terraform destroy</span> and
+        <span class="icode">DROP TABLE</span>. A call made straight to a
+        provider's API with <span class="icode">curl</span>, as in this case,
+        is not one of them, so search for the provider's own delete call. To
+        narrow what the next one can reach,
+        <a href="/guides/ai-agent-token-scopes">scope the token</a>.
+      </p>
     </div>
   </div>
 </section>
@@ -382,6 +415,22 @@ exit 0</pre></div>
         <span class="icode">sandbox.failIfUnavailable</span> is true.
       </p>
       <p>
+        The write limit holds only on a patched build. Before 2.1.64, a
+        symlink made by a sandboxed command could lead Claude Code's own,
+        unsandboxed process to write outside the workspace without asking
+        (CVE-2026-39861). From 2.1.38 until 2.1.163, a repository could
+        combine a worktree named <span class="icode">.git</span>, symlinks and
+        git fsmonitor to overwrite files in your home directory, such as
+        <span class="icode">~/.zshenv</span> (CVE-2026-55607). Before 2.1.247,
+        on macOS, a <span class="icode">core.fsmonitor</span> command planted
+        from inside the sandbox ran outside it when Claude Code's own git
+        calls ran, which Accomplish AI called Beltdown. Each needed untrusted
+        content in the session, from a cloned repository or injected
+        instructions. Auto-update has applied all three fixes. If you update
+        by hand, <span class="icode">claude --version</span> should print
+        2.1.247 or later.
+      </p>
+      <p>
         Rewind and the sandbox cover each other's gaps. Checkpoints track
         Claude's file tools and not Bash; the sandbox limits Bash and not
         Claude's file tools.
@@ -417,6 +466,12 @@ exit 0</pre></div>
         <li><a href="https://code.claude.com/docs/en/permissions">Configure permissions<span>what a Bash rule does not match</span></a></li>
         <li><a href="https://code.claude.com/docs/en/hooks-guide">Automate actions with hooks<span>the two PreToolUse hooks, exit 2</span></a></li>
         <li><a href="https://code.claude.com/docs/en/sandboxing">Configure the sandboxed Bash tool<span>write limits, denyWrite, platforms</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-vp62-r36r-9xqp">GHSA-vp62-r36r-9xqp<span>CVE-2026-39861, symlinks, fixed in 2.1.64</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-7835-87q9-rgvv">GHSA-7835-87q9-rgvv<span>CVE-2026-55607, worktrees, fixed in 2.1.163</span></a></li>
+        <li><a href="https://accomplish.ai/blog/beltdown-escaping-the-claude-code-sandbox/">Accomplish AI: Beltdown<span>macOS, fixed in 2.1.247</span></a></li>
+        <li><a href="https://www.theregister.com/software/2026/04/27/cursor-opus-agent-snuffs-out-startups-production-database/5224442">The Register: the PocketOS deletion<span>27 April 2026</span></a></li>
+        <li><a href="https://blog.railway.com/p/your-ai-wants-to-nuke-your-database">Railway: Your AI wants to nuke your database<span>blog.railway.com</span></a></li>
+        <li><a href="https://railway.com/changelog/2026-05-01-undoable-deletes">Railway changelog: undoable deletes<span>48-hour soft delete, 1 May 2026</span></a></li>
         <li><a href="https://git-scm.com/docs/git-restore">git restore<span>git-scm.com</span></a></li>
         <li><a href="https://git-scm.com/docs/git-reset">git reset<span>git-scm.com</span></a></li>
         <li><a href="https://git-scm.com/docs/git-reflog">git reflog<span>git-scm.com</span></a></li>

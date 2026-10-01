@@ -63,7 +63,7 @@
       Stripe or AWS.
     </p>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the GitHub, Google, Slack, Stripe, AWS and MCP documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
+      Checked against the GitHub, Google, Slack, Stripe, AWS, Railway and MCP documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -389,7 +389,59 @@ aws iam get-service-last-accessed-details --job-id "$JOB" --output json \
 
 <section class="mark-2">
   <div class="shell band split">
-    <div class="marginal">07 / All at once</div>
+    <div class="marginal">07 / Railway</div>
+    <div>
+      <h2>Railway</h2>
+      <p class="lede">
+        Railway has four kinds of token, and only one is held to a single
+        environment.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Token</th><th>Reaches</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Account</strong></td><td data-label="Reaches">All your resources and workspaces.</td></tr>
+          <tr><td><strong>Workspace</strong></td><td data-label="Reaches">One workspace.</td></tr>
+          <tr><td><strong>Project</strong></td><td data-label="Reaches">One environment in one project, sent as a <span class="icode">Project-Access-Token</span> header.</td></tr>
+          <tr><td><strong>OAuth</strong></td><td data-label="Reaches">What the user granted.</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        The Railway CLI reads a project token from
+        <span class="icode">RAILWAY_TOKEN</span> and an account token from
+        <span class="icode">RAILWAY_API_TOKEN</span>. On 24 April 2026, a
+        Cursor agent working in PocketOS's staging environment found a Railway
+        token in an unrelated file and called <span class="icode">volumeDelete</span>
+        with it, removing the production database and the backups kept in the
+        same volume. The token had been made to manage custom domains through
+        the CLI, but it was an account token, so it could do anything the
+        account could.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        To cut: a project token for the one environment the agent works in,
+        and no account token in a file the agent can read. For agents, Railway
+        suggests its remote MCP server, which signs in through the browser,
+        keeps no token on disk, uses short-lived tokens and lets you pick the
+        workspaces and projects it reaches. Since 1 May 2026, a volume deleted
+        through the API can be restored for 48 hours. That is a recovery
+        window, not a permission.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        If an agent has already read a file holding one,
+        <span class="icode">uvx ranwhat clean</span> finds it in a Claude Code
+        transcript as an assignment such as
+        <span class="icode">RAILWAY_TOKEN=...</span>, or after a
+        <span class="icode">Project-Access-Token</span> header. It has no
+        pattern for the bare value.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">08 / All at once</div>
     <div>
       <h2>All of them at once, read-only</h2>
       <p class="lede">
@@ -438,9 +490,43 @@ ranwhat demo                                  <span class="c-mut"># the report o
   </div>
 </section>
 
-<section class="mark-3">
+<section class="mark-4">
   <div class="shell band split">
-    <div class="marginal">08 / Cut</div>
+    <div class="marginal">09 / In CI</div>
+    <div>
+      <h2>In CI</h2>
+      <p class="lede">
+        An agent in a GitHub Actions job holds the job's
+        <span class="icode">GITHUB_TOKEN</span> and whatever secrets the
+        workflow passes it.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        Before 1.0.74, <span class="icode">anthropics/claude-code-action</span>
+        checked out a pull request's head branch, read
+        <span class="icode">.mcp.json</span> from it and switched on every
+        project MCP server it defined. Anyone who could open a pull request
+        could add one. Once a privileged user or an automatic trigger ran the
+        action on it, the attacker's server ran on the runner, with the
+        workflow's secrets in reach (CVE-2026-47751). Workflows on
+        <span class="icode">@v1</span>, <span class="icode">@beta</span> or
+        <span class="icode">@main</span> have the fix; a pinned version needs
+        1.0.74 or later. Novee's Hugging Face demonstration also ran on an
+        Actions runner, started from an issue comment.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        That fix closes one path; scope decides what the next one reaches.
+        GitHub's advice is to grant <span class="icode">GITHUB_TOKEN</span>
+        the least access it needs, through a <span class="icode">permissions</span>
+        block on the workflow or the job. Pass the agent step only the secrets
+        it uses, and make any key it holds fine-grained or restricted.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">10 / Cut</div>
     <div>
       <h2>Cut them down</h2>
       <p class="lede">
@@ -458,8 +544,12 @@ ranwhat demo                                  <span class="c-mut"># the report o
           <span class="v">A restricted key tagged for the agent, or OAuth, and no <span class="icode">sk_</span> key. For Stripe MCP, before 31 October 2026. Stripe also recommends an access policy on every live key.</span></div>
         <div class="row"><span class="k">AWS</span>
           <span class="v">Remove the services with no <span class="icode">LastAuthenticated</span> in the window, then the actions, where action data exists. Check CloudTrail before removing anything a job depends on.</span></div>
+        <div class="row"><span class="k">Railway</span>
+          <span class="v">A project token for one environment, or Railway's remote MCP server. No account token in a file the agent can read.</span></div>
+        <div class="row"><span class="k">CI</span>
+          <span class="v">A <span class="icode">permissions</span> block on every workflow, only the secrets the agent step uses, and claude-code-action 1.0.74 or later.</span></div>
         <div class="row"><span class="k">Everywhere</span>
-          <span class="v">Tokens in environment variables or a secrets store, never in a command line or a committed file.</span></div>
+          <span class="v">Tokens in environment variables or a secrets store, never in a command line or a committed file. Commodity infostealers now collect the credentials in AI tools' MCP configs, Gen Digital reported in September 2026: a narrow, short-lived token limits what a stolen copy can do.</span></div>
       </div>
       <p style="margin-top:22px;color:var(--muted);font-size:15px">
         Scope is one item on the
@@ -471,14 +561,15 @@ ranwhat demo                                  <span class="c-mut"># the report o
   </div>
 </section>
 
-<section class="mark-4">
+<section class="mark-1">
   <div class="shell band split">
-    <div class="marginal">09 / Sources</div>
+    <div class="marginal">11 / Sources</div>
     <div>
       <h2>Sources</h2>
       <p class="lede">
         Every statement about a provider on this page comes from its official
-        documentation. Every statement about ranwhat comes from its source.
+        documentation, and every incident from the advisory or report linked
+        here. Every statement about ranwhat comes from its source.
       </p>
       <ul class="follow">
         <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices#scope-minimization">MCP security best practices<span>scope minimisation, risks and common mistakes</span></a></li>
@@ -502,8 +593,17 @@ ranwhat demo                                  <span class="c-mut"># the report o
         <li><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_last-accessed.html">AWS IAM: last accessed information<span>tracking period, attempts, permissions</span></a></li>
         <li><a href="https://docs.aws.amazon.com/cli/latest/reference/iam/generate-service-last-accessed-details.html">AWS CLI: generate-service-last-accessed-details<span>--arn, --granularity</span></a></li>
         <li><a href="https://docs.aws.amazon.com/cli/latest/reference/iam/get-service-last-accessed-details.html">AWS CLI: get-service-last-accessed-details<span>JobStatus, LastAuthenticated</span></a></li>
+        <li><a href="https://docs.railway.com/reference/public-api">Railway: public API<span>token types, Project-Access-Token</span></a></li>
+        <li><a href="https://docs.railway.com/guides/cli">Railway: CLI<span>RAILWAY_TOKEN, RAILWAY_API_TOKEN</span></a></li>
+        <li><a href="https://www.theregister.com/software/2026/04/27/cursor-opus-agent-snuffs-out-startups-production-database/5224442">The Register: the PocketOS deletion<span>27 April 2026</span></a></li>
+        <li><a href="https://blog.railway.com/p/your-ai-wants-to-nuke-your-database">Railway: Your AI wants to nuke your database<span>the remote MCP server</span></a></li>
+        <li><a href="https://railway.com/changelog/2026-05-01-undoable-deletes">Railway changelog: undoable deletes<span>48-hour soft delete</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code-action/security/advisories/GHSA-8q5r-mmjf-575q">GHSA-8q5r-mmjf-575q<span>CVE-2026-47751, fixed in 1.0.74</span></a></li>
+        <li><a href="https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication">GitHub: automatic token authentication<span>least access for GITHUB_TOKEN</span></a></li>
+        <li><a href="https://novee.security/blog/critical-flaws-in-anthropic-google-and-openais-coding-agents/">Novee: the Hugging Face channel<span>run on an Actions runner</span></a></li>
+        <li><a href="https://www.gendigital.com/blog/insights/research/infostealers-your-ai-agent">Gen Digital: infostealers and your AI agent<span>8 September 2026</span></a></li>
         <li><a href="https://curl.se/docs/manpage.html">curl manual<span>-H @-, --data-urlencode, -G</span></a></li>
-        <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>introspect.py, usage.py, catalog.py</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>introspect.py, usage.py, catalog.py, clean.py</span></a></li>
       </ul>
       <h2 style="margin-top:52px">Related guides</h2>
       <ul class="follow">

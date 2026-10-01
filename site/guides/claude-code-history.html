@@ -70,7 +70,7 @@
       </div>
     </div>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
+      Checked against the Claude Code documentation and the reports under Sources. Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -138,17 +138,43 @@ du -sh ~/.claude/projects</pre></div>
           <tr><td><code>history.jsonl</code></td>
               <td data-label="What it holds">Every prompt you have typed, with its time and project path. Used for up-arrow recall and <span class="icode">Ctrl+R</span> search.</td>
               <td data-label="Age limit"><span class="chip high">Kept</span></td></tr>
+          <tr><td><code>/tmp/claude/response.md</code></td>
+              <td data-label="What it holds">What <span class="icode">/copy</span> wrote on Claude Code 2.1.59 to 2.1.127: one fixed path for every user on the machine, readable by all of them.</td>
+              <td data-label="Age limit"><span class="chip high">Kept</span></td></tr>
         </tbody>
       </table>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        Paths are under <span class="icode">~/.claude/</span>. If you set
+        Paths that do not start with <span class="icode">/</span> are under
+        <span class="icode">~/.claude/</span>. If you set
         <span class="icode">CLAUDE_CONFIG_DIR</span>, all of it lives under that
         directory instead: with <span class="icode">CLAUDE_CONFIG_DIR=~/.claude-work</span>,
         transcripts are in <span class="icode">~/.claude-work/projects/</span>.
         In current versions, pasted images and each session's scratchpad are
         not here at all. They sit under Claude Code's temp directory, such as
         <span class="icode">/private/tmp/claude-&lt;uid&gt;/</span> on macOS.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Older builds left one more file outside both. On 2.1.59 to 2.1.127,
+        <span class="icode">/copy</span> wrote the response to
+        <span class="icode">/tmp/claude/response.md</span>, readable by
+        everyone (0644) in a directory anyone could enter (0755). Another
+        local user could read what you copied, secrets included, or plant a
+        symlink there so that your next
+        <span class="icode">/copy</span> overwrote a file of their choosing
+        (CVE-2026-46406). 2.1.128 fixed it. Check for a copy an old build
+        left:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>claude --version              <span class="c-mut"># 2.1.128 or later</span>
+ls -la /tmp/claude/           <span class="c-mut"># owner, mode, and whether response.md is a symlink</span>
+rm /tmp/claude/response.md    <span class="c-mut"># once you have looked</span></pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        If <span class="icode">response.md</span> is a symlink, or
+        <span class="icode">/tmp/claude/</span> belongs to another user,
+        someone set up the overwrite the advisory describes. Note where the
+        link points before you remove it.
       </p>
     </div>
   </div>
@@ -205,6 +231,38 @@ grep -rlsF 'first-8-chars' ~/.claude/projects ~/.claude/history.jsonl \
         Every tool call is in there with its arguments, so you can also
         <a href="/guides/claude-code-audit-log">read the transcripts back as an
         audit log</a> of what the agent ran.
+      </p>
+
+      <h3 style="margin-top:34px">What malware looks for</h3>
+      <p style="color:var(--muted);font-size:15px">
+        File permissions keep other users out. They do not stop a program
+        running as you. On 8 September 2026, Gen Digital reported that
+        commodity infostealers now collect AI coding tools' local data:
+        access and refresh tokens, credentials in MCP configs, prompt
+        histories and conversation databases. It names Claude among the
+        targets of the Remus and CallbackBeaver families, though not Claude
+        Code or any path, and says the data sits in predictable places, some
+        of it in plaintext. <span class="icode">~/.claude/projects</span> fits
+        that description. Retention is a security setting as well as an audit
+        one: what a stealer cannot find, it cannot take.
+      </p>
+      <div class="rows" style="margin-top:22px">
+        <div class="row"><span class="k">Keep less</span>
+          <span class="v">A <span class="icode">cleanupPeriodDays</span> that matches how far back you actually look.</span></div>
+        <div class="row"><span class="k">Mask</span>
+          <span class="v"><span class="icode">ranwhat clean --apply</span> masks each credential it finds in the transcripts from the last 30 days (<span class="icode">--days N</span> for more). Delete <span class="icode">~/.ranwhat/backups</span> once the result looks right: the backups hold the originals.</span></div>
+        <div class="row"><span class="k">Purge</span>
+          <span class="v"><span class="icode">claude project purge</span> for projects you have finished.</span></div>
+        <div class="row"><span class="k">Login</span>
+          <span class="v">Claude Code keeps its own credentials, MCP OAuth tokens included, in the macOS Keychain where it can, and otherwise in <span class="icode">~/.claude/.credentials.json</span>, protected by file permissions. <span class="icode">~/.claude.json</span> holds settings such as an MCP server's URL, not the tokens.</span></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        After an infection, rotate from a clean device: every credential the
+        transcripts held, the keys in your MCP configs, and your AI services'
+        sessions and API keys, not only browser passwords.
+        <span class="icode">ranwhat clean</span> lists what the transcripts
+        held, and <span class="icode">rotate</span> in its review session
+        groups it by provider.
       </p>
     </div>
   </div>
@@ -285,7 +343,7 @@ claude project purge --all                      <span class="c-mut">every projec
         <div class="row"><span class="k">--all</span>
           <span class="v">Deletes <span class="icode">history.jsonl</span> outright instead of filtering it.</span></div>
         <div class="row"><span class="k">Leaves</span>
-          <span class="v">Pasted images and session scratchpads, which live in the temp directory. The sweep still removes the images after <span class="icode">cleanupPeriodDays</span>; a purged session's scratchpad stays until you or the operating system clear it. <span class="icode">shell-snapshots/</span> and <span class="icode">backups/</span> are not per project, so it leaves those too and says so in the plan.</span></div>
+          <span class="v">Pasted images and session scratchpads, which live in the temp directory. The sweep still removes the images after <span class="icode">cleanupPeriodDays</span>; a purged session's scratchpad stays until you or the operating system clear it. <span class="icode">shell-snapshots/</span> and <span class="icode">backups/</span> are not per project, so it leaves those too and says so in the plan. And <span class="icode">/tmp/claude/response.md</span>, if a build before 2.1.128 ran <span class="icode">/copy</span>.</span></div>
         <div class="row"><span class="k">Costs</span>
           <span class="v">Resume, continue and rewind for the deleted sessions, and the project's auto memory. New sessions are unaffected.</span></div>
       </div>
@@ -387,7 +445,9 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
       <h2>Sources</h2>
       <p class="lede">
         Every statement about Claude Code on this page comes from its official
-        documentation. Every statement about ranwhat comes from its source.
+        documentation or Anthropic's security advisory, and the malware
+        findings from Gen Digital's report. Every statement about ranwhat
+        comes from its source.
       </p>
       <ul class="follow">
         <li><a href="https://code.claude.com/docs/en/sessions#where-transcripts-are-stored">Manage sessions<span>transcript location, naming, /export, claude rm</span></a></li>
@@ -395,6 +455,10 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
         <li><a href="https://code.claude.com/docs/en/settings-reference#cleanupperioddays">Settings reference<span>cleanupPeriodDays, desktopSessionCleanupPeriodDays</span></a></li>
         <li><a href="https://code.claude.com/docs/en/env-vars">Environment variables<span>CLAUDE_CONFIG_DIR, CLAUDE_CODE_SKIP_PROMPT_HISTORY</span></a></li>
         <li><a href="https://code.claude.com/docs/en/data-usage#data-retention">Data usage<span>what Anthropic retains, and for how long</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/authentication">Authentication<span>Keychain and .credentials.json</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/mcp">MCP<span>where MCP OAuth tokens are kept</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-4vp2-6q8c-pvq2">GHSA-4vp2-6q8c-pvq2<span>CVE-2026-46406, /copy, fixed in 2.1.128</span></a></li>
+        <li><a href="https://www.gendigital.com/blog/insights/research/infostealers-your-ai-agent">Gen Digital: infostealers and your AI agent<span>8 September 2026</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>watch.py and clean.py: what is read, and how masking works</span></a></li>
       </ul>
       <h2 style="margin-top:52px">Related guides</h2>

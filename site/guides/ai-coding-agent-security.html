@@ -65,7 +65,8 @@
     </p>
     <p style="margin:18px 0 0;font-size:14px;color:var(--muted)">
       Checked against the Claude Code, GitHub, Stripe, AWS and MCP
-      documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
+      documentation, and the advisories and research under Sources.
+      Published <time datetime="2026-10-02">2 October 2026</time>.
     </p>
   </div>
 </section>
@@ -89,7 +90,7 @@
         <div class="row"><span class="k">Environment</span>
           <span class="v">Bash commands run with the environment Claude Code was started in. Even sandboxed commands inherit it by default, credentials included, so a token exported in that shell is in reach of every command the agent runs.</span></div>
         <div class="row"><span class="k">Network</span>
-          <span class="v">Your prompts and the model's outputs go to the model provider, encrypted in transit with TLS 1.2 or later.</span></div>
+          <span class="v">Your prompts and the model's outputs go to the model provider, encrypted in transit with TLS 1.2 or later. WebFetch is a second way out. It runs in Claude Code's own process and follows the permission rules, not the sandbox's network allowlist.</span></div>
         <div class="row"><span class="k">MCP servers</span>
           <span class="v">Anthropic reviews connectors against its listing criteria before adding them to its directory, but does not security-audit or manage any MCP server. The MCP specification's security guidance says clients should warn that a local MCP server runs with the same privileges as the client.</span></div>
       </div>
@@ -115,6 +116,25 @@ claude --permission-mode default   <span class="c-mut">Manual mode: ask before e
   }
 }</pre></div>
       </div>
+
+      <h3 style="margin-top:40px">WebFetch's preapproved domains</h3>
+      <p style="font-size:15px;color:var(--ink-2)">
+        In Manual and acceptEdits modes, WebFetch fetches a built-in set of
+        documentation domains without asking. Until 2.1.163 that set held
+        <span class="icode">huggingface.co</span> as a bare hostname, so an
+        attacker's own model repository went through without a prompt too
+        (CVE-2026-54316). Hugging Face counts each file request as a download,
+        and Novee read a secret back one character at a time from which of 64
+        repositories' counters moved.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Since 2.1.162, an explicit <span class="icode">WebFetch(domain:...)</span>
+        rule overrides the preapproved set, so a deny rule such as
+        <span class="icode">WebFetch(domain:huggingface.co)</span> removes a
+        domain you do not use. Where nothing needs the web, set
+        <span class="icode">CLAUDE_CODE_DISABLE_WEB_FETCH=1</span> (2.1.285 or
+        later).
+      </p>
     </div>
   </div>
 </section>
@@ -215,6 +235,76 @@ claude --permission-mode default   <span class="c-mut">Manual mode: ask before e
         for data exfiltration. And a command that fails in the sandbox can be
         retried outside it, through the normal permission prompt, unless you
         set <span class="icode">"allowUnsandboxedCommands": false</span>.
+      </p>
+
+      <h3 style="margin-top:40px">Run a patched build</h3>
+      <p style="font-size:15px;color:var(--ink-2)">
+        The sandbox and the trust dialog are only as good as the build. With
+        <span class="icode">autoAllowBashIfSandboxed</span> at its default, a
+        sandboxed command runs without a prompt, so an escape meets none.
+        Auto-update applies these fixes. If you update by hand,
+        <span class="icode">claude --version</span> should print 2.1.260 or
+        later.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">2.1.64</span>
+          <span class="v">A symlink made by a sandboxed command led Claude Code's own process to write outside the workspace (CVE-2026-39861).</span></div>
+        <div class="row"><span class="k">2.1.84</span>
+          <span class="v">A repository could skip the trust dialog, and run its hooks, through a spoofed git worktree <span class="icode">commondir</span> (CVE-2026-40068).</span></div>
+        <div class="row"><span class="k">2.1.163</span>
+          <span class="v">A worktree named <span class="icode">.git</span>, symlinks and git fsmonitor let a repository overwrite files such as <span class="icode">~/.zshenv</span> outside the sandbox (CVE-2026-55607).</span></div>
+        <div class="row"><span class="k">2.1.247</span>
+          <span class="v">On macOS, a <span class="icode">core.fsmonitor</span> command planted from inside the sandbox ran outside it through Claude Code's own git calls: Accomplish AI's Beltdown, with no advisory or CVE.</span></div>
+        <div class="row"><span class="k">2.1.260</span>
+          <span class="v">Team and Enterprise sessions could run without the organisation's server-managed policy (CVE-2026-103012, in <a href="/guides/claude-code-audit-log">the audit log guide</a>).</span></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Organisations can set <span class="icode">requiredMinimumVersion</span>
+        through MDM or a managed settings file, and an older build then
+        refuses to start. The key needs 2.1.163 or later.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>managed-settings.json</span></div>
+        <div class="term-body"><pre>{
+  "requiredMinimumVersion": "2.1.260"
+}</pre></div>
+      </div>
+
+      <h3 style="margin-top:40px">A repository you did not write</h3>
+      <p style="font-size:15px;color:var(--ink-2)">
+        A clone can bring its own <span class="icode">.claude/settings.json</span>
+        and <span class="icode">.mcp.json</span>, whose hooks and MCP servers
+        run as you once you accept the trust dialog. Under
+        <span class="icode">-p</span>, trust verification is off.
+      </p>
+      <p style="font-size:15px;color:var(--ink-2)">
+        It need not hold the harmful code itself. In 0DIN's demonstration of
+        25 June 2026, a package raised an error naming
+        <span class="icode">python3 -m axiom init</span> until that had run,
+        and Claude Code, asked only to get the project running, ran it. The
+        script behind it piped a DNS TXT record from the attacker's domain to
+        bash, which opened a reverse shell as the developer. The write-up
+        names no Claude Code version or permission mode.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        An install script can rewrite the configuration itself: Mitiga showed
+        an npm <span class="icode">postinstall</span> script and a repository
+        hook re-pointing an OAuth MCP server at a localhost proxy, to read its
+        tokens (<a href="/guides/claude-code-audit-log">the audit log guide</a>
+        has the chain). In October 2025, Koi Security reported 126
+        PhantomRaven packages on npm, some named after packages language
+        models invent, that ran a credential stealer at install.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>cat .claude/settings*.json .mcp.json    <span class="c-mut">before the first claude in a new clone</span>
+grep -n localhost ~/.claude.json         <span class="c-mut">an MCP server you did not point there</span>
+npm install --ignore-scripts             <span class="c-mut">no install scripts run</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Run an unfamiliar project's setup yourself once you have read it, and
+        not under <span class="icode">claude -p</span>. Check that a package
+        the agent proposes is the one you meant. Put a re-pointed MCP server
+        back before you rotate its token, or the new one goes the same way.
       </p>
       <p class="more" style="margin-top:14px"><a href="/guides/claude-code-env-secrets">Keep Claude Code out of your .env files: the full walk-through &rarr;</a></p>
     </div>
@@ -318,62 +408,19 @@ ranwhat watch --json       <span class="c-mut">one record per flagged call</span
       <h3 style="margin-top:40px">A record from now on</h3>
       <p style="font-size:15px;color:var(--ink-2)">
         A <span class="icode">PostToolUse</span> hook runs after each tool call
-        that succeeds. A command that exits non-zero fires
-        <span class="icode">PostToolUseFailure</span> instead. This config
-        appends every Bash command to a file: the
-        <span class="icode">PostToolUse</span> entry is the example from Claude
-        Code's hooks guide, and the same entry under
-        <span class="icode">PostToolUseFailure</span> adds the commands that
-        failed. Put it in <span class="icode">~/.claude/settings.json</span>;
-        it needs <span class="icode">jq</span>.
-      </p>
-      <div class="term">
-        <div class="term-bar"><span>~/.claude/settings.json</span></div>
-        <div class="term-body"><pre>{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "jq -r '.tool_input.command' &gt;&gt; ~/.claude/command-log.txt"
-          }
-        ]
-      }
-    ],
-    "PostToolUseFailure": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "jq -r '.tool_input.command' &gt;&gt; ~/.claude/command-log.txt"
-          }
-        ]
-      }
-    ]
-  }
-}</pre></div>
-      </div>
-      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        The log holds each command as written, so a token passed on a command
-        line ends up in it too. Keep it as private as the transcripts.
+        that succeeds, and a command that exits non-zero fires
+        <span class="icode">PostToolUseFailure</span> instead. The same entry
+        under both, matching Bash, appends every command to a file. The log
+        holds each command as written, so a token passed on a command line
+        ends up in it too: keep it as private as the transcripts.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
         Or export events with OpenTelemetry.
         <span class="icode">CLAUDE_CODE_ENABLE_TELEMETRY=1</span> turns it on,
         and Bash command strings are logged only with
         <span class="icode">OTEL_LOG_TOOL_DETAILS=1</span>, which is off by
-        default.
+        default. The audit log guide has both configurations in full.
       </p>
-      <div class="term">
-        <div class="term-body"><pre>export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-export OTEL_LOG_TOOL_DETAILS=1    <span class="c-mut">without it, Bash commands are not logged</span></pre></div>
-      </div>
       <p class="more" style="margin-top:22px"><a href="/guides/claude-code-audit-log">Build an audit log for Claude Code &rarr;</a></p>
       <p class="more"><a href="/guides/claude-code-deleted-files">If Claude Code deleted your files &rarr;</a></p>
     </div>
@@ -410,15 +457,12 @@ ranwhat demo                     <span class="c-mut">the same report on a bundle
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         <span class="icode">ranwhat live</span> sends each token only to the
-        provider that issued it, and scores what it allows: scopes for Google,
-        classic GitHub and Slack tokens, and for Stripe whether the key is an
-        unrestricted <span class="icode">sk_</span> key. A fine-grained GitHub
-        token or an <span class="icode">rk_</span> restricted key comes back
-        with no scope list; declare its permissions in a profile and use
-        <a href="/scan">ranwhat scan</a>.
-        <span class="icode">ranwhat scan profile.json --pull-usage</span> then
-        marks which grants were used, from AWS IAM last accessed data, Stripe
-        events, the GitHub organisation audit log and Google Admin SDK reports.
+        provider that issued it, and scores what it allows. A fine-grained
+        GitHub token or an <span class="icode">rk_</span> restricted key comes
+        back with no scope list: declare its permissions in a profile and use
+        <a href="/scan">ranwhat scan</a>, whose
+        <span class="icode">--pull-usage</span> also marks which grants were
+        used.
       </p>
       <p class="more" style="margin-top:14px"><a href="/guides/ai-agent-token-scopes">AI agent token scopes: the longer guide &rarr;</a></p>
     </div>
@@ -479,26 +523,32 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
       </p>
       <ol class="rows" style="list-style:none;margin:0;padding:0">
         <li class="row"><span class="k">01</span>
-          <span class="v">Start Claude Code in the project directory, not in <span class="icode">~</span>. <a href="#reach">Reach</a></span></li>
+          <span class="v">Run <span class="icode">claude --version</span>: 2.1.260 or later. Organisations: set <span class="icode">requiredMinimumVersion</span>. <a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">02</span>
-          <span class="v">Review <span class="icode">/permissions</span>, and which settings file each rule comes from. <a href="#reach">Reach</a></span></li>
+          <span class="v">Start Claude Code in the project directory, not in <span class="icode">~</span>. <a href="#reach">Reach</a></span></li>
         <li class="row"><span class="k">03</span>
-          <span class="v"><a href="/guides/claude-code-env-secrets">Deny reads of <span class="icode">.env</span> files</a> and secrets directories. <a href="#boundary">Boundary</a></span></li>
+          <span class="v">Review <span class="icode">/permissions</span>, and which settings file each rule comes from. <a href="#reach">Reach</a></span></li>
         <li class="row"><span class="k">04</span>
-          <span class="v">Turn on the sandbox and list your credential files and variables in <span class="icode">sandbox.credentials</span>. <a href="#boundary">Boundary</a></span></li>
+          <span class="v">Deny preapproved WebFetch domains you do not use, or set <span class="icode">CLAUDE_CODE_DISABLE_WEB_FETCH=1</span> where nothing needs the web. <a href="#reach">Reach</a></span></li>
         <li class="row"><span class="k">05</span>
-          <span class="v">Set <span class="icode">CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</span>. <a href="#boundary">Boundary</a></span></li>
+          <span class="v"><a href="/guides/claude-code-env-secrets">Deny reads of <span class="icode">.env</span> files</a> and secrets directories. <a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">06</span>
-          <span class="v">Check who can read <span class="icode">~/.claude</span>. <a href="#disk">Disk</a></span></li>
+          <span class="v">Turn on the sandbox and list your credential files and variables in <span class="icode">sandbox.credentials</span>. <a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">07</span>
-          <span class="v">Set <span class="icode">cleanupPeriodDays</span> on purpose: <a href="/guides/claude-code-history">how long Claude Code keeps history</a>. <a href="#disk">Disk</a></span></li>
+          <span class="v">Set <span class="icode">CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</span>. <a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">08</span>
-          <span class="v">Run <span class="icode">uvx ranwhat check</span> now, and again after anything odd. <a href="#audit">Audit</a></span></li>
+          <span class="v">Read a new clone's <span class="icode">.claude/</span> and <span class="icode">.mcp.json</span> before you accept trust, and run its setup yourself. <a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">09</span>
-          <span class="v"><a href="/guides/claude-code-audit-log">Log commands from now on</a>, with a hook or OpenTelemetry. <a href="#audit">Audit</a></span></li>
+          <span class="v">Check who can read <span class="icode">~/.claude</span>. <a href="#disk">Disk</a></span></li>
         <li class="row"><span class="k">10</span>
-          <span class="v"><a href="/guides/ai-agent-token-scopes">Replace broad tokens</a> with fine-grained, restricted or agent-tagged ones. <a href="#tokens">Tokens</a></span></li>
+          <span class="v">Set <span class="icode">cleanupPeriodDays</span> on purpose: <a href="/guides/claude-code-history">how long Claude Code keeps history</a>. <a href="#disk">Disk</a></span></li>
         <li class="row"><span class="k">11</span>
+          <span class="v">Run <span class="icode">uvx ranwhat check</span> now, and again after anything odd. <a href="#audit">Audit</a></span></li>
+        <li class="row"><span class="k">12</span>
+          <span class="v"><a href="/guides/claude-code-audit-log">Log commands from now on</a>, with a hook or OpenTelemetry. <a href="#audit">Audit</a></span></li>
+        <li class="row"><span class="k">13</span>
+          <span class="v"><a href="/guides/ai-agent-token-scopes">Replace broad tokens</a> with fine-grained, restricted or agent-tagged ones. <a href="#tokens">Tokens</a></span></li>
+        <li class="row"><span class="k">14</span>
           <span class="v">Rotate anything found in a transcript, then mask it. <a href="#leaks">Leaks</a></span></li>
       </ol>
     </div>
@@ -518,7 +568,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
         <div class="row"><span class="k">Covers</span>
           <span class="v"><span class="icode">watch</span>: risky actions in Claude Code history. <span class="icode">clean</span>: credentials in Claude Code transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries.</span></div>
         <div class="row"><span class="k">Does not</span>
-          <span class="v">Block anything while the agent works: Claude Code's permission rules, hooks and sandbox do that. It does not scan MCP servers or skills for malicious content.</span></div>
+          <span class="v">Block anything while the agent works: Claude Code's permission rules, hooks and sandbox do that. It does not scan MCP servers or skills for malicious content. It flags a WebFetch call only when a secret-shaped value is in it, and does not flag a setup command that fetches its payload at run time.</span></div>
         <div class="row"><span class="k">Network</span>
           <span class="v">Reads locally. <span class="icode">live</span> and <span class="icode">--pull-usage</span> ask only the provider that issued each token.</span></div>
       </div>
@@ -551,6 +601,19 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
         <li><a href="https://code.claude.com/docs/en/hooks-guide">Claude Code: Hooks guide<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/hooks">Claude Code: Hooks reference<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/monitoring-usage">Claude Code: Monitoring<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/tools-reference">Claude Code: Tools reference<span>WebFetch and its preapproved domains</span></a></li>
+        <li><a href="https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md">Claude Code: Changelog<span>2.1.162, 2.1.285</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-fg94-h982-f3mm">GHSA-fg94-h982-f3mm<span>CVE-2026-54316, WebFetch, fixed in 2.1.163</span></a></li>
+        <li><a href="https://novee.security/blog/critical-flaws-in-anthropic-google-and-openais-coding-agents/">Novee: the Hugging Face channel<span>novee.security</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-vp62-r36r-9xqp">GHSA-vp62-r36r-9xqp<span>CVE-2026-39861, fixed in 2.1.64</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-q5hj-mxqh-vv77">GHSA-q5hj-mxqh-vv77<span>CVE-2026-40068, fixed in 2.1.84</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-7835-87q9-rgvv">GHSA-7835-87q9-rgvv<span>CVE-2026-55607, fixed in 2.1.163</span></a></li>
+        <li><a href="https://accomplish.ai/blog/beltdown-escaping-the-claude-code-sandbox/">Accomplish AI: Beltdown<span>fixed in 2.1.247</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-gfvf-j8jh-jxxw">GHSA-gfvf-j8jh-jxxw<span>CVE-2026-103012, fixed in 2.1.260</span></a></li>
+        <li><a href="https://0din.ai/blog/clone-this-repo-and-i-own-your-machine">0DIN: Clone this repo<span>0din.ai</span></a></li>
+        <li><a href="https://www.mitiga.io/blog/claude-code-mcp-token-theft-mitm">Mitiga: MCP token theft<span>mitiga.io</span></a></li>
+        <li><a href="https://web.archive.org/web/20251226221836/https://www.koi.ai/blog/phantomraven-npm-malware-hidden-in-invisible-dependencies">Koi Security: PhantomRaven<span>archived copy</span></a></li>
+        <li><a href="https://docs.npmjs.com/cli/v11/using-npm/config#ignore-scripts">npm: ignore-scripts<span>docs.npmjs.com</span></a></li>
         <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices">MCP: Security best practices<span>modelcontextprotocol.io</span></a></li>
         <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">GitHub: Managing personal access tokens<span>docs.github.com</span></a></li>
         <li><a href="https://docs.stripe.com/mcp">Stripe: Model Context Protocol<span>docs.stripe.com</span></a></li>
