@@ -388,11 +388,12 @@ uvx ranwhat watch --days 30    <span class="c-mut"># what ran while they may not
         <span class="icode">~/.claude.json</span>, after which a hook in a
         repository cloned there re-pointed an OAuth MCP server at a proxy on
         localhost at every start, and read each token that passed. Anthropic
-        ruled it out of scope, since it needs code already running as you.
-        Mitiga's advice is to watch <span class="icode">~/.claude.json</span>
-        and a project's MCP and hook files for changes, and to keep a list of
-        the MCP endpoints you approved. <span class="icode">/hooks</span>
-        lists what is registered.
+        ruled it out of scope, Mitiga reports, because the chain depends on
+        consent the user has already given. Mitiga's advice is to watch
+        <span class="icode">~/.claude.json</span> and a project's MCP files for
+        changes, and to keep a list of the MCP endpoints you approved. Hooks
+        deserve the same watch: <span class="icode">/hooks</span> lists what is
+        registered.
       </p>
     </div>
   </div>

@@ -191,7 +191,7 @@ ranwhat scan profile.json --pull-usage        <span class="c-mut">which grants w
       </div>
       <div class="rows" style="margin-top:26px">
         <div class="row"><span class="k">Introspection</span>
-          <span class="v">Google through tokeninfo, GitHub through the scopes header on an authenticated call, Slack through <span class="icode">auth.test</span>, and Stripe by key prefix, where an <span class="icode">sk_</span> key is treated as unrestricted. A token that comes back with no scope list, such as an <span class="icode">rk_</span> restricted key, is scored with none: declare its scopes in a profile and use <span class="icode">scan</span> instead.</span></div>
+          <span class="v">Google through tokeninfo, GitHub through the scopes header on an authenticated call, Slack through <span class="icode">auth.test</span>, and Stripe by key prefix, where an <span class="icode">sk_</span> key is treated as unrestricted. A token that comes back with no scope list, such as an <span class="icode">rk_</span> restricted key or a fine-grained GitHub token, is left out of the scores and reported as a high finding, so it is never counted as harmless: declare its scopes in a profile and use <span class="icode">scan</span> instead.</span></div>
         <div class="row"><span class="k">By hand</span>
           <span class="v">To check a token's scopes yourself, provider by provider: <a href="/guides/ai-agent-token-scopes">AI agent token scopes</a>.</span></div>
         <div class="row"><span class="k">Usage pulls</span>
