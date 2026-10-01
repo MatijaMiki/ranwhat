@@ -110,7 +110,7 @@
       </p>
       <div class="rows" style="margin-top:26px">
         <div class="row"><span class="k">Deletion</span>
-          <span class="v"><span class="icode">rm</span> told to recurse and to force, in any spelling: <span class="icode">-rf</span>, <span class="icode">-Rf</span>, <span class="icode">-r -f</span>, <span class="icode">--recursive --force</span>. Also <span class="icode">find … -delete</span>, <span class="icode">git rm -r</span>, <span class="icode">shred</span> and <span class="icode">truncate -s 0</span>. <span class="icode">/bin/rm</span> counts, and the payload of <span class="icode">bash -c</span> is read as shell.</span></div>
+          <span class="v"><span class="icode">rm</span> told to recurse and to force, as in <span class="icode">-rf</span>, <span class="icode">-Rf</span> or <span class="icode">-fr</span>. Also <span class="icode">find … -delete</span>, <span class="icode">git rm -r</span>, <span class="icode">shred</span> and <span class="icode">truncate -s 0</span>. <span class="icode">/bin/rm</span> counts, and the payload of <span class="icode">bash -c</span> is read as shell.</span></div>
         <div class="row"><span class="k">Severity</span>
           <span class="v">Follows the target. <span class="icode">rm -rf build</span> and <span class="icode">rm -rf /tmp/x</span> are not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical. <span class="icode">rm -rf .git</span> or <span class="icode">rm -r .git</span> is also reported as critical log or history tampering. Other spellings, such as <span class="icode">rm -fr .git</span>, are reported as high recursive deletion.</span></div>
         <div class="row"><span class="k">Destructive git</span>
@@ -205,14 +205,17 @@ grep -oE '.{0,80}old-notes.{0,80}' ~/.claude/projects/&lt;project&gt;/&lt;sessio
         with <span class="icode">--source</span>.
       </p>
       <div class="term">
-        <div class="term-body"><pre>git status                            <span class="c-mut">which tracked files are gone</span>
-git restore src/app.py                <span class="c-mut">from the index</span>
-git restore --source=HEAD~1 docs/     <span class="c-mut">from a commit</span></pre></div>
+        <div class="term-body"><pre>git status                                  <span class="c-mut">which tracked files are gone</span>
+git restore src/app.py                      <span class="c-mut">from the index</span>
+git restore --source=HEAD~1 docs/guide.md   <span class="c-mut">from a commit</span></pre></div>
       </div>
       <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
         <span class="icode">git restore .</span> brings back everything under
         the current directory, and also throws away unstaged edits to tracked
-        files there. Read <span class="icode">git status</span> first.
+        files there. Give <span class="icode">--source</span> a directory and it
+        does the same under that path, and also removes tracked files there
+        that the commit did not have. Read <span class="icode">git status</span>
+        first.
       </p>
 
       <h3 style="margin-top:34px">After git reset --hard</h3>

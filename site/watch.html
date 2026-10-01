@@ -86,36 +86,36 @@
         It raises the ones you'd want to know about either way.
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Rule</th><th>Severity</th><th>Why it's on the list</th></tr></thead>
         <tbody>
           <tr><td><strong>Credential access</strong><br><code>.env · ~/.aws/credentials · id_rsa</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>Read a file whose only purpose is holding secrets. The contents are now in a context you don't control, and in the transcript too: <a href="/clean">find and mask them with ranwhat clean</a>. Then <a href="/guides/claude-code-env-secrets">block the next read</a>.</td></tr>
-          <tr><td><strong>Secret-shaped string in a tool call</strong><br><code>sk_live_… · ghp_… · AKIA…</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>A credential-shaped value appeared verbatim in any part of the call. Even if the call was benign, the value is now in the transcript.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">Read a file whose only purpose is holding secrets. The contents are now in a context you don't control, and in the transcript too: <a href="/clean">find and mask them with ranwhat clean</a>. Then <a href="/guides/claude-code-env-secrets">block the next read</a>.</td></tr>
+          <tr><td><strong>Secret-shaped string in a command</strong><br><code>sk_live_… · ghp_… · AKIA…</code></td>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">A credential-shaped value appeared verbatim in a shell command. Even if the command was benign, the value is now in the transcript.</td></tr>
           <tr><td><strong>Package or release published</strong><br><code>npm publish · twine upload · docker push</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>Something reached a registry other people install from. Supply-chain reach, usually irreversible.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">Something reached a registry other people install from. Supply-chain reach, usually irreversible.</td></tr>
           <tr><td><strong>Cloud resource destroyed or modified</strong><br><code>terraform destroy · kubectl delete · aws iam attach-…</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>A write or delete against live infrastructure, including IAM changes, <span class="icode">terraform apply -auto-approve</span> and <span class="icode">DROP TABLE</span>.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">A write or delete against live infrastructure, including IAM changes, <span class="icode">terraform apply -auto-approve</span> and <span class="icode">DROP TABLE</span>.</td></tr>
           <tr><td><strong>Financial API called</strong><br><code>stripe charges · refunds</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>With a live key, each of these moves real money.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">With a live key, each of these moves real money.</td></tr>
           <tr><td><strong>Log or history tampering</strong><br><code>history -c · cloudtrail stop</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>An action whose effect is removing the record of other actions.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">An action whose effect is removing the record of other actions.</td></tr>
           <tr><td><strong>Destructive git</strong><br><code>push --force · reset --hard</code></td>
-              <td><span class="chip high">High</span></td>
-              <td>History rewriting. The class of action that destroys the record of what else happened.</td></tr>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list">History rewriting. The class of action that destroys the record of what else happened.</td></tr>
           <tr><td><strong>Recursive deletion</strong><br><code>rm -rf · find -delete</code></td>
-              <td><span class="chip high">High</span></td>
-              <td><a href="/guides/claude-code-deleted-files">Recoverable only if something else was backing it up</a>. Severity follows the target: <span class="icode">rm -rf build</span> is not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical.</td></tr>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list"><a href="/guides/claude-code-deleted-files">Recoverable only if something else was backing it up</a>. Severity follows the target: <span class="icode">rm -rf build</span> is not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical.</td></tr>
           <tr><td><strong>Local file sent to the network</strong><br><code>curl -d @file · curl -F file=@…</code></td>
-              <td><span class="chip high">High</span></td>
-              <td>File contents sent outbound in one command. That shape, whatever the intent.</td></tr>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list">File contents sent outbound in one command. That shape, whatever the intent.</td></tr>
         </tbody>
       </table>
       </div>
@@ -148,7 +148,7 @@
       </div>
       <div class="rows" style="margin-top:34px">
         <div class="row"><span class="k">On real history</span>
-          <span class="v"><strong>15 findings on one machine's 90-day history, then 4.</strong> Eleven of the fifteen were true deletions of build and temp directories that nobody would want to read, so deletions are now ranked by target. The four left are real project directories that were removed.</span></div>
+          <span class="v"><strong>15 findings on one machine's 90-day history, then 4.</strong> Eleven of the fifteen were true deletions of build and temp directories that nobody would want to read, so deletions are now ranked by target. All four that remain are real.</span></div>
         <div class="row"><span class="k">Evidence</span>
           <span class="v">Every finding carries surrounding context. <span class="icode">rm -rf</span> on its own tells you nothing. The target is the point.</span></div>
         <div class="row"><span class="k">Test suite</span>

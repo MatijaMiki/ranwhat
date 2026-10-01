@@ -156,18 +156,18 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
       </p>
       <h3 style="margin-top:34px">Nine rules</h3>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Rule</th><th>Severity</th><th>For example</th></tr></thead>
         <tbody>
-          <tr><td><strong>Credential access</strong></td><td><span class="chip crit">Critical</span></td><td><code>cat ~/.aws/credentials</code>, Read on <code>.env</code></td></tr>
-          <tr><td><strong>Secret-shaped string in a tool call</strong></td><td><span class="chip crit">Critical</span></td><td><code>sk_live_…</code> <code>ghp_…</code> <code>AKIA…</code></td></tr>
-          <tr><td><strong>Package or release published</strong></td><td><span class="chip crit">Critical</span></td><td><code>npm publish</code> <code>twine upload</code> <code>docker push</code></td></tr>
-          <tr><td><strong>Cloud resource destroyed or modified</strong></td><td><span class="chip crit">Critical</span></td><td><code>terraform destroy</code> <code>kubectl delete</code> <code>aws iam attach-…</code></td></tr>
-          <tr><td><strong>Financial API called</strong></td><td><span class="chip crit">Critical</span></td><td>Stripe charges, refunds, transfers or payouts</td></tr>
-          <tr><td><strong>Log or history tampering</strong></td><td><span class="chip crit">Critical</span></td><td><code>history -c</code> <code>aws cloudtrail stop-logging</code></td></tr>
-          <tr><td><strong>Destructive git</strong></td><td><span class="chip high">High</span></td><td><code>git push --force</code> <code>git reset --hard</code></td></tr>
-          <tr><td><strong>Recursive deletion</strong></td><td><span class="chip high">High</span></td><td><code>rm -rf ~/Documents/old-notes</code> <code>find . -delete</code></td></tr>
-          <tr><td><strong>Local file sent to the network</strong></td><td><span class="chip high">High</span></td><td><code>curl -d @dump.sql</code> <code>curl -F file=@notes.txt</code></td></tr>
+          <tr><td><strong>Credential access</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>cat ~/.aws/credentials</code>, Read on <code>.env</code></td></tr>
+          <tr><td><strong>Secret-shaped string in a command</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>sk_live_…</code> <code>ghp_…</code> <code>AKIA…</code></td></tr>
+          <tr><td><strong>Package or release published</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>npm publish</code> <code>twine upload</code> <code>docker push</code></td></tr>
+          <tr><td><strong>Cloud resource destroyed or modified</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>terraform destroy</code> <code>kubectl delete</code> <code>aws iam attach-…</code></td></tr>
+          <tr><td><strong>Financial API called</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example">Stripe charges, refunds, transfers or payouts</td></tr>
+          <tr><td><strong>Log or history tampering</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>history -c</code> <code>aws cloudtrail stop-logging</code></td></tr>
+          <tr><td><strong>Destructive git</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>git push --force</code> <code>git reset --hard</code></td></tr>
+          <tr><td><strong>Recursive deletion</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>rm -rf ~/Documents/old-notes</code> <code>find . -delete</code></td></tr>
+          <tr><td><strong>Local file sent to the network</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>curl -d @dump.sql</code> <code>curl -F file=@notes.txt</code></td></tr>
         </tbody>
       </table>
       </div>
@@ -211,7 +211,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <div class="row"><span class="k">Once each</span>
           <span class="v">A call replayed by a resumed session is reported once, not once per transcript that carries it.</span></div>
         <div class="row"><span class="k">Not actions</span>
-          <span class="v"><span class="icode">grep "rm -rf" src/</span> and other searches, <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies, <span class="icode">python -c</span> and <span class="icode">node -e</span> payloads, comments, and <span class="icode">git rm --cached</span>. A <span class="icode">bash -c</span> payload is parsed, because it really is shell. A secret-shaped string is the exception: it is reported wherever it appears in the call, because it is in the transcript either way.</span></div>
+          <span class="v"><span class="icode">grep "rm -rf" src/</span> and other searches, <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies, <span class="icode">python -c</span> and <span class="icode">node -e</span> payloads, comments, and <span class="icode">git rm --cached</span>. A <span class="icode">bash -c</span> payload is parsed, because it really is shell. A secret-shaped string in a shell command is the exception: it is reported in <span class="icode">echo</span> and <span class="icode">printf</span> arguments, heredoc bodies and <span class="icode">-c</span> or <span class="icode">-e</span> payloads too, because it is in the transcript either way.</span></div>
         <div class="row"><span class="k">Moved config</span>
           <span class="v">ranwhat does not read <span class="icode">CLAUDE_CONFIG_DIR</span>. Pass <span class="icode">--root "$CLAUDE_CONFIG_DIR/projects"</span>.</span></div>
         <div class="row"><span class="k">0 source(s)</span>

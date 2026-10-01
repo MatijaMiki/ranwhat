@@ -105,9 +105,9 @@
 model context you do not control. Masking them here stops
 them leaking again. It does not make them safe.</span>
 
-<span class="c-crit">*</span> <span class="c-b">AWS access key ID</span>        <span class="c-mut">AKIA…Q7AA  20 chars, seen 8x</span>
-<span class="c-crit">*</span> <span class="c-b">DATABASE_URL</span>             <span class="c-mut">pos…pp     42 chars, seen 8x</span>
-<span class="c-crit">*</span> <span class="c-b">PUSHER_APP_SECRET</span>        <span class="c-mut">b99…0a     64 chars, seen 2x</span>
+<span class="c-crit">*</span> <span class="c-b">Stripe live secret key</span>   <span class="c-mut">sk_…dc  32 chars  seen 8x</span>
+<span class="c-crit">*</span> <span class="c-b">DATABASE_URL</span>             <span class="c-mut">pos…pp  42 chars  seen 8x</span>
+<span class="c-crit">*</span> <span class="c-b">PUSHER_APP_SECRET</span>        <span class="c-mut">b99…0a  64 chars  seen 2x</span>
 
 <span class="c-warn">Dry run. Nothing was changed.</span></pre></div>
       </div>
@@ -156,15 +156,15 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
         secrets and roughly two thirds were not credentials at all.
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Reported</th><th>What it actually is</th></tr></thead>
         <tbody>
-          <tr><td><code>process.env.DB_PASSWORD</code></td><td>a reference to a secret, not its value</td></tr>
-          <tr><td><code>crypto.randomBytes(32)</code></td><td>a call that produces one</td></tr>
-          <tr><td><code>[A-Z]{20}</code></td><td>a regex that matches one</td></tr>
-          <tr><td><code>${env}-session-id</code></td><td>a template literal</td></tr>
-          <tr><td><code>/Users/you/project</code></td><td>a path assigned to PWD</td></tr>
-          <tr><td><code>your-api-key-here</code></td><td>a placeholder</td></tr>
+          <tr><td><code>process.env.DB_PASSWORD</code></td><td data-label="What it actually is">a reference to a secret, not its value</td></tr>
+          <tr><td><code>crypto.randomBytes(32)</code></td><td data-label="What it actually is">a call that produces one</td></tr>
+          <tr><td><code>[A-Z]{20}</code></td><td data-label="What it actually is">a regex that matches one</td></tr>
+          <tr><td><code>${env}-session-id</code></td><td data-label="What it actually is">a template literal</td></tr>
+          <tr><td><code>/Users/you/project</code></td><td data-label="What it actually is">a path assigned to PWD</td></tr>
+          <tr><td><code>your-api-key-here</code></td><td data-label="What it actually is">a placeholder</td></tr>
         </tbody>
       </table>
       </div>

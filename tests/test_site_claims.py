@@ -438,6 +438,26 @@ class SiteStructure(unittest.TestCase):
         self.assertIn(" ".join(cli.NETWORK.split()),
                       plain(read(SITE / "install.html")))
 
+    def test_a_stacked_table_labels_every_value_with_its_column(self):
+        # Below 620px a .stack table puts each value under its column's name,
+        # which the cell carries in data-label. The first cell heads the
+        # record and goes unlabelled; a missing or stale label elsewhere
+        # leaves a value on a phone under no heading, or the wrong one.
+        stacked = 0
+        for page in all_pages():
+            for table in re.findall(r'<table class="stack">(.*?)</table>',
+                                    read(page), re.S):
+                stacked += 1
+                head, body = table.split("</thead>", 1)
+                columns = [plain(th) for th in re.findall(r"<th>(.*?)</th>", head, re.S)]
+                for row in re.findall(r"<tr>(.*?)</tr>", body, re.S):
+                    labels = [re.search(r'data-label="([^"]*)"', attrs)
+                              for attrs in re.findall(r"<td\b([^>]*)>", row)]
+                    labels = [html.unescape(m.group(1)) if m else None for m in labels]
+                    self.assertEqual(labels, [None] + columns[1:],
+                                     "%s: %s" % (page.name, plain(row)[:60]))
+        self.assertGreaterEqual(stacked, 10)
+
 
 def _csp():
     """The site's Content-Security-Policy as {directive: [sources]}."""

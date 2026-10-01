@@ -107,12 +107,12 @@ ranwhat> keep 3         leave it alone
 ranwhat> rotate         what to rotate, grouped by provider
 ```
 
-Each finding says where it came from, the file it was read out of and the
-project that file belongs to, because a 64-character string is useless
-without knowing which `.env` it escaped:
+Each finding says which project it was found in and, when the transcript
+names it, the file it was read out of, because a 64-character string is
+useless without knowing which `.env` it escaped:
 
 ```
-* AWS access key ID   AKIA…DFWB  20 chars  seen 8x
+* Stripe live secret key   sk_…dc  32 chars  seen 8x
       read from api/.env
       in         /Users/you/Desktop/app
 ```

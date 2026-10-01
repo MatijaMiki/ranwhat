@@ -117,27 +117,27 @@ du -sh ~/.claude/projects</pre></div>
         The session file is not the only thing a session leaves behind:
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Path</th><th>What it holds</th><th>Age limit</th></tr></thead>
         <tbody>
           <tr><td><code>projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</code></td>
-              <td>The full conversation: every message, tool call and tool result.</td>
-              <td><span class="chip ok">Swept</span></td></tr>
+              <td data-label="What it holds">The full conversation: every message, tool call and tool result.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
           <tr><td><code>projects/&lt;project&gt;/&lt;session-id&gt;/subagents/</code></td>
-              <td>Transcripts of the subagents that session started.</td>
-              <td><span class="chip ok">Swept</span></td></tr>
+              <td data-label="What it holds">Transcripts of the subagents that session started.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
           <tr><td><code>projects/&lt;project&gt;/&lt;session-id&gt;/tool-results/</code></td>
-              <td>Large tool outputs, spilled to separate files.</td>
-              <td><span class="chip ok">Swept</span></td></tr>
+              <td data-label="What it holds">Large tool outputs, spilled to separate files.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
           <tr><td><code>file-history/&lt;session-id&gt;/</code></td>
-              <td>Copies of files taken before Claude edited them, used to rewind to a checkpoint.</td>
-              <td><span class="chip ok">Swept</span></td></tr>
+              <td data-label="What it holds">Copies of files taken before Claude edited them, used to rewind to a checkpoint.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
           <tr><td><code>paste-cache/</code></td>
-              <td>The contents of large pastes.</td>
-              <td><span class="chip ok">Swept</span></td></tr>
+              <td data-label="What it holds">The contents of large pastes.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
           <tr><td><code>history.jsonl</code></td>
-              <td>Every prompt you have typed, with its time and project path. Used for up-arrow recall and <span class="icode">Ctrl+R</span> search.</td>
-              <td><span class="chip high">Kept</span></td></tr>
+              <td data-label="What it holds">Every prompt you have typed, with its time and project path. Used for up-arrow recall and <span class="icode">Ctrl+R</span> search.</td>
+              <td data-label="Age limit"><span class="chip high">Kept</span></td></tr>
         </tbody>
       </table>
       </div>

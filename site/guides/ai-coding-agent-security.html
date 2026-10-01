@@ -32,7 +32,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"AI coding agent security: a checklist for your own machine","description":"What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.","datePublished":"2026-09-27","dateModified":"2026-09-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-security"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent security","item":"https://ranwhat.com/guides/ai-coding-agent-security"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"AI coding agent security: a checklist for your own machine","description":"What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.","datePublished":"2026-09-27","dateModified":"2026-10-01","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-security"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent security","item":"https://ranwhat.com/guides/ai-coding-agent-security"}]}]}</script>
 </head>
 <body>
 <header>
@@ -66,7 +66,8 @@
     </p>
     <p style="margin:18px 0 0;font-size:14px;color:var(--muted)">
       Checked against the Claude Code, OpenClaw, GitHub, Stripe, AWS and MCP
-      docs on <time datetime="2026-09-27">27 September 2026</time>.
+      docs on 27 September 2026, and Claude Code's permission modes and hooks
+      again on <time datetime="2026-10-01">1 October 2026</time>.
     </p>
   </div>
 </section>
@@ -78,11 +79,13 @@
       <h2>Know what the agent can reach.</h2>
       <p class="lede">
         Most of the exposure sits in what the agent can do without asking you,
-        so start with the defaults.
+        so start with the mode a session starts in.
       </p>
       <div class="rows">
+        <div class="row"><span class="k">Starting mode</span>
+          <span class="v">With Claude Code v2.1.283 or later, an interactive session in a terminal or VS Code starts in auto mode, where a classifier model reviews actions instead of you. On earlier versions that is the starting mode only on Pro, Max and Team plans. The <span class="icode">--permission-mode</span> flag or <span class="icode">permissions.defaultMode</span> in a settings file starts it in another mode.</span></div>
         <div class="row"><span class="k">Manual mode</span>
-          <span class="v">Claude Code starts with read-only permissions and asks before it edits a file or runs a command that can change your system. It can write only inside the folder it was started in and its subfolders, and asks before Read, Grep or Glob go outside it. Other modes change what asks: in auto mode a classifier reviews actions instead of you.</span></div>
+          <span class="v">The mode you can choose instead, config value <span class="icode">default</span>. Claude Code starts with read-only permissions and asks before it edits a file or runs a command that can change your system. It can write only inside the folder it was started in and its subfolders, and asks before Read, Grep or Glob go outside it.</span></div>
         <div class="row"><span class="k">No prompt</span>
           <span class="v">A built-in set of read-only commands runs without a prompt in every mode: <span class="icode">ls</span>, <span class="icode">cat</span>, <span class="icode">grep</span>, <span class="icode">find</span>, <span class="icode">head</span>, <span class="icode">tail</span> and others. The set is not configurable. To make one of them ask, add an <span class="icode">ask</span> or <span class="icode">deny</span> rule for it.</span></div>
         <div class="row"><span class="k">Environment</span>
@@ -93,8 +96,9 @@
           <span class="v">Anthropic reviews connectors against its listing criteria before adding them to its directory, but does not security-audit or manage any MCP server. The MCP specification's security guidance says clients should warn that a local MCP server runs with the same privileges as the client.</span></div>
       </div>
       <div class="term" style="margin-top:30px">
-        <div class="term-body"><pre>cd ~/code/myapp &amp;&amp; claude   <span class="c-mut">start in the project, not in ~</span>
-/permissions                <span class="c-mut">in the session: every rule, and the file it came from</span></pre></div>
+        <div class="term-body"><pre>cd ~/code/myapp &amp;&amp; claude          <span class="c-mut">start in the project, not in ~</span>
+claude --permission-mode default   <span class="c-mut">Manual mode: ask before edits and commands</span>
+/permissions                       <span class="c-mut">in the session: every rule, and the file it came from</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         Started in your home directory, the folder boundary is your whole home
@@ -229,21 +233,21 @@
         contents, command output, pasted text. In plaintext, on your disk.
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Path</th><th>What it holds</th></tr></thead>
         <tbody>
           <tr><td><code>~/.claude/<wbr>projects/<wbr>&lt;project&gt;/<wbr>&lt;session&gt;.jsonl</code></td>
-              <td>Every message, tool call and tool result in a session. A <span class="icode">.env</span> value a tool read is written here.</td></tr>
+              <td data-label="What it holds">Every message, tool call and tool result in a session. A <span class="icode">.env</span> value a tool read is written here.</td></tr>
           <tr><td><code>&lt;session&gt;/<wbr>subagents/</code></td>
-              <td>Subagent transcripts, removed with the parent transcript when it ages out.</td></tr>
+              <td data-label="What it holds">Subagent transcripts, removed with the parent transcript when it ages out.</td></tr>
           <tr><td><code>&lt;session&gt;/<wbr>tool-results/</code></td>
-              <td>Large tool outputs, spilled to separate files.</td></tr>
+              <td data-label="What it holds">Large tool outputs, spilled to separate files.</td></tr>
           <tr><td><code>~/.claude/<wbr>file-history/</code></td>
-              <td>Pre-edit snapshots of files Claude changed, kept for checkpoint restore.</td></tr>
+              <td data-label="What it holds">Pre-edit snapshots of files Claude changed, kept for checkpoint restore.</td></tr>
           <tr><td><code>~/.claude/<wbr>history.jsonl</code></td>
-              <td>Every prompt you typed, with timestamp and project path. The retention sweep does not remove it.</td></tr>
+              <td data-label="What it holds">Every prompt you typed, with timestamp and project path. The retention sweep does not remove it.</td></tr>
           <tr><td><code>~/.openclaw/<wbr>agents/<wbr>&lt;agentId&gt;/<wbr>agent/<wbr>openclaw-agent.sqlite</code></td>
-              <td>OpenClaw's per-agent state, including session rows and transcripts.</td></tr>
+              <td data-label="What it holds">OpenClaw's per-agent state, including session rows and transcripts.</td></tr>
         </tbody>
       </table>
       </div>
@@ -274,8 +278,9 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in Claude 
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         <span class="icode">ranwhat clean</span> reads session transcripts from
-        the last 30 days by default (<span class="icode">--days N</span>) and
-        names the file each credential was read out of. It does not read
+        the last 30 days by default (<span class="icode">--days N</span>).
+        When the transcript names the file a credential was read out of, clean
+        names it too. It does not read
         <span class="icode">subagents/</span>,
         <span class="icode">tool-results/</span> or
         <span class="icode">history.jsonl</span> yet.
@@ -328,9 +333,14 @@ ranwhat watch --json       <span class="c-mut">one record per flagged call</span
 
       <h3 style="margin-top:40px">A record from now on</h3>
       <p style="font-size:15px;color:var(--ink-2)">
-        A <span class="icode">PostToolUse</span> hook runs after each tool call.
-        This one, from Claude Code's hooks guide, appends every Bash command to
-        a file. Put it in <span class="icode">~/.claude/settings.json</span>;
+        A <span class="icode">PostToolUse</span> hook runs after each tool call
+        that succeeds. A command that exits non-zero fires
+        <span class="icode">PostToolUseFailure</span> instead. This config
+        appends every Bash command to a file: the
+        <span class="icode">PostToolUse</span> entry is the example from Claude
+        Code's hooks guide, and the same entry under
+        <span class="icode">PostToolUseFailure</span> adds the commands that
+        failed. Put it in <span class="icode">~/.claude/settings.json</span>;
         it needs <span class="icode">jq</span>.
       </p>
       <div class="term">
@@ -338,6 +348,17 @@ ranwhat watch --json       <span class="c-mut">one record per flagged call</span
         <div class="term-body"><pre>{
   "hooks": {
     "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' &gt;&gt; ~/.claude/command-log.txt"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
       {
         "matcher": "Bash",
         "hooks": [
@@ -536,6 +557,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
       <h2>Where each fact comes from.</h2>
       <ul class="follow">
         <li><a href="https://code.claude.com/docs/en/security">Claude Code: Security<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/permission-modes">Claude Code: Choose a permission mode<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/permissions">Claude Code: Configure permissions<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/settings-reference">Claude Code: Settings reference<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/sandboxing">Claude Code: Sandboxed Bash tool<span>code.claude.com</span></a></li>
@@ -543,6 +565,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
         <li><a href="https://code.claude.com/docs/en/data-usage">Claude Code: Data usage<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/claude-directory">Claude Code: The .claude directory<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/hooks-guide">Claude Code: Hooks guide<span>code.claude.com</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/hooks">Claude Code: Hooks reference<span>code.claude.com</span></a></li>
         <li><a href="https://code.claude.com/docs/en/monitoring-usage">Claude Code: Monitoring<span>code.claude.com</span></a></li>
         <li><a href="https://docs.openclaw.ai/gateway/security/secrets-and-storage">OpenClaw: Secrets, storage and logs<span>docs.openclaw.ai</span></a></li>
         <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices">MCP: Security best practices<span>modelcontextprotocol.io</span></a></li>

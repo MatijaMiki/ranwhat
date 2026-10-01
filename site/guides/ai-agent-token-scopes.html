@@ -141,13 +141,13 @@
         Four classic scopes deserve a second look when an agent holds them:
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Scope</th><th>What GitHub says it grants</th></tr></thead>
         <tbody>
-          <tr><td><code>repo</code></td><td>Read and write access to code, commit statuses, invitations, collaborators, deployment statuses and webhooks, in public and private repositories.</td></tr>
-          <tr><td><code>workflow</code></td><td>Adding and updating GitHub Actions workflow files.</td></tr>
-          <tr><td><code>delete_repo</code></td><td>Deleting any repository the account can administer.</td></tr>
-          <tr><td><code>admin:org</code></td><td>Full management of the organisation, its teams, projects and memberships.</td></tr>
+          <tr><td><code>repo</code></td><td data-label="What GitHub says it grants">Read and write access to code, commit statuses, repository invitations, collaborators, deployment statuses and repository webhooks, in public and private repositories. It also lets the token manage organisation-owned projects, invitations, team memberships and webhooks, and projects owned by users.</td></tr>
+          <tr><td><code>workflow</code></td><td data-label="What GitHub says it grants">Adding and updating GitHub Actions workflow files.</td></tr>
+          <tr><td><code>delete_repo</code></td><td data-label="What GitHub says it grants">Deleting any repository the account can administer.</td></tr>
+          <tr><td><code>admin:org</code></td><td data-label="What GitHub says it grants">Full management of the organisation, its teams, projects and memberships.</td></tr>
         </tbody>
       </table>
       </div>
@@ -277,15 +277,15 @@
         answer.
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Key</th><th>Prefix</th><th>What it can do</th></tr></thead>
         <tbody>
-          <tr><td><strong>Secret key</strong></td><td><code>sk_live_</code><br><code>sk_test_</code></td>
-              <td>Everything, on every Stripe API. Stripe does not recommend secret keys for new uses, and recommends moving existing ones to restricted keys.</td></tr>
-          <tr><td><strong>Restricted key</strong></td><td><code>rk_live_</code><br><code>rk_test_</code></td>
-              <td>Only what you grant, resource by resource: None, Read or Write. Stripe recommends restricted keys for agents.</td></tr>
-          <tr><td><strong>Agent key</strong></td><td><code>rk_</code><br>tagged Agent</td>
-              <td>A restricted key marked at creation as belonging to an autonomous agent. Approval rules make a designated reviewer approve sensitive actions; the default rules cover payouts, refunds and account configuration changes.</td></tr>
+          <tr><td><strong>Secret key</strong></td><td data-label="Prefix"><code>sk_live_</code><br><code>sk_test_</code></td>
+              <td data-label="What it can do">Everything, on every Stripe API. Stripe does not recommend secret keys for new uses, and recommends moving existing ones to restricted keys.</td></tr>
+          <tr><td><strong>Restricted key</strong></td><td data-label="Prefix"><code>rk_live_</code><br><code>rk_test_</code></td>
+              <td data-label="What it can do">Only what you grant, resource by resource: None, Read or Write. Stripe recommends restricted keys for agents.</td></tr>
+          <tr><td><strong>Agent key</strong></td><td data-label="Prefix"><code>rk_</code><br>tagged Agent</td>
+              <td data-label="What it can do">A restricted key marked at creation as belonging to an autonomous agent. Approval rules make a designated reviewer approve sensitive actions; the default rules cover payouts, refunds and account configuration changes.</td></tr>
         </tbody>
       </table>
       </div>
