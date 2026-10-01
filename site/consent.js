@@ -136,6 +136,10 @@
     panel.hidden = true;
     var gone = false;
     if (!next.stats) {
+      /* Google's own opt-out switch: gtag.js stops sending and stops writing
+         cookies at once, so the ping it sends as the page unloads cannot
+         put _ga_<id> back after it has been cleared. */
+      window["ga-disable-" + GA_ID] = true;
       clearCookies(/^_ga(_|$)/);
       gone = gone || statsLoaded;
     }
@@ -202,6 +206,10 @@
   });
 
   var now = choice();
+  /* A cookie a tool managed to write before it was declined goes on the
+     next page load, wherever the visitor lands. */
+  if (now && !now.stats) clearCookies(/^_ga(_|$)/);
+  if (now && !now.ads) clearCookies(/^_?tw|twclid/i);
   if (now) apply(now);
   else {
     /* An earlier yes to the X pixel alone still counts until it is changed. */

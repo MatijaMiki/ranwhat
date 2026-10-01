@@ -165,6 +165,9 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
         # Statistics is for counting visits, not advertising.
         self.assertIn("allow_google_signals: false", js)
         self.assertIn("allow_ad_personalization_signals: false", js)
+        # Withdrawing stops gtag at once and sweeps leftovers on later loads.
+        self.assertIn('window["ga-disable-" + GA_ID] = true;', js)
+        self.assertIn("if (now && !now.stats) clearCookies(/^_ga(_|$)/);", js)
 
     def test_csp_allows_the_tools_and_nothing_broader(self):
         headers = (SITE / "_headers").read_text(encoding="utf-8")
