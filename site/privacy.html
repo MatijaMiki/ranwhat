@@ -140,25 +140,29 @@
             the footer. What X does with it is in
             <a href="https://x.com/en/privacy">X&rsquo;s privacy policy</a>.</span></div>
         <div class="row"><span class="k">Forms</span>
-          <span class="v">The contact form posts to this site&rsquo;s own endpoint,
-            which checks the anti-bot challenge and emails the message to our
-            inbox. Nothing is kept on the server; the message lives in the inbox,
-            as described under Email.</span></div>
+          <span class="v">The contact form sends your email address, your topic
+            and your message to a Cloudflare Worker on this domain, which
+            checks the challenge and forwards the message to our mailbox. The
+            Worker keeps no copy. What arrives is kept as described under
+            Email below.</span></div>
         <div class="row"><span class="k">Server logs</span>
-          <span class="v">Cloudflare hosts the site and sits in front of it. It logs
-            request metadata, including your IP address, to deliver pages and
-            absorb abuse. That is our legitimate interest in running a website,
-            and the logs are not used to profile anyone.</span></div>
+          <span class="v">Cloudflare hosts and serves the site. It logs request
+            metadata, including your IP address, to deliver pages and absorb
+            abuse. That is our legitimate interest in running a website, and the
+            logs are not used to profile anyone.</span></div>
         <div class="row"><span class="k">Third parties</span>
-          <span class="v">Cloudflare Turnstile on the contact page, to keep bots
-            out: it runs in your browser, and Cloudflare processes your IP address
-            and browser signals for that one check. X, only if you allow ad
-            measurement. Typefaces are served from this domain rather than Google
-            Fonts, so rendering a page sends your IP address to nobody else.</span></div>
+          <span class="v">Cloudflare Turnstile, on the contact page only: the
+            challenge that keeps the form from being used by bots. It loads from
+            challenges.cloudflare.com and reads signals from your browser to tell
+            a person from a script. X, only if you allow ad measurement (above).
+            Nothing else loads from anywhere else. Typefaces are served from this
+            domain rather than Google Fonts.</span></div>
         <div class="row"><span class="k">Email</span>
-          <span class="v">If you write to us we keep the message and your address
-            for as long as the conversation is useful, and delete it when it is
-            not. The inbox is hosted by Google. We do not add you to any list.</span></div>
+          <span class="v">Mail, whether written directly or sent through the form,
+            is kept in a Gmail mailbox, so Google holds it too and may store it
+            outside the EU. We keep the message and your address for as long as
+            the conversation is useful, and delete it when it is not. We do not
+            add you to any list.</span></div>
       </div>
 
       <div class="grid2" style="margin-top:30px">

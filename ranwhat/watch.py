@@ -1271,7 +1271,7 @@ def evaluate(tool_name, tool_input):
 
 def _iter_claude_tool_calls(path):
     try:
-        fh = open(path, "r", errors="replace")
+        fh = open(path, "r", encoding="utf-8", errors="replace")
     except OSError:
         return
     with fh:

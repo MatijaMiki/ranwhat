@@ -28,6 +28,16 @@ const SUBJECTS = {
 
 const LIMITS = { message: 8000, email: 200 };
 
+/* A token solved on another site with the same key must not count here.
+   Preview deployments are left out on purpose: the form only sends from
+   the canonical host. */
+const HOSTNAMES = new Set(["ranwhat.com"]);
+
+/* Stricter than RFC 5322 on purpose. The address lands in From, Reply-To
+   and Subject, so anything with header meaning (angle brackets, commas,
+   quotes, semicolons, colons, backslashes) is refused rather than escaped. */
+const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
+
 /* X's Conversions API, for the pixel on the site. The token is a Worker
    secret (X_PIXEL_TOKEN) and the lead event's ID a plain variable
    (X_EVENT_LEAD); until both are set this does nothing. */
@@ -96,17 +106,24 @@ async function handleContact(request, env, ctx) {
   const token = form["cf-turnstile-response"];
   if (!token) return json(400, { error: "Complete the challenge and try again." });
 
-  const verify = await fetch(SITEVERIFY, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      secret: env.TURNSTILE_SECRET,
-      response: token,
-      remoteip: request.headers.get("cf-connecting-ip") || undefined,
-    }),
-  });
-  const outcome = await verify.json();
-  if (!outcome.success) {
+  /* If siteverify is down or answers with something other than JSON, say so
+     in the same shape as every other error rather than throwing a bare 500. */
+  let outcome;
+  try {
+    const verify = await fetch(SITEVERIFY, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret: env.TURNSTILE_SECRET,
+        response: token,
+        remoteip: request.headers.get("cf-connecting-ip") || undefined,
+      }),
+    });
+    outcome = await verify.json();
+  } catch {
+    return json(502, { error: "The challenge could not be checked just now. Try again in a minute." });
+  }
+  if (!outcome.success || !HOSTNAMES.has(outcome.hostname)) {
     return json(403, { error: "That challenge did not verify. Reload and try again." });
   }
 
@@ -118,7 +135,7 @@ async function handleContact(request, env, ctx) {
   if (message.length > LIMITS.message) {
     return json(400, { error: "That message is longer than this form accepts." });
   }
-  if (!replyTo || !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(replyTo)) {
+  if (!replyTo || !EMAIL.test(replyTo)) {
     return json(400, { error: "That email address does not look right." });
   }
 
@@ -134,9 +151,11 @@ async function handleContact(request, env, ctx) {
      the writer's address goes in the display name and the subject instead.
      Otherwise every submission looks identical in a mailbox list and you have
      to open it to find out who wrote in. Both values are run through header()
-     first: a newline in either would let someone append headers of their own. */
+     first: a newline in either would let someone append headers of their own.
+     The display name is quoted because an unquoted @ is not valid in one, and
+     EMAIL has already refused the quote and backslash that could break out. */
   const raw = [
-    `From: ${header(replyTo)} via ranwhat.com <${FROM}>`,
+    `From: "${header(replyTo)} via ranwhat.com" <${FROM}>`,
     `To: <${TO}>`,
     `Reply-To: <${replyTo}>`,
     `Subject: ${header(SUBJECTS[topic])} \u00b7 ${header(replyTo)}`,

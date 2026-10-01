@@ -13,7 +13,6 @@ import contextlib
 import io
 import json
 import os
-import pty
 import re
 import subprocess
 import sys
@@ -25,6 +24,18 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ranwhat import clean, cli, term, watch
+
+try:
+    import pty
+except ImportError:         # Windows: tty needs termios, which it lacks
+    pty = None
+
+# The pinned output shows transcript times in the reader's zone. Only
+# time.tzset can pin it to UTC, and Windows has none, so there the exact
+# output holds only on a machine that is already on UTC, as CI's is.
+PINNED_ZONE = unittest.skipUnless(
+    hasattr(time, "tzset") or (time.timezone == 0 and not time.daylight),
+    "needs time.tzset or a machine on UTC")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FOOTER = "  Read locally. Nothing was transmitted."
@@ -52,7 +63,7 @@ def make_root(rows):
     root = tempfile.mkdtemp(prefix="check-t-")
     proj = os.path.join(root, "-tmp-synthetic-proj")
     os.makedirs(proj)
-    with open(os.path.join(proj, "s1.jsonl"), "w") as fh:
+    with open(os.path.join(proj, "s1.jsonl"), "w", encoding="utf-8") as fh:
         for r in rows:
             fh.write(json.dumps(r) + "\n")
     return root, tempfile.mkdtemp(prefix="check-oc-")
@@ -475,6 +486,7 @@ CLEAN_COLOUR = (
 
 class StandaloneUnchanged(_Base):
 
+    @PINNED_ZONE
     def test_plain(self):
         self.assertEqual(watch.render([REC], 1, 30), WATCH_PLAIN)
         self.assertEqual(clean.render(FIND, 1, [], False), CLEAN_PLAIN)
@@ -483,6 +495,7 @@ class StandaloneUnchanged(_Base):
         self.assertEqual(WATCH_PLAIN.split("\n").count(FOOTER), 1)
         self.assertEqual(CLEAN_PLAIN.split("\n").count(FOOTER), 1)
 
+    @PINNED_ZONE
     def test_gates_drop_only_their_lines(self):
         w = watch.render([REC], 1, 30, footer=False)
         self.assertEqual(w + "\n" + RULE + "\n" + FOOTER + "\n", WATCH_PLAIN)
@@ -503,6 +516,7 @@ class StandaloneUnchanged(_Base):
         _, out, _ = self.run_cli(["watch", "--root", root, "--state-dir", st])
         self.assertEqual(self.lines(out).count(FOOTER), 1)
 
+    @unittest.skipIf(os.name == "nt", "pseudo-terminals are POSIX only")
     def test_colour_in_a_pty(self):
         code = ("import sys\nfrom ranwhat import watch, clean\n"
                 "REC = %r\nFIND = %r\n"
@@ -578,6 +592,7 @@ def _screen(raw, cols):
     return ["".join(x) for x in rows]
 
 
+@unittest.skipIf(os.name == "nt", "pseudo-terminals are POSIX only")
 class RealTerminal(unittest.TestCase):
 
     def test_progress_shows_then_leaves_no_residue(self):

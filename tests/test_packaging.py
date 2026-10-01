@@ -16,7 +16,7 @@ import ranwhat
 
 
 def pyproject():
-    with open(os.path.join(ROOT, "pyproject.toml")) as fh:
+    with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as fh:
         return fh.read()
 
 
@@ -84,7 +84,7 @@ class SuggestedCommands(unittest.TestCase):
 
     def exe(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write("#!/bin/sh\n")
         os.chmod(path, 0o755)
         return path
@@ -140,7 +140,8 @@ class SuggestedCommands(unittest.TestCase):
 
     def test_uvx_cache_dir_flag_found_by_cachedir_tag(self):
         root = self.mkdir("cli-cache", "archive-v3", "CCC")
-        open(os.path.join(self.t, "cli-cache", "CACHEDIR.TAG"), "w").close()
+        open(os.path.join(self.t, "cli-cache", "CACHEDIR.TAG"), "w",
+             encoding="utf-8").close()
         self.assertEqual(self.uvx(root), "uvx ranwhat")
 
     def test_uvx_cache_found_without_uv_on_the_env(self):
@@ -247,7 +248,7 @@ class SuggestedCommands(unittest.TestCase):
         macOS's /usr/bin/python3 starts the Command Line Tools' copy. Asked
         for sys.executable, it answers with the interpreter it runs."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write("#!/bin/sh\nprintf '%%s' '%s'\n" % starts)
         os.chmod(path, 0o755)
         return path

@@ -247,6 +247,7 @@ def write_html(result, path):
     """
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)     # Windows: else \r\n lands as \r\r\n
     try:
         fd = os.open(path, flags, 0o600)
     except OSError as e:
@@ -255,8 +256,11 @@ def write_html(result, path):
                              "through it" % path)
         raise SystemExit("ranwhat: cannot write %s (%s)" % (path, e.strerror))
     try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as fh:
+        if hasattr(os, "fchmod"):       # Windows before Python 3.13 has none
+            os.fchmod(fd, 0o600)
+        # The page declares utf-8; the locale's encoding (cp1252 on Windows)
+        # would garble every middle dot, and fail on anything it lacks.
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(build_html(result))
     except OSError as e:
         raise SystemExit("ranwhat: cannot write %s (%s)" % (path, e.strerror))

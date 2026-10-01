@@ -230,7 +230,7 @@ class OriginOfAFinding(unittest.TestCase):
     def _scan(self, rows):
         d = tempfile.mkdtemp(prefix="origin-")
         path = os.path.join(d, "s.jsonl")
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             for r in rows:
                 fh.write(json.dumps(r) + "\n")
         findings, changed = scan_file(path)

@@ -56,7 +56,7 @@ def transcript(calls):
     root = tempfile.mkdtemp(prefix="watch-out-")
     proj = os.path.join(root, "-tmp-synthetic")
     os.makedirs(proj)
-    with open(os.path.join(proj, "s.jsonl"), "w") as fh:
+    with open(os.path.join(proj, "s.jsonl"), "w", encoding="utf-8") as fh:
         for i, (name, tool_input) in enumerate(calls):
             fh.write(json.dumps({
                 "timestamp": "2026-09-20T10:%02d:00Z" % i,

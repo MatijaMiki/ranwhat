@@ -111,15 +111,25 @@ def _worth_scanning(text):
 # which is ambiguous the moment a directory name contains one: the slug
 # -Users-me-Desktop-birthday-planner could be .../birthday-planner or
 # .../birthday/planner. Resolved by asking the filesystem.
+#
+# On Windows the colon and backslash after the drive flatten too, so
+# C:\Users\me\app arrives as C--Users-me-app.
+_DRIVE_SLUG = re.compile(r"([A-Za-z])--(.*)")
+
+
 def project_path(slug):
-    if not slug.startswith("-"):
+    drive = _DRIVE_SLUG.fullmatch(slug) if os.name == "nt" else None
+    if drive:
+        path, rest = drive.group(1) + ":" + os.path.sep, drive.group(2)
+    elif slug.startswith("-"):
+        path, rest = os.path.sep, slug[1:]
+    else:
         return slug
-    parts = slug[1:].split("-")
-    path = ""
+    parts = rest.split("-")
     i = 0
     while i < len(parts):
         for take in range(len(parts) - i, 0, -1):
-            candidate = path + "/" + "-".join(parts[i:i + take])
+            candidate = os.path.join(path, "-".join(parts[i:i + take]))
             if os.path.isdir(candidate):
                 path = candidate
                 i += take
@@ -127,9 +137,9 @@ def project_path(slug):
         else:
             # Past the part that exists on this machine, the remainder is
             # most likely one directory name that happens to contain dashes.
-            path = path + "/" + "-".join(parts[i:])
+            path = os.path.join(path, "-".join(parts[i:]))
             break
-    return path or slug
+    return path
 
 
 # Paths whose contents are credentials, used to attribute a secret to the
@@ -636,8 +646,12 @@ def scan_file(path, apply=False, only=None):
             entry["origins"].add(origin_now[0])
         entry["count"] += 1
 
+    # UTF-8 whatever the locale says: Windows would otherwise decode as
+    # cp1252 and write the mojibake back. newline="" hands each line over
+    # with its own ending, so a rewrite keeps \r\n where it found \r\n.
     try:
-        with open(path, "r", errors="replace") as fh:
+        with open(path, "r", encoding="utf-8", errors="replace",
+                  newline="") as fh:
             for line in fh:
                 stripped = line.strip()
                 if not stripped:
@@ -656,7 +670,8 @@ def scan_file(path, apply=False, only=None):
                 new = _walk(obj, collect, replace=apply, only=only)
                 if apply and new != obj:
                     changed = True
-                    rewritten.append(json.dumps(new, ensure_ascii=False) + "\n")
+                    ending = line[len(line.rstrip("\r\n")):]
+                    rewritten.append(json.dumps(new, ensure_ascii=False) + ending)
                 else:
                     rewritten.append(line)
     except OSError:
@@ -665,23 +680,90 @@ def scan_file(path, apply=False, only=None):
     if apply and changed:
         _backup(path)
         tmp = path + ".ranwhat-tmp"
-        with open(tmp, "w") as fh:
-            fh.writelines(rewritten)
-        # refuse to install a file we cannot read back
-        with open(tmp) as fh:
-            for line in fh:
-                if line.strip():
-                    json.loads(line)
-        os.replace(tmp, path)
+        try:
+            _write_like(path, tmp, rewritten)
+            # refuse to install a file we cannot read back
+            with open(tmp, encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip():
+                        json.loads(line)
+            os.replace(tmp, path)
+        finally:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
 
     return findings, changed
 
 
+# O_NOFOLLOW where the platform has it: a symlink planted at a path we are
+# about to create must fail the write, not redirect it. O_BINARY on Windows,
+# where a descriptor from os.open is otherwise in text mode and every \n
+# written through it gains a \r: a backup would no longer be the original.
+_CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+           | getattr(os, "O_BINARY", 0))
+
+
+def _write_like(original, tmp, lines):
+    """Write the rewritten transcript with the original's permissions.
+
+    open(tmp, "w") took the umask default, so a 0600 transcript came back
+    0644 after masking: the one command meant to reduce exposure widened it.
+    The file is created 0600 and only then given the original's mode, so it
+    is never readable by anyone the original was not. A stale tmp from an
+    interrupted run is removed first rather than written through.
+
+    Lines are written exactly as given, endings included. Windows has no
+    mode bits to carry, only a read-only flag, which would leave a tmp that
+    could not be removed if the replace failed; there the new file takes
+    its directory's permissions."""
+    mode = os.stat(original).st_mode & 0o777
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    fd = os.open(tmp, _CREATE, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+        fh.writelines(lines)
+        if os.name != "nt":
+            os.fchmod(fh.fileno(), mode)
+
+
+def _backup_dest(root, stamp, path):
+    """Where the backup of `path` goes: its absolute path, re-rooted under
+    root/stamp. Joining C:\\Users\\... onto the root would discard the root
+    and name the transcript itself, so on Windows the drive (or a UNC
+    server and share) becomes a directory of its own."""
+    drive, rest = os.path.splitdrive(os.path.abspath(path))
+    parts = [p for p in re.split(r"[\\/:?]+", drive) if p.strip(".")]
+    rest = rest.lstrip(os.path.sep + (os.path.altsep or ""))
+    return os.path.join(root, stamp, *parts, rest)
+
+
 def _backup(path):
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = os.path.join(BACKUP_ROOT, stamp, path.lstrip("/"))
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    shutil.copy2(path, dest)
+    """Copy the unmasked transcript aside before rewriting it.
+
+    The backup holds every secret the rewrite removes, so it is written the
+    way a secret should be: 0600, under a 0700 root nobody else can list.
+    copy2 used to carry the source's mode across and makedirs left the tree
+    0755. Microseconds in the stamp, and O_EXCL, keep two masks in the same
+    second from overwriting the true original with a half-masked copy.
+
+    Microseconds are only as fine as the clock: on Windows before Python
+    3.13 it ticks every 1 to 16 ms. A stamp already taken gets a counter,
+    stamp-1, stamp-2, rather than failing the mask."""
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
+    os.chmod(BACKUP_ROOT, 0o700)
+    for attempt in range(100):
+        name = "%s-%d" % (stamp, attempt) if attempt else stamp
+        dest = _backup_dest(BACKUP_ROOT, name, path)
+        os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
+        try:
+            fd = os.open(dest, _CREATE, 0o600)
+            break
+        except FileExistsError:
+            if attempt == 99:
+                raise
+    with open(path, "rb") as src, os.fdopen(fd, "wb") as out:
+        shutil.copyfileobj(src, out)
     return dest
 
 
@@ -754,6 +836,8 @@ def render(findings, scanned, changed_files, applied, footer=True,
     if applied:
         L.append("  " + GRN("Masked in %d file(s)." % len(changed_files)))
         L.append(DIM("  Backups: %s" % BACKUP_ROOT))
+        L.append(DIM("  They still hold every masked value. Delete them once"
+                     " the transcripts look right."))
     elif advice:
         L.append("  " + YEL("Dry run. Nothing was changed."))
         L.append(DIM("  Run with --apply to mask them. Backups are written first."))
@@ -872,7 +956,7 @@ def review(findings, scanned, stream=None):
 
         if cmd in ("show", "mask", "keep"):
             if cmd == "mask" and arg == "all":
-                changed_total += _mask(items, scanned, _print, GRN, RED)
+                changed_total += _mask(items, scanned, _print, GRN, RED, DIM)
                 items = []
                 continue
             if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
@@ -898,14 +982,14 @@ def review(findings, scanned, stream=None):
                 items.remove(target)
                 _print(DIM("  kept. %d left." % len(items)))
             else:
-                changed_total += _mask([target], scanned, _print, GRN, RED)
+                changed_total += _mask([target], scanned, _print, GRN, RED, DIM)
                 items.remove(target)
             continue
 
         _print(RED("  unknown command: %s" % cmd) + DIM("  (try 'help')"))
 
 
-def _mask(targets, scanned, _print, GRN, RED):
+def _mask(targets, scanned, _print, GRN, RED, DIM):
     """Re-walk only the files that hold these secrets, masking just them."""
     wanted = {t["fingerprint"] for t in targets}
     paths = set()
@@ -920,6 +1004,8 @@ def _mask(targets, scanned, _print, GRN, RED):
     if changed:
         _print(GRN("  masked in %d file(s)." % changed)
                + (" Backups: %s" % BACKUP_ROOT))
+        _print(DIM("  They still hold every masked value. Delete them once"
+                   " the transcripts look right."))
     else:
         _print(RED("  nothing changed."))
     return changed
