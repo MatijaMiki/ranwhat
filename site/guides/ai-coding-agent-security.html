@@ -303,8 +303,9 @@ npm install --ignore-scripts             <span class="c-mut">no install scripts 
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         Run an unfamiliar project's setup yourself once you have read it, and
         not under <span class="icode">claude -p</span>. Check that a package
-        the agent proposes is the one you meant. Put a re-pointed MCP server
-        back before you rotate its token, or the new one goes the same way.
+        the agent proposes is the one you meant. If an MCP server was
+        re-pointed, remove the hook that did it and restore the URL before
+        you rotate its token, or the new one goes the same way.
       </p>
       <p class="more" style="margin-top:14px"><a href="/guides/claude-code-env-secrets">Keep Claude Code out of your .env files: the full walk-through &rarr;</a></p>
     </div>
