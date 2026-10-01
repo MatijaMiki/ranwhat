@@ -165,26 +165,43 @@
         "people here? Each sets cookies and sends your visit to that company. " +
         "Nothing else on this site tracks you. " +
         '<a href="/privacy#stats">What each sends</a></p>' +
+        '<div class="consent-acts">' +
+        '<button type="button" data-answer="all">Allow all</button>' +
+        '<button type="button" data-answer="none">No thanks</button>' +
+        "</div>" +
+        '<button type="button" class="consent-more" data-answer="choose" aria-expanded="false">Choose for each</button>' +
+        '<div class="consent-opts" hidden>' +
         '<label class="consent-opt"><input type="checkbox" data-purpose="stats"> ' +
         "Visit statistics (Google Analytics)</label>" +
         '<label class="consent-opt"><input type="checkbox" data-purpose="ads"> ' +
         "Ad measurement (X)</label>" +
         '<div class="consent-acts">' +
         '<button type="button" data-answer="save">Save choices</button>' +
-        '<button type="button" data-answer="all">Allow all</button>' +
-        '<button type="button" data-answer="none">No thanks</button>' +
+        "</div>" +
         "</div>";
       panel.addEventListener("click", function (ev) {
         var answer = ev.target && ev.target.getAttribute && ev.target.getAttribute("data-answer");
         if (answer === "all") decide({ stats: true, ads: true });
         else if (answer === "none") decide({ stats: false, ads: false });
         else if (answer === "save") decide({ stats: box("stats").checked, ads: box("ads").checked });
+        else if (answer === "choose") expand(true);
       });
       document.body.appendChild(panel);
     }
     box("stats").checked = c.stats;
     box("ads").checked = c.ads;
+    /* Someone reopening it from "Privacy choices" sees what they chose. */
+    expand(choice() !== null);
     panel.hidden = false;
+  }
+
+  /* Two buttons by default; the per-purpose boxes open on request. Neither
+     box starts ticked: a pre-ticked box is not consent. */
+  function expand(open) {
+    panel.querySelector(".consent-opts").hidden = !open;
+    var more = panel.querySelector(".consent-more");
+    more.hidden = open;
+    more.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
   /* Other scripts ask here rather than reading storage themselves. */

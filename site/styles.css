@@ -515,6 +515,12 @@ ul.follow a span{color:var(--muted);font-size:13px;font-weight:400;
 .consent p{margin:0;font-size:13.5px;line-height:1.55;color:var(--ink-2)}
 .consent p strong{color:var(--ink)}
 .consent a{color:var(--ink)}
+.consent-more{background:none;border:0;padding:0;margin-top:12px;cursor:pointer;
+  font-family:"IBM Plex Mono",Menlo,monospace;font-size:12px;color:var(--muted);
+  text-decoration:underline;text-underline-offset:2px}
+.consent-more:hover{color:var(--ink)}
+.consent-more[hidden],.consent-opts[hidden]{display:none}
+.consent-opts{margin-top:4px}
 .consent-opt{display:flex;gap:9px;align-items:center;margin-top:10px;font-size:13px;color:var(--ink);cursor:pointer}
 .consent-opt input{width:15px;height:15px;margin:0;accent-color:var(--brand)}
 .consent-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
