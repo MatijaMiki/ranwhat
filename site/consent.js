@@ -1,19 +1,23 @@
-/* X ad measurement, and only with consent.
+/* Measurement, and only with consent.
  *
- * We advertise on X, and X's pixel is how an ad finds out whether anyone it
- * sent actually arrived. It sets cookies and tells X about the visit, which
- * under the ePrivacy rules needs a yes first. So nothing from X loads until
- * the visitor says so, "No thanks" is exactly as easy as "Allow", and a
- * browser that sends Global Privacy Control is taken at its word and never
- * asked.
+ * Two things on this site can measure a visit, and each needs its own yes
+ * under the ePrivacy rules, because each sets cookies and sends the visit to
+ * another company:
+ *   visit statistics  Google Analytics: which pages people read, and where
+ *                     they came from;
+ *   ad measurement    X's pixel: whether an ad on X brought anyone here.
+ * Nothing from either loads until the visitor ticks it. "No thanks" is as
+ * easy as "Allow all", and a browser that sends Global Privacy Control is
+ * taken at its word and never asked.
  *
  * The answer is kept in localStorage so the question is asked once. The
- * footer's "Privacy choices" reopens it, and changing a yes to a no reloads
- * the page so the pixel that already loaded is gone.
+ * footer's "Privacy choices" reopens it; withdrawing a yes clears what that
+ * tool set on this domain and reloads the page so it is gone.
  */
 (function () {
   "use strict";
 
+  var GA_ID = "G-MTR111ZTTE";
   var PIXEL = "rfz6t";
   /* Event IDs come from X Events Manager. Empty means "not set up yet", and
      nothing is recorded for it. */
@@ -32,17 +36,46 @@
     } catch (e) { /* private mode: we simply ask again next time */ }
   }
 
+  /* {stats, ads}, or null when the visitor has not answered. The first
+     version stored "granted" or "denied" for the X pixel alone: that answer
+     still stands for ads, and statistics is asked about once. */
   function choice() {
     var stored = read(KEY);
-    if (stored === "granted" || stored === "denied") return stored;
-    if (navigator.globalPrivacyControl === true) return "denied";
+    if (stored && stored.charAt(0) === "{") {
+      try {
+        var c = JSON.parse(stored);
+        if (typeof c.stats === "boolean" && typeof c.ads === "boolean") return c;
+      } catch (e) { /* damaged: ask again */ }
+    }
+    if (navigator.globalPrivacyControl === true) return { stats: false, ads: false };
     return null;
   }
+  function earlierAds() { return read(KEY) === "granted"; }
 
-  var loaded = false;
-  function load() {
-    if (loaded) return;
-    loaded = true;
+  var statsLoaded = false;
+  function loadStats() {
+    if (statsLoaded) return;
+    statsLoaded = true;
+    /* Google's gtag.js snippet, unrolled so it can live in this file: the
+       site's CSP allows no inline script. Google signals and ad
+       personalisation stay off, because this is for counting visits. */
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    window.gtag("js", new Date());
+    window.gtag("config", GA_ID, {
+      allow_google_signals: false,
+      allow_ad_personalization_signals: false,
+    });
+    var s = document.createElement("script");
+    s.async = true;
+    s.src = "https://www.googletagmanager.com/gtag/js?id=" + GA_ID;
+    document.head.appendChild(s);
+  }
+
+  var adsLoaded = false;
+  function loadAds() {
+    if (adsLoaded) return;
+    adsLoaded = true;
     /* X's base code, unrolled: a queue that uwt.js drains once it arrives. */
     var q = window.twq = function () {
       q.exe ? q.exe.apply(q, arguments) : q.queue.push(arguments);
@@ -77,53 +110,86 @@
     return null;
   }
 
-  /* First-party cookies the pixel may have set on this domain. X's own
-     cookies live on X's domains, where only X or the browser can clear them. */
-  function forget() {
-    write(CLICK, null);
+  /* First-party cookies a tool may have set on this domain. Cookies on
+     Google's or X's own domains are theirs, or the browser's, to clear. */
+  function clearCookies(pattern) {
     document.cookie.split(";").forEach(function (pair) {
       var name = pair.split("=")[0].trim();
-      if (/^_?tw|twclid/i.test(name)) {
-        document.cookie = name + "=; Max-Age=0; path=/";
-        document.cookie = name + "=; Max-Age=0; path=/; domain=." + location.hostname;
-      }
+      if (!pattern.test(name)) return;
+      var host = location.hostname;
+      document.cookie = name + "=; Max-Age=0; path=/";
+      document.cookie = name + "=; Max-Age=0; path=/; domain=" + host;
+      document.cookie = name + "=; Max-Age=0; path=/; domain=." + host;
     });
+  }
+
+  function apply(c) {
+    if (c.stats) loadStats();
+    if (c.ads) loadAds();
   }
 
   var panel = null;
+  function box(purpose) { return panel.querySelector('[data-purpose="' + purpose + '"]'); }
+
+  function decide(next) {
+    write(KEY, JSON.stringify({ stats: next.stats, ads: next.ads }));
+    panel.hidden = true;
+    var gone = false;
+    if (!next.stats) {
+      clearCookies(/^_ga(_|$)/);
+      gone = gone || statsLoaded;
+    }
+    if (!next.ads) {
+      write(CLICK, null);
+      clearCookies(/^_?tw|twclid/i);
+      gone = gone || adsLoaded;
+    }
+    /* A script that already ran cannot be unloaded, only left behind. */
+    if (gone) { location.reload(); return; }
+    apply(next);
+  }
+
   function ask() {
-    if (panel) { panel.hidden = false; return; }
-    panel = document.createElement("section");
-    panel.className = "consent";
-    panel.setAttribute("aria-label", "Ad measurement");
-    panel.innerHTML =
-      '<p><strong>One question.</strong> May X’s ad pixel measure whether ' +
-      'our posts on X bring people here? It sets cookies and tells X you ' +
-      'visited. Nothing else on this site tracks you. ' +
-      '<a href="/privacy#ads">What it sends</a></p>' +
-      '<div class="consent-acts">' +
-      '<button type="button" data-answer="granted">Allow</button>' +
-      '<button type="button" data-answer="denied">No thanks</button>' +
-      "</div>";
-    panel.addEventListener("click", function (ev) {
-      var answer = ev.target && ev.target.getAttribute("data-answer");
-      if (!answer) return;
-      var before = choice();
-      write(KEY, answer);
-      panel.hidden = true;
-      if (answer === "granted") { load(); return; }
-      forget();
-      if (before === "granted" || loaded) location.reload();
-    });
-    document.body.appendChild(panel);
+    var c = choice() || { stats: false, ads: earlierAds() };
+    if (!panel) {
+      panel = document.createElement("section");
+      panel.className = "consent";
+      panel.setAttribute("aria-label", "Measurement choices");
+      panel.innerHTML =
+        "<p><strong>Two questions.</strong> May we count visits with Google " +
+        "Analytics, and may X’s pixel measure whether our posts on X bring " +
+        "people here? Each sets cookies and sends your visit to that company. " +
+        "Nothing else on this site tracks you. " +
+        '<a href="/privacy#stats">What each sends</a></p>' +
+        '<label class="consent-opt"><input type="checkbox" data-purpose="stats"> ' +
+        "Visit statistics (Google Analytics)</label>" +
+        '<label class="consent-opt"><input type="checkbox" data-purpose="ads"> ' +
+        "Ad measurement (X)</label>" +
+        '<div class="consent-acts">' +
+        '<button type="button" data-answer="save">Save choices</button>' +
+        '<button type="button" data-answer="all">Allow all</button>' +
+        '<button type="button" data-answer="none">No thanks</button>' +
+        "</div>";
+      panel.addEventListener("click", function (ev) {
+        var answer = ev.target && ev.target.getAttribute && ev.target.getAttribute("data-answer");
+        if (answer === "all") decide({ stats: true, ads: true });
+        else if (answer === "none") decide({ stats: false, ads: false });
+        else if (answer === "save") decide({ stats: box("stats").checked, ads: box("ads").checked });
+      });
+      document.body.appendChild(panel);
+    }
+    box("stats").checked = c.stats;
+    box("ads").checked = c.ads;
+    panel.hidden = false;
   }
 
   /* Other scripts ask here rather than reading storage themselves. */
+  function adsAllowed() { var c = choice(); return !!(c && c.ads) || earlierAds(); }
   window.ranwhatAds = {
-    allowed: function () { return choice() === "granted"; },
-    click: function () { return choice() === "granted" ? click() : null; },
+    allowed: adsAllowed,
+    click: function () { return adsAllowed() ? click() : null; },
     lead: function (conversionId) {
-      if (choice() !== "granted" || !EVENTS.lead || !window.twq) return;
+      if (!adsAllowed() || !EVENTS.lead || !window.twq) return;
       window.twq("event", EVENTS.lead, { conversion_id: conversionId });
     },
   };
@@ -136,8 +202,10 @@
   });
 
   var now = choice();
-  if (now === "granted") load();
-  else if (now === null) {
+  if (now) apply(now);
+  else {
+    /* An earlier yes to the X pixel alone still counts until it is changed. */
+    if (earlierAds()) loadAds();
     if (document.body) ask();
     else document.addEventListener("DOMContentLoaded", ask);
   }

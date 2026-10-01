@@ -118,24 +118,28 @@ class ExampleReportIgnoresThisMachinesFeed(unittest.TestCase):
 
 
 class AdMeasurementNeedsConsent(unittest.TestCase):
-    """The X pixel sets cookies and reports the visit, so it may only load
-    after a yes. These pin the parts of that which a later edit could quietly
-    undo: a page pasting X's base code straight in, a page missing the way to
-    withdraw, or the server sending X more than the privacy page says."""
+    """Google Analytics and the X pixel set cookies and report the visit, so
+    each may only load after its own yes. These pin the parts of that which a
+    later edit could quietly undo: a page pasting a vendor snippet straight
+    in, one yes switching on both tools, a page missing the way to withdraw,
+    or the server sending X more than the privacy page says."""
 
     PAGES = sorted(SITE.glob("*.html"))
-    X_HOSTS = ("ads-twitter.com", "twq(", "uwt.js", "analytics.twitter.com")
+    # Loading code, not names: the privacy page may say which hosts are used.
+    LOADERS = ("twq(", "uwt.js", "gtag(", "gtag/js", "dataLayer")
+    SCRIPT_SRC = re.compile(
+        r'<script[^>]+src="https://[^"]*(ads-twitter\.com|googletagmanager\.com|google-analytics\.com)')
 
-    def test_no_page_loads_x_directly(self):
+    def test_no_page_loads_a_vendor_directly(self):
         for page in self.PAGES:
             text = page.read_text(encoding="utf-8")
-            for host in self.X_HOSTS:
-                self.assertNotIn(host, text.replace("static.ads-twitter.com</span>", ""),
-                                 "%s references %s outside consent.js" % (page.name, host))
+            self.assertIsNone(self.SCRIPT_SRC.search(text), page.name)
+            for marker in self.LOADERS:
+                self.assertNotIn(marker, text, "%s has %s outside consent.js" % (page.name, marker))
 
     def test_every_page_offers_consent_and_a_way_back(self):
         # Pages with the site footer. The example report is a standalone
-        # document the tool writes, and loads nothing from X at all.
+        # document the tool writes, and loads nothing from X or Google.
         for page in self.PAGES:
             text = page.read_text(encoding="utf-8")
             if 'class="fbase"' not in text:
@@ -143,32 +147,48 @@ class AdMeasurementNeedsConsent(unittest.TestCase):
             self.assertIn('src="/consent.js', text, page.name)
             self.assertIn("data-consent-open", text, page.name)
 
-    def test_pixel_loads_only_from_the_consent_path(self):
+    def test_each_tool_loads_only_after_its_own_yes(self):
         js = (SITE / "consent.js").read_text(encoding="utf-8")
         self.assertEqual(js.count("https://static.ads-twitter.com/uwt.js"), 1)
-        calls = re.findall(r"(?<![\w.])load\(\);", js)
-        self.assertEqual(len(calls), 2, "load() should be reachable only from "
-                         "a stored yes and the Allow button")
-        self.assertIn('now === "granted") load();', js)
-        self.assertIn('answer === "granted") { load();', js)
+        self.assertEqual(js.count("https://www.googletagmanager.com/gtag/js"), 1)
+        # Statistics loads from one place, gated on its own answer.
+        self.assertEqual(re.findall(r"(?<![\w.])loadStats\(\);", js), ["loadStats();"])
+        self.assertIn("if (c.stats) loadStats();", js)
+        # Ads load from the same gate, or from an earlier yes to the pixel
+        # alone, which predates the statistics question.
+        self.assertEqual(len(re.findall(r"(?<![\w.])loadAds\(\);", js)), 2)
+        self.assertIn("if (c.ads) loadAds();", js)
+        self.assertIn("if (earlierAds()) loadAds();", js)
+        # Both boxes start unticked for a new visitor, and GPC answers no.
+        self.assertIn("choice() || { stats: false, ads: earlierAds() }", js)
         self.assertIn("globalPrivacyControl", js)
+        # Statistics is for counting visits, not advertising.
+        self.assertIn("allow_google_signals: false", js)
+        self.assertIn("allow_ad_personalization_signals: false", js)
 
-    def test_csp_allows_the_pixel_and_nothing_broader(self):
+    def test_csp_allows_the_tools_and_nothing_broader(self):
         headers = (SITE / "_headers").read_text(encoding="utf-8")
         csp = next(l for l in headers.splitlines()
                    if "Content-Security-Policy" in l)
         self.assertIn("https://static.ads-twitter.com", csp)
         # uwt.js reports by fetch as well as by image, to both hosts.
         connect = csp.split("connect-src", 1)[1].split(";", 1)[0]
-        for host in ("https://analytics.twitter.com", "https://t.co"):
+        for host in ("https://analytics.twitter.com", "https://t.co",
+                     "https://*.google-analytics.com"):
             self.assertIn(host, connect)
-        self.assertNotIn("*", csp.replace("/*", ""), "no wildcard hosts")
+        # The only wildcards are Google's documented GA4 hosts.
+        allowed = {"https://*.googletagmanager.com", "https://*.google-analytics.com",
+                   "https://*.analytics.google.com"}
+        wild = {tok for tok in csp.replace(";", " ").split() if "*" in tok}
+        self.assertEqual(wild - allowed, set(), "unexpected wildcard hosts")
 
     def test_privacy_page_describes_it(self):
         text = (SITE / "privacy.html").read_text(encoding="utf-8")
-        self.assertIn('id="ads"', text)
-        self.assertIn("Global Privacy Control", text)
-        for stale in ("GitHub Pages", "no backend", "no tracking pixels"):
+        for anchor in ('id="ads"', 'id="stats"'):
+            self.assertIn(anchor, text)
+        for fact in ("Global Privacy Control", "Google Analytics", "_ga_MTR111ZTTE"):
+            self.assertIn(fact, text)
+        for stale in ("GitHub Pages", "no backend", "no tracking pixels", "no analytics"):
             self.assertNotIn(stale, text)
 
     def test_browser_and_server_report_the_same_event(self):
