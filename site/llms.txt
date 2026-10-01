@@ -16,9 +16,9 @@ Commands:
 - `ranwhat demo`: an authority scan on a bundled example, with no setup.
 - `ranwhat update`: refreshes the capability catalogue. Needs a Plus subscription, and Plus is not available yet.
 
-`check`, `watch` and `clean` read Claude Code transcripts, `~/.claude/projects/*/*.jsonl` and each session's `subagents/` transcripts, or the same under `$CLAUDE_CONFIG_DIR/projects` when that is set, for the last 30 days by default (`--days N`). `--root PATH` reads another directory. `watch` and `check` also read OpenClaw's per-agent database, `$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite` (default `~/.openclaw`).
+`check`, `watch` and `clean` read Claude Code transcripts, `~/.claude/projects/*/*.jsonl` and each session's `subagents/` transcripts, or the same under `$CLAUDE_CONFIG_DIR/projects` when that is set, for the last 30 days by default (`--days N`). `--root PATH` reads another directory.
 
-Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`, `~/.claude/history.jsonl`, the events that database stores compressed, and the cold transcript archives in `agents/<agentId>/sessions/cold/` under the same state directory.
+Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`, and `~/.claude/history.jsonl`.
 
 ## Docs
 

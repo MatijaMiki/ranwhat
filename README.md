@@ -43,11 +43,13 @@ $ ranwhat watch --days 90
   Read locally. Nothing was transmitted.
 ```
 
-Claude Code deletes transcripts older than
+Claude Code deletes the transcript of a session you have not used for longer
+than
 [`cleanupPeriodDays`](https://code.claude.com/docs/en/settings-reference#cleanupperioddays),
-30 days by default, so `--days 90` finds more only if you raised it, or for
-sessions started or last continued in Claude Desktop or Cowork, which Claude
-Code v2.1.248 and later
+30 days by default. So `--days 90` finds more if you raised it, if a session
+you resumed within that period has older actions in it, or for sessions
+started or last continued in Claude Desktop or Cowork, which Claude Code
+v2.1.248 and later
 [keep at any age by default](https://code.claude.com/docs/en/claude-directory#cleaned-up-automatically).
 
 ## Install

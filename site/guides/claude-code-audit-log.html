@@ -147,10 +147,12 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         <span class="icode">uvx</span> runs it without installing it.
-        <span class="icode">--days 90</span> finds more only if
-        <span class="icode">cleanupPeriodDays</span> was already above 30, or
-        for sessions started or last continued in Claude Desktop or Cowork,
-        which Claude Code v2.1.248 and later keep at any age by default.
+        <span class="icode">--days 90</span> finds more if
+        <span class="icode">cleanupPeriodDays</span> was already above 30, if
+        a session you resumed within the retention period has older actions
+        in it, or for sessions started or last continued in Claude Desktop or
+        Cowork, which Claude Code v2.1.248 and later keep at any age by
+        default.
       </p>
       <h3 style="margin-top:34px">Nine rules</h3>
       <div class="scroll">
@@ -374,8 +376,8 @@ claude</pre></div>
 uvx ranwhat watch --days 30    <span class="c-mut"># what ran while they may not have applied</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        watch reads only what retention kept, so it reaches back
-        <span class="icode">cleanupPeriodDays</span> and no further.
+        watch reads only what retention kept, and a session nobody used
+        within <span class="icode">cleanupPeriodDays</span> is already gone.
         Administrators can set <span class="icode">requiredMinimumVersion</span>
         to 2.1.260 through MDM or a managed settings file.
       </p>

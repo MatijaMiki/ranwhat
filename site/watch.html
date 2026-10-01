@@ -172,8 +172,8 @@
               <td data-label="Location"><code>~/.claude/projects/*/*.jsonl</code>, and each session's <code>subagents/</code></td>
               <td data-label="Format">JSONL transcripts</td></tr>
           <tr><td><strong>OpenClaw</strong></td>
-              <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code></td>
-              <td data-label="Format">SQLite, tool calls found by shape</td></tr>
+              <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code> (default <code>~/.openclaw</code>, or <code>--state-dir</code>)</td>
+              <td data-label="Format">SQLite, tool calls found by shape; compressed events and <a href="https://docs.openclaw.ai/reference/database-schemas/layout">cold archives</a> not read yet</td></tr>
         </tbody>
       </table>
       </div>
@@ -181,20 +181,12 @@
         When <span class="icode">CLAUDE_CONFIG_DIR</span> is set, transcripts
         are read from <span class="icode">$CLAUDE_CONFIG_DIR/projects</span>
         instead, and <span class="icode">--root PATH</span> reads any other
-        directory. The SQLite database, under <span class="icode">~/.openclaw</span>
-        unless <span class="icode">OPENCLAW_STATE_DIR</span> or
-        <span class="icode">--state-dir</span> points elsewhere, is opened
-        read-only, through a copy if the agent holds a lock.
+        directory.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
         Not read yet: the large tool outputs Claude Code stores in
         <span class="icode">&lt;session&gt;/tool-results/</span>, and
-        <span class="icode">~/.claude/history.jsonl</span>; the events that
-        database stores compressed; and the cold transcript archives in
-        <span class="icode">agents/&lt;agentId&gt;/sessions/cold/</span>,
-        which its
-        <a href="https://docs.openclaw.ai/reference/database-schemas/layout">database
-        layout</a> says also hold history.
+        <span class="icode">~/.claude/history.jsonl</span>.
         <a href="/guides/claude-code-history">Where Claude Code keeps your
         history</a> lists the files a session leaves behind.
       </p>

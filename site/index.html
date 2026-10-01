@@ -74,22 +74,28 @@
       </div>
 
       <div class="term" aria-label="Example ranwhat output">
-        <div class="term-bar"><span>ranwhat watch</span><span style="margin-left:auto">4 transcripts · 30 days</span></div>
-        <div class="term-body"><pre><span class="c-crit c-b">2 critical</span>  <span class="c-warn c-b">3 high</span>
+        <div class="term-bar"><span>ranwhat watch</span><span style="margin-left:auto">1 transcript · 30 days</span></div>
+        <div class="term-body"><pre><span class="c-crit c-b">2 critical</span>  <span class="c-warn c-b">1 high</span>
 
-<span class="c-crit">*</span> <span class="c-b">Credential material accessed</span>   <span class="c-mut">18:13  Bash</span>
-    <span class="c-mut">cat ~/.ssh/id_rsa</span>
-    <span class="c-mut">-> Whatever it read is now in a model
-       context you do not control.</span>
+<span class="c-crit">*</span> <span class="c-b">Credential material accessed</span><span class="c-mut">   2026-09-30 18:13:00  Bash</span>
+<span class="c-mut">    cat ~/.ssh/id_rsa
+    -> The agent read a file whose only purpose is to hold
+       secrets. Whatever it read is now in a model context
+       you do not control.</span>
 
-<span class="c-warn">*</span> <span class="c-b">Bulk or recursive deletion</span>     <span class="c-mut">15:13  Bash</span>
-    <span class="c-mut">rm -rf .frames ; printf 'node_mod…</span>
+<span class="c-warn">*</span> <span class="c-b">Bulk or recursive deletion</span><span class="c-mut">   2026-09-30 15:13:00  Bash</span>
+<span class="c-mut">    rm -rf .frames
+    -> Recursive deletion. Recoverable only if something
+       else was backing it up.</span>
 
-<span class="c-crit">*</span> <span class="c-b">Package or release published</span>   <span class="c-mut">14:58  Bash</span>
-    <span class="c-mut">npm publish --access public</span>
+<span class="c-crit">*</span> <span class="c-b">Package or release published</span><span class="c-mut">   2026-09-30 14:58:00  Bash</span>
+<span class="c-mut">    npm publish --access public
+    -> Something was pushed to a registry other people may
+       install from. Supply-chain reach, and usually
+       irreversible.</span>
 
-<span class="c-mut">────────────────────────────────────────</span>
-<span class="c-mut">Read locally. Nothing was transmitted.</span></pre></div>
+<span class="c-mut">------------------------------------------------------------
+Read locally. Nothing was transmitted.</span></pre></div>
       </div>
     </div>
   </div>
