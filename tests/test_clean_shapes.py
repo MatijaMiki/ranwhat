@@ -90,7 +90,7 @@ def _run(alphabet, k):
 
 
 def _read(path):
-    with open(path) as fh:
+    with open(path, encoding="utf-8") as fh:
         return fh.read()
 
 
@@ -110,7 +110,7 @@ def tearDownModule():
 def _transcript(content):
     d = tempfile.mkdtemp(prefix="shapes-")
     path = os.path.join(d, "s.jsonl")
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": "t1", "content": content}]}})
             + "\n")

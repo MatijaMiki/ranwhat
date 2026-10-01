@@ -16,3 +16,6 @@ build/
 dist/
 *.egg-info/
 .eggs/
+
+# Wrangler local state. The account cache names the Cloudflare account.
+.wrangler/

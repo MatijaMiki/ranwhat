@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.ads-twitter.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.co https://analytics.twitter.com https://ads-twitter.com; manifest-src 'self'; connect-src 'self' https://analytics.twitter.com https://t.co https://ads-twitter.com https://ads-api.twitter.com https://ads-api.x.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://challenges.cloudflare.com https://static.ads-twitter.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.co https://analytics.twitter.com https://ads-twitter.com; manifest-src 'self'; connect-src 'self' https://analytics.twitter.com https://t.co https://ads-twitter.com https://ads-api.twitter.com https://ads-api.x.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
   # Strict-Transport-Security deliberately omitted. Enabling it is a one-way
   # door: browsers cache the policy, and `preload` ships inside Chrome and
   # Firefox and takes months to undo. Turn it on as a separate decision,
@@ -17,6 +17,9 @@
   Cache-Control: public, max-age=3600
 
 /copy.js
+  Cache-Control: public, max-age=3600
+
+/contact.js
   Cache-Control: public, max-age=3600
 
 /consent.js

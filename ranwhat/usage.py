@@ -136,7 +136,10 @@ def aws_usage(principal_arn=None, profile=None, window_days=DEFAULT_WINDOW_DAYS)
     depends on destroys trust in the report.
     """
     if not principal_arn:
-        principal_arn = _aws(["sts", "get-caller-identity"]).get("Arn", "")
+        # Same profile as every call below. Without it the principal came
+        # from the default profile while the usage was pulled for another,
+        # and the report scored one account's usage against another's grants.
+        principal_arn = _aws(["sts", "get-caller-identity"], profile).get("Arn", "")
         # sts returns an assumed-role ARN; convert to the role ARN IAM wants
         if ":assumed-role/" in principal_arn:
             acct = principal_arn.split(":")[4]
@@ -258,7 +261,9 @@ def github_usage(token, org=None, window_days=DEFAULT_WINDOW_DAYS):
 
     since = (datetime.datetime.now(datetime.timezone.utc)
              - datetime.timedelta(days=window_days)).strftime("%Y-%m-%d")
-    url = ("https://api.github.com/orgs/%s/audit-log?" % org) + urllib.parse.urlencode(
+    # Quoted whole, so an org name can only ever be one path segment.
+    url = ("https://api.github.com/orgs/%s/audit-log?"
+           % urllib.parse.quote(org, safe="")) + urllib.parse.urlencode(
         {"phrase": "created:>=%s" % since, "per_page": 100})
     status, _, raw = _request(url, headers={
         "Authorization": "Bearer %s" % token,

@@ -124,12 +124,14 @@ def _resolve(credentials):
                 usage = "used"
             else:
                 usage = "unused"
+            # entry first, so nothing a catalogue entry carries can overwrite
+            # which credential, scope or usage this row is about.
             rows.append({
+                **entry,
                 "provider": provider,
                 "credential": cred.get("label", provider),
                 "scope": scope,
                 "usage": usage,
-                **entry,
             })
     return rows
 

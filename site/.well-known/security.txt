@@ -1,0 +1,5 @@
+Contact: mailto:hello@ranwhat.com
+Expires: 2027-09-27T00:00:00.000Z
+Preferred-Languages: en, hr
+Canonical: https://ranwhat.com/.well-known/security.txt
+Policy: https://github.com/MatijaMiki/ranwhat/blob/main/SECURITY.md

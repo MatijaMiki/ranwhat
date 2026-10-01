@@ -21,6 +21,13 @@ class IntrospectionError(Exception):
     pass
 
 
+def _header_safe(value):
+    """Printable latin-1 with no line break, which is all a credential needs.
+    http.client refuses a line break, or a character latin-1 cannot encode,
+    with a ValueError that quotes the whole value."""
+    return all(" " <= c <= "~" or "\xa0" <= c <= "\xff" for c in value)
+
+
 def _request(url, method="GET", headers=None, data=None):
     body = None
     if data is not None:
@@ -28,6 +35,14 @@ def _request(url, method="GET", headers=None, data=None):
     req = urllib.request.Request(url, data=body, method=method)
     req.add_header("User-Agent", "ranwhat/0.1 (read-only introspection)")
     for k, v in (headers or {}).items():
+        # Stripping a token takes a \r off its ends, not a line break inside
+        # it: a CRLF file with a second line, read with $(cat file). Refused
+        # here, and the message does not repeat it.
+        if not _header_safe(v):
+            raise IntrospectionError(
+                "the credential contains a line break or another character "
+                "a request header cannot carry, so nothing was sent. Check "
+                "how it was copied.")
         req.add_header(k, v)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -35,6 +50,12 @@ def _request(url, method="GET", headers=None, data=None):
             return resp.status, dict(resp.headers), raw
     except urllib.error.HTTPError as e:
         return e.code, dict(e.headers or {}), e.read().decode("utf-8", "replace")
+    except ValueError:
+        # Whatever else http.client refuses in a header or the URL, its
+        # message quotes it, token included. from None: not shown as the cause.
+        raise IntrospectionError(
+            "the request could not be sent: a header or the address holds a "
+            "character HTTP cannot carry.") from None
     except Exception as e:
         raise IntrospectionError(str(e))
 

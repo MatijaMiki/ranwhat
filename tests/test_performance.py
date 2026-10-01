@@ -3,10 +3,21 @@ a first run that takes ninety seconds on one file is a first run nobody
 finishes. These pin the two fixes that took a 39MB transcript from 89s to 2s.
 """
 import json
+import os
+import shutil
+import tempfile
 import time
 import unittest
+from unittest import mock
 
-from ranwhat import clean
+from ranwhat import catalog, clean, feed, score
+
+# What a quadratic pattern costs here is seconds (10s to 24s on the shapes
+# below before the fix), so the budget only has to sit well under that. At
+# 50ms it failed on a loaded machine while the full suite ran, which on CI
+# is a red build for nothing. 0.5s still catches every regression these
+# exist for by a factor of twenty.
+BUDGET = 0.5
 
 
 class Linear(unittest.TestCase):
@@ -16,7 +27,7 @@ class Linear(unittest.TestCase):
         text = "a" * 50000
         t = time.perf_counter()
         clean._origins(text)
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
 
     def test_origins_still_found_when_a_marker_is_present(self):
         self.assertIn("~/.ssh/id_rsa", clean._origins("then cat ~/.ssh/id_rsa here"))
@@ -47,13 +58,13 @@ class Linear(unittest.TestCase):
             with self.subTest(text=text[:24]):
                 t = time.perf_counter()
                 clean._origins(text)
-                self.assertLess(time.perf_counter() - t, 0.05)
+                self.assertLess(time.perf_counter() - t, BUDGET)
 
     def test_a_very_long_path_still_resolves(self):
         text = " " + "a/" * 100000 + ".env"
         t = time.perf_counter()
         found = clean._origins(text)
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0].endswith("/.env"))
 
@@ -62,7 +73,7 @@ class Linear(unittest.TestCase):
         text = json.dumps({"c": line})
         t = time.perf_counter()
         found = clean._origins(text)
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
         self.assertEqual(set(found), {"api/.env"})
 
 
@@ -72,7 +83,7 @@ class EmbeddedImages(unittest.TestCase):
     def test_embedded_png_is_not_scanned(self):
         t = time.perf_counter()
         self.assertEqual(clean.find_secrets(self.PNG), [])
-        self.assertLess(time.perf_counter() - t, 0.05)
+        self.assertLess(time.perf_counter() - t, BUDGET)
 
     def test_image_data_cannot_produce_a_false_positive(self):
         """Random-looking base64 can contain an AKIA-shaped run by chance."""
@@ -91,6 +102,45 @@ class EmbeddedImages(unittest.TestCase):
         text = "export STRIPE_KEY=sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc" + " and done"
         labels = [label for _, label in clean.find_secrets(text)]
         self.assertTrue(labels, "a live-shaped key in prose was missed")
+
+
+class FeedLookups(unittest.TestCase):
+    """lookup() asks providers() for the merged catalogue once per grant, and
+    the merge floors every feed scope of that provider with _no_lower, in
+    Python. Rebuilt on every call that was grants times feed entries: 300
+    grants against a 17,000-entry feed (2.4 MB, well under feed.MAX_BYTES)
+    took 2.2s here, against 0.08s before the floor existed."""
+
+    ENTRIES = 17000
+    GRANTS = 300
+
+    def setUp(self):
+        home = tempfile.mkdtemp(prefix="ranwhat-perf-")
+        self.addCleanup(shutil.rmtree, home, True)
+        patch = mock.patch.dict(os.environ, {"RANWHAT_HOME": home})
+        patch.start()
+        self.addCleanup(patch.stop)
+        entry = {"label": "Fed", "authority": "write", "reversible": True,
+                 "blast": "data_egress", "why": "a large test feed"}
+        cat = {"aws": {"svc%d:Action%d" % (i, i): dict(entry)
+                       for i in range(self.ENTRIES)}}
+        feed.save({"schema": feed.SCHEMA, "version": "t", "catalogue": cat,
+                   "digest": feed.digest(cat)})
+        catalog.reset_feed_cache()
+        self.addCleanup(catalog.reset_feed_cache)
+
+    def test_a_scan_against_a_large_feed_is_not_grants_times_entries(self):
+        profile = {"agent": "perf", "credentials": [{
+            "provider": "aws",
+            "scopes": ["svc%d:Action%d" % (i, i) for i in range(self.GRANTS)]}]}
+        # Reading the cache is once per process, whatever the grants; the
+        # lookups are what went quadratic.
+        self.assertIsNotNone(catalog._feed_catalogue(), "the feed is not in use")
+        t = time.perf_counter()
+        result = score.scan(profile)
+        self.assertLess(time.perf_counter() - t, BUDGET)
+        self.assertEqual(len(result["scopes"]), self.GRANTS)
+        self.assertTrue(all(r["label"] == "Fed" for r in result["scopes"]))
 
 
 if __name__ == "__main__":

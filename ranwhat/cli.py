@@ -51,7 +51,12 @@ def _token(args, provider):
         print("  warning: --%s put a credential in this machine's process "
               "table. Use %s instead." % (provider, env_name), file=sys.stderr)
 
-    return value or os.environ.get(env_name)
+    # Stripped on every path, not only stdin. A token copied out of a CRLF
+    # .env keeps its \r, http.client rejects the header, and the ValueError
+    # it raises quotes the whole header, token included, into the error the
+    # user sees.
+    value = (value or os.environ.get(env_name) or "").strip()
+    return value or None
 
 
 def run_scan(profile, path=None):
@@ -64,9 +69,12 @@ def run_scan(profile, path=None):
 
 
 def _load(path):
-    """Read a profile, failing with a message rather than a traceback."""
+    """Read a profile, failing with a message rather than a traceback.
+
+    UTF-8, not the locale's encoding, and a leading byte-order mark allowed:
+    PowerShell 5 and older Notepad write one, and json refuses it."""
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8-sig") as fh:
             return json.load(fh)
     except FileNotFoundError:
         raise SystemExit("ranwhat: no such file: %s" % path)
@@ -82,7 +90,8 @@ def _bundled(name):
     """Load data shipped inside the package."""
     try:
         from importlib.resources import files
-        return json.loads(files("ranwhat").joinpath("demo", name).read_text())
+        return json.loads(files("ranwhat").joinpath("demo", name)
+                          .read_text(encoding="utf-8"))
     except Exception:
         here = os.path.dirname(os.path.abspath(__file__))
         return _load(os.path.join(here, "demo", name))
@@ -354,7 +363,9 @@ def _update(args):
             % (st.get("version") or "?", st["providers"], st["scopes"], when))
         return 0
 
-    token = args.token or feed_mod.read_token()
+    # Stripped as every other token is: a \r from a CRLF file would make
+    # http.client quote the header, token and all, into its error.
+    token = (args.token or "").strip() or feed_mod.read_token()
     if not token:
         sys.stderr.write(
             "  No token. Set RANWHAT_TOKEN, or pass --token with --save-token\n"
@@ -368,15 +379,20 @@ def _update(args):
             "  on this machine through the process table, and is written to\n"
             "  your shell history. Prefer RANWHAT_TOKEN.\n\n")
 
+    # save() too: a body can load and still be nested too deep to write.
     try:
         doc = feed_mod.fetch(token)
+        feed_mod.save(doc)
     except feed_mod.FeedError as exc:
         sys.stderr.write("  %s\n" % exc)
         return 1
 
-    feed_mod.save(doc)
     if args.save_token:
-        path = feed_mod.save_token(token)
+        try:
+            path = feed_mod.save_token(token)
+        except feed_mod.FeedError as exc:
+            sys.stderr.write("  %s\n" % exc)
+            return 1
         sys.stdout.write("  Token saved to %s (0600)\n" % path)
     catalog_mod.reset_feed_cache()
 
