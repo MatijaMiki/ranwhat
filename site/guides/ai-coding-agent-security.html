@@ -356,8 +356,7 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in Claude 
         <span class="icode">ranwhat clean</span> reads session transcripts from
         the last 30 days by default (<span class="icode">--days N</span>).
         When the transcript names the file a credential was read out of, clean
-        names it too. It does not read
-        <span class="icode">subagents/</span>,
+        names it too. It reads subagent transcripts as well, but not
         <span class="icode">tool-results/</span> or
         <span class="icode">history.jsonl</span> yet.
       </p>
@@ -396,7 +395,7 @@ ranwhat watch --json       <span class="c-mut">one record per flagged call</span
         credential reads, secret-shaped strings in tool calls, package
         publishing, cloud resource changes, payment API calls, log or history
         tampering, destructive git, recursive deletion, and local files
-        uploaded with curl. It does not read subagent transcripts yet.
+        uploaded with curl. It reads subagent transcripts too.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
         Without ranwhat, a first look is one grep away, because each transcript

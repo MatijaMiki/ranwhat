@@ -182,7 +182,7 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
         <div class="row"><span class="k">Scope</span>
           <span class="v">Masking one finding rewrites only that value, not every other secret in the same file.</span></div>
         <div class="row"><span class="k">Reads</span>
-          <span class="v"><a href="/guides/claude-code-history">Claude Code transcripts</a>, <span class="icode">~/.claude/projects/*/*.jsonl</span>, or <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> when that is set, for the last 30 days by default (<span class="icode">--days N</span>). Not subagent transcripts yet.</span></div>
+          <span class="v"><a href="/guides/claude-code-history">Claude Code transcripts</a>, <span class="icode">~/.claude/projects/*/*.jsonl</span> and the transcripts subagents write beside them, or the same under <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> when that is set, for the last 30 days by default (<span class="icode">--days N</span>). Not the large tool outputs in <span class="icode">tool-results/</span> yet.</span></div>
         <div class="row"><span class="k">Recognises</span>
           <span class="v">Stripe <span class="icode">sk_live_</span> and <span class="icode">rk_live_</span> keys, <span class="icode">sk-</span> style OpenAI and Anthropic keys, GitHub <span class="icode">ghp_</span> and <span class="icode">github_pat_</span> tokens, Slack <span class="icode">xox</span> tokens, AWS <span class="icode">AKIA</span> and <span class="icode">ASIA</span> key IDs, Twilio SIDs, SendGrid keys, PEM private keys and JWTs, passwords inside connection strings, and <span class="icode">KEY=value</span> pairs whose key names a secret.</span></div>
       </div>

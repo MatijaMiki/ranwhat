@@ -215,7 +215,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <div class="row"><span class="k">Nothing read</span>
           <span class="v">The report's header counts the transcripts it read. A run that reads nothing says that nothing was checked, rather than that nothing was found. That almost always means the wrong directory or too short a window, not a clean history.</span></div>
         <div class="row"><span class="k">Not read yet</span>
-          <span class="v">Subagent transcripts in <span class="icode">&lt;session&gt;/subagents/</span>, the spilled outputs in <span class="icode">&lt;session&gt;/tool-results/</span>, and <span class="icode">history.jsonl</span>.</span></div>
+          <span class="v">The spilled outputs in <span class="icode">&lt;session&gt;/tool-results/</span>, and <span class="icode">history.jsonl</span>. Subagent transcripts in <span class="icode">&lt;session&gt;/subagents/</span> are read, and each call in them is credited to the session that started the subagent.</span></div>
         <div class="row"><span class="k">Call, not result</span>
           <span class="v">watch judges each call as the agent made it. It does not read the result, so a call you refused or one that failed is reported the same way as one that ran. The result is in the transcript beside it, and the result before a call often explains it. In 0DIN's demonstration of 25 June 2026, Claude Code ran <span class="icode">python3 -m axiom init</span> because an error message told it to, and that command opened a reverse shell. watch does not flag it. When a session looks wrong, resume it, <span class="icode">/export</span> it, and read the result before each command.</span></div>
       </div>
@@ -273,7 +273,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <div class="row"><span class="k">Failures</span>
           <span class="v"><strong><span class="icode">PostToolUse</span> fires only after a tool call succeeds.</strong> A command that exits non-zero fires <span class="icode">PostToolUseFailure</span> instead, so add the same entry under that event or the log misses every failed command. A call refused at the permission prompt fires neither; <span class="icode">PreToolUse</span> sees it.</span></div>
         <div class="row"><span class="k">Subagents</span>
-          <span class="v">Hooks fire inside subagents too, with an <span class="icode">agent_id</span> field in the input, so this log covers the commands that ranwhat watch does not read yet.</span></div>
+          <span class="v">Hooks fire inside subagents too, with an <span class="icode">agent_id</span> field in the input, so the log covers their commands as well.</span></div>
         <div class="row"><span class="k">transcript_path</span>
           <span class="v">The input includes the session's transcript path. The transcript is written asynchronously and may not hold the current turn's latest messages when the hook fires, so log from the hook's own input rather than reading the file.</span></div>
         <div class="row"><span class="k">Off switch</span>

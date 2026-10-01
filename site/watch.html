@@ -169,7 +169,7 @@
         <thead><tr><th>Agent</th><th>Location</th><th>Format</th></tr></thead>
         <tbody>
           <tr><td><strong>Claude Code</strong></td>
-              <td data-label="Location"><code>~/.claude/projects/*/*.jsonl</code></td>
+              <td data-label="Location"><code>~/.claude/projects/*/*.jsonl</code>, and each session's <code>subagents/</code></td>
               <td data-label="Format">JSONL transcripts</td></tr>
           <tr><td><strong>OpenClaw</strong></td>
               <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code></td>
@@ -187,8 +187,9 @@
         read-only, through a copy if the agent holds a lock.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
-        Not read yet: Claude Code subagent transcripts, in
-        <span class="icode">&lt;session&gt;/subagents/</span>; the events that
+        Not read yet: the large tool outputs Claude Code stores in
+        <span class="icode">&lt;session&gt;/tool-results/</span>, and
+        <span class="icode">~/.claude/history.jsonl</span>; the events that
         database stores compressed; and the cold transcript archives in
         <span class="icode">agents/&lt;agentId&gt;/sessions/cold/</span>,
         which its

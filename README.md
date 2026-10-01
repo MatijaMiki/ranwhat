@@ -71,7 +71,7 @@ your critical path.
 
 | Source | Location | Format |
 |---|---|---|
-| Claude Code | `~/.claude/projects/*/*.jsonl`, or `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
+| Claude Code | `~/.claude/projects/*/*.jsonl` and each session's `subagents/**/agent-*.jsonl`, or the same under `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
 | OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite` | SQLite |
 
 Nine rules: credential access, secret-shaped strings in tool calls, package
@@ -229,8 +229,7 @@ locally and sends nothing.
 
 ## What it does not read yet
 
-- Claude Code subagent transcripts (`<session>/subagents/`) and the large
-  tool outputs Claude Code stores in `<session>/tool-results/`
+- The large tool outputs Claude Code stores in `<session>/tool-results/`
 - `~/.claude/history.jsonl`
 - Events the SQLite source stores compressed (`event_zstd`), and the cold
   transcript archives in `agents/<agentId>/sessions/cold/` under the same

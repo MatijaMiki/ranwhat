@@ -422,7 +422,7 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
       </p>
       <div class="rows" style="margin-top:26px">
         <div class="row"><span class="k">Reads</span>
-          <span class="v">Only the top-level session files, <span class="icode">~/.claude/projects/*/*.jsonl</span>. Not <span class="icode">subagents/</span>, <span class="icode">tool-results/</span>, <span class="icode">file-history/</span>, <span class="icode">paste-cache/</span> or <span class="icode">history.jsonl</span>. The <span class="icode">grep</span> above covers those.</span></div>
+          <span class="v">The session files, <span class="icode">~/.claude/projects/*/*.jsonl</span>, and the subagent transcripts under each session's <span class="icode">subagents/</span>. Not <span class="icode">tool-results/</span>, <span class="icode">file-history/</span>, <span class="icode">paste-cache/</span> or <span class="icode">history.jsonl</span>. The <span class="icode">grep</span> above covers those.</span></div>
         <div class="row"><span class="k">Window</span>
           <span class="v"><span class="icode">--days</span>, default 30. A transcript is read if it was written to inside the window, and the watch half then keeps only the actions that happened inside it. That matches Claude Code's default retention. If you raised <span class="icode">cleanupPeriodDays</span> or keep Desktop sessions, widen it: <span class="icode">ranwhat check --days 365</span>.</span></div>
         <div class="row"><span class="k">Moved config</span>

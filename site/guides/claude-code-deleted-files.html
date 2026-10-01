@@ -84,9 +84,9 @@
         have</a>. Subagents write transcripts of their own, covered below.
       </p>
       <p>
-        ranwhat reads those files and lists the actions worth knowing about,
-        deletions and destructive git among them, newest first. It changes
-        nothing.
+        ranwhat reads those files, subagents' included, and lists the actions
+        worth knowing about, deletions and destructive git among them, newest
+        first. It changes nothing.
       </p>
       <div class="cmd" style="max-width:640px">
         <span class="dollar">$</span>
@@ -116,7 +116,7 @@
         <div class="row"><span class="k">Destructive git</span>
           <span class="v"><span class="icode">push --force</span> or <span class="icode">-f</span> (not <span class="icode">--force-with-lease</span>), <span class="icode">reset --hard</span>, <span class="icode">branch -D</span>, <span class="icode">clean -f</span>, <span class="icode">filter-branch</span> and <span class="icode">remote remove</span>.</span></div>
         <div class="row"><span class="k">Not reported</span>
-          <span class="v">A plain <span class="icode">rm file</span>, <span class="icode">rm -r</span> without <span class="icode">-f</span>, <span class="icode">mv</span>, <span class="icode">git checkout .</span>, <span class="icode">git restore .</span>, and files a Python or Node script deletes. Commands a subagent ran are not read yet either.</span></div>
+          <span class="v">A plain <span class="icode">rm file</span>, <span class="icode">rm -r</span> without <span class="icode">-f</span>, <span class="icode">mv</span>, <span class="icode">git checkout .</span>, <span class="icode">git restore .</span>, and files a Python or Node script deletes.</span></div>
       </div>
       <p style="margin-top:26px">
         For anything in that last row, search the transcripts yourself. Use
