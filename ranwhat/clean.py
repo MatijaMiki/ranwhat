@@ -248,6 +248,51 @@ _ASSIGN = re.compile(
     + _SEPARATOR + r"""\s*"""
     r"""(\\?["']|)((?:[^\s"',;}\\]|\\(?![nrt"\\])){8,})\3""")
 
+# _ASSIGN has no literal start, so a search for it tried a match at every
+# character of a text: 13.9 seconds of a 31.2 second clean pass, and the
+# slow half of watch's literal rule. A match's key, quotes and blanks hold
+# no = or :, so its separator is the first one at or after its start, and
+# it starts no earlier than the run of blanks, quotes and key characters
+# before that separator. _assign_search tries the regex only there: its
+# key part (_KEY_PART, up to and with the separator) is looked for in that
+# run, read backwards from the separator (_KEY_BACK) no further than
+# _KEY_BACK_MOST, and each place it starts is confirmed by _ASSIGN itself.
+# Where separators are closer together than _SEPARATORS_CLOSE, the regex
+# alone is faster: tried at every separator, a megabyte of : took nine
+# times as long.
+_KEY_PART = re.compile(r"""(\\?["']|)""" + _KEY_START
+                       + r"""([A-Za-z_][A-Za-z0-9_]*)\1\s*""" + _SEPARATOR)
+_KEY_BACK = re.compile(r"""\s*(?:["']\\?)?[A-Za-z0-9_]*(?:["']\\?)?""")
+_KEY_BACK_MOST = 256
+_SEPARATORS_CLOSE = 16
+
+
+def _assign_search(text, pos, nxt):
+    """_ASSIGN.search(text, pos), with the regex tried only where a match
+    can start. `nxt` is where the next = and the next : are, [-2, -2] to
+    begin with, for one text searched from positions that only grow."""
+    while True:
+        for i, ch in enumerate("=:"):
+            if nxt[i] != -1 and nxt[i] < pos:
+                nxt[i] = text.find(ch, pos)
+        live = [j for j in nxt if j != -1]
+        if not live:
+            return None
+        j = min(live)
+        if j - pos < _SEPARATORS_CLOSE:
+            return _ASSIGN.search(text, pos)
+        lo = max(pos, j - _KEY_BACK_MOST)
+        run = _KEY_BACK.match(text[lo:j][::-1]).end()
+        start = pos if (run == j - lo and lo > pos) else j - run
+        k = _KEY_PART.search(text, start, j + 1)
+        while k:
+            m = _ASSIGN.match(text, k.start())
+            if m:
+                return m
+            k = _KEY_PART.search(text, k.start() + 1, j + 1)
+        pos = j + 1
+
+
 # A password embedded in a connection string.
 #
 # A scheme is tried once per run of scheme characters, from its first
@@ -1404,8 +1449,9 @@ def _found(text):
     # tokens with none is still read once for each, a run at a time.
     pos = 0 if ("=" in text or ":" in text) else None
     label = _Labels(text, found) if pos is not None else None
+    nxt = [-2, -2]
     while pos is not None:
-        m = _ASSIGN.search(text, pos)
+        m = _assign_search(text, pos, nxt)
         if not m:
             break
         pos = m.end()

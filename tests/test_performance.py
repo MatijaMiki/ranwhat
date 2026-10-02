@@ -646,5 +646,100 @@ class CheckMasksEveryActionCheaply(unittest.TestCase):
                 self.assertLess(run(command), watch_alone + clean_alone + BUDGET)
 
 
+class AssignmentsTriedAtTheirSeparator(unittest.TestCase):
+    """_ASSIGN has no literal start, so a search for it tried a match at
+    every character: 13.9 of a 31.2 second clean pass, and the slow half
+    of watch's literal rule. Every match has its separator at the first =
+    or : after its start, and starts no earlier than the key, quotes and
+    blanks before that, so the regex is now tried only there, and alone
+    where separators are close together. It must find exactly what the
+    regex finds."""
+
+    ATOMS = ["a", "Z", "_", "0", "9", "x", "n", "t", " ", "\t", " ", "\n", "=", ":",
+             "::", ":::", '"', "'", "\\", "\\n", "\\r", '\\"', "\\'", "\\t",
+             "\\\\", ",", ";", "}", "-", ".", "password", "API_KEY", "secret",
+             "token", "DB_PASSWORD", "Ab3dEf9hJk2LmN0pQr", "xY7zW2vU5tS8rQ1p", "://",
+             "@", "user", "http", "(", ")", "$", "{", "}", "12", "\u00a0", "\u3000"]
+
+    @staticmethod
+    def regex_alone(text, pos, _next):
+        return clean._ASSIGN.search(text, pos)
+
+    def same(self, text):
+        positions = sorted({0, len(text)} | {random.Random(len(text)).randint(0, len(text))
+                                              for _ in range(6)})
+        nxt, at = [-2, -2], 0
+        for pos in positions:
+            # A search goes on from where the last left off, as _found's do.
+            pos = max(pos, at)
+            a = clean._ASSIGN.search(text, pos)
+            b = clean._assign_search(text, pos, nxt)
+            self.assertEqual(a and (a.span(), a.groups()),
+                             b and (b.span(), b.groups()), repr(text[:200]))
+            at = pos
+        with mock.patch.object(clean, "_assign_search", self.regex_alone):
+            expected = clean._found(text)
+        self.assertEqual(clean._found(text), expected, repr(text[:200]))
+
+    def test_the_key_part_is_the_regex_s_own(self):
+        """_KEY_PART is _ASSIGN up to and with its separator: changed in one
+        and not the other, the search would miss what the regex finds."""
+        head = clean._KEY_PART.pattern
+        self.assertTrue(head.endswith(clean._SEPARATOR))
+        self.assertTrue(clean._ASSIGN.pattern.startswith(head))
+
+    def test_the_same_matches_as_the_regex(self):
+        rng = random.Random(20261002)
+        for _ in range(3000):
+            text = "".join(rng.choice(self.ATOMS) for _ in range(rng.randint(1, 100)))
+            r = rng.random()
+            if r < 0.08:
+                text = "".join(rng.choice(self.ATOMS[:14])
+                               for _ in range(rng.randint(250, 700))) + text
+            elif r < 0.12:
+                text = (rng.choice(["key", '"key"', '\\"key\\"', "x" * 300])
+                        + " " * rng.randint(0, 300) + rng.choice(["=", ":"]) + text)
+            self.same(text)
+
+    def test_dense_and_sparse_separators(self):
+        rng = random.Random(4)
+
+        def r(n):
+            return "".join(rng.choice("abcdefghijklmnopqrstuvwxyz0123456789")
+                           for _ in range(n))
+        for text in (":" * 20000, "a:" * 10000, "=" * 20000,
+                     json.dumps([{"id": i, "name": r(6), "v": i * 3} for i in range(600)],
+                                separators=(",", ":")),
+                     json.dumps([{"id": i, "token": r(20)} for i in range(300)], indent=2),
+                     "".join("k%d=%s\n" % (i, r(5)) for i in range(2000)),
+                     "".join("https://h%d.example.test:8080/p?q=%d x\n" % (i, i)
+                             for i in range(800)),
+                     (" ".join(r(rng.randint(2, 9)) for _ in range(60))
+                      + ' API_KEY: "%s" note.\n' % r(24)) * 200,
+                     "x" * 5000 + " " * 400 + "secret_token = " + r(30),
+                     "\\n" * 3000 + "API_TOKEN=" + r(30)):
+            self.same(text)
+
+    def test_prose_is_faster(self):
+        rng = random.Random(7)
+        words = ["the", "agent", "read", "a", "file", "and", "wrote", "notes",
+                 "about", "its", "plan", "for", "today"]
+        text = ((" ".join(rng.choice(words) for _ in range(300)) + " note: done.\n") * 500)
+
+        def best(search):
+            times = []
+            for _ in range(3):
+                t = time.perf_counter()
+                pos, nxt = 0, [-2, -2]
+                while True:
+                    m = search(text, pos, nxt)
+                    if not m:
+                        break
+                    pos = m.end()
+                times.append(time.perf_counter() - t)
+            return min(times)
+        self.assertLess(best(clean._assign_search), best(self.regex_alone) / 1.5)
+
+
 if __name__ == "__main__":
     unittest.main()
