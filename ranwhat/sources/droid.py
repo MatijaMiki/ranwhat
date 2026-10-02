@@ -848,9 +848,9 @@ class DroidSource(Source):
 
     def _log_call(self, store):
         """The call a terminal log, background output or tool output log
-        holds the output of, or None. The transcript that named it is read again only
-        when stores() has tied more of its calls to logs since it was last
-        read, so it is read once for all the logs it names."""
+        holds the output of, or None. The transcript that named it is read
+        again only when stores() has tied more of its calls to logs since it
+        was last read, so it is read once for all the logs it names."""
         owner = self._log_owner.get(_key(store.path))
         if owner is None or owner[1] is None:
             return None
