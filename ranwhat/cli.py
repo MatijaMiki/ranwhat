@@ -680,7 +680,7 @@ def _check(args):
 
     places = None if sources or scanned else watch_mod.locations(
         args.sources, root=args.root, state_dir=args.state_dir,
-        paths=args.paths)
+        paths=args.paths, asked=args.source)
     if args.json:
         print(_json_text({
             "days": args.days,
@@ -867,7 +867,7 @@ def _clean_nothing_read(args):
     L += [DIM(term.rule("-")), "  0 transcript(s) scanned", ""]
     places = watch_mod.locations(
         [i for i in args.sources if i != "openclaw"] or ("claude-code",),
-        root=args.root, paths=args.paths)
+        root=args.root, paths=args.paths, asked=args.source)
     return "\n".join(L + watch_mod._nothing_read(args.days, places, width))
 
 
@@ -1356,7 +1356,7 @@ def _main(argv=None):
         # fresh machine, or history kept somewhere else.
         places = None if scanned else watch_mod.locations(
             [i for i in args.sources if i != "openclaw"] or ("claude-code",),
-            root=args.root, paths=args.paths)
+            root=args.root, paths=args.paths, asked=args.source)
         # Every value found is masked in what clean prints, as check masks
         # it: one may sit in another finding's key name, in the path
         # another was read from, or in a transcript's name, and the report,
@@ -1410,7 +1410,8 @@ def _main(argv=None):
             bar.clear()
         n = sum(counts.values())
         places = None if n else watch_mod.locations(
-            sources, root=args.root, state_dir=args.state_dir, paths=args.paths)
+            sources, root=args.root, state_dir=args.state_dir, paths=args.paths,
+            asked=args.source)
         if args.json:
             print(_json_text(records))
             return _said_nothing_read(places, args.days)

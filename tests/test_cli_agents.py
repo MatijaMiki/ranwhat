@@ -539,6 +539,78 @@ class Reports(_Cli):
         self.assertEqual((rc, out.strip()), (2, "[]"))
         self.assertIn("--path codex=PATH", " ".join(err.split()))
 
+    def assertSaysWhereItLooked(self, argv, agents, where):
+        """A run that read nothing names, in its text and on --json's
+        stderr, each agent --source asked for, where it looked, and how
+        to point it elsewhere."""
+        rc, out, err = self.run_cli(*argv)
+        self.assertEqual(rc, 2, err)
+        text = " ".join(out.split())
+        for agent_id, name in agents:
+            self.assertIn(name, text)
+            self.assertIn("--path %s=PATH" % agent_id, text)
+        for path in where:
+            self.assertIn(path, text)
+        json_argv = argv[:1] + ["--json"] + [a for a in argv[1:]
+                                             if a != "--no-interactive"]
+        rc, out, err = self.run_cli(*json_argv)
+        self.assertEqual(rc, 2, err)
+        said = " ".join(err.split())
+        self.assertNotIn("in ,", said)
+        for agent_id, name in agents:
+            self.assertIn("(%s)" % name, said)
+            self.assertIn("--path %s=PATH" % agent_id, said)
+        for path in where:
+            self.assertIn(path, said)
+
+    def test_an_agent_asked_for_by_name_is_named_where_it_is_absent(self):
+        # --source codex on a machine with no ~/.codex: the next step
+        # `ranwhat sources` suggests read nothing, and said nowhere.
+        codex = os.path.join("~", ".codex")
+        for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                self.assertSaysWhereItLooked(argv + ["--source", "codex"],
+                                             [("codex", "Codex")], [codex])
+        # two of them, neither here
+        self.assertSaysWhereItLooked(
+            ["watch", "--source", "codex", "--source", "grok"],
+            [("codex", "Codex"), ("grok", "Grok Build")],
+            [codex, os.path.join("~", ".grok")])
+
+    def test_an_agent_asked_for_where_its_folder_holds_no_history(self):
+        # ~/.copilot holding only what the IDE extension keeps
+        os.makedirs(os.path.join(self.home, ".copilot", "ide"))
+        for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                self.assertSaysWhereItLooked(
+                    argv + ["--source", "copilot-cli"],
+                    [("copilot-cli", "GitHub Copilot CLI")],
+                    [os.path.join("~", ".copilot")])
+
+    def test_an_agent_asked_for_where_its_own_variable_points_nowhere(self):
+        moved = os.path.join(self.home, "moved-codex")
+        for target in ("missing", "file"):
+            with self.subTest(target=target):
+                if target == "file":
+                    af.write(moved, "not a folder\n")
+                with mock.patch.dict(os.environ, {"CODEX_HOME": moved}):
+                    self.assertSaysWhereItLooked(
+                        ["watch", "--source", "codex"], [("codex", "Codex")],
+                        [os.path.join("~", "moved-codex")])
+
+    def test_where_it_looked_fits_every_width(self):
+        for width in WIDTHS:
+            for argv in (["watch", "--source", "gemini", "--source", "droid"],
+                         ["check", "--source", "pi"],
+                         ["clean", "--no-interactive", "--source", "muse-code"]):
+                with self.subTest(width=width, argv=argv), \
+                        mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                    rc, out, err = self.run_cli(*argv)
+                    self.assertEqual(rc, 2, err)
+                    self.assertIn("Looked in:", out)
+                    self.assertFits(out, int(width))
+                    self.assertNotIn("—", out + err)
+
     def test_what_could_not_be_read_is_said(self):
         codex = af.AGENTS[0]
         root = self.agent_root(codex)

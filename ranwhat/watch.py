@@ -2648,7 +2648,8 @@ def scan_sources(sources=SOURCES, root=None, state_dir=None, since_days=None):
     return records, sum(counts.values())
 
 
-def locations(sources=SOURCES, root=None, state_dir=None, paths=None):
+def locations(sources=SOURCES, root=None, state_dir=None, paths=None,
+              asked=()):
     """Where each requested source keeps its history, and how many
     transcripts are there whatever their age:
     [{"source": ..., "path": ..., "found": n}], JSON as it is.
@@ -2658,9 +2659,12 @@ def locations(sources=SOURCES, root=None, state_dir=None, paths=None):
     history kept somewhere else, and must not read as an all-clear.
 
     Claude Code and OpenClaw are always named when asked for, as before.
-    Any other agent is named only where it keeps transcripts, or where
-    `paths` ({source id: path}) points it: an agent that is not on this
-    machine is not listed (`ranwhat sources` lists every one)."""
+    Any other agent is named where it keeps transcripts, where `paths`
+    ({source id: path}) points it, and, at every place it looks, when
+    `asked` (the ids --source named) holds it: --source grok on a machine
+    with no ~/.grok said "Looked in:" and nothing under it. In a run of
+    every agent, one that is not on this machine is not listed (`ranwhat
+    sources` lists every one)."""
     paths = paths or {}
     root = root or paths.get("claude-code")
     state_dir = state_dir or paths.get("openclaw")
@@ -2678,12 +2682,14 @@ def locations(sources=SOURCES, root=None, state_dir=None, paths=None):
             if n:
                 place["projects"] = {"path": inner, "found": n}
         out.append(place)
+    asked = set(asked or ())
     for source in _agents.adapters(sources):
         pointed = paths.get(source.id)
+        named = pointed or source.id in asked
         for loc in source.locations(pointed):
             n = (len(_agents.transcripts(source.stores([loc])))
                  if loc.found else 0)
-            if n or pointed:
+            if n or named:
                 out.append({"source": source.id, "path": loc.path, "found": n})
     if "openclaw" in sources:
         path = state_dir or openclaw_state_dir()
