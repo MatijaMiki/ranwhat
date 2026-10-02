@@ -157,9 +157,11 @@ class Progress:
             return
         # Set first: a write that fails halfway may still have put text up.
         self.dirty = True
+        room = self._columns() - 1
+        if os.environ.get("RANWHAT_WIDTH"):
+            room = min(room, width())         # as wide as the report, no wider
         try:
-            self.stream.write("\r" + text[:max(1, self._columns() - 1)]
-                              + "\033[K")
+            self.stream.write("\r" + text[:max(1, room)] + "\033[K")
             self.stream.flush()
         except Exception:
             self.enabled = False

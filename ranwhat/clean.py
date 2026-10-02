@@ -1804,14 +1804,14 @@ _MASK_MARK = b"ranwhat:redacted:"
 _MASKS = re.compile(rb"ranwhat:redacted:([0-9a-f]{12})")
 
 
-def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
+def known_values(texts, root=CLAUDE_PROJECTS, since_days=None, progress=None):
     """{fingerprint: value} for each value clean finds in the transcripts
     of root (since_days as scan takes it) that shows in any of texts, or
     a stretch of which does. Never written anywhere: for mask_known.
     check and watch ask every transcript, whatever their --days: a value
     read before the window is still a secret where one in it shows it.
     A value a mask took the place of is known by the mask's fingerprint,
-    whole, where texts show it."""
+    whole, where texts show it. `progress` is called as scan calls it."""
     texts = [t for t in texts if t]
     looked, pieces = set(), set()
     for text in texts:
@@ -1837,7 +1837,9 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
     seen = set()                    # (stretch, the characters before it)
     spent = dict.fromkeys(order, 0)
     looks = dict.fromkeys(order, 0)
-    for path in paths:
+    for index, path in enumerate(paths, 1):
+        if progress:
+            progress(index, len(paths), path)
         try:
             with open(path, "rb") as fh:
                 content = fh.read()

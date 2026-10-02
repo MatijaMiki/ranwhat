@@ -1099,8 +1099,8 @@ class NextStepsReadWhatCheckRead(_Base):
 
 class OneProgressWording(_Base):
     """check said "reading transcripts 1/4" and clean said "scanning 1/4
-    -Users-you-Desktop-app", an internal directory slug. One wording, and
-    no slug."""
+    -Users-you-Desktop-app", an internal directory slug. One wording for
+    one pass, and no slug."""
 
     def progress(self, *argv):
         root, st = make_root(ACTION + SECRET)
@@ -1115,9 +1115,10 @@ class OneProgressWording(_Base):
         return err.getvalue()
 
     def test_check_and_clean_say_the_same_thing(self):
-        expected = "\r  reading transcripts 1/1\033[K\r\033[K"
-        self.assertEqual(self.progress("check"), expected)
-        self.assertEqual(self.progress("clean", "--no-interactive"), expected)
+        secrets = "\r  looking for secrets 1/1\033[K"
+        self.assertEqual(self.progress("clean", "--no-interactive"),
+                         secrets + "\r\033[K")
+        self.assertIn(secrets, self.progress("check"))
 
     def test_no_slug_reaches_the_terminal(self):
         for argv in (["check"], ["clean", "--no-interactive"]):
@@ -1128,6 +1129,81 @@ class OneProgressWording(_Base):
         _, out, err = self.run_cli(["clean", "--no-interactive", "--root", root])
         self.assertEqual(err, "")
         self.assertIn("Stripe live secret key", out)
+
+
+class ProgressFromTheFirstTranscript(_Base):
+    """check showed nothing for its first five seconds on a real history,
+    while every transcript was read for its actions, and the line came up
+    only for the search for secrets after. watch never showed one at all.
+    Each pass now has its line from the first transcript, in words of its
+    own, so a count going back to 1 reads as the next pass, not a restart,
+    and it is gone before anything is printed."""
+
+    ACTIONS = "\r  checking actions 1/1\033[K"
+    SECRETS = "\r  looking for secrets 1/1\033[K"
+    SHOWN = "\r  hiding secrets in the report 1/1\033[K"
+
+    def stderr(self, *argv, **env):
+        root, st = make_root(ACTION + SECRET)
+        err = _FakeTTY()
+        with mock.patch.dict(os.environ, dict({"TERM": "xterm"}, **env)), \
+             mock.patch("sys.stdin", io.StringIO()):
+            rc, out, _ = self.run_cli(list(argv) + ["--root", root,
+                                                    "--state-dir", st],
+                                      stderr=err)
+        self.assertEqual(rc, 0)
+        self.assertIn("rm -rf ~/Documents/archive", out)
+        return err.getvalue()
+
+    def test_check_counts_actions_then_secrets(self):
+        err = self.stderr("check")
+        self.assertTrue(err.startswith(self.ACTIONS), repr(err))
+        self.assertLess(err.index(self.ACTIONS), err.index(self.SECRETS))
+        self.assertLess(err.index(self.SECRETS), err.index(self.SHOWN))
+        self.assertTrue(err.endswith("\r\033[K"), repr(err))
+        self.assertNotIn("reading transcripts", err)
+
+    def test_watch_has_a_line_too(self):
+        err = self.stderr("watch")
+        self.assertEqual(err, self.ACTIONS + self.SHOWN + "\r\033[K")
+
+    def test_never_in_json_on_a_pipe_or_a_dumb_terminal(self):
+        for argv, env in ((["watch", "--json"], {}), (["check", "--json"], {}),
+                          (["watch"], {"TERM": "dumb"}), (["check"], {"TERM": "dumb"})):
+            with self.subTest(argv=argv, env=env):
+                self.assertEqual(self.stderr(*argv, **env), "")
+        root, st = make_root(ACTION + SECRET)
+        rc, out, err = self.run_cli(["watch", "--root", root, "--state-dir", st])
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_counted_before_each_transcript_is_read(self):
+        root, _st = make_root(ACTION)
+        second = os.path.join(root, "-tmp-synthetic-proj", "s2.jsonl")
+        with open(second, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(tool_use("ls", 3)) + "\n")
+        events = []
+        real = watch.scan_transcript
+
+        def scanned(path, *a, **k):
+            events.append(("read", os.path.basename(path)))
+            return real(path, *a, **k)
+        with mock.patch.object(watch, "scan_transcript", scanned):
+            watch.scan_sources_counted(
+                sources=("claude-code",), root=root,
+                progress=lambda i, n, path: events.append(
+                    ("count", i, n, os.path.basename(path))))
+        self.assertEqual([e[0] for e in events], ["count", "read", "count", "read"])
+        self.assertEqual([e[1:3] for e in events if e[0] == "count"], [(1, 2), (2, 2)])
+        self.assertEqual([e[-1] for e in events[0::2]], [e[-1] for e in events[1::2]])
+
+    def test_fits_ranwhat_width(self):
+        s = _FakeTTY()
+        with mock.patch.dict(os.environ, {"TERM": "xterm", "RANWHAT_WIDTH": "46"}):
+            bar = term.Progress(s)
+            bar.update("  " + "x" * 120)
+            bar.clear()
+        for piece in s.getvalue().replace("\033[K", "").split("\r"):
+            self.assertLessEqual(len(piece), 46)
 
 
 class _BrokenTTY:
@@ -1376,8 +1452,9 @@ class RealTerminal(unittest.TestCase):
                 "--state-dir", st]
         for cols in (80, 40):
             raw = _pty_run(argv, {"TERM": "xterm", "NO_COLOR": ""}, cols)
-            self.assertIn("reading transcripts 1/1", raw)
-            last = raw.rindex("reading transcripts")
+            self.assertIn("checking actions 1/1", raw)
+            self.assertIn("looking for secrets 1/1", raw)
+            last = raw.rindex("hiding secrets in the report")
             self.assertIn("\r\033[K", raw[last:])
             self.assertNotIn(" " * 46, raw)
             rows = _screen(raw.replace("\r\n", "\n"), cols)
@@ -1385,6 +1462,20 @@ class RealTerminal(unittest.TestCase):
             self.assertTrue(rows[1].startswith("  ranwhat watch"), rows[:3])
             self.assertEqual(sum(r == FOOTER for r in rows), 1)
             self.assertIn("Stripe live secret key", raw)
+
+    def test_watch_shows_then_leaves_no_residue(self):
+        root, st = make_root(ACTION + SECRET)
+        argv = [sys.executable, "-m", "ranwhat", "watch", "--root", root,
+                "--state-dir", st]
+        for cols in (80, 40):
+            raw = _pty_run(argv, {"TERM": "xterm", "NO_COLOR": ""}, cols)
+            self.assertIn("checking actions 1/1", raw)
+            last = raw.rindex("hiding secrets in the report")
+            self.assertIn("\r\033[K", raw[last:])
+            rows = _screen(raw.replace("\r\n", "\n"), cols)
+            self.assertEqual(rows[0], "", rows[:3])
+            self.assertTrue(rows[1].startswith("  ranwhat watch"), rows[:3])
+            self.assertIn("rm -rf ~/Documents/archive", raw)
 
     def test_narrow_stderr_with_stdout_redirected(self):
         # shutil.get_terminal_size() measures stdout, which here is a file,
@@ -1418,7 +1509,8 @@ class RealTerminal(unittest.TestCase):
             out.seek(0)
             report = out.read().decode()
         err = raw.decode()
-        self.assertIn("\r  reading transcrip\033[K", err)
+        self.assertIn("\r  checking actions \033[K", err)
+        self.assertIn("\r  looking for secre\033[K", err)
         for piece in err.replace("\033[K", "").split("\r"):
             self.assertLessEqual(len(piece), 19, repr(err))
         self.assertEqual([r for r in _screen(err, 20) if r], [])

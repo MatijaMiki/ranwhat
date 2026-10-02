@@ -561,7 +561,7 @@ def _mask_known(records, known):
                 hit["evidence"] = known.mask(hit.get("evidence") or "")
 
 
-def _found_by_clean(args, records):
+def _found_by_clean(args, records, progress=None):
     """The values clean finds in the transcripts that the actions show,
     for masking them: {fingerprint: value}, never written anywhere.
     watch --json printed whole the password check hid. Nothing is read
@@ -577,7 +577,7 @@ def _found_by_clean(args, records):
         return {}
     return clean_mod.known_values(
         [hit.get("evidence") for record in records for hit in record.get("hits", ())],
-        root=args.root, since_days=None)
+        root=args.root, since_days=None, progress=progress)
 
 
 def _check(args):
@@ -589,27 +589,30 @@ def _check(args):
     should not require. Nothing is modified: masking stays an explicit choice
     under `clean`.
     """
-    records, counts = watch_mod.scan_sources_counted(
-        sources=watch_mod.SOURCES, root=args.root,
-        state_dir=args.state_dir, since_days=args.days)
+    # Up from the first transcript, and down before anything is printed:
+    # reading every transcript for its actions took five seconds on a real
+    # history, and showed nothing.
+    bar, step = _progress_line(args)
+    known = {}
+    try:
+        records, counts = watch_mod.scan_sources_counted(
+            sources=watch_mod.SOURCES, root=args.root,
+            state_dir=args.state_dir, since_days=args.days,
+            progress=step(_ACTIONS))
+        findings, scanned, _ = clean_mod.scan(
+            root=args.root, since_days=args.days, apply=False,
+            progress=step(_SECRETS), known=known)
+        _mask_known(records, known)
+        # What the window's clean pass found is masked; what the actions
+        # still show may be a value read before the window.
+        _mask_known(records, _found_by_clean(args, records, step(_SHOWN)))
+    finally:
+        bar.clear()
     sources = sum(counts.values())
     # clean searches Claude Code transcripts only. OpenClaw's databases,
     # read above for actions, are not searched for secrets, and the report
     # must not read as if they were.
     unsearched = counts.get("openclaw", 0)
-
-    bar, _progress = _progress_line(args)
-    known = {}
-    try:
-        findings, scanned, _ = clean_mod.scan(
-            root=args.root, since_days=args.days, apply=False,
-            progress=_progress, known=known)
-    finally:
-        bar.clear()
-    _mask_known(records, known)
-    # What the window's clean pass found is masked; what the actions still
-    # show may be a value read before the window.
-    _mask_known(records, _found_by_clean(args, records))
 
     places = None if sources else watch_mod.locations(
         root=args.root, state_dir=args.state_dir)
@@ -777,16 +780,29 @@ def _clean_nothing_read(args):
     return "\n".join(L + watch_mod._nothing_read(args.days, places, width))
 
 
+# What each pass over the transcripts says while it runs, the same words
+# for the same pass in every command: watch's read for actions, clean's
+# for secrets, and the look for the values the actions show. Each its own,
+# so a count going back to 1 reads as the next pass, not a restart.
+_ACTIONS = "checking actions"
+_SECRETS = "looking for secrets"
+_SHOWN = "hiding secrets in the report"
+
+
 def _progress_line(args):
-    """One status line for check and clean, in the same words. It never names
-    the transcript: its directory is an internal slug of a project path, no
-    use to a reader and longer than most terminals."""
+    """One status line on stderr, for check, watch and clean: (the line,
+    a function that gives each pass its progress callback, in its words).
+    Never with --json. It never names the transcript: its directory is an
+    internal slug of a project path, no use to a reader and longer than
+    most terminals."""
     bar = term.Progress(sys.stderr)
 
-    def progress(i, total, path):
-        if not args.json:
-            bar.update("  reading transcripts %d/%d" % (i, total))
-    return bar, progress
+    def step(words):
+        def progress(i, total, path):
+            if not args.json:
+                bar.update("  %s %d/%d" % (words, i, total))
+        return progress
+    return bar, step
 
 
 def _takes_no_path(command, path):
@@ -993,12 +1009,12 @@ def _main(argv=None):
         return _check(args)
 
     if args.command == "clean":
-        bar, _progress = _progress_line(args)
+        bar, step = _progress_line(args)
         known = {}            # for the review: never written anywhere
         try:
             findings, scanned, changed = clean_mod.scan(
                 root=args.root, since_days=args.days, apply=args.apply,
-                progress=_progress, known=known)
+                progress=step(_SECRETS), known=known)
         finally:
             bar.clear()
         # Zero read is not "No secrets found": it is a wrong --root, a
@@ -1024,13 +1040,17 @@ def _main(argv=None):
 
     if args.command == "watch":
         sources = args.source or watch_mod.SOURCES
-        records, counts = watch_mod.scan_sources_counted(
-            sources=sources, root=args.root, state_dir=args.state_dir,
-            since_days=args.days)
+        bar, step = _progress_line(args)
+        try:
+            records, counts = watch_mod.scan_sources_counted(
+                sources=sources, root=args.root, state_dir=args.state_dir,
+                since_days=args.days, progress=step(_ACTIONS))
+            _mask_known(records, _found_by_clean(args, records, step(_SHOWN)))
+        finally:
+            bar.clear()
         n = sum(counts.values())
         places = None if n else watch_mod.locations(
             sources, root=args.root, state_dir=args.state_dir)
-        _mask_known(records, _found_by_clean(args, records))
         if args.json:
             print(_json_text(records))
             return _said_nothing_read(places, args.days)

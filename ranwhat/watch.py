@@ -2132,7 +2132,7 @@ def _in_window(record, cutoff):
     return when is None or when >= cutoff
 
 
-def scan_all(root=None, since_days=None, limit=None):
+def scan_all(root=None, since_days=None, limit=None, progress=None):
     """Scan every transcript, reporting each distinct action once.
 
     The same tool call appears in more than one transcript -- resumed
@@ -2142,13 +2142,21 @@ def scan_all(root=None, since_days=None, limit=None):
     With since_days, an action is reported only if it happened inside the
     window. Windowing by file alone listed a 2025 deletion under "over 1
     days" because its transcript had been written to today.
+
+    `progress` is called with (index, total, path) before each transcript
+    is read, as clean.scan calls it: reading a large history takes
+    seconds, and a run that shows nothing for that long looks hung.
     """
     records, scanned, seen = [], 0, set()
     cutoff = _cutoff(since_days)
-    for path in discover(root, since_days):
+    paths = discover(root, since_days)
+    total = min(len(paths), limit) if limit else len(paths)
+    for path in paths:
         if limit and scanned >= limit:
             break
         scanned += 1
+        if progress:
+            progress(scanned, total, path)
         for record in scan_transcript(path):
             if not _in_window(record, cutoff):
                 continue
@@ -2697,15 +2705,16 @@ _SOURCE_NAMES = {"claude-code": "Claude Code", "openclaw": "OpenClaw"}
 
 
 def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
-                         since_days=None):
+                         since_days=None, progress=None):
     """Scan every requested local agent source into one record stream.
 
     Returns (records, {source: how many it read}): Claude Code transcripts,
     OpenClaw databases. Zero read is not an all-clear: locations() says
-    whether there was anything to read at all."""
+    whether there was anything to read at all. `progress` is scan_all's."""
     records, counts = [], {}
     if "claude-code" in sources:
-        recs, counts["claude-code"] = scan_all(root=root, since_days=since_days)
+        recs, counts["claude-code"] = scan_all(root=root, since_days=since_days,
+                                               progress=progress)
         records += recs
     if "openclaw" in sources:
         recs, counts["openclaw"] = scan_openclaw(state_dir=state_dir,
