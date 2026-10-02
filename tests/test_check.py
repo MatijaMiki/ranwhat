@@ -113,6 +113,56 @@ def steps_in(out, cmd):
     return steps
 
 
+# Outside double quotes, a character cmd or PowerShell hands to the
+# program as it is: anything else may be acted on by one of them.
+_WINDOWS_PLAIN = re.compile(r"[\w.:\\/~+=-]")
+# Inside them, what each still expands: % in cmd, $ and ` in PowerShell,
+# which also ends a string at a typographic quote.
+_WINDOWS_EXPANDED = set("%$`\u201c\u201d\u201e\u2018\u2019\u201a\u201b")
+
+
+def windows_words(line):
+    """The words a program is given for `line` pasted into cmd or into
+    PowerShell. Both hand on a word of plain characters, or one in double
+    quotes, as it is, and a backslash is itself, as the C runtime that
+    splits the program's command line reads it. A line is printed for
+    either shell, so what either could read otherwise fails the test: a
+    character one of them acts on, and backslashes before a quote, which
+    the runtime reads as escapes after cmd and as themselves after
+    PowerShell."""
+    words, word, quoted, started = [], [], False, False
+    for i, c in enumerate(line):
+        if c == "\\" and line[i:].lstrip("\\")[:1] == '"':
+            raise AssertionError("cmd and PowerShell read backslashes before "
+                                 "a quote differently: %r" % line)
+        if c == '"':
+            quoted, started = not quoted, True
+        elif quoted:
+            if c in _WINDOWS_EXPANDED:
+                raise AssertionError("%r is expanded inside quotes: %r" % (c, line))
+            word.append(c)
+        elif c in " \t":
+            if word or started:
+                words.append("".join(word))
+            word, started = [], False
+        elif _WINDOWS_PLAIN.match(c):
+            word.append(c)
+        else:
+            raise AssertionError("%r is not quoted for cmd and PowerShell: %r"
+                                 % (c, line))
+    if quoted:
+        raise AssertionError("a quote is left open: %r" % line)
+    if word or started:
+        words.append("".join(word))
+    return words
+
+
+def shell_words(line, windows=os.name == "nt"):
+    """A suggested command, read as the shell it is printed for reads it:
+    POSIX shlex dropped every backslash of C:\\Users\\..."""
+    return windows_words(line) if windows else shlex.split(line)
+
+
 ACTION = [tool_use("rm -rf ~/Documents/archive", 1)]
 SECRET = [tool_result(STRIPE + "\n", 2)]
 
@@ -365,7 +415,7 @@ class WatchShowsNoSecretCleanFound(_Base):
                 self.assertTrue(steps)
                 for step in steps:
                     with mock.patch("sys.stdin", io.StringIO()):
-                        _rc, shown, err = self.run_cli(shlex.split(step)[1:])
+                        _rc, shown, err = self.run_cli(shell_words(step)[1:])
                     self.assertNotIn(self.PASSWORD, shown + err, step)
                     self.assertNotIn("watch", step.split()[1:2], step)
 
@@ -970,7 +1020,7 @@ class NextSteps(_Base):
             with mock.patch("sys.stdin", io.StringIO()), \
                  mock.patch.object(watch, "CLAUDE_PROJECTS", root), \
                  mock.patch.dict(os.environ, {"OPENCLAW_STATE_DIR": st}):
-                rc, _, err = self.run_cli(shlex.split(step)[1:])
+                rc, _, err = self.run_cli(shell_words(step)[1:])
             self.assertEqual(rc, 0, (step, err))
 
     def test_demo_is_offered_even_with_nothing_found(self):
@@ -1014,7 +1064,7 @@ class NextStepsReadWhatCheckRead(_Base):
              tool_result(STRIPE + "\n", 2, self.OLD)], age_days=100)
         steps, doc, _ = self.run_check(root, st, "--days", "365")
         self.assertEqual((len(doc["actions"]), len(doc["secrets"])), (1, 1))
-        argv = {s.split()[1]: shlex.split(s)[1:] for s in steps}
+        argv = {s.split()[1]: shell_words(s)[1:] for s in steps}
         self.assertEqual(sorted(argv), ["check", "clean", "demo"])
         # Refuse to run a step that would read the default directory.
         for name in ("clean", "check"):
@@ -1039,12 +1089,14 @@ class NextStepsReadWhatCheckRead(_Base):
 
     def test_a_carried_path_is_quoted_for_the_shell(self):
         root, st = make_root(ACTION + SECRET)
-        odd = root + " it's $HOME"
+        # What no quoting shared by cmd and PowerShell can hold, $ and %,
+        # is left out on Windows (cli._quote).
+        odd = root + (" it's (R&D) a,b;c" if os.name == "nt" else " it's $HOME")
         os.rename(root, odd)
         steps, doc, _ = self.run_check(odd, st)
         self.assertEqual(len(doc["secrets"]), 1)
         for step in steps[:2]:
-            words = shlex.split(step)
+            words = shell_words(step)
             self.assertEqual(os.path.expanduser(words[words.index("--root") + 1]),
                              odd)
 
@@ -1064,7 +1116,7 @@ class NextStepsReadWhatCheckRead(_Base):
             return
         for step in steps[:2]:
             self.assertIn(" --root ~/", step)
-            words = shlex.split(step)
+            words = shell_words(step)
             word = words[words.index("--root") + 1]
             self.assertTrue(word.startswith("~/"), word)
             self.assertEqual(os.path.join(home, word[2:]), odd)
@@ -1095,6 +1147,37 @@ class NextStepsReadWhatCheckRead(_Base):
                     self.assertEqual(len(line.strip().rstrip(" \\").split()),
                                      1, (width, line))
             self.assertEqual(len(steps), 3)
+
+
+class WindowsPathsPasteIntoCmdAndPowerShell(unittest.TestCase):
+    """On Windows a step's path was quoted by subprocess.list2cmdline,
+    which quotes only for a blank: C:\\R&D ran D as a second command in
+    cmd, and O'Brien opened a string in PowerShell. Read as either shell
+    reads it, each of these is the path, whatever the platform here."""
+
+    PATHS = [r"C:\Users\RUNNER~1\AppData\Local\Temp\check-t-b0po2grd",
+             r"C:\Users\Jane Doe\.claude\projects",
+             r"C:\Users\O'Brien\.claude\projects",
+             r"D:\R&D\agents",
+             r"D:\R&D\agents (old)\run;1,2",
+             r"C:\Users\a@b\#x\{y}\[z]\^w=v!",
+             r"\\server\share\my projects",
+             "C:\\Users\\\u017deljko\\\u00fcn\u00efcode"]
+
+    def test_each_is_one_word_both_shells_hand_on(self):
+        for path in self.PATHS:
+            with self.subTest(path=path):
+                word = cli._quote(path, windows=True)
+                self.assertEqual(windows_words("ranwhat clean --root " + word),
+                                 ["ranwhat", "clean", "--root", path])
+
+    def test_a_path_of_plain_characters_is_left_bare(self):
+        for path in (self.PATHS[0], "C:\\", "D:\\x\\\u017deljko"):
+            self.assertEqual(cli._quote(path, windows=True), path)
+
+    def test_posix_is_unchanged(self):
+        self.assertEqual(cli._quote("/tmp/it's here", windows=False),
+                         shlex.quote("/tmp/it's here"))
 
 
 class OneProgressWording(_Base):

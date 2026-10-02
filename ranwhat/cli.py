@@ -309,12 +309,34 @@ def _user_path(env, prefix, argv0):
     return entries
 
 
-def _quote(arg):
-    """One argument, quoted for the shell the user is in."""
-    if os.name == "nt":
+# Neither cmd nor PowerShell gives any of these a meaning of its own,
+# wherever it is in a word.
+_PLAIN_ON_WINDOWS = re.compile(r"[\w.:\\/~+-]+")
+
+
+def _quote(arg, windows=None):
+    """One argument, quoted for the shell the user is in.
+
+    On Windows that is cmd or PowerShell, and one spelling serves both. A
+    word of letters, digits and . : \\ / ~ + - _ means nothing to either
+    and is left as it is. Anything else goes in double quotes, inside which
+    both hand every character on as it is, but for what each still expands
+    there: % in cmd, $ and ` in PowerShell. No quoting the two share holds
+    those, so a path with them is quoted the same way, for cmd.
+    subprocess.list2cmdline quoted only for a blank: C:\\R&D ran D as a
+    second command in cmd, and O'Brien opened a string in PowerShell."""
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        return shlex.quote(arg)
+    if _PLAIN_ON_WINDOWS.fullmatch(arg):
+        return arg
+    if '"' in arg:                    # in no Windows path
         import subprocess
         return subprocess.list2cmdline([arg])
-    return shlex.quote(arg)
+    # The C runtime splitting the program's command line reads a backslash
+    # before the closing quote as escaping it, and two as one.
+    return '"%s"' % (arg + "\\" * (len(arg) - len(arg.rstrip("\\"))))
 
 
 def _same_file(a, b):
