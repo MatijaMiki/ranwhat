@@ -26,7 +26,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -36,7 +35,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, sources, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite  # noqa: E402
 from ranwhat.sources import droid as droid_module  # noqa: E402
@@ -299,7 +300,8 @@ def findings(source, stores):
                 named = _named_by_input(text.call)
                 origin = named[-1] if named else None
 
-            def collect(value, label, origin=origin, store=store, text=text):
+            def collect(value, label, _in=None, _copies=None, origin=origin,
+                        store=store, text=text):
                 entry = found.setdefault(value, {"origins": set(), "count": 0,
                                                  "stores": set(), "where": []})
                 entry["count"] += 1
@@ -1570,75 +1572,67 @@ class Window(DroidCase):
 
 
 # --------------------------------------------------------------------------
-# A large session, timed in its own process
+# A large session: how reading it grows, on its own interpreter
+# (tests/growth.py)
 # --------------------------------------------------------------------------
 
-TIMED = r"""
-import json, sys, time
-sys.path.insert(0, sys.argv[1])
+READ = r"""
 from ranwhat.sources.droid import DroidSource
-d = DroidSource()
-t = time.perf_counter()
-stores = d.stores(d.locations(override=sys.argv[2]))
-calls = sum(1 for s in stores for _ in d.tool_calls(s))
-texts = sum(1 for s in stores for _ in d.secret_texts(s))
-print(json.dumps({"seconds": time.perf_counter() - t, "stores": len(stores),
-                  "calls": calls, "texts": texts, "counts": d.counts}))
+def call(made):
+    d = DroidSource()
+    stores = d.stores(d.locations(override=made["home"]))
+    calls = sum(1 for s in stores for _ in d.tool_calls(s))
+    texts = sum(1 for s in stores for _ in d.secret_texts(s))
+    return {"stores": len(stores), "calls": calls, "texts": texts,
+            "counts": d.counts}
 """
 
-# Generous: about 0.5 s here for 30 MB. A quadratic slip costs minutes.
-BUDGET = 10.0
-
-# Every log a session names, read for clean: the seconds per log for each
-# home given, the best of two runs, each with a fresh adapter.
-TIMED_LOGS = r"""
-import json, sys, time
-sys.path.insert(0, sys.argv[1])
+# Every log a session names, read for clean.
+READ_LOGS = r"""
 from ranwhat.sources.droid import DroidSource
-out = []
-for home in sys.argv[2:]:
-    best = None
-    for _ in range(2):
-        d = DroidSource()
-        t = time.perf_counter()
-        logs = [s for s in d.stores(d.locations(override=home)) if s.role == "side"]
-        tied = sum(1 for s in logs for x in d.secret_texts(s) if x.call is not None)
-        took = time.perf_counter() - t
-        best = took if best is None else min(best, took)
-    out.append({"logs": len(logs), "tied": tied, "per_log": best / len(logs),
-                "seconds": best})
-print(json.dumps(out))
+def call(home):
+    d = DroidSource()
+    logs = [s for s in d.stores(d.locations(override=home)) if s.role == "side"]
+    tied = sum(1 for s in logs for x in d.secret_texts(s) if x.call is not None)
+    return [len(logs), tied]
 """
 
 
 class Performance(unittest.TestCase):
 
-    def test_a_30mb_session_reads_well_within_budget(self):
+    def _env(self):
+        home = _tempdir(self, "droid-perf-home-")
+        env = dict(os.environ, HOME=home, USERPROFILE=home)
+        env.pop(ENV, None)
+        return env
+
+    def _session(self, n):
+        """A home whose one session is n(30 MB) long, and how many calls
+        it holds."""
         home = _tempdir(self, "droid-perf-")
         folder = os.path.join(home, ".factory", "sessions", "-Users-me-proj")
         os.makedirs(folder)
         path = os.path.join(folder, SID + ".jsonl")
         out = ("lorem ipsum dolor sit amet " * 24 + "\n") * 2 + EXIT_0
-        n = 0
+        i = 0
         with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write(_dump(header()) + "\n")
-            while fh.tell() < 30 * 1024 * 1024:
-                for line in call_lines(n, "toolu_%08d" % n, "Execute",
-                                       {"command": "grep -rn foo src/%d" % n,
+            while fh.tell() < n(30 * 1024 * 1024):
+                for line in call_lines(i, "toolu_%08d" % i, "Execute",
+                                       {"command": "grep -rn foo src/%d" % i,
                                         "summary": "search"}, output=out):
                     fh.write(_dump(line) + "\n")
-                n += 2
-        env = dict(os.environ, HOME=home, USERPROFILE=home)
-        env.pop(ENV, None)
-        proc = subprocess.run([sys.executable, "-c", TIMED, REPO, home], env=env,
-                              capture_output=True, text=True, encoding="utf-8",
-                              timeout=20)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        report = json.loads(proc.stdout)
+                i += 2
+        return {"home": home, "calls": i // 2}
+
+    def test_a_30mb_session_reads_well_within_budget(self):
+        measured, made = growth.measure_apart(self._session, READ,
+                                              env=self._env())
+        growth.assert_linear(self, measured, "a 30 MB session")
+        report = measured.result
         self.assertEqual(report["stores"], 1)
-        self.assertEqual(report["calls"], n // 2)
+        self.assertEqual(report["calls"], made["calls"])
         self.assertEqual(report["counts"]["unparsed"], 0)
-        self.assertLess(report["seconds"], BUDGET, report)
 
     def _many_logs(self, count):
         """A home whose one session ran `count` long or background commands,
@@ -1673,20 +1667,11 @@ class Performance(unittest.TestCase):
         # Each Execute whose output passes 16 KiB leaves a terminal log, and
         # nothing clears them but the OS, so a long-lived machine collects
         # thousands. Finding each log's call once used to walk every log.
-        small, large = 2000, 8000
-        homes = [self._many_logs(small), self._many_logs(large)]
-        env = dict(os.environ, HOME=homes[0], USERPROFILE=homes[0])
-        env.pop(ENV, None)
-        proc = subprocess.run([sys.executable, "-c", TIMED_LOGS, REPO] + homes,
-                              env=env, capture_output=True, text=True,
-                              encoding="utf-8", timeout=20)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        report = json.loads(proc.stdout)
-        self.assertEqual([(r["logs"], r["tied"]) for r in report],
-                         [(small, small), (large, large)])
-        # four times the logs: linear stays near 1, quadratic near 3 here
-        self.assertLess(report[1]["per_log"] / report[0]["per_log"], 2.0, report)
-        self.assertLess(report[1]["seconds"], BUDGET, report)
+        logs = 8000
+        measured, _home = growth.measure_apart(
+            lambda n: self._many_logs(n(logs)), READ_LOGS, env=self._env())
+        growth.assert_linear(self, measured, "%d logs" % logs)
+        self.assertEqual(measured.result, [logs, logs])
 
 
 if __name__ == "__main__":

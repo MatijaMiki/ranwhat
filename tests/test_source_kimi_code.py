@@ -55,7 +55,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -65,7 +64,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _stamps  # noqa: E402
 from ranwhat.sources.base import MaskResult, Source  # noqa: E402
@@ -464,7 +465,7 @@ class KimiCodeCase(unittest.TestCase):
                     named = clean._origins(json.dumps(rest, ensure_ascii=False))
                     origin = named[-1] if named else None
 
-                def collect(value, label, origin=origin):
+                def collect(value, label, _in=None, _copies=None, origin=origin):
                     entry = found.setdefault(value, set())
                     if origin:
                         entry.add(origin)
@@ -1897,50 +1898,54 @@ class Window(KimiCodeCase):
 
 
 # --------------------------------------------------------------------------
-# Timing: a large transcript, in a subprocess
+# Timing: how reading a large transcript grows, on its own interpreter
+# (tests/growth.py)
 # --------------------------------------------------------------------------
 
-_TIMED = r"""
-import os, sys, time
-sys.path.insert(0, sys.argv[1])
+_CALL = r"""
 from ranwhat.sources.kimi_code import KimiCodeSource
-src = KimiCodeSource()
-start = time.time()
-stores = src.stores(src.locations())
-calls = sum(1 for s in stores for c in src.tool_calls(s))
-texts = sum(1 for s in stores for t in src.secret_texts(s))
-print(len(stores), calls, texts, round(time.time() - start, 2))
+def call(root):
+    src = KimiCodeSource()
+    stores = src.stores(src.locations(override=root))
+    calls = sum(1 for s in stores for c in src.tool_calls(s))
+    texts = sum(1 for s in stores for t in src.secret_texts(s))
+    return [len(stores), calls, texts]
 """
 
 
 class Timing(KimiCodeCase):
 
-    def test_a_large_transcript_is_read_in_time(self):
-        pairs = 60000
+    PAIRS = 60000
+
+    def transcript(self, n):
+        """A Kimi Code home whose one transcript holds n(PAIRS) calls, each
+        result naming an output_path, so the spill pass parses each one
+        too."""
+        root = os.path.join(tempfile.mkdtemp(dir=self.home), ".kimi-code")
         filler = "x" * 300
-        path = os.path.join(self._session_dir(), "agents", "main", "wire.jsonl")
+        path = os.path.join(self._session_dir(root=root), "agents", "main",
+                            "wire.jsonl")
         os.makedirs(os.path.dirname(path))
         with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write(_j(_meta()) + "\n")
-            for i in range(pairs):
+            for i in range(n(self.PAIRS)):
                 cid = "call_%d" % i
                 fh.write(_j(_call(cid, "Bash", {"command": "cat f%d.txt" % i},
                                   T0 + i)) + "\n")
                 fh.write(_j(_result(cid, filler + " output_path: none\n",
                                     T0 + i)) + "\n")
+        return root
+
+    def test_a_large_transcript_is_read_in_time(self):
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
+        env.pop("KIMI_CODE_HOME", None)
+        measured, root = growth.measure_apart(self.transcript, _CALL, env=env)
+        path = os.path.join(self._session_dir(root=root), "agents", "main",
+                            "wire.jsonl")
         self.assertGreater(os.path.getsize(path), 30 * 1024 * 1024)
-        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home,
-                   KIMI_CODE_HOME=self.root)
-        out = subprocess.run([sys.executable, "-c", _TIMED, REPO], env=env,
-                             capture_output=True, text=True, encoding="utf-8",
-                             timeout=20)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        stores, calls, texts, seconds = out.stdout.split()
-        self.assertEqual((int(stores), int(calls), int(texts)),
-                         (1, pairs, 2 * pairs + 1))
-        # about 2.5 s on a laptop: every line names an output_path, so the
-        # spill pass parses each one too
-        self.assertLess(float(seconds), 15)
+        growth.assert_linear(self, measured, "a 30 MB transcript")
+        pairs = self.PAIRS
+        self.assertEqual(measured.result, [1, pairs, 2 * pairs + 1])
 
 
 if __name__ == "__main__":

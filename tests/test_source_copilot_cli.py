@@ -33,7 +33,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite  # noqa: E402
 from ranwhat.sources import copilot_cli  # noqa: E402
@@ -92,7 +94,7 @@ def findings(texts):
     out = {}
     for text in texts:
         found = []
-        clean._walk(text.node, lambda value, label: found.append(value))
+        clean._walk(text.node, lambda value, label, *_: found.append(value))
         named = origins(text)
         for value in found:
             out.setdefault(value, set()).update(named[-1:])
@@ -624,12 +626,13 @@ class SideFiles(CopilotCase):
         # Every call that reads a result's saved paths, on a line of about
         # 2 MB that names "Saved to:" and then repeats the file-name marker
         # without ending in .txt.
-        root = os.path.join(self.tmp, "marker")
-        content = "Saved to: /" + "-copilot-tool-output-" * 100000 + "x"
-        self.write(Log().start().call("call_1", "bash", {"command": "ls"},
-                                      content), root=root)
-        stores, calls, texts = _timed(self, root)
-        self.assertEqual((stores, calls, texts), (1, 1, 4))
+        def build(n):
+            root = tempfile.mkdtemp(prefix="marker-", dir=self.tmp)
+            content = "Saved to: /" + "-copilot-tool-output-" * n(100000) + "x"
+            self.write(Log().start().call("call_1", "bash", {"command": "ls"},
+                                          content), root=root)
+            return root
+        self.assertEqual(_measured(self, build, "a 2 MB line")[0], (1, 1, 4))
 
     @unittest.skipIf(WINDOWS, "symlinks need privileges on Windows")
     def test_a_symlink_is_not_followed(self):
@@ -902,12 +905,13 @@ class ToolCalls(CopilotCase):
         self.assertEqual(copilot_cli._output(result(50)),
                          "\n".join("%07d" % i
                                    for i in [1, 0] + list(range(2, 50))))
-        data = result(100000)
-        root = os.path.join(self.tmp, "blocks")
-        log = Log().start().run(T0, "c1", "bash", {"command": "ls"})
-        log.add("tool.execution_complete", data, T0)
-        self.write(log, root=root)
-        self.assertEqual(_timed(self, root), (1, 1, 3))
+        def build(n):
+            root = tempfile.mkdtemp(prefix="blocks-", dir=self.tmp)
+            log = Log().start().run(T0, "c1", "bash", {"command": "ls"})
+            log.add("tool.execution_complete", result(n(100000)), T0)
+            self.write(log, root=root)
+            return root
+        self.assertEqual(_measured(self, build, "100000 blocks")[0], (1, 1, 3))
 
     def test_powershell_on_windows(self):
         log = Log().start(cwd="C:\\Users\\dev\\app")
@@ -1171,47 +1175,42 @@ class Window(CopilotCase):
 # A large session log
 # --------------------------------------------------------------------------
 
-_TIMED = r"""
-import os, sys, time
-sys.path.insert(0, sys.argv[1])
+_CALL = r"""
 from ranwhat.sources.copilot_cli import CopilotCliSource
-src = CopilotCliSource()
-t0 = time.time()
-stores = src.stores(src.locations(override=sys.argv[2]))
-calls = sum(1 for s in stores for c in src.tool_calls(s))
-texts = sum(1 for s in stores for t in src.secret_texts(s))
-print(len(stores), calls, texts, round(time.time() - t0, 2))
+def call(root):
+    src = CopilotCliSource()
+    stores = src.stores(src.locations(override=root))
+    calls = sum(1 for s in stores for c in src.tool_calls(s))
+    texts = sum(1 for s in stores for t in src.secret_texts(s))
+    return [len(stores), calls, texts]
 """
 
 
-def _timed(case, root):
-    """(stores, calls, texts) from _TIMED run on `root` in a subprocess
-    that must finish within 20 seconds."""
+def _measured(case, build, what):
+    """((stores, calls, texts), root) for the root build(n) makes at full
+    size, failing `case` where reading it grows as a quadratic cost does
+    (tests/growth.py)."""
     env = dict(os.environ, HOME=case.home, USERPROFILE=case.home)
     env.pop("COPILOT_HOME", None)
-    try:
-        done = subprocess.run([sys.executable, "-c", _TIMED, REPO, root],
-                              capture_output=True, text=True, encoding="utf-8",
-                              env=env, timeout=20)
-    except subprocess.TimeoutExpired:
-        case.fail("reading %s took more than 20 seconds" % root)
-    case.assertEqual(done.returncode, 0, done.stderr)
-    stores, calls, texts, _seconds = done.stdout.split()
-    return int(stores), int(calls), int(texts)
+    measured, root = growth.measure_apart(build, _CALL, env=env)
+    growth.assert_linear(case, measured, what)
+    return tuple(measured.result), root
 
 
 class LargeFile(CopilotCase):
 
-    def test_a_large_log_is_read_in_time(self):
-        root = os.path.join(self.tmp, "big")
+    CALLS = 12000
+
+    def log(self, n):
+        """A root whose one session ran n(CALLS) commands."""
+        root = tempfile.mkdtemp(prefix="big-", dir=self.tmp)
         folder = os.path.join(root, "session-state", SID)
         os.makedirs(folder)
-        n = 12000
         out = ("x" * 700 + "\n") * 2 + "API_KEY=" + SECRET
         with open(os.path.join(folder, "events.jsonl"), "wb") as fh:
             log = Log().start()
             fh.write(log.data())
-            for i in range(n):
+            for i in range(n(self.CALLS)):
                 args = {"command": "cat file%d.txt" % i, "description": "Read"}
                 cid = "call_%d" % i
                 ts = "2026-10-01T09:00:07.000Z"
@@ -1220,16 +1219,15 @@ class LargeFile(CopilotCase):
                 event.run(ts, cid, "bash", args)
                 event.done(ts, cid, out)
                 fh.write(event.data())
-        size = os.path.getsize(os.path.join(folder, "events.jsonl"))
+        return root
+
+    def test_a_large_log_is_read_in_time(self):
+        counts, root = _measured(self, self.log, "a 20 MB log")
+        size = os.path.getsize(os.path.join(root, "session-state", SID,
+                                            "events.jsonl"))
         self.assertGreater(size, 20 * 1024 * 1024)
-        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
-        done = subprocess.run([sys.executable, "-c", _TIMED, REPO, root],
-                              capture_output=True, text=True, encoding="utf-8",
-                              env=env, timeout=20)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        stores, calls, texts, _seconds = done.stdout.split()
-        self.assertEqual((stores, calls, texts),
-                         ("1", str(n), str(1 + 3 * n)))
+        n = self.CALLS
+        self.assertEqual(counts, (1, n, 1 + 3 * n))
 
 
 if __name__ == "__main__":

@@ -24,7 +24,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -34,7 +33,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, sources, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite  # noqa: E402
 from ranwhat.sources import pi as pi_module  # noqa: E402
@@ -315,7 +316,8 @@ def findings(source, stores):
                 named = _named_by_input(text.call)
                 origin = named[-1] if named else None
 
-            def collect(value, label, origin=origin, store=store, text=text):
+            def collect(value, label, _in=None, _copies=None, origin=origin,
+                        store=store, text=text):
                 item = found.setdefault(value, {"origins": set(), "count": 0,
                                                 "stores": set(), "where": []})
                 item["count"] += 1
@@ -1633,57 +1635,55 @@ class Window(PiCase):
 
 
 # --------------------------------------------------------------------------
-# A large session, timed in its own process
+# A large session: how reading it grows, on its own interpreter
+# (tests/growth.py)
 # --------------------------------------------------------------------------
 
-TIMED = r"""
-import json, sys, time
-sys.path.insert(0, sys.argv[1])
+READ = r"""
 from ranwhat.sources.pi import PiSource
-p = PiSource()
-t = time.perf_counter()
-stores = p.stores(p.locations(override=sys.argv[2]))
-calls = sum(1 for s in stores for _ in p.tool_calls(s))
-texts = sum(1 for s in stores for _ in p.secret_texts(s))
-print(json.dumps({"seconds": time.perf_counter() - t, "stores": len(stores),
-                  "calls": calls, "texts": texts, "counts": p.counts}))
+def call(made):
+    p = PiSource()
+    stores = p.stores(p.locations(override=made["root"]))
+    calls = sum(1 for s in stores for _ in p.tool_calls(s))
+    texts = sum(1 for s in stores for _ in p.secret_texts(s))
+    return {"stores": len(stores), "calls": calls, "texts": texts,
+            "counts": p.counts}
 """
-
-# Generous: well under a second here for 30 MB. A quadratic slip costs
-# minutes.
-BUDGET = 10.0
 
 
 class Performance(unittest.TestCase):
 
-    def test_a_30mb_session_reads_well_within_budget(self):
+    def _session(self, n):
+        """A root whose one session is n(30 MB) long, and how many calls it
+        holds."""
         root = _tempdir(self, "pi-perf-")
         folder = os.path.join(root, "sessions", FOLDER)
         os.makedirs(folder)
         path = os.path.join(folder, NAME)
         out = ("lorem ipsum dolor sit amet " * 24 + "\n") * 2
-        n = 0
+        i = 0
         with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write(_dump(header()) + "\n")
-            while fh.tell() < 30 * 1024 * 1024:
-                for line in call_lines(n + 1, "call_%08d" % n, "bash",
-                                       {"command": "grep -rn foo src/%d" % n},
+            while fh.tell() < n(30 * 1024 * 1024):
+                for line in call_lines(i + 1, "call_%08d" % i, "bash",
+                                       {"command": "grep -rn foo src/%d" % i},
                                        output=out):
                     fh.write(_dump(line) + "\n")
-                n += 2
-        env = dict(os.environ, HOME=root, USERPROFILE=root)
+                i += 2
+        return {"root": root, "calls": i // 2}
+
+    def test_a_30mb_session_reads_well_within_budget(self):
+        home = _tempdir(self, "pi-perf-home-")
+        env = dict(os.environ, HOME=home, USERPROFILE=home)
         env.pop(ENV, None)
         env.pop(SESSION_ENV, None)
-        proc = subprocess.run([sys.executable, "-c", TIMED, REPO, root], env=env,
-                              capture_output=True, text=True, encoding="utf-8",
-                              timeout=20)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        report = json.loads(proc.stdout)
+        measured, made = growth.measure_apart(self._session, READ, env=env)
+        growth.assert_linear(self, measured, "a 30 MB session")
+        report = measured.result
         self.assertEqual(report["stores"], 1)
-        self.assertEqual(report["calls"], n // 2)
-        self.assertEqual(report["texts"], 1 + 3 * (n // 2))
+        self.assertEqual(report["calls"], made["calls"])
+        self.assertEqual(report["texts"], 1 + 3 * made["calls"])
         self.assertEqual(report["counts"]["unparsed"], 0)
-        self.assertLess(report["seconds"], BUDGET, report)
 
 
 if __name__ == "__main__":

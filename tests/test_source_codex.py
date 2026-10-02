@@ -30,7 +30,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, watch  # noqa: E402
 from ranwhat import sources  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _shell, _stamps, _zstd, codex  # noqa: E402
@@ -246,7 +248,7 @@ def found_secrets(texts):
     out = []
     for text in texts:
         values = []
-        clean._walk(text.node, lambda value, _label: values.append(value))
+        clean._walk(text.node, lambda value, _label, *_: values.append(value))
         out.extend((v, origin(text), text.where) for v in values)
     return out
 
@@ -1852,36 +1854,34 @@ class RecordTypes(_Case):
 
 
 # --------------------------------------------------------------------------
-# A large file, in a subprocess with a time limit
+# A large file: how reading it grows, on its own interpreter (tests/growth.py)
 # --------------------------------------------------------------------------
 
-LARGE_SCRIPT = r"""
-import json, sys, time
-sys.path.insert(0, sys.argv[1])
+LARGE_CALL = r"""
 from ranwhat.sources.codex import CodexSource
-src = CodexSource()
-start = time.perf_counter()
-[store] = [s for s in src.stores(src.locations(override=sys.argv[2]))
-           if s.role == "transcript"]
-calls = sum(1 for _ in src.tool_calls(store))
-texts = sum(1 for _ in src.secret_texts(store))
-print(json.dumps({"calls": calls, "texts": texts,
-                  "seconds": time.perf_counter() - start}))
+def call(root):
+    src = CodexSource()
+    [store] = [s for s in src.stores(src.locations(override=root))
+               if s.role == "transcript"]
+    calls = sum(1 for _ in src.tool_calls(store))
+    texts = sum(1 for _ in src.secret_texts(store))
+    return {"calls": calls, "texts": texts}
 """
 
 
 class LargeFile(_Case):
 
     CALLS = 20000
-    BUDGET = 10.0
 
-    def test_a_large_rollout_is_read_in_bounded_time(self):
-        out = os.path.join(self.root, *ROLLOUT.split("/"))
+    def rollout(self, n):
+        """A Codex home whose one rollout holds n(CALLS) calls."""
+        root = tempfile.mkdtemp(prefix="codex-large-", dir=self.home)
+        out = os.path.join(root, *ROLLOUT.split("/"))
         os.makedirs(os.path.dirname(out))
         body = "x" * 1500 + "\n"
         with open(out, "w", encoding="utf-8", newline="") as fh:
             fh.write(line("2026-10-01T12:00:00.123Z", "session_meta", meta()) + "\n")
-            for i in range(self.CALLS):
+            for i in range(n(self.CALLS)):
                 cid = "call_%06d" % i
                 fh.write(line("2026-10-01T12:00:01.000Z", "response_item", fcall(
                     "exec_command", {"cmd": "cat src/file%d.py" % i,
@@ -1893,16 +1893,17 @@ class LargeFile(_Case):
                                   {"type": "reasoning",
                                    "encrypted_content": "gAAAA" + "z" * 4000})
                              + "\n")
-        self.assertGreater(os.path.getsize(out), 50 * 1000 * 1000)
+        return root
+
+    def test_a_large_rollout_is_read_in_bounded_time(self):
         env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
-        result = subprocess.run([sys.executable, "-c", LARGE_SCRIPT, REPO,
-                                 self.root], env=env, capture_output=True,
-                                text=True, encoding="utf-8", timeout=20)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        report = json.loads(result.stdout)
-        self.assertEqual(report["calls"], self.CALLS)
-        self.assertEqual(report["texts"], 2 * self.CALLS + self.CALLS // 50 + 1)
-        self.assertLess(report["seconds"], self.BUDGET, report)
+        measured, root = growth.measure_apart(self.rollout, LARGE_CALL, env=env)
+        out = os.path.join(root, *ROLLOUT.split("/"))
+        self.assertGreater(os.path.getsize(out), 50 * 1000 * 1000)
+        growth.assert_linear(self, measured, "a 50 MB rollout")
+        self.assertEqual(measured.result["calls"], self.CALLS)
+        self.assertEqual(measured.result["texts"],
+                         2 * self.CALLS + self.CALLS // 50 + 1)
 
 
 if __name__ == "__main__":

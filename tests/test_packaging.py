@@ -50,6 +50,20 @@ class Metadata(unittest.TestCase):
         self.assertTrue(os.path.isfile(
             os.path.join(ROOT, "ranwhat", "demo", "support-copilot.json")))
 
+    def test_every_package_is_listed(self):
+        """setuptools builds only the packages named, so a subpackage left
+        out installs without error and fails on its first import."""
+        listed = re.search(r"^packages\s*=\s*\[(.*?)\]", pyproject(),
+                           re.M | re.S).group(1)
+        listed = set(re.findall(r'"([^"]+)"', listed))
+        found = set()
+        for folder, _dirs, files in os.walk(os.path.join(ROOT, "ranwhat")):
+            if "__init__.py" in files:
+                rel = os.path.relpath(folder, ROOT)
+                found.add(rel.replace(os.sep, "."))
+        self.assertIn("ranwhat.sources", found)
+        self.assertEqual(listed, found)
+
     def test_demo_loads_through_the_package(self):
         from ranwhat.cli import _bundled
         self.assertEqual(_bundled("support-copilot.json")["agent"],

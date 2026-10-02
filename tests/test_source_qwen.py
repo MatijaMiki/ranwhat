@@ -28,7 +28,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _stamps, qwen  # noqa: E402
 from ranwhat.sources.base import MaskResult, Store  # noqa: E402
@@ -226,7 +228,7 @@ def findings(source, store):
             origins = clean._origins(json.dumps(named, ensure_ascii=False))
             origin = origins[-1] if origins else None
         values = []
-        clean._walk(text.node, lambda value, label: values.append(value))
+        clean._walk(text.node, lambda value, label, *_: values.append(value))
         for value in values:
             out.setdefault(value, set()).add(origin)
     return out
@@ -1458,27 +1460,28 @@ class Legacy(_Home):
 
 
 # --------------------------------------------------------------------------
-# A large file, in a subprocess with a time limit
+# A large file: how reading it grows, on its own interpreter (tests/growth.py)
 # --------------------------------------------------------------------------
 
-_LARGE = r"""
-import sys, time
-sys.path.insert(0, sys.argv[1])
+_CALL = r"""
 from ranwhat.sources.qwen import QwenSource
-src = QwenSource()
-[store] = src.stores(src.locations(override=sys.argv[2]))
-start = time.time()
-calls = list(src.tool_calls(store))
-texts = sum(1 for _ in src.secret_texts(store))
-print(len(calls), sum(1 for c in calls if c.output), texts,
-      round(time.time() - start, 2))
+def call(root):
+    src = QwenSource()
+    [store] = src.stores(src.locations(override=root))
+    calls = list(src.tool_calls(store))
+    texts = sum(1 for _ in src.secret_texts(store))
+    return [len(calls), sum(1 for c in calls if c.output), texts]
 """
 
 
 class LargeFile(_Home):
 
-    def test_a_large_session_is_read_in_bounded_time(self):
-        pairs = 20000
+    PAIRS = 20000
+    SESSION = os.path.join("projects", SANITIZED, "chats", SESSION + ".jsonl")
+
+    def chats(self, n):
+        """A Qwen home whose one session ran n(PAIRS) commands."""
+        root = os.path.join(tempfile.mkdtemp(dir=self.home), ".qwen")
         call = json.dumps(assistant(2, "2026-09-30T10:00:02.000Z",
                                     ("@ID@", "run_shell_command",
                                      {"command": "cat src/file_@ID@.py",
@@ -1489,23 +1492,23 @@ class LargeFile(_Home):
                                         shell_output("cat src/file_@ID@.py",
                                                      "x = 1\\n" * 40)),
                             separators=(",", ":"))
-        path = os.path.join(self.qwen, "projects", SANITIZED, "chats",
-                            SESSION + ".jsonl")
+        path = os.path.join(root, self.SESSION)
         os.makedirs(os.path.dirname(path))
         with open(path, "w", encoding="utf-8", newline="") as fh:
-            for i in range(pairs):
+            for i in range(n(self.PAIRS)):
                 ident = "call_%06d" % i
                 fh.write(call.replace("@ID@", ident) + "\n")
                 fh.write(result.replace("@ID@", ident) + "\n")
-        self.assertGreater(os.path.getsize(path), 20 * 1024 * 1024)
+        return root
+
+    def test_a_large_session_is_read_in_bounded_time(self):
         env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
-        out = subprocess.run([sys.executable, "-c", _LARGE, REPO, self.qwen],
-                             cwd=REPO, env=env, capture_output=True, text=True,
-                             encoding="utf-8", timeout=20)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        calls, with_output, texts, _seconds = out.stdout.split()
-        self.assertEqual((int(calls), int(with_output), int(texts)),
-                         (pairs, pairs, pairs * 4))
+        measured, root = growth.measure_apart(self.chats, _CALL, env=env)
+        size = os.path.getsize(os.path.join(root, self.SESSION))
+        self.assertGreater(size, 20 * 1024 * 1024)
+        growth.assert_linear(self, measured, "a %d MB session" % (size // 10 ** 6))
+        pairs = self.PAIRS
+        self.assertEqual(measured.result, [pairs, pairs, pairs * 4])
 
 
 if __name__ == "__main__":

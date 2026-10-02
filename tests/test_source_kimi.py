@@ -19,7 +19,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -29,7 +28,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _stamps, kimi  # noqa: E402
 from ranwhat.sources.base import MaskResult  # noqa: E402
@@ -239,7 +240,8 @@ def _scan(src, stores):
         for text in src.secret_texts(store):
             origin = _origin(text.call) if text.call is not None else None
 
-            def collect(value, _label, origin=origin, path=store.path):
+            def collect(value, _label, _in=None, _copies=None, origin=origin,
+                        path=store.path):
                 entry = found.setdefault(value, {"origins": set(),
                                                  "files": set(), "count": 0})
                 entry["files"].add(path)
@@ -1459,64 +1461,68 @@ class Robustness(KimiCase):
 
 
 # --------------------------------------------------------------------------
-# A large file
+# A large file: how reading it grows, on its own interpreter (tests/growth.py)
 # --------------------------------------------------------------------------
 
-_TIMING = r"""
-import json, os, sys, time
-sys.path.insert(0, sys.argv[1])
+_CALL = r"""
 from ranwhat.sources import kimi
-root = sys.argv[2]
-folder = os.path.join(root, "sessions", "0" * 32, "big")
-os.makedirs(folder)
-out = "x" * 1500 + "\n"
-# context.jsonl holds a copy of every call: none of them is a call of its own
-with open(os.path.join(folder, "wire.jsonl"), "w", encoding="utf-8") as fh, \
-        open(os.path.join(folder, "context.jsonl"), "w", encoding="utf-8") as ctx:
-    fh.write(json.dumps({"type": "metadata", "protocol_version": "1.10"}) + "\n")
-    for i in range(20000):
-        cid = "Shell:%d" % i
-        args = json.dumps({"command": "cat file%d.txt" % i})
-        fh.write(json.dumps({"timestamp": 1790000000.0 + i, "message": {
-            "type": "ToolCall", "payload": {"type": "function", "id": cid,
-            "function": {"name": "Shell", "arguments": args},
-            "extras": None}}}) + "\n")
-        fh.write(json.dumps({"timestamp": 1790000000.5 + i, "message": {
-            "type": "ToolResult", "payload": {"tool_call_id": cid,
-            "return_value": {"is_error": False, "output": out, "message": "",
-            "display": [], "extras": None}}}}) + "\n")
-        ctx.write(json.dumps({"role": "assistant", "content": "", "tool_calls": [
-            {"type": "function", "id": cid, "function": {"name": "Shell",
-             "arguments": args}}]}, separators=(",", ":")) + "\n")
-        ctx.write(json.dumps({"role": "tool", "content": [
-            {"type": "text", "text": "<system>Command executed successfully.</system>"},
-            {"type": "text", "text": out}], "tool_call_id": cid},
-            separators=(",", ":")) + "\n")
-size = os.path.getsize(os.path.join(folder, "wire.jsonl"))
-src = kimi.KimiSource()
-t = time.perf_counter()
-stores = src.stores(src.locations(override=root))
-calls = sum(1 for s in stores for _ in src.tool_calls(s))
-texts = sum(1 for s in stores for _ in src.secret_texts(s))
-print(json.dumps({"size": size, "calls": calls, "texts": texts,
-                  "seconds": time.perf_counter() - t}))
+def call(root):
+    src = kimi.KimiSource()
+    stores = src.stores(src.locations(override=root))
+    calls = sum(1 for s in stores for _ in src.tool_calls(s))
+    texts = sum(1 for s in stores for _ in src.secret_texts(s))
+    return [calls, texts]
 """
 
 
 class LargeFile(KimiCase):
 
+    CALLS = 20000
+
+    def share(self, n):
+        """A share directory whose one session ran n(CALLS) commands."""
+        root = tempfile.mkdtemp(prefix="big-share-", dir=self.tmp)
+        folder = os.path.join(root, "sessions", "0" * 32, "big")
+        os.makedirs(folder)
+        out = "x" * 1500 + "\n"
+        # context.jsonl holds a copy of every call: none of them is a call
+        # of its own
+        with open(os.path.join(folder, "wire.jsonl"), "w", encoding="utf-8") as fh, \
+                open(os.path.join(folder, "context.jsonl"), "w",
+                     encoding="utf-8") as ctx:
+            fh.write(json.dumps({"type": "metadata", "protocol_version": "1.10"})
+                     + "\n")
+            for i in range(n(self.CALLS)):
+                cid = "Shell:%d" % i
+                args = json.dumps({"command": "cat file%d.txt" % i})
+                fh.write(json.dumps({"timestamp": 1790000000.0 + i, "message": {
+                    "type": "ToolCall", "payload": {"type": "function", "id": cid,
+                    "function": {"name": "Shell", "arguments": args},
+                    "extras": None}}}) + "\n")
+                fh.write(json.dumps({"timestamp": 1790000000.5 + i, "message": {
+                    "type": "ToolResult", "payload": {"tool_call_id": cid,
+                    "return_value": {"is_error": False, "output": out,
+                    "message": "", "display": [], "extras": None}}}}) + "\n")
+                ctx.write(json.dumps({"role": "assistant", "content": "",
+                                      "tool_calls": [
+                    {"type": "function", "id": cid, "function": {"name": "Shell",
+                     "arguments": args}}]}, separators=(",", ":")) + "\n")
+                ctx.write(json.dumps({"role": "tool", "content": [
+                    {"type": "text",
+                     "text": "<system>Command executed successfully.</system>"},
+                    {"type": "text", "text": out}], "tool_call_id": cid},
+                    separators=(",", ":")) + "\n")
+        return root
+
     def test_a_large_wire_file_is_read_in_linear_time(self):
-        root = os.path.join(self.tmp, "big-share")
-        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home,
-                   KIMI_SHARE_DIR=root)
-        out = subprocess.run([sys.executable, "-c", _TIMING, REPO, root],
-                             cwd=REPO, env=env, capture_output=True, text=True,
-                             encoding="utf-8", timeout=20)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        result = json.loads(out.stdout)
-        self.assertGreater(result["size"], 30 * 1024 * 1024)
-        self.assertEqual((result["calls"], result["texts"]), (20000, 80001))
-        self.assertLess(result["seconds"], 10.0)
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
+        env.pop("KIMI_SHARE_DIR", None)
+        measured, root = growth.measure_apart(self.share, _CALL, env=env)
+        size = os.path.getsize(os.path.join(root, "sessions", "0" * 32, "big",
+                                            "wire.jsonl"))
+        self.assertGreater(size, 30 * 1024 * 1024)
+        growth.assert_linear(self, measured, "a %d MB wire file" % (size // 10 ** 6))
+        self.assertEqual(measured.result, [self.CALLS, 4 * self.CALLS + 1])
 
 
 if __name__ == "__main__":

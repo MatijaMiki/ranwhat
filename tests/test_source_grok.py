@@ -22,7 +22,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -32,7 +31,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _stamps, base  # noqa: E402
 from ranwhat.sources.base import MaskResult, Store  # noqa: E402
@@ -364,7 +365,7 @@ def secrets(source, stores):
         for text in source.secret_texts(store):
             origin = origin_of(text)
 
-            def collect(value, _label, origin=origin):
+            def collect(value, _label, _in=None, _copies=None, origin=origin):
                 out.setdefault(value, set()).add(origin)
             clean._walk(text.node, collect)
     return out
@@ -1715,34 +1716,34 @@ class Window(_Home):
 
 
 # --------------------------------------------------------------------------
-# Timing: a large session, in a child process with a deadline
+# Timing: how reading a large session grows, on its own interpreter
+# (tests/growth.py)
 # --------------------------------------------------------------------------
 
-_TIMED = r"""
-import json, os, sys, time
-sys.path.insert(0, sys.argv[1])
+_CALL = r"""
 from ranwhat.sources.grok import GrokBuildSource
-start = time.perf_counter()
-src = GrokBuildSource()
-stores = src.stores(src.locations())
-calls = texts = 0
-for store in stores:
-    calls += sum(1 for _ in src.tool_calls(store))
-    texts += sum(1 for _ in src.secret_texts(store))
-print(json.dumps({"stores": len(stores), "calls": calls, "texts": texts,
-                  "seconds": time.perf_counter() - start}))
+def call(root):
+    src = GrokBuildSource()
+    stores = src.stores(src.locations(override=root))
+    calls = texts = 0
+    for store in stores:
+        calls += sum(1 for _ in src.tool_calls(store))
+        texts += sum(1 for _ in src.secret_texts(store))
+    return {"stores": len(stores), "calls": calls, "texts": texts}
 """
 
 
 class Timing(unittest.TestCase):
 
-    CALLS = 2000
-    BUDGET = 12.0       # seconds for about 57 MB; measured near 1.5 s
+    CALLS = 2000        # about 57 MB at full size
 
-    def test_a_large_session_reads_in_bounded_time(self):
-        home = tempfile.mkdtemp(prefix="grok-timing-")
-        self.addCleanup(shutil.rmtree, home, True)
-        root = os.path.join(home, ".grok")
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="grok-timing-")
+        self.addCleanup(shutil.rmtree, self.home, True)
+
+    def session(self, n):
+        """A Grok home whose one session ran n(CALLS) commands and reads."""
+        root = os.path.join(tempfile.mkdtemp(dir=self.home), ".grok")
         folder = os.path.join(root, "sessions", ENC, SID)
         os.makedirs(folder)
         chunk = line(envelope(1790000000, {"sessionUpdate": "agent_message_chunk",
@@ -1750,7 +1751,7 @@ class Timing(unittest.TestCase):
                                                        "text": "word " * 40}}, "c"))
         output = ("x" * 79 + "\n") * 40
         with open(os.path.join(folder, "updates.jsonl"), "w", encoding="utf-8") as fh:
-            for i in range(self.CALLS):
+            for i in range(n(self.CALLS)):
                 for _ in range(5):
                     fh.write(chunk + "\n")
                 for obj in shell_lines("c%d" % i, "cat f%d.txt" % i, 1790000000 + i,
@@ -1761,16 +1762,18 @@ class Timing(unittest.TestCase):
                     fh.write(line(obj) + "\n")
         with open(os.path.join(folder, "summary.json"), "w", encoding="utf-8") as fh:
             json.dump({"info": {"id": SID, "cwd": CWD}}, fh)
-        size = os.path.getsize(os.path.join(folder, "updates.jsonl"))
+        return root
+
+    def test_a_large_session_reads_in_bounded_time(self):
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
+        env.pop("GROK_HOME", None)
+        measured, root = growth.measure_apart(self.session, _CALL, env=env)
+        size = os.path.getsize(os.path.join(root, "sessions", ENC, SID,
+                                            "updates.jsonl"))
         self.assertGreater(size, 30 * 1024 * 1024)
-        env = dict(os.environ, HOME=home, USERPROFILE=home, GROK_HOME=root)
-        out = subprocess.run([sys.executable, "-c", _TIMED, REPO], env=env,
-                             capture_output=True, text=True, encoding="utf-8",
-                             timeout=20)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        result = json.loads(out.stdout)
+        growth.assert_linear(self, measured, "a %d MB session" % (size // 10 ** 6))
+        result = measured.result
         self.assertEqual((result["stores"], result["calls"]), (2, 2 * self.CALLS))
-        self.assertLess(result["seconds"], self.BUDGET, result)
 
 
 if __name__ == "__main__":

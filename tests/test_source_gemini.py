@@ -26,7 +26,9 @@ from unittest import mock
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TESTS)
 sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
 
+import growth  # noqa: E402
 from ranwhat import clean, watch  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _stamps, gemini  # noqa: E402
 from ranwhat.sources.base import MaskResult, Store  # noqa: E402
@@ -253,7 +255,8 @@ def _findings(source, stores):
             named = _call_origins(text.call)
             origin = named[-1] if named else None
 
-            def collect(value, label, text=text, origin=origin):
+            def collect(value, label, _in=None, _copies=None, text=text,
+                        origin=origin):
                 entry = out.setdefault(value, {"label": label, "count": 0,
                                                "origins": set(), "calls": set()})
                 entry["count"] += 1
@@ -1619,57 +1622,58 @@ class BackgroundLogs(GeminiCase):
 
 
 # --------------------------------------------------------------------------
-# A large file, timed in a subprocess
+# A large file: how reading it grows, on its own interpreter (tests/growth.py)
 # --------------------------------------------------------------------------
 
 # Every turn: a prompt, the model message, the same message again with its
 # call and a 2 KB result, the repeated result, and a $set.
 TURNS = 6000
-BUDGET = 5.0
 
-_TIMED = r"""
-import sys, time
-sys.path.insert(0, sys.argv[1])
+_CALL = r"""
 from ranwhat.sources import gemini
-src = gemini.GeminiSource()
-t = time.perf_counter()
-[store] = src.stores(src.locations(override=sys.argv[2]))
-calls = list(src.tool_calls(store))
-texts = sum(1 for _ in src.secret_texts(store))
-print(len(calls), texts, round(time.perf_counter() - t, 3))
+def call(root):
+    src = gemini.GeminiSource()
+    [store] = src.stores(src.locations(override=root))
+    calls = sum(1 for _ in src.tool_calls(store))
+    texts = sum(1 for _ in src.secret_texts(store))
+    return [calls, texts]
 """
 
 
 class LargeFile(GeminiCase):
 
-    def test_a_large_session_is_read_in_time(self):
-        out = os.path.join(self.root, "tmp", "proj", "chats", "session-big.jsonl")
+    BIG = os.path.join("tmp", "proj", "chats", "session-big.jsonl")
+
+    def session(self, n):
+        """A .gemini root whose one session has n(TURNS) turns."""
+        root = os.path.join(tempfile.mkdtemp(prefix="big-", dir=self.home),
+                            ".gemini")
+        out = os.path.join(root, self.BIG)
         os.makedirs(os.path.dirname(out))
         blob = ("drwxr-xr-x  12 alice staff  384 Sep 30 10:15 src\n" * 40)[:2048]
         with open(out, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(_dump(header()) + "\n")
-            for n in range(TURNS):
-                ts = "2026-09-30T10:%02d:%02d.000Z" % (n // 60 % 60, n % 60)
-                call = shell("c%d" % n, "ls -la src/%d" % n, output=blob, ts=ts)
-                for record in (user("u%d" % n, "list it", ts=ts),
-                               model("m%d" % n, ts=ts),
-                               model("m%d" % n, [call], ts=ts),
-                               results("r%d" % n, [call], ts=ts),
+            for i in range(n(TURNS)):
+                ts = "2026-09-30T10:%02d:%02d.000Z" % (i // 60 % 60, i % 60)
+                call = shell("c%d" % i, "ls -la src/%d" % i, output=blob, ts=ts)
+                for record in (user("u%d" % i, "list it", ts=ts),
+                               model("m%d" % i, ts=ts),
+                               model("m%d" % i, [call], ts=ts),
+                               results("r%d" % i, [call], ts=ts),
                                {"$set": {"lastUpdated": ts}}):
                     fh.write(_dump(record) + "\n")
-        size = os.path.getsize(out)
-        self.assertGreater(size, 20 * 1024 * 1024)
+        return root
+
+    def test_a_large_session_is_read_in_time(self):
         env = dict(os.environ, HOME=self.home, USERPROFILE=self.home,
                    GEMINI_CLI_HOME=self.home)
-        done = subprocess.run([sys.executable, "-c", _TIMED, REPO, self.root],
-                              capture_output=True, text=True, encoding="utf-8",
-                              env=env, timeout=20)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        calls, texts, elapsed = done.stdout.split()
-        self.assertEqual(int(calls), TURNS)
-        self.assertGreater(int(texts), TURNS * 4)
-        self.assertLess(float(elapsed), BUDGET,
-                        "%.1f MB took %ss" % (size / 1e6, elapsed))
+        measured, root = growth.measure_apart(self.session, _CALL, env=env)
+        size = os.path.getsize(os.path.join(root, self.BIG))
+        self.assertGreater(size, 20 * 1024 * 1024)
+        growth.assert_linear(self, measured, "%.1f MB" % (size / 1e6))
+        calls, texts = measured.result
+        self.assertEqual(calls, TURNS)
+        self.assertGreater(texts, TURNS * 4)
 
 
 if __name__ == "__main__":
