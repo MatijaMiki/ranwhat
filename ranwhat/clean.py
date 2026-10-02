@@ -1764,14 +1764,16 @@ def _glued(piece):
     return [piece[i:j] for i in starts for j in ends if j - i >= _MIN_ASSIGNED]
 
 
-def _stretches(text):
-    """The stretches of text that could be, or be in, a value clean finds.
-    Not a URL: what in one is a secret, a password or a parameter, the
-    rules find in it, and the rest is no value."""
+def _pieces(text, urls=False):
+    """Each stretch of text a value may be, of _MIN_ASSIGNED characters or
+    more: a run between blanks and quotes, and its pieces between the
+    separators a command puts around a value, and where one may be glued
+    on. Not a run holding a URL, but with urls: what in one is a secret,
+    a password or a parameter, the rules find in it."""
     out = set()
     for run in _EVIDENCE_RUN.findall(text):
         run = run.strip(_EVIDENCE_EDGES)
-        if len(run) < _MIN_ASSIGNED or _SCHEME_END in run:
+        if len(run) < _MIN_ASSIGNED or (_SCHEME_END in run and not urls):
             continue
         pieces = {run}
         if run[0] == "-" and run[1:2].isalpha():
@@ -1781,10 +1783,25 @@ def _stretches(text):
             pieces.update(_glued(piece))          # admin%VALUE
         for piece in pieces:
             piece = piece.strip(_EVIDENCE_EDGES)
-            if (len(piece) >= _MIN_ASSIGNED and _ELLIPSIS not in piece
-                    and _is_secret_value("password", "", piece)):
+            if len(piece) >= _MIN_ASSIGNED and _ELLIPSIS not in piece:
                 out.add(piece)
     return out
+
+
+def _stretches(text):
+    """The stretches of text that could be, or be in, a value clean finds
+    (_pieces), to be looked for in the transcripts."""
+    return {piece for piece in _pieces(text)
+            if _is_secret_value("password", "", piece)}
+
+
+# A mask keeps the fingerprint of the value it took the place of. Past a
+# copy budget, a copy typed where no rule reads it was left by every mask
+# step, and once the copy the value was found by was masked, nothing knew
+# it: check and watch printed it whole. Each piece of what they show is
+# compared, by its fingerprint, with every mask in the transcripts.
+_MASK_MARK = b"ranwhat:redacted:"
+_MASKS = re.compile(rb"ranwhat:redacted:([0-9a-f]{12})")
 
 
 def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
@@ -1792,12 +1809,15 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
     of root (since_days as scan takes it) that shows in any of texts, or
     a stretch of which does. Never written anywhere: for mask_known.
     check and watch ask every transcript, whatever their --days: a value
-    read before the window is still a secret where one in it shows it."""
+    read before the window is still a secret where one in it shows it.
+    A value a mask took the place of is known by the mask's fingerprint,
+    whole, where texts show it."""
     texts = [t for t in texts if t]
-    looked = set()
+    looked, pieces = set(), set()
     for text in texts:
         looked |= _stretches(text)
-    if not looked:
+        pieces |= _pieces(text, urls=True)
+    if not pieces:
         return {}
     paths = discover(root, since_days)
     size = 0
@@ -1813,7 +1833,7 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
     forms = [(stretch, tuple(form.encode("utf-8", "replace") for form in _written(stretch)))
              for stretch in order]
     shown = _JOIN.join(texts)
-    known = {}
+    known, masks = {}, set()
     seen = set()                    # (stretch, the characters before it)
     spent = dict.fromkeys(order, 0)
     looks = dict.fromkeys(order, 0)
@@ -1823,6 +1843,8 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
                 content = fh.read()
         except OSError:
             continue
+        if _MASK_MARK in content:
+            masks.update(fp.decode("ascii") for fp in _MASKS.findall(content))
         if _odd_escape_in(content):
             content = _as_dumps(content.decode("utf-8", "replace")).encode(
                 "utf-8", "replace")
@@ -1860,6 +1882,11 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
                 for value, _label in _scan(text, spans=False)[0]:
                     if value in shown or any(stretch in value for stretch in inside):
                         known[_fingerprint(value)] = value
+    if masks:
+        for piece in pieces:
+            fp = _fingerprint(piece)
+            if fp in masks:
+                known.setdefault(fp, piece)
     return known
 
 

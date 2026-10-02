@@ -513,6 +513,58 @@ class WrittenWithEscapes(_Reports):
                     self.assertIn(clean.DISPLAY_MASK % clean._hint(value), _shown(out))
 
 
+class KnownByItsMask(_Reports):
+    """Past a copy budget, a copy typed where no rule reads it is left by
+    every mask step: clean --apply, the review's mask all, its mask N. The
+    copy it was found by is masked, nothing knew the value any more, and
+    check, watch and their --json forms printed it whole. A mask keeps the
+    value's fingerprint, and that is enough to know a copy by."""
+
+    def _root(self, same):
+        root = _tempdir(self, "masked-")
+        project = os.path.join(root, "-Users-a-app")
+        read = [_call(1, "cat .env", _stamp(2000)),
+                _result(1, "DB_PASSWORD=%s\n" % PW, _stamp(2000))]
+        typed = [_call(2, SCRIPT % PW, _stamp(3000)), _result(2, "ok", _stamp(3000))]
+        if same:
+            _write(os.path.join(project, "sess.jsonl"), read + typed, 2000)
+        else:
+            _write(os.path.join(project, "sessA.jsonl"), read, 2000)
+            _write(os.path.join(project, "sessB.jsonl"), typed, 3000)
+        return root
+
+    def _mask(self, root, how):
+        if how == "apply":
+            _cli(["clean", "--apply", "--root", root])
+            return
+        known = {}
+        findings, scanned, _ = clean.scan(root=root, known=known)
+        order = [f["fingerprint"] for f in clean._numbered(findings)]
+        n = order.index(clean._fingerprint(PW)) + 1
+        replies = iter(("mask all" if how == "mask all" else "mask %d" % n, "quit"))
+        with mock.patch("builtins.input", lambda prompt="": next(replies)):
+            clean.review(findings, scanned, stream=io.StringIO(), values=known)
+
+    def test_nothing_prints_what_no_mask_reached(self):
+        budgets = (mock.patch.object(clean, "_CROSS_SEARCH_CHARS", 0),
+                   mock.patch.object(clean, "_COPY_SEARCH_CHARS", 0))
+        for patch in budgets:
+            patch.start()
+            self.addCleanup(patch.stop)
+        for same in (False, True):
+            for how in ("apply", "mask all", "mask N"):
+                root = self._root(same)
+                for argv in self.reports(root):
+                    self.assertNotIn(PW, _cli(argv))
+                self._mask(root, how)
+                self.assertNotIn(PW, _cli(["clean", "--no-interactive", "--root", root]))
+                for argv in self.reports(root):
+                    with self.subTest(same=same, how=how, argv=argv[:2]):
+                        out = _cli(argv)
+                        self.assertNotIn(PW, out)
+                        self.assertIn(_MASKED, _shown(out))
+
+
 class ALongHistory(_Reports):
     """The newest transcript is long, and the session that read the
     password read many keys with it: the search of other transcripts ran
