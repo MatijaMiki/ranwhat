@@ -1823,6 +1823,9 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
                 content = fh.read()
         except OSError:
             continue
+        if _odd_escape_in(content):
+            content = _as_dumps(content.decode("utf-8", "replace")).encode(
+                "utf-8", "replace")
         lines = {}                  # (start, end) of a line -> the stretches in it
         for stretch, written in forms:
             for form in written:
@@ -1986,6 +1989,60 @@ def _written(value):
     the escapes json.dumps gives it with and without ensure_ascii."""
     return {value, json.dumps(value)[1:-1],
             json.dumps(value, ensure_ascii=False)[1:-1]}
+
+
+# Another JSON writer may escape what json.dumps writes as it is: / as \/,
+# a printable character as \u0041, or any as \uXXXX in capitals. A reader
+# decodes the same string, but a copy written so was never found by a
+# look for the forms of _written: clean --apply left it, and once the copy
+# it was found by was masked, check and watch printed it whole. A text
+# holding an escape json.dumps without ensure_ascii would not write (any
+# but a control character's, in small letters, that has no short form) is
+# looked in with each escape as that writes it (_as_dumps). A writer that
+# escapes some characters past ASCII and not others is covered so too.
+_ODD_ESCAPE = re.compile(r"\\(?:/|u(?!00[01][0-9a-f])[0-9a-fA-F]{4}|u000[89acd])")
+_ODD_ESCAPE_BYTES = re.compile(_ODD_ESCAPE.pattern.encode("ascii"))
+_JSON_ESCAPE = re.compile(r"\\(?:u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})"
+                          r"|u([0-9a-fA-F]{4})|(.))", re.S)
+
+
+def _dumps_escape(m):
+    if m.group(1):
+        high, low = int(m.group(1), 16), int(m.group(2), 16)
+        return chr(0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00))
+    if m.group(3):
+        code = int(m.group(3), 16)
+        if 0xD800 <= code <= 0xDFFF:
+            return "\\u%04x" % code             # half a pair: as dumps writes it
+        return json.dumps(chr(code), ensure_ascii=False)[1:-1]
+    return "/" if m.group(4) == "/" else m.group(0)
+
+
+def _odd_escape_in(text):
+    """Whether JSON text (str or bytes) holds an escape json.dumps would
+    have written otherwise. \\\\/ is an escaped backslash and a /, and in
+    a real history every match was one of those: so an escape counts only
+    where the backslashes before it leave it one of its own."""
+    pattern, slash = ((_ODD_ESCAPE, "\\") if isinstance(text, str)
+                      else (_ODD_ESCAPE_BYTES, b"\\"))
+    for m in pattern.finditer(text):
+        k = m.start()
+        while k and text[k - 1:k] == slash:
+            k -= 1
+        if (m.start() - k) % 2 == 0:
+            return True
+    return False
+
+
+def _as_dumps(text):
+    """JSON text with every escape as json.dumps(ensure_ascii=False)
+    writes it, when it holds one written otherwise: the same JSON to a
+    reader, and a copy of a value in it is in one of _written's forms.
+    Escapes are read from the start, so \\\\u0041 stays a backslash and
+    u0041."""
+    if not _odd_escape_in(text):
+        return text
+    return _JSON_ESCAPE.sub(_dumps_escape, text)
 
 
 def _copies_elsewhere(texts, owners, size, values, found):
@@ -2575,7 +2632,7 @@ def _copies_in_other_transcripts(paths, merged, values, apply, changed_files):
             if content is None:
                 try:
                     with open(path, encoding="utf-8", errors="replace") as fh:
-                        content = fh.read()
+                        content = _as_dumps(fh.read())
                 except OSError:
                     break
             if fp not in forms:

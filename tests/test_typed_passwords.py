@@ -399,6 +399,120 @@ class TypedManyTimesBeforeTheRead(_Reports):
         self.assertLess(decoded.call_count, 10)
 
 
+def _escaped(value, how):
+    """value as a JSON writer other than json.dumps may write it: every
+    character as \\uXXXX, or each / as \\/."""
+    if how == "u":
+        return "".join("\\u%04X" % ord(c) for c in value)
+    return json.dumps(value)[1:-1].replace("/", "\\/")
+
+
+def _write_escaped(path, lines, age, value, how):
+    """_write, with value written _escaped in every line."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    plain = json.dumps(value)[1:-1]
+    with open(path, "w", encoding="utf-8") as fh:
+        for line in lines:
+            text = json.dumps(line)
+            fh.write(text.replace(plain, _escaped(value, how)) + "\n")
+            assert json.loads(text.replace(plain, _escaped(value, how))) == line
+    t = time.time() - age
+    os.utime(path, (t, t))
+
+
+def _decoded_copies(root, value):
+    """How many copies of value the strings of every transcript hold, as
+    a JSON reader decodes them."""
+    n = 0
+    for top, _dirs, files in os.walk(root):
+        for name in files:
+            with open(os.path.join(top, name), encoding="utf-8") as fh:
+                for line in fh:
+                    n += sum(text.count(value) for _c, _k, text
+                             in clean._strings(json.loads(line)))
+    return n
+
+
+class WrittenWithEscapes(_Reports):
+    """A transcript's JSON may write a character as \\uXXXX, or / as \\/,
+    where json.dumps would not. clean looked for a value in other
+    transcripts only as json.dumps writes it, so --apply left the copy
+    typed there, masked the .env read, and with nothing left to know the
+    value by, check and watch printed it whole. watch's own look missed
+    a read written so."""
+
+    VALUES = {"u": PW, "/": PW[:6] + "/" + PW[6:]}
+
+    def _root(self, value, how, escaped):
+        root = _tempdir(self, "escaped-")
+        project = os.path.join(root, "-Users-a-app")
+        read = [_call(1, "cat .env", _stamp(2000)),
+                _result(1, "DB_PASSWORD=%s\n" % value, _stamp(2000))]
+        typed = [_call(2, SCRIPT % value, _stamp(3000)), _result(2, "ok", _stamp(3000))]
+        for name, lines, age in (("sessA.jsonl", read, 2000), ("sessB.jsonl", typed, 3000)):
+            if name == escaped:
+                _write_escaped(os.path.join(project, name), lines, age, value, how)
+            else:
+                _write(os.path.join(project, name), lines, age)
+        return root
+
+    def test_apply_masks_the_copy_written_so(self):
+        for how, value in self.VALUES.items():
+            self.assertEqual([v for v, _l in find_secrets("DB_PASSWORD=%s\n" % value)], [value])
+            root = self._root(value, how, "sessB.jsonl")
+            with self.subTest(how=how):
+                for argv in self.reports(root):
+                    self.assertNotIn(value, _cli(argv))
+                _cli(["clean", "--apply", "--root", root])
+                self.assertEqual(_decoded_copies(root, value), 0)
+                for argv in self.reports(root):
+                    self.assertNotIn(value, _cli(argv))
+
+    def test_rewritten_as_dumps_writes_it(self):
+        import random
+        rng = random.Random(20261002)
+        alphabet = 'aZ09/"\\\n\t\x1b\x7fé \U0001F600 '
+        for _ in range(2000):
+            value = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+            parts = []
+            for c in value:
+                r = rng.random()
+                if r < 0.3:
+                    if ord(c) > 0xFFFF:
+                        u = c.encode("utf-16-be")
+                        parts.append("".join("\\u%02x%02x" % (u[i], u[i + 1])
+                                             for i in (0, 2)))
+                    else:
+                        code = "%04x" % ord(c)
+                        parts.append("\\u" + (code.upper() if r < 0.15 else code))
+                elif c == "/" and r < 0.6:
+                    parts.append("\\/")
+                else:
+                    parts.append(json.dumps(c, ensure_ascii=False)[1:-1])
+            # The backslashes of "x" are escaped: it reads as odd, and is
+            # left as it is.
+            text = '{"k": "%s", "x": "\\\\u0041\\\\/"}' % "".join(parts)
+            canon = clean._as_dumps(text)
+            self.assertEqual(json.loads(canon), json.loads(text))
+            self.assertIn(json.dumps(value, ensure_ascii=False)[1:-1], canon)
+            self.assertIn('"\\\\u0041\\\\/"', canon)
+            # What json.dumps wrote still holds the value as _written has it.
+            for ascii_only in (True, False):
+                dumped = json.dumps({"k": value}, ensure_ascii=ascii_only)
+                canon = clean._as_dumps(dumped)
+                self.assertEqual(json.loads(canon), json.loads(dumped))
+                self.assertTrue(any(form in canon for form in clean._written(value)))
+
+    def test_watch_finds_a_read_written_so(self):
+        for how, value in self.VALUES.items():
+            root = self._root(value, how, "sessA.jsonl")
+            for argv in self.reports(root):
+                with self.subTest(how=how, argv=argv[:2]):
+                    out = _cli(argv)
+                    self.assertNotIn(value, out)
+                    self.assertIn(clean.DISPLAY_MASK % clean._hint(value), _shown(out))
+
+
 class ALongHistory(_Reports):
     """The newest transcript is long, and the session that read the
     password read many keys with it: the search of other transcripts ran
