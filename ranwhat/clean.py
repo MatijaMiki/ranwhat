@@ -364,8 +364,9 @@ _NOT_A_SECRET_RUNS = (("change", "me"), ("replace", "me"), ("not", "for", "produ
 
 # A string can only hold a secret if it has an assignment, a connection
 # string, a known credential prefix, or a command that takes a password
-# (_TYPED: each rule's marker holds one of these, or it never runs). Most of a transcript is prose, and
-# checking this first skips the regex battery on the overwhelming majority.
+# (_TYPED: each rule's marker holds one of these, or it never runs). Most
+# of a transcript is prose, and checking this first skips the regex
+# battery on the overwhelming majority.
 # Every shape in _SHAPES_NAMED must start with one of these, or text holding
 # only that shape is never scanned (tests/test_clean_shapes.py checks).
 _CHEAP = ("=", ":", "sk_", "rk_", "sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_",
@@ -2439,6 +2440,10 @@ def scan_file(path, apply=False, only=None, known=None, extra=None):
     if not any(len(line) > MAX_STRING for line in lines):
         asked = {fp: v for fp, v in values.items()
                  if fp not in findings or findings[fp]["label"] not in _SHAPE_LABELS}
+    if only is not None:
+        # Only these are masked, or counted by the caller: seventy longer
+        # keys found here spent the budget before the one being masked.
+        asked = {fp: v for fp, v in asked.items() if fp in only}
     elsewhere, spent = (_copies_elsewhere(texts, owners, sum(map(len, lines)), asked, found)
                         if asked else ({}, 0))
     masking = {fp for fp in elsewhere if only is None or fp in only} if apply else ()
@@ -2946,13 +2951,15 @@ def _numbered(findings):
     return sorted(findings.values(), key=lambda x: -x["count"])
 
 
-def review(findings, scanned, stream=None, values=None):
+def review(findings, scanned, stream=None, values=None, paths=None):
     """Interactive review of an already-completed scan. Returns the number of
     files changed. Every line fits the terminal, as in render().
 
     `values`, {fingerprint: value} as scan(known=...) gives them, lets a
     mask reach the copies of a value in transcripts where the rules did
-    not find it. Without them each is read back from where they did."""
+    not find it. Without them each is read back from where they did.
+    `paths`, the transcripts the scan read, are where a mask looks for
+    them, past where the scan counted them (_mask)."""
     import sys as _sys
     from .report import BOLD, DIM, RED, GRN, YEL
 
@@ -3027,7 +3034,7 @@ def review(findings, scanned, stream=None, values=None):
         if cmd in ("show", "mask", "keep"):
             if cmd == "mask" and arg == "all":
                 changed_total += _mask(items, scanned, _print, GRN, RED, DIM,
-                                       values)
+                                       values, paths=paths)
                 items = []
                 continue
             if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
@@ -3058,7 +3065,7 @@ def review(findings, scanned, stream=None, values=None):
                 _print(DIM("  kept. %d left." % len(items)))
             else:
                 changed_total += _mask([target], scanned, _print, GRN, RED, DIM,
-                                       values)
+                                       values, paths=paths)
                 items.remove(target)
             continue
 
@@ -3066,12 +3073,19 @@ def review(findings, scanned, stream=None, values=None):
                + DIM("  (try 'help')"))
 
 
-def _mask(targets, scanned, _print, GRN, RED, DIM, values=None):
+def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None):
     """Re-walk only the files that hold these secrets, masking just them.
     A file may hold a copy the rules do not find there, typed with no key
     beside it, so each value goes with the walk (scan_file's extra): read
-    back first, before anything is masked, from where the rules found it."""
+    back first, before anything is masked, from where the rules found it.
+
+    The scan counted a value's copies in other transcripts only until its
+    search ran out of budget, and mask N left a copy it never got to. So
+    with `paths`, the transcripts the scan read, these values are looked
+    for in all of them again (_copies_in_other_transcripts): one value
+    costs a pass over them, many share its budget."""
     wanted = {t["fingerprint"] for t in targets}
+    everywhere = paths
     paths = set()
     for t in targets:
         paths |= set(t["files"])
@@ -3091,6 +3105,11 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None):
                                extra={fp: v for fp, v in known.items() if fp in here})
         if did:
             changed += 1
+    if everywhere and known:
+        elsewhere = []
+        _copies_in_other_transcripts(
+            everywhere, {t["fingerprint"]: t for t in targets}, known, True, elsewhere)
+        changed += len(set(elsewhere) - set(paths))
     if changed:
         _print(GRN("  masked in %d file(s)." % changed))
         _print(DIM("  Backups: %s" % _fit_path(_home_short(BACKUP_ROOT),

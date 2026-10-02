@@ -1035,7 +1035,8 @@ def _main(argv=None):
         # large history just to act on what they read is wasteful.
         if (findings and not args.apply and not args.no_interactive
                 and sys.stdin.isatty()):
-            clean_mod.review(findings, scanned, values=known)
+            clean_mod.review(findings, scanned, values=known,
+                             paths=clean_mod.discover(args.root, args.days))
         return 0
 
     if args.command == "watch":

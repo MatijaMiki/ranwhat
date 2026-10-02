@@ -579,6 +579,69 @@ class KnownByItsMask(_Reports):
                         self.assertIn(_MASKED, _shown(out))
 
 
+class MaskingOneValueReachesEveryCopy(_Reports):
+    """The review's mask N masked a value in the transcripts the dry run
+    had counted it in. Where that run's search of other transcripts ran
+    out of budget before it got to the value, a copy typed where no rule
+    reads it was left. One value is looked for in every transcript the run
+    read, and that costs a pass over them, not one per value."""
+
+    def test_mask_n_masks_the_copy_the_dry_run_never_reached(self):
+        root = _tempdir(self, "mask-n-")
+        project = os.path.join(root, "-Users-a-app")
+        _write(os.path.join(project, "sessB.jsonl"),
+               [_call(2, SCRIPT % PW, _stamp(3000)), _result(2, "ok", _stamp(3000))], 3000)
+        _write(os.path.join(project, "sessA.jsonl"),
+               [_call(1, "cat .env", _stamp(2000)),
+                _result(1, "DB_PASSWORD=%s\n" % PW, _stamp(2000))], 2000)
+        known = {}
+        with mock.patch.object(clean, "_CROSS_SEARCH_CHARS", 0):
+            findings, scanned, _ = clean.scan(root=root, known=known)
+        order = [f["fingerprint"] for f in clean._numbered(findings)]
+        n = order.index(clean._fingerprint(PW)) + 1
+        replies = iter(("mask %d" % n, "quit"))
+        out = io.StringIO()
+        with mock.patch("builtins.input", lambda prompt="": next(replies)):
+            changed = clean.review(findings, scanned, stream=out, values=known,
+                                   paths=clean.discover(root))
+        self.assertEqual(changed, 2)
+        self.assertEqual(_decoded_copies(root, PW), 0)
+        self.assertIn("masked in 2 file(s)", out.getvalue())
+
+    def test_and_in_the_transcript_it_was_read_in(self):
+        """In its own transcript the search for copies asked every value
+        found there, longest first, and seventy longer keys spent its budget
+        before the one being masked."""
+        root = _tempdir(self, "mask-n-same-")
+        keys = "".join("SERVICE_%d_API_KEY=%s\n" % (i, ("Zx8Qm4Lp9Vb2Rt7Kc3Wn%02dQm4Lp9Vb2Rt7"
+                                                         "Kc3W" % i)) for i in range(70))
+        rows = [_call(1, "cat .env", _stamp(2000)),
+                _result(1, keys + "DB_PASSWORD=%s\n" % PW, _stamp(2000)),
+                _call(2, SCRIPT % PW, _stamp(2000)), _result(2, "ok", _stamp(2000))]
+        path = os.path.join(root, "-Users-a-app", "sess.jsonl")
+        _write(path, rows, 2000)
+        known = {}
+        with mock.patch.object(clean, "_COPY_SEARCH_CHARS", 8 * os.path.getsize(path)):
+            findings, scanned, _ = clean.scan(root=root, known=known)
+            order = [f["fingerprint"] for f in clean._numbered(findings)]
+            replies = iter(("mask %d" % (order.index(clean._fingerprint(PW)) + 1), "quit"))
+            with mock.patch("builtins.input", lambda prompt="": next(replies)):
+                clean.review(findings, scanned, stream=io.StringIO(), values=known,
+                             paths=clean.discover(root))
+        self.assertEqual(_decoded_copies(root, PW), 0)
+
+    def test_the_cli_hands_the_review_what_it_read(self):
+        root = _read_then_typed(self, SCRIPT, 2000, 3000)
+        replies = iter(("mask 1", "quit"))
+        with mock.patch("builtins.input", lambda prompt="": next(replies)), \
+             mock.patch("sys.stdin.isatty", return_value=True), \
+             mock.patch.object(clean, "_CROSS_SEARCH_CHARS", 0), \
+             mock.patch.object(clean, "_mask", wraps=clean._mask) as masked:
+            _cli(["clean", "--root", root])
+        self.assertEqual(sorted(masked.call_args.kwargs["paths"]),
+                         sorted(clean.discover(root)))
+
+
 class ALongHistory(_Reports):
     """The newest transcript is long, and the session that read the
     password read many keys with it: the search of other transcripts ran
