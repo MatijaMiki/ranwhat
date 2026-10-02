@@ -11,19 +11,30 @@ printed values that clean finds and check masked.
 So each transcript's values are kept in an index, one per transcript root,
 under ranwhat's state directory (RANWHAT_HOME, ~/.ranwhat by default), and a
 transcript is read again only when its size or modification time changes.
-The index holds no value and no piece of one. For each it keeps a keyed
-BLAKE2b of its first PREFIX characters, its length, a keyed BLAKE2b of the
-whole value, and a keyed BLAKE2b of the fingerprint its mask keeps, so a
-value clean has masked is still known by the mask; clean adds each value
-it masks. The key is 32 random bytes per install, in a file of its own
-beside the index. Both are written 0600, never through a symlink, and
-replaced whole. A damaged index, or one of another version or key, is
-rebuilt; deleting it is safe. Where nothing can be written, it is built in
-memory each run.
+check's own read for secrets (clean.scan) hands the index what it finds, so
+a transcript in its window is read for them once, not twice.
+
+The index holds no value. For each it keeps 16 bits of a keyed BLAKE2b of
+its first PREFIX characters (a tag a great many beginnings share, so it
+tells whoever holds the key no more than 16 bits of them), its length, a
+keyed BLAKE2b of the whole value, and a keyed BLAKE2b of the fingerprint its
+mask keeps, so a value clean has masked is still known by the mask; clean
+adds each value before it masks one. The key is 32 random bytes per install,
+in a file of its own beside the index. Both are written 0600, never through
+a symlink, and replaced whole. A damaged index, or one of another version or
+key, is rebuilt. Where nothing can be written, it is built in memory each
+run.
+
+What a lost index knew of a value clean has masked is lost with it: the
+transcripts keep only the mask's fingerprint, 48 bits of an unkeyed SHA-256
+with no length. A copy the mask did not reach is then found by that
+fingerprint, where a piece of what check and watch print is all of it, and
+in what an action shows, every stretch of up to Matcher._STRETCH_LONGEST
+characters, within a budget.
 
 Text is masked by looking at every place a value could start: the PREFIX
-characters there are hashed, and each value whose first characters hash so
-is compared whole.
+characters there are hashed, and each value whose tag they have is
+compared whole.
 """
 
 from __future__ import annotations
@@ -37,16 +48,22 @@ import stat
 from . import clean
 from .watch import _transcripts, claude_projects
 
-VERSION = 1
+# 2: 16 bits of the head hash, not 64. An index of version 1 is read, its
+# head hashes cut to that, and written again.
+VERSION = 2
 # A value clean returns is never shorter than this (clean._MIN_ASSIGNED),
 # so its first PREFIX characters are always its own. A shorter one is
 # looked for by all of it.
 PREFIX = min(6, clean._MIN_ASSIGNED)
 
 _HEAD_SIZE, _VALUE_SIZE, _MASK_SIZE, _KEY_ID_SIZE = 8, 16, 16, 8
+# What is kept of the head hash. With the key, the whole 64 bits of it let
+# anyone find the first six characters on their own, and then the rest:
+# two small searches instead of one large one. 16 bits are shared by a
+# great many beginnings, and save such a search no more than 16 bits;
+# every place a tag leads to is confirmed by the hash of the whole value.
+_TAG_SIZE = 2
 _KEY_SIZE = 32
-_HEX = {n: re.compile("[0-9a-f]{%d}\\Z" % (2 * n))
-        for n in (_HEAD_SIZE, _VALUE_SIZE, _MASK_SIZE)}
 
 # O_NOFOLLOW: a symlink planted where the key or the index goes fails the
 # write rather than sending it elsewhere. O_BINARY: Windows would otherwise
@@ -74,7 +91,8 @@ def _hasher(key, person, size):
 
 class _Hashes(object):
     """The three keyed hashes, kept ready to copy: a copy of a keyed
-    state costs less than keying a new one, at every place in a text."""
+    state costs less than keying a new one, at every place in a text.
+    Of the head hash only its first _TAG_SIZE bytes are ever kept."""
 
     def __init__(self, key):
         self.head = _hasher(key, b"ranwhat:head", _HEAD_SIZE)
@@ -89,11 +107,11 @@ class _Hashes(object):
         return h.digest()
 
     def entry(self, value):
-        """(head, length, value, mask) for value: its hashes and length."""
+        """(tag, length, value, mask) for value: its hashes and length."""
         data = _bytes(value)
         head = _bytes(value[:PREFIX])
-        return (self._of(self.head, head), len(value), self._of(self.value, data),
-                self.of_mask(clean._fingerprint(value)))
+        return (self._of(self.head, head)[:_TAG_SIZE], len(value),
+                self._of(self.value, data), self.of_mask(clean._fingerprint(value)))
 
     def of_mask(self, fingerprint):
         return self._of(self.mask, fingerprint.encode("ascii", "replace"))
@@ -121,14 +139,20 @@ class Matcher(object):
     False when it knows none."""
 
     _CACHED = 64
-    # A value known only by its mask is looked for in a text no longer than
-    # this, as what check and watch print is: every piece of a long one
-    # (_pieces) is too many to hash.
-    _ORPHAN_TEXT = 1024
+    # A value known only by its mask is looked for, in what an action
+    # shows (merged with shown), in every stretch of each run between
+    # blanks and quotes from clean._MIN_ASSIGNED characters up to this
+    # many: one glued to letters or digits on both sides (old<VALUE>9) is
+    # no piece of anything else there. Up to this many stretches are
+    # hashed for it in all, about a second's worth; past it, and in all
+    # else, it is found where a piece of the text is all of it.
+    _STRETCH_LONGEST = 64
+    _STRETCHES = 1 << 20
+    _RUNS_CACHED = 4096
 
     def __init__(self, hashes, entries, orphans=()):
         self._hashes = hashes
-        # PREFIX, or a shorter length -> {head: {length: value hashes}}.
+        # PREFIX, or a shorter length -> {tag: {length: value hashes}}.
         # By length, so a thousand keys that start alike (sk_live_...) cost
         # a hash for each length they have where one may start, not one
         # for each key.
@@ -144,10 +168,11 @@ class Matcher(object):
                 # The longest first.
                 heads[head] = sorted(lengths.items(), reverse=True)
         # Masks no known value took the place of: masked before the index
-        # knew it. Such a value is known by its mask's fingerprint alone,
-        # so only where a piece of the text is all of it.
+        # knew it. Such a value is known by its mask's fingerprint alone.
         self._orphans = frozenset(orphans)
         self._cache = {}
+        self._runs = {}             # a run -> where in it a stretch is one
+        self._stretches = self._STRETCHES
 
     @classmethod
     def of(cls, values, key=None):
@@ -172,13 +197,14 @@ class Matcher(object):
         data = _bytes(text)
         plain = len(data) == len(text)         # ASCII: a character is a byte
         n = len(text)
+        tag = _TAG_SIZE
         head_of, value_of = self._hashes.head.copy, self._hashes.value.copy
         for size, heads in self._heads.items():
             get = heads.get
             for i in range(n - size + 1):
                 h = head_of()
                 h.update(data[i:i + size] if plain else _bytes(text[i:i + size]))
-                candidates = get(h.digest())
+                candidates = get(h.digest()[:tag])
                 if not candidates:
                     continue
                 for length, values in candidates:
@@ -188,7 +214,7 @@ class Matcher(object):
                     h.update(data[i:i + length] if plain else _bytes(text[i:i + length]))
                     if h.digest() in values:
                         found.append((i, i + length))
-        if self._orphans and n <= self._ORPHAN_TEXT:
+        if self._orphans:
             found += self._orphan_spans(text)
         found.sort()
         if len(self._cache) >= self._CACHED:
@@ -197,6 +223,9 @@ class Matcher(object):
         return found
 
     def _orphan_spans(self, text):
+        """Where a piece of text (clean._pieces) is a value known by its
+        mask alone. The pieces of a text cost what it is long, so any text
+        is asked, however long: a command of many refspecs shown whole."""
         out = []
         for piece in clean._pieces(text, urls=True):
             if self._hashes.of_mask(clean._fingerprint(piece)) in self._orphans:
@@ -206,9 +235,67 @@ class Matcher(object):
                     at = text.find(piece, at + 1)
         return out
 
-    def merged(self, text, spans=()):
-        """The merged (start, end) of spans and every copy of a known value."""
+    def _stretch_spans(self, text, lo, hi):
+        """Where a stretch of a run in text[lo:hi] is a value known by its
+        mask alone, and of the runs it cuts at either end as far as such a
+        value can reach, while the budget lasts: a run that would take more
+        than is left is not asked."""
+        out = []
+        shortest, longest = clean._MIN_ASSIGNED, self._STRETCH_LONGEST
+        n = len(text)
+        while lo > 0 and longest > 1 and _in_run(text[lo - 1]):
+            lo, longest = lo - 1, longest - 1
+        longest = self._STRETCH_LONGEST
+        while hi < n and longest > 1 and _in_run(text[hi]):
+            hi, longest = hi + 1, longest - 1
+        for m in clean._EVIDENCE_RUN.finditer(text, lo, hi):
+            run = m.group()
+            if len(run) < shortest:
+                continue
+            found = self._runs.get(run)
+            if found is None:
+                cost = _stretches(len(run), shortest, self._STRETCH_LONGEST)
+                if cost > self._stretches:
+                    continue
+                self._stretches -= cost
+                found = self._stretches_in(run)
+                if len(self._runs) >= self._RUNS_CACHED:
+                    self._runs.clear()
+                self._runs[run] = found
+            at = m.start()
+            out += [(at + i, at + j) for i, j in found]
+        return out
+
+    def _stretches_in(self, run):
+        """(start, end) of each stretch of run that is a value known by its
+        mask alone. Each start is hashed once and extended a character at
+        a time, as clean._fingerprint encodes the value."""
+        shortest, longest = clean._MIN_ASSIGNED, self._STRETCH_LONGEST
+        try:
+            data = run.encode("ascii")
+            chars = [data[k:k + 1] for k in range(len(run))]
+        except UnicodeEncodeError:
+            chars = [c.encode("utf-8", "replace") for c in run]
+        of_mask, orphans, sha256 = self._hashes.of_mask, self._orphans, hashlib.sha256
+        n, found = len(run), []
+        for i in range(n - shortest + 1):
+            h = sha256(b"".join(chars[i:i + shortest - 1]))
+            for j in range(i + shortest, min(n, i + longest) + 1):
+                h.update(chars[j - 1])
+                if of_mask(h.copy().hexdigest()[:12]) in orphans:
+                    found.append((i, j))
+        return found
+
+    def merged(self, text, spans=(), shown=None):
+        """The merged (start, end) of spans and every copy of a known value.
+        `shown`, (start, end), is the part of text an action shows: there,
+        and in the runs it cuts, as far as such a value can reach, a value
+        known by its mask alone is looked for in every stretch too
+        (_stretch_spans), so that what is shown can be widened over one it
+        would cut and masked whole."""
         found = self.spans(text)
+        if shown is not None and self._orphans and text:
+            found = found + self._stretch_spans(text, *shown)
         if not found:
             return tuple(spans)
         return tuple(_merge(list(spans) + found))
@@ -223,6 +310,23 @@ class Matcher(object):
         if not spans:
             return text
         return clean.mask_for_display(text, _merge(spans))
+
+
+def _in_run(char):
+    """Whether char is in a run as clean._EVIDENCE_RUN finds one."""
+    return not (char.isspace() or char in "\"'`")
+
+
+def _stretches(n, shortest, longest):
+    """How many stretches of shortest to longest characters a run of n
+    has: what _stretches_in hashes for it."""
+    if n < shortest:
+        return 0
+    each = longest - shortest + 1
+    if n < longest:
+        m = n - shortest + 1
+        return m * (m + 1) // 2
+    return (n - longest + 1) * each + (each - 1) * each // 2
 
 
 def _write_new(path, data):
@@ -281,8 +385,11 @@ def _writable(where):
     return os.path.isdir(where) and os.access(where, os.W_OK | os.X_OK)
 
 
+_HEX = re.compile("[0-9a-f]*\\Z")
+
+
 def _hex(text, size):
-    if not (isinstance(text, str) and _HEX[size].match(text)):
+    if not (isinstance(text, str) and len(text) == 2 * size and _HEX.match(text)):
         raise ValueError("not a digest")
     return bytes.fromhex(text)
 
@@ -300,10 +407,12 @@ class Index(object):
         self._key = key
         self._stored = stored           # whether the key is on disk already
         self._hashes = _Hashes(key)
-        self.values = {}                # value hash -> (head, length, mask hash)
+        self.values = {}                # value hash -> (tag, length, mask hash)
         self.files = {}                 # path -> (size, mtime_ns, value hashes, masks)
         self.kept = True                # until a write fails: then in memory
         self.rescanned = 0
+        self._taken = {}                # path -> what clean found there (take)
+        self._migrated = False          # read from an older version: write it again
 
     @classmethod
     def open(cls, root=None):
@@ -331,15 +440,18 @@ class Index(object):
     def _load(self, doc):
         """Take doc as this index, or raise: one wrong part and it is all
         read again, as for none at all."""
-        if (doc["version"] != VERSION or doc["key"] != self._hashes.key_id
+        version = doc["version"]
+        if (version not in (1, VERSION) or doc["key"] != self._hashes.key_id
                 or doc["prefix"] != PREFIX):
             raise ValueError("another index")
+        # Version 1 kept the whole head hash: its tag is the start of it.
+        head_size = _HEAD_SIZE if version == 1 else _TAG_SIZE
         values = {}
         for value, entry in doc["values"].items():
             head, n, mask = entry
             if type(n) is not int or n < 1:
                 raise ValueError("a length")
-            values[_hex(value, _VALUE_SIZE)] = (_hex(head, _HEAD_SIZE), n,
+            values[_hex(value, _VALUE_SIZE)] = (_hex(head, head_size)[:_TAG_SIZE], n,
                                                 _hex(mask, _MASK_SIZE))
         files = {}
         for path, entry in doc["files"].items():
@@ -352,12 +464,29 @@ class Index(object):
                 raise ValueError("a value it does not hold")
             files[path] = (size, mtime, held, frozenset(_hex(m, _MASK_SIZE) for m in masks))
         self.values, self.files = values, files
+        self._migrated = version != VERSION
+
+    def take(self, path, st, values, fingerprints):
+        """What clean found reading the transcript at path: the values the
+        rules find there and the fingerprint each mask in it keeps, as
+        clean.values_in returns them. st is its os.stat from before it was
+        read. update keeps this in place of a read of its own while the
+        transcript is still that size and that age: one written to since
+        is read again, so nothing it gained in the meantime is missed."""
+        if not stat.S_ISREG(st.st_mode):
+            return
+        try:
+            real = os.path.realpath(path)
+        except OSError:
+            return
+        self._taken[real] = (st.st_size, st.st_mtime_ns, set(values), set(fingerprints))
 
     def update(self, progress=None):
         """Read again each transcript under the root that is new or has
-        changed since it was read, forget those gone, keep the index, and
-        return a Matcher for every value it knows. `progress` is called
-        with (index, total, path) before each one is read."""
+        changed since it was read, but for one clean has just read as it
+        is now (take), forget those gone, keep the index, and return a
+        Matcher for every value it knows. `progress` is called with
+        (index, total, path) before each one is read."""
         now = {}
         for path in _transcripts(self.root):
             try:
@@ -371,16 +500,23 @@ class Index(object):
                  if self.files.get(real, (None, None))[:2] != (size, mtime)]
         stale.sort(key=lambda real: now[real][1], reverse=True)     # newest first
         gone = [real for real in self.files if real not in now]
-        read = {}
-        for i, real in enumerate(stale, 1):
+        found = {}
+        for real in stale:
+            taken = self._taken.get(real)
+            if taken is not None and taken[:2] == now[real][:2]:
+                found[real] = taken[2:]
+        self._taken.clear()
+        unread = [real for real in stale if real not in found]
+        for i, real in enumerate(unread, 1):
             path = now[real][2]
             if progress:
-                progress(i, len(stale), path)
+                progress(i, len(unread), path)
             self.rescanned += 1
-            found = clean.values_in(path)
-            if found is None:
-                continue                # unreadable now: what it held is kept
-            values, fingerprints = found
+            got = clean.values_in(path)
+            if got is not None:         # unreadable now: what it held is kept
+                found[real] = got
+        read = {}
+        for real, (values, fingerprints) in found.items():
             held = set()
             for value in values:
                 head, n, full, mask = self._hashes.entry(value)
@@ -407,19 +543,25 @@ class Index(object):
             masks |= held_masks
         self.values = {full: e for full, e in self.values.items()
                        if full in used or e[2] in masks}
-        if read or gone:
+        if read or gone or self._migrated:
             self._save()
         return self.matcher()
 
     def remember(self, values):
-        """Keep values, which clean has just masked, by their fingerprints:
-        a transcript read again with a mask that took the place of one is
-        known to hold it, though nothing finds the value there any more.
-        One that no transcript holds is forgotten on the next update."""
+        """Keep values, which clean is about to mask, by their fingerprints,
+        before any transcript loses one: a transcript read again with a
+        mask that took the place of one is known to hold it, though nothing
+        finds the value there any more. Kept at once, so a session that
+        ends any way at all after the mask, or a check run meanwhile, still
+        knows it. One that no transcript holds is forgotten on the next
+        update. Nothing is written when each is known already."""
+        new = False
         for value in values:
             head, n, full, mask = self._hashes.entry(value)
+            new = new or full not in self.values
             self.values[full] = (head, n, mask)
-        self._save()
+        if new:
+            self._save()
 
     def matcher(self):
         known_masks = {mask for _head, _n, mask in self.values.values()}
@@ -446,5 +588,6 @@ class Index(object):
                          for path, (size, mtime, held, masks) in self.files.items()}}
         try:
             _write_new(self.path, json.dumps(doc, sort_keys=True).encode("utf-8"))
+            self._migrated = False
         except OSError:
             self.kept = False

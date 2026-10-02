@@ -584,33 +584,41 @@ def _mask_known(records, known):
                 hit["evidence"] = known.mask(hit.get("evidence") or "")
 
 
-def _known(args, step):
+def _known(args, step, index=None):
     """Every value clean finds in the transcripts under --root, in all of
     history whatever --days says, as a known.Matcher for masking what check
     and watch print: a password read in a session older than the window is
     no less a password where a command in it types it. The index keeps
     them between runs (known.py), so only a transcript new or changed since
-    the last run is read for them, with its own line of progress."""
-    index = known_mod.Index.open(args.root)
+    the last run is read for them, with its own line of progress, and not
+    one clean has just read for check (`index`, which took what it found)."""
+    index = index or known_mod.Index.open(args.root)
     return index.update(progress=step(_INDEXING_FIRST if index.first else _INDEXING))
 
 
-def _remember(args, values):
-    """Keep in the index each value clean found, once it has masked some
-    (known.Index.remember): a copy it did not reach, typed glued where no
-    rule reads it, is still known by the fingerprint the mask keeps, when
-    check or watch first index the history after it."""
-    if values:
-        known_mod.Index.open(args.root).remember(values.values())
+def _remembering(args):
+    """For clean: keeps in the index of --root each value it is about to
+    mask, before any transcript loses it (known.Index.remember). A copy
+    the mask does not reach, typed glued where no rule reads it, is still
+    known by the fingerprint the mask keeps, when check or watch next
+    index the history. Kept as each mask is made, not once clean returns:
+    a review ended by closing its terminal, or a check run while it was
+    still open, left the index knowing nothing of what it had masked."""
+    def remember(values):
+        known_mod.Index.open(args.root).remember(values)
+    return remember
 
 
 def _masked_strings(node, mask):
-    """node with every string in it, in lists, dicts, sets and tuples, put
-    through mask: what check and watch print or hand on as JSON."""
+    """node with every string in it, in lists, dicts (their keys too),
+    sets and tuples, put through mask: what check and watch print or
+    hand on as JSON. A transcript may give an id as an object, keyed by
+    whatever it holds."""
     if isinstance(node, str):
         return mask(node)
     if isinstance(node, dict):
-        return {k: _masked_strings(v, mask) for k, v in node.items()}
+        return {(mask(k) if isinstance(k, str) else k): _masked_strings(v, mask)
+                for k, v in node.items()}
     if isinstance(node, (list, tuple)):
         return type(node)(_masked_strings(v, mask) for v in node)
     if isinstance(node, (set, frozenset)):
@@ -633,14 +641,20 @@ def _check(args):
     bar, step = _progress_line(args)
     known = {}
     try:
-        everywhere = _known(args, step)
+        # clean's read for secrets first, handing the index what it finds
+        # in each transcript, so the index reads only those outside the
+        # window or changed since. Indexed first, every transcript was
+        # read for its secrets twice on a first run: 50 s on a history
+        # clean read in 24.
+        index = known_mod.Index.open(args.root)
+        findings, scanned, _ = clean_mod.scan(
+            root=args.root, since_days=args.days, apply=False,
+            progress=step(_SECRETS), known=known, read=index.take)
+        everywhere = _known(args, step, index)
         records, counts = watch_mod.scan_sources_counted(
             sources=watch_mod.SOURCES, root=args.root,
             state_dir=args.state_dir, since_days=args.days,
             progress=step(_ACTIONS), known=everywhere)
-        findings, scanned, _ = clean_mod.scan(
-            root=args.root, since_days=args.days, apply=False,
-            progress=step(_SECRETS), known=known)
         _mask_known(records, known)
         # Then every value clean finds anywhere, in all that is printed:
         # each action's evidence was masked as it was read, and this masks
@@ -1055,35 +1069,39 @@ def _main(argv=None):
     if args.command == "clean":
         bar, step = _progress_line(args)
         known = {}            # for the review: never written anywhere
+        remember = _remembering(args)
         try:
             findings, scanned, changed = clean_mod.scan(
                 root=args.root, since_days=args.days, apply=args.apply,
-                progress=step(_SECRETS), known=known)
+                progress=step(_SECRETS), known=known,
+                remember=remember if args.apply else None)
         finally:
             bar.clear()
         # Zero read is not "No secrets found": it is a wrong --root, a
         # fresh machine, or history kept somewhere else.
         places = None if scanned else watch_mod.locations(
             ("claude-code",), root=args.root)
-        if changed:
-            _remember(args, known)
+        # Every value found is masked in what clean prints, as check masks
+        # it: one may sit in another finding's key name, in the path
+        # another was read from, or in a transcript's name, and the report,
+        # --json and the review's show N printed it whole there.
+        shown = known_mod.Matcher.of(known.values()).mask if known else None
         if args.json:
-            print(_json_text({"scanned": scanned, "applied": args.apply,
-                              "changed": changed,
-                              "findings": [_finding_json(f)
-                                           for f in findings.values()]}))
+            doc = {"scanned": scanned, "applied": args.apply, "changed": changed,
+                   "findings": [_finding_json(f) for f in findings.values()]}
+            print(_json_text(_masked_strings(doc, shown) if shown else doc))
             return _said_nothing_read(places, args.days)
         if places is not None:
             print(_clean_nothing_read(args))
             return 2
-        print(clean_mod.render(findings, scanned, changed, args.apply))
+        print(clean_mod.render(findings, scanned, changed, args.apply, shown=shown))
         # The findings are already in memory; making someone re-scan a
         # large history just to act on what they read is wasteful.
         if (findings and not args.apply and not args.no_interactive
                 and sys.stdin.isatty()):
-            if clean_mod.review(findings, scanned, values=known,
-                                paths=clean_mod.discover(args.root, args.days)):
-                _remember(args, known)
+            clean_mod.review(findings, scanned, values=known,
+                             paths=clean_mod.discover(args.root, args.days),
+                             shown=shown, remember=remember)
         return 0
 
     if args.command == "watch":

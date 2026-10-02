@@ -262,7 +262,10 @@ def _evidence(text, span, before=20, after=70, known=None):
             break
     spans = _secret_spans(text)
     if known:
-        spans = known.merged(text, spans)
+        # What is about to be shown is asked too for a value known only by
+        # its mask, in every stretch, glued to letters or not, and in what
+        # the window would cut (known.Matcher).
+        spans = known.merged(text, spans, shown=(lo, hi))
     for s, e in spans:
         if s < lo < e:
             lo = s
@@ -1948,7 +1951,9 @@ def _masked(obj, depth=0, known=None):
     if isinstance(obj, (list, tuple)):
         return [_masked(o, depth + 1, known) for o in obj]
     if isinstance(obj, dict):
-        return {str(k): _masked(v, depth + 1, known) for k, v in obj.items()}
+        # Keys too: an input may be keyed by what it holds.
+        return {_masked(str(k), depth + 1, known): _masked(v, depth + 1, known)
+                for k, v in obj.items()}
     return obj
 
 

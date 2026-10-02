@@ -1780,10 +1780,14 @@ _EVIDENCE_EDGES = ".,;:!?()[]{}<>\u2026"
 # character but a letter, a digit or one of ._- (which values hold), as
 # smbclient -U admin%PASSWORD joins one to the user. The pieces between
 # two of them are asked too, for a value glued on at both ends, as long
-# as there are no more than this many: past it, only what starts or
-# ends at each.
+# as there are no more than this many: past it, only what starts at one
+# and runs to the end, or runs from the start to one, and no longer than
+# _GLUED_LONGEST. Each of those was as long as the rest of the stretch:
+# for a run of 64,000 characters with a + in every other one, a gigabyte
+# to hash, and check and watch ask about texts that long.
 _GLUE = re.compile(r"[^A-Za-z0-9._-]")
 _GLUE_PAIRED = 8
+_GLUED_LONGEST = 256
 
 
 def _glued(piece):
@@ -1794,7 +1798,9 @@ def _glued(piece):
         return ()
     starts, ends = [0] + [k + 1 for k in at], at + [len(piece)]
     if len(at) > _GLUE_PAIRED:
-        return [piece[k:] for k in starts] + [piece[:k] for k in ends]
+        n = len(piece)
+        return ([piece[k:] for k in starts if n - k <= _GLUED_LONGEST]
+                + [piece[:k] for k in ends if k <= _GLUED_LONGEST])
     return [piece[i:j] for i in starts for j in ends if j - i >= _MIN_ASSIGNED]
 
 
@@ -2241,7 +2247,8 @@ def _origin_for_line(obj, last_call, call_origins):
     return _GREP_LINE
 
 
-def scan_file(path, apply=False, only=None, known=None, extra=None):
+def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
+              remember=None):
     """Find (and optionally mask) secrets in one transcript.
 
     Returns (findings, changed). Each finding is a dict describing one
@@ -2255,6 +2262,13 @@ def scan_file(path, apply=False, only=None, known=None, extra=None):
     transcripts: each is counted and masked here like a copy, wherever it
     is. One found only that way has a finding with no label of its own;
     the caller holds the one it was found under.
+
+    `read`, once the whole transcript has been read, is called with what
+    values_in(path) would return for it: the values the rules find and
+    the fingerprint each mask in it keeps (for known.Index.take). Not
+    when it could not be read. `remember`, with apply, is called with the
+    values about to be masked before the transcript is rewritten (for
+    known.Index.remember).
     """
     findings = {}
     rewritten = []
@@ -2267,6 +2281,7 @@ def scan_file(path, apply=False, only=None, known=None, extra=None):
 
     values = {}                 # fingerprint -> the value it was taken of
     found = {}                  # fingerprint -> copies the rules found
+    masks = set()               # the fingerprint each mask here keeps
     # The project every finding here belongs to. Resolving a slug asks the
     # filesystem a hundred times, and asked once per finding a megabyte of
     # distinct key IDs took nine seconds.
@@ -2313,6 +2328,8 @@ def scan_file(path, apply=False, only=None, known=None, extra=None):
                 if not stripped:
                     rewritten.append(line)
                     continue
+                if read is not None and _MASK_MARK in stripped:
+                    masks.update(_MASKS.findall(stripped))
                 try:
                     obj = json.loads(stripped)
                 except (ValueError, RecursionError):
@@ -2332,6 +2349,8 @@ def scan_file(path, apply=False, only=None, known=None, extra=None):
                     rewritten.append(line)
     except OSError:
         return {}, False
+    if read is not None:
+        read(set(values.values()), masks)
 
     for fp, value in (extra or {}).items():
         if value and fp not in values:
@@ -2408,6 +2427,8 @@ def scan_file(path, apply=False, only=None, known=None, extra=None):
         known.update(values)
 
     if apply and changed:
+        if remember is not None:
+            remember([v for fp, v in values.items() if only is None or fp in only])
         _backup(path)
         tmp = path + ".ranwhat-tmp"
         try:
@@ -2544,7 +2565,7 @@ def _backup(path):
 
 
 def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
-         known=None, copies=True):
+         known=None, copies=True, read=None, remember=None):
     """Scan every transcript. Returns (merged_findings, files_scanned, files_changed).
 
     `progress` is called with (index, total, path) before each file. A large
@@ -2554,6 +2575,12 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
     With `copies`, a value the rules found in one transcript is also looked
     for in the others (_copies_in_other_transcripts), counted there, and
     with apply masked there. Only `known` is wanted without it.
+
+    `read` is called with (path, its os.stat from before it was read, the
+    values the rules find there, the fingerprints of its masks) for each
+    transcript read whole: check's index takes them (known.Index.take)
+    rather than read each transcript a second time. `remember`, with
+    apply, is given each value before a transcript loses it to a mask.
     """
     merged, scanned, changed_files = {}, 0, []
     values = {}
@@ -2562,12 +2589,23 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
         if progress:
             progress(index, len(paths), path)
         scanned += 1
-        findings, changed = scan_file(path, apply=apply, known=values)
+        took = None
+        if read is not None:
+            try:
+                st = os.stat(path)
+            except OSError:
+                st = None
+            if st is not None:
+                def took(found, masks, path=path, st=st):
+                    read(path, st, found, masks)
+        findings, changed = scan_file(path, apply=apply, known=values, read=took,
+                                      remember=remember)
         if changed:
             changed_files.append(path)
         _merge(merged, findings)
     if copies and merged:
-        _copies_in_other_transcripts(paths, merged, values, apply, changed_files)
+        _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
+                                     remember=remember)
     if known is not None:
         known.update(values)
     return merged, scanned, changed_files
@@ -2604,11 +2642,13 @@ _CROSS_LOOK = 256
 _SHAPE_LABELS = frozenset(name for _shape, name in _SHAPES_NAMED)
 
 
-def _copies_in_other_transcripts(paths, merged, values, apply, changed_files):
+def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
+                                 remember=None):
     """Count, and with apply mask, each value of `merged` in the transcripts
     of `paths` it was not found in. Each look costs what it reads, and a
     little more for asking at all, so a thousand small transcripts and ten
-    thousand values stop at the budget too."""
+    thousand values stop at the budget too. `remember` as scan_file takes
+    it."""
     order = sorted((fp for fp, f in merged.items()
                     if fp in values and f["label"] not in _SHAPE_LABELS),
                    key=lambda fp: (-len(values[fp]), fp))
@@ -2644,7 +2684,7 @@ def _copies_in_other_transcripts(paths, merged, values, apply, changed_files):
                 present[fp] = values[fp]
         if present:
             findings, changed = scan_file(path, apply=apply, only=set(present),
-                                          extra=present)
+                                          extra=present, remember=remember)
             if changed and path not in changed_files:
                 changed_files.append(path)
             _merge(merged, {fp: f for fp, f in findings.items() if f["count"]},
@@ -2720,7 +2760,7 @@ UNSEARCHED = ("OpenClaw history is not searched for secrets. Its %d "
 
 
 def render(findings, scanned, changed_files, applied, footer=True,
-           advice=True, unsearched=0):
+           advice=True, unsearched=0, shown=None):
     """check passes footer=False and advice=False: it prints one footer for
     all sections, and its own next step, since "Run with --apply" is wrong
     there. They gate only those lines; the rotation warning and every finding
@@ -2729,9 +2769,14 @@ def render(findings, scanned, changed_files, applied, footer=True,
 
     `unsearched` is how many OpenClaw databases check read for actions.
     Then "No secrets found" is said of the transcripts alone, and a line
-    says what was not searched."""
+    says what was not searched.
+
+    `shown`, when given, masks each label and path before it is printed:
+    a value found may sit in another finding's key name or in the path
+    another was read from (known.Matcher.mask)."""
     from .report import painters
     BOLD, DIM, RED, YEL, GRN, CYA = painters()
+    shown = shown or _as_it_is
 
     width = term.width()
     if len(_TITLE + _TAGLINE) <= width:
@@ -2757,14 +2802,15 @@ def render(findings, scanned, changed_files, applied, footer=True,
 
     for f in sorted(findings.values(), key=lambda x: -x["count"]):
         meta = "%s  %d chars  seen %dx" % (f["hint"], f["length"], f["count"])
-        if len("  * %s   %s" % (f["label"], meta)) <= width:
-            L.append("  " + RED("* ") + BOLD(f["label"]) + DIM("   " + meta))
+        label = shown(f["label"])
+        if len("  * %s   %s" % (label, meta)) <= width:
+            L.append("  " + RED("* ") + BOLD(label) + DIM("   " + meta))
         else:
-            L.append("  " + RED("* ") + BOLD(_fit(f["label"], width - 4)))
+            L.append("  " + RED("* ") + BOLD(_fit(label, width - 4)))
             L.append(DIM(_fit("      " + meta, width)))
-        for origin in sorted(f.get("origins") or [])[:2]:
+        for origin in sorted(map(shown, f.get("origins") or []))[:2]:
             L.append(DIM("      read from ") + CYA(_fit_path(origin, width - 16)))
-        projects = sorted(f.get("projects") or [])
+        projects = sorted(map(shown, f.get("projects") or []))
         for proj in projects[:2]:
             L.append(DIM("      in         %s" % _fit_path(proj, width - 17)))
         if len(projects) > 2:
@@ -2855,7 +2901,12 @@ def _numbered(findings):
     return sorted(findings.values(), key=lambda x: -x["count"])
 
 
-def review(findings, scanned, stream=None, values=None, paths=None):
+def _as_it_is(text):
+    return text
+
+
+def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
+           remember=None):
     """Interactive review of an already-completed scan. Returns the number of
     files changed. Every line fits the terminal, as in render().
 
@@ -2863,12 +2914,17 @@ def review(findings, scanned, stream=None, values=None, paths=None):
     mask reach the copies of a value in transcripts where the rules did
     not find it. Without them each is read back from where they did.
     `paths`, the transcripts the scan read, are where a mask looks for
-    them, past where the scan counted them (_mask)."""
+    them, past where the scan counted them (_mask). `shown` masks each
+    label and path before it is printed, as render's does. `remember` is
+    given the values of each mask before any transcript is rewritten
+    (known.Index.remember), so what a mask took the place of is known
+    however the session ends."""
     import sys as _sys
     from .report import BOLD, DIM, RED, GRN, YEL
 
     out = stream or _sys.stdout
     items = _numbered(findings)
+    shown = shown or _as_it_is
     changed_total = 0
 
     def _print(text=""):
@@ -2899,19 +2955,20 @@ def review(findings, scanned, stream=None, values=None, paths=None):
 
         if cmd == "list":
             lead = len("  %3d " % len(items))
-            pad = max((len(f["label"]) for f in items), default=0)
+            labels = [shown(f["label"]) for f in items]
+            pad = max(map(len, labels), default=0)
             rests = ["%s %d chars, seen %dx" % (f["hint"], f["length"], f["count"])
                      for f in items]
             # One column of labels when every row fits beside it. Otherwise
             # each row's details go on the line under its label.
             aligned = all(lead + pad + 1 + len(r) <= width for r in rests)
-            for i, f in enumerate(items, 1):
+            for i, (f, label) in enumerate(zip(items, labels), 1):
                 rest = DIM(f["hint"]) + " %d chars, seen %dx" % (f["length"], f["count"])
                 if aligned:
-                    _print("  %s %s %s" % (BOLD("%3d" % i), f["label"].ljust(pad), rest))
+                    _print("  %s %s %s" % (BOLD("%3d" % i), label.ljust(pad), rest))
                 else:
                     _print("  %s %s" % (BOLD("%3d" % i),
-                                        _fit(f["label"], width - lead)))
+                                        _fit(label, width - lead)))
                     _print(" " * lead + rest)
             _print()
             continue
@@ -2923,14 +2980,15 @@ def review(findings, scanned, stream=None, values=None, paths=None):
             for advice, group in sorted(groups.items()):
                 for line in term.wrap(advice, indent="    ", first="  "):
                     _print(_painted(line, BOLD))
-                pad = max(len(f["label"]) for f in group)
+                labels = [shown(f["label"]) for f in group]
+                pad = max(map(len, labels))
                 seen = ["seen %dx" % f["count"] for f in group]
                 aligned = all(6 + pad + 1 + len(s) <= width for s in seen)
-                for f, s in zip(group, seen):
+                for label, s in zip(labels, seen):
                     if aligned:
-                        _print(DIM("      %s %s" % (f["label"].ljust(pad), s)))
+                        _print(DIM("      %s %s" % (label.ljust(pad), s)))
                     else:
-                        _print(DIM("      " + _fit(f["label"], width - 6)))
+                        _print(DIM("      " + _fit(label, width - 6)))
                         _print(DIM("        " + s))
                 _print()
             continue
@@ -2938,7 +2996,7 @@ def review(findings, scanned, stream=None, values=None, paths=None):
         if cmd in ("show", "mask", "keep"):
             if cmd == "mask" and arg == "all":
                 changed_total += _mask(items, scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths)
+                                       values, paths=paths, remember=remember)
                 items = []
                 continue
             if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
@@ -2947,7 +3005,7 @@ def review(findings, scanned, stream=None, values=None, paths=None):
             target = items[int(arg) - 1]
 
             if cmd == "show":
-                _print("  " + BOLD(_fit(target["label"], width - 2)))
+                _print("  " + BOLD(_fit(shown(target["label"]), width - 2)))
                 _print(DIM("      looks like : %s" % target["hint"]))
                 _print(DIM("      length     : %d characters" % target["length"]))
                 _print(DIM("      occurrences: %d" % target["count"]))
@@ -2955,13 +3013,13 @@ def review(findings, scanned, stream=None, values=None, paths=None):
                                       indent=" " * 19,
                                       first="      rotate at  : "):
                     _print(DIM(line))
-                for origin in sorted(target.get("origins") or []):
+                for origin in sorted(map(shown, target.get("origins") or [])):
                     _print(DIM("      read from  : ")
                            + _fit_path(origin, width - 19))
-                for proj in sorted(target.get("projects") or []):
+                for proj in sorted(map(shown, target.get("projects") or [])):
                     _print(DIM("      project    : %s" % _fit_path(proj, width - 19)))
                 _print(DIM("      transcripts:"))
-                for path in sorted(target["files"]):
+                for path in sorted(map(shown, target["files"])):
                     _print(DIM("        %s" % _fit_path(path, width - 8, middle=True)))
                 _print()
             elif cmd == "keep":
@@ -2969,7 +3027,7 @@ def review(findings, scanned, stream=None, values=None, paths=None):
                 _print(DIM("  kept. %d left." % len(items)))
             else:
                 changed_total += _mask([target], scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths)
+                                       values, paths=paths, remember=remember)
                 items.remove(target)
             continue
 
@@ -2977,7 +3035,8 @@ def review(findings, scanned, stream=None, values=None, paths=None):
                + DIM("  (try 'help')"))
 
 
-def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None):
+def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
+          remember=None):
     """Re-walk only the files that hold these secrets, masking just them.
     A file may hold a copy the rules do not find there, typed with no key
     beside it, so each value goes with the walk (scan_file's extra): read
@@ -2987,7 +3046,10 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None):
     search ran out of budget, and mask N left a copy it never got to. So
     with `paths`, the transcripts the scan read, these values are looked
     for in all of them again (_copies_in_other_transcripts): one value
-    costs a pass over them, many share its budget."""
+    costs a pass over them, many share its budget.
+
+    `remember` is given the values once they are read back, before the
+    first transcript is rewritten."""
     wanted = {t["fingerprint"] for t in targets}
     everywhere = paths
     paths = set()
@@ -3001,6 +3063,8 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None):
         found = {}
         scan_file(path, known=found)
         known.update((fp, v) for fp, v in found.items() if fp in wanted)
+    if remember is not None and known:
+        remember(list(known.values()))
 
     changed = 0
     for path in paths:

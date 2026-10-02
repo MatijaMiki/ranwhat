@@ -250,7 +250,9 @@ class EvidenceShownWholeIsNotScannedAgain(unittest.TestCase):
         with mock.patch.object(clean, "_scan", counted):
             hits, _payload = watch.evaluate("Bash", {"command": command})
         self.assertEqual(hits[0]["evidence"], command)
-        self.assertEqual(counted.call_count, 1)
+        # Once for the command. The payload's keys are asked too, each once.
+        self.assertEqual([c for c in counted.call_args_list if c[0][0] == command],
+                         [mock.call(command)])
 
     def test_what_a_hint_stands_apart_from_is_still_read(self):
         """Once a value is masked, a second look reads what its hint now

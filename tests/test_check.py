@@ -1222,8 +1222,10 @@ class ProgressFromTheFirstTranscript(_Base):
     only for the search for secrets after. watch never showed one at all.
     Each pass now has its line from the first transcript, in words of its
     own, so a count going back to 1 reads as the next pass, not a restart,
-    and it is gone before anything is printed. The first is the index of
-    the values clean finds, which on a first run reads every transcript."""
+    and it is gone before anything is printed. watch's first is the index
+    of the values clean finds, which on a first run reads every transcript.
+    check's is its read for secrets, which the index takes in place of one
+    of its own for each transcript in the window."""
 
     INDEX = "\r  indexing secrets (first run) 1/1\033[K"
     ACTIONS = "\r  checking actions 1/1\033[K"
@@ -1241,12 +1243,9 @@ class ProgressFromTheFirstTranscript(_Base):
         self.assertIn("rm -rf ~/Documents/archive", out)
         return err.getvalue()
 
-    def test_check_counts_actions_then_secrets(self):
+    def test_check_counts_secrets_then_actions(self):
         err = self.stderr("check")
-        self.assertTrue(err.startswith(self.INDEX), repr(err))
-        self.assertLess(err.index(self.INDEX), err.index(self.ACTIONS))
-        self.assertLess(err.index(self.ACTIONS), err.index(self.SECRETS))
-        self.assertTrue(err.endswith("\r\033[K"), repr(err))
+        self.assertEqual(err, self.SECRETS + self.ACTIONS + "\r\033[K")
         self.assertNotIn("reading transcripts", err)
 
     def test_watch_has_a_line_too(self):
@@ -1538,12 +1537,13 @@ class RealTerminal(unittest.TestCase):
                 "--state-dir", st]
         for cols in (80, 40):
             raw = _pty_run(argv, {"TERM": "xterm", "NO_COLOR": ""}, cols)
-            # The index is read on the first run only: the second has
-            # nothing new to read for it.
-            self.assertEqual("indexing secrets (first run) 1/1" in raw, cols == 80)
-            self.assertIn("checking actions 1/1", raw)
+            # The index takes what the read for secrets found in the one
+            # transcript, on the first run and after: it reads none itself.
+            self.assertNotIn("indexing", raw)
             self.assertIn("looking for secrets 1/1", raw)
-            last = raw.rindex("looking for secrets")
+            self.assertIn("checking actions 1/1", raw)
+            self.assertLess(raw.index("looking for secrets"), raw.index("checking actions"))
+            last = raw.rindex("checking actions")
             self.assertIn("\r\033[K", raw[last:])
             self.assertNotIn(" " * 46, raw)
             rows = _screen(raw.replace("\r\n", "\n"), cols)
