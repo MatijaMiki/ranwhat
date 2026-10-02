@@ -1177,6 +1177,103 @@ class Rewrite(unittest.TestCase):
         self.assertEqual(json.loads(self._read(path)),
                          {"t": _marker(value), "b": [1, 2]})
 
+    # -- one pass, as replacing each form in turn did ---------------------
+
+    # Characters that overlap each other's forms (quotes, backslashes, a
+    # newline, non-ASCII, Go's escapes) and none of a marker's, so a value
+    # never meets a marker put in before it.
+    _ALPHABET = 'xyzXYZ"\\\n/é&_  '
+
+    def _random_case(self, rnd):
+        """(values, text): values short and long, some inside others or
+        sharing a prefix, and a text of their forms, byte lists and noise."""
+        def word(lo, hi):
+            return "".join(rnd.choice(self._ALPHABET)
+                           for _ in range(rnd.randint(lo, hi)))
+        values = [word(1, 40) for _ in range(rnd.randint(1, 5))]
+        for _ in range(rnd.randint(0, 3)):
+            v = rnd.choice(values)
+            values.append(rnd.choice([v[:rnd.randint(1, len(v))],
+                                      v + word(1, 9), word(1, 3) + v]))
+        pieces = []
+        for _ in range(rnd.randint(1, 30)):
+            v = rnd.choice(values)
+            pieces.append(rnd.choice(
+                [v, rnd.choice(_rewrite.encodings(v)), word(0, 12),
+                 "[%s]" % _rewrite._byte_list(v),
+                 "[1,%s,2]" % _rewrite._byte_list(v)]))
+        return values, "".join(pieces)
+
+    def test_one_pass_makes_what_replacing_each_form_in_turn_made(self):
+        import random
+        import re
+
+        def in_turn(text, plan, byte_arrays):
+            for value, marker in plan:
+                for form in _rewrite.encodings(value):
+                    text = text.replace(form, marker)
+                if byte_arrays:
+                    text = re.sub(r"(?<=[\[,])" + re.escape(_rewrite._byte_list(value))
+                                  + r"(?=[,\]])", _rewrite._byte_list(marker), text)
+            return text
+
+        def any_left(text, plan, byte_arrays):
+            return any(
+                any(form in text for form in _rewrite.encodings(value))
+                or (byte_arrays and re.search(
+                    r"(?<=[\[,])" + re.escape(_rewrite._byte_list(value))
+                    + r"(?=[,\]])", text) is not None)
+                for value, _m in plan)
+
+        rnd = random.Random(11)
+        for case in range(400):
+            values, text = self._random_case(rnd)
+            plan = _rewrite._plan(values)
+            for byte_arrays in (False, True):
+                with self.subTest(case=case, byte_arrays=byte_arrays):
+                    want = in_turn(text, plan, byte_arrays)
+                    self.assertEqual(_rewrite._replace_text(text, plan, byte_arrays),
+                                     want)
+                    for sample in (text, want, text[:len(text) // 2]):
+                        self.assertEqual(_rewrite._leftover(sample, plan, byte_arrays),
+                                         any_left(sample, plan, byte_arrays))
+
+    def test_strings_are_masked_as_masking_each_in_turn_did(self):
+        import random
+
+        def in_turn(node, plan, byte_arrays):
+            def one(text):
+                for value, marker in plan:
+                    text = text.replace(value, marker)
+                return text
+            if isinstance(node, str):
+                return one(node)
+            if isinstance(node, list):
+                if byte_arrays and _rewrite._is_byte_array(node):
+                    return list(_rewrite._utf8(one(
+                        bytes(node).decode("utf-8", "surrogateescape"))))
+                return [in_turn(v, plan, byte_arrays) for v in node]
+            if isinstance(node, tuple) and node[0] == "obj":
+                return ("obj", tuple((one(k), in_turn(v, plan, byte_arrays))
+                                     for k, v in node[1]))
+            if isinstance(node, tuple) and node[0] == "json":
+                return ("json", in_turn(node[1], plan, byte_arrays))
+            return node
+
+        rnd = random.Random(12)
+        for case in range(300):
+            values, text = self._random_case(rnd)
+            v = rnd.choice(values)
+            doc = {text: [text[::-1], 7, {"inner": json.dumps({v: [v, text]})}],
+                   "bytes": list(("pre " + v).encode("utf-8")), v: v + v}
+            node = _rewrite._expand(_rewrite._decode(json.dumps(doc)))
+            plan = _rewrite._plan(values)
+            for byte_arrays in (False, True):
+                with self.subTest(case=case, byte_arrays=byte_arrays):
+                    self.assertEqual(
+                        _rewrite._mask(node, _rewrite._Forms.raw(plan), byte_arrays),
+                        in_turn(node, plan, byte_arrays))
+
     # -- refusals -------------------------------------------------------
 
     def _refused(self, path, reason, **kwargs):

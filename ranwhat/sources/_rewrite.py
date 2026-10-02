@@ -17,13 +17,20 @@ Anything else refuses the file. A file written in the last QUIET_SECONDS is
 refused too: an agent appending to it would keep writing to the old inode
 after the replace, and lose everything it wrote. That is worse than the
 secret.
+
+The values found in a file grow with it, so nothing here asks each value
+of the whole file, or of every string in it: every form of every value is
+found in one pass over the text (_Forms), and the new text is built in
+one more. Searching the file once per form, and every string of every
+line once per value, was quadratic: a Codex rollout of 2,700 keys, a
+megabyte, took 3.9 seconds to mask, sixteen times what a quarter of it
+took.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import stat
 import time
 
@@ -100,13 +107,6 @@ def _byte_list(text):
     return ",".join(str(b) for b in _utf8(text))
 
 
-def _byte_pattern(value):
-    """The value's bytes as whole numbers inside a JSON integer list: the
-    match must start after [ or , and end before , or ]."""
-    return re.compile(r"(?<=[\[,])" + re.escape(_byte_list(value))
-                      + r"(?=[,\]])")
-
-
 def _marker(value):
     from .. import clean            # not at import: sources never import clean
     return clean.REDACTION % clean._fingerprint(value)
@@ -119,24 +119,220 @@ def _plan(values):
     return [(v, _marker(v)) for v in distinct]
 
 
-def _replace_text(text, plan, byte_arrays):
-    for value, marker in plan:
-        for form in encodings(value):
-            if form in text:
-                text = text.replace(form, marker)
-        if byte_arrays:
-            text = _byte_pattern(value).sub(_byte_list(marker), text)
-    return text
+# How _Forms finds its strings: (shortest, window, stride). A form at
+# least `shortest` long holds, wherever it starts, one of the windows of
+# the text that start every `stride` characters, a whole window of
+# `window` characters (window + stride - 1 <= shortest). So the text is
+# read one window every `stride` characters, each looked up among the
+# windows the forms hold at `stride` offsets in a row. A form shorter than
+# the last tier, which no rule of clean's finds (a password in a URL is at
+# least four characters), is looked for by itself.
+_TIERS = ((24, 12, 13), (12, 6, 7), (6, 3, 4), (4, 4, 1))
 
 
-def _leftover(text, plan, byte_arrays):
+class _Forms(object):
+    """Strings to replace, each with what replaces it and its rank, and
+    every place any of them occurs in a text, found in one pass over it
+    whatever their number.
+
+    A form's windows are taken where the other forms hold them least:
+    keys that share a prefix (sk-ant-api03-, a JWT's header) would
+    otherwise all be asked at every copy of it."""
+
+    def __init__(self, entries):
+        """entries: (form, replacement, rank, bounded) for each form; a
+        bounded one counts only between [ or , and , or ] (a byte list)."""
+        self.forms = []             # distinct forms
+        self.entries = []           # per form: [(rank, replacement, bounded)]
+        ids = {}
+        for form, replacement, rank, bounded in entries:
+            if not form:
+                continue
+            i = ids.get(form)
+            if i is None:
+                i = ids[form] = len(self.forms)
+                self.forms.append(form)
+                self.entries.append([])
+            self.entries[i].append((rank, replacement, bounded))
+        self.short = []             # form ids looked for by themselves
+        self.tiers = []             # (window, stride, {window: [(id, offset)]})
+        tiers = [[] for _ in _TIERS]
+        for i, form in enumerate(self.forms):
+            for t, (shortest, _window, _stride) in enumerate(_TIERS):
+                if len(form) >= shortest:
+                    tiers[t].append(i)
+                    break
+            else:
+                self.short.append(i)
+        for (_shortest, window, stride), ids in zip(_TIERS, tiers):
+            if ids:
+                self.tiers.append((window, stride,
+                                   self._index(ids, window, stride)))
+
+    @classmethod
+    def encoded(cls, plan, byte_arrays=False):
+        """Every encoding of every value in `plan`, [(value, marker)]
+        longest first, each replaced by the marker, ranked as replacing
+        each in turn would: value by value, and each value's forms longest
+        first, then its byte list."""
+        entries = []
+        for value, marker in plan:
+            for form in encodings(value):
+                entries.append((form, marker, len(entries), False))
+            if byte_arrays:
+                entries.append((_byte_list(value), _byte_list(marker),
+                                len(entries), True))
+        return cls(entries)
+
+    @classmethod
+    def raw(cls, plan):
+        """The values themselves, for the strings of decoded JSON."""
+        return cls([(value, marker, rank, False)
+                    for rank, (value, marker) in enumerate(plan)])
+
+    def _index(self, ids, window, stride):
+        shared = {}
+        for i in ids:
+            form = self.forms[i]
+            for key in {form[o:o + window]
+                        for o in range(len(form) - window + 1)}:
+                shared[key] = shared.get(key, 0) + 1
+        index = {}
+        for i in ids:
+            form = self.forms[i]
+            costs = [shared[form[o:o + window]]
+                     for o in range(len(form) - window + 1)]
+            # `stride` windows in a row, from the least shared start
+            total = best = sum(costs[:stride])
+            base = 0
+            for b in range(1, len(costs) - stride + 1):
+                total += costs[b + stride - 1] - costs[b - 1]
+                if total < best:
+                    best, base = total, b
+            for o in range(base, base + stride):
+                index.setdefault(form[o:o + window], []).append((i, o))
+        return index
+
+    def occurrences(self, text):
+        """(start, form id) for every place a form occurs in `text`,
+        overlapping ones too, in no particular order."""
+        found = []
+        forms = self.forms
+        for window, stride, index in self.tiers:
+            get = index.get
+            for i in range(0, len(text) - window + 1, stride):
+                hits = get(text[i:i + window])
+                if hits is not None:
+                    for fid, offset in hits:
+                        start = i - offset
+                        if start >= 0 and text.startswith(forms[fid], start):
+                            found.append((start, fid))
+        for fid in self.short:
+            form = forms[fid]
+            at = text.find(form)
+            while at != -1:
+                found.append((at, fid))
+                at = text.find(form, at + 1)
+        return found
+
+    def _candidates(self, text, found):
+        """(rank, start, end, replacement) for each entry of each place
+        found that may be replaced there."""
+        out = []
+        for start, fid in found:
+            end = start + len(self.forms[fid])
+            for rank, replacement, bounded in self.entries[fid]:
+                if bounded and not _between_items(text, start, end):
+                    continue
+                out.append((rank, start, end, replacement))
+        return out
+
+    def replace(self, text):
+        """`text` with every form replaced, as replacing each in turn, by
+        rank, would have it (_claims), built in one pass."""
+        candidates = self._candidates(text, self.occurrences(text))
+        if not candidates:
+            return text
+        return _apply(text, _claims(candidates, len(text)))
+
+    def occur_in(self, text):
+        """True when any form occurs in `text`."""
+        return bool(self._candidates(text, self.occurrences(text)))
+
+    def mask_each(self, texts):
+        """`texts` with every form replaced in each, one pass over all of
+        them together; `texts` itself when none holds any."""
+        joined = "\0".join(texts)
+        found = self.occurrences(joined)
+        if not found:
+            return texts
+        starts, at = [], 0
+        for text in texts:
+            starts.append(at)
+            at += len(text) + 1
+        per, k, last = {}, 0, len(starts) - 1
+        for start, fid in sorted(found):
+            while k < last and starts[k + 1] <= start:
+                k += 1
+            begin = start - starts[k]
+            end = begin + len(self.forms[fid])
+            if end > len(texts[k]):
+                continue            # across the join of two strings
+            for rank, replacement, _bounded in self.entries[fid]:
+                per.setdefault(k, []).append((rank, begin, end, replacement))
+        if not per:
+            return texts
+        out = list(texts)
+        for k, candidates in per.items():
+            out[k] = _apply(texts[k], _claims(candidates, len(texts[k])))
+        return out
+
+
+def _between_items(text, start, end):
+    """True when text[start:end] is whole items of a JSON integer list."""
+    return (start > 0 and text[start - 1] in "[,"
+            and end < len(text) and text[end] in ",]")
+
+
+def _claims(candidates, size):
+    """(start, end, replacement) for the candidates, (rank, start, end,
+    replacement), that replacing each rank in turn, left to right, would
+    make: each the first of its rank that overlaps no claim before it.
+    Sorted by start."""
+    by_start = sorted((c[1], c[2], c[0], c[3]) for c in candidates)
+    if all(a[1] <= b[0] for a, b in zip(by_start, by_start[1:])):
+        return [(start, end, rep) for start, end, _rank, rep in by_start]
+    taken = bytearray(size)
+    chosen = []
+    for rank, start, end, rep in sorted(candidates):
+        if taken.find(1, start, end) == -1:
+            taken[start:end] = b"\x01" * (end - start)
+            chosen.append((start, end, rep))
+    chosen.sort()
+    return chosen
+
+
+def _apply(text, claims):
+    out, at = [], 0
+    for start, end, rep in claims:
+        out.append(text[at:start])
+        out.append(rep)
+        at = end
+    out.append(text[at:])
+    return "".join(out)
+
+
+def _replace_text(text, plan, byte_arrays, forms=None):
+    """`text` with every encoding of every value in `plan` replaced by its
+    marker (and for a byte-array format, every byte list of one)."""
+    forms = forms or _Forms.encoded(plan, byte_arrays)
+    return forms.replace(text)
+
+
+def _leftover(text, plan, byte_arrays, forms=None):
     """True when any encoding of any value is still in `text`."""
-    for value, _marker_text in plan:
-        if any(form in text for form in encodings(value)):
-            return True
-        if byte_arrays and _byte_pattern(value).search(text):
-            return True
-    return False
+    forms = forms or _Forms.encoded(plan, byte_arrays)
+    return forms.occur_in(text)
 
 
 # Decoding for the check. Objects become ("obj", pairs) so key order and
@@ -175,67 +371,90 @@ def _expand(node, depth=0):
     return node
 
 
-def _mask_str(text, plan):
-    for value, marker in plan:
-        if value in text:
-            text = text.replace(value, marker)
-    return text
-
-
 def _is_byte_array(node):
     return bool(node) and all(type(v) is int and 0 <= v <= 255 for v in node)
 
 
-def _mask(node, plan, byte_arrays):
-    """The decoded structure with every value masked in every string, key
-    and nested JSON string (and, for byte-array formats, in every array of
-    bytes read as UTF-8)."""
+def _texts(node, byte_arrays, out):
+    """Every string, key and nested JSON string of a decoded structure
+    (and, for byte-array formats, every array of bytes read as UTF-8),
+    appended to `out` in the order _rebuild takes them back."""
     if isinstance(node, str):
-        return _mask_str(node, plan)
+        out.append(node)
+    elif isinstance(node, list):
+        if byte_arrays and _is_byte_array(node):
+            out.append(bytes(node).decode("utf-8", "surrogateescape"))
+        else:
+            for v in node:
+                _texts(v, byte_arrays, out)
+    elif isinstance(node, tuple) and node[0] == "obj":
+        for k, v in node[1]:
+            out.append(k)
+            _texts(v, byte_arrays, out)
+    elif isinstance(node, tuple) and node[0] == "json":
+        _texts(node[1], byte_arrays, out)
+    return out
+
+
+def _rebuild(node, byte_arrays, texts):
+    """The structure with each of its _texts taken, in turn, from the
+    iterator `texts`."""
+    if isinstance(node, str):
+        return next(texts)
     if isinstance(node, list):
         if byte_arrays and _is_byte_array(node):
-            text = bytes(node).decode("utf-8", "surrogateescape")
-            return list(_utf8(_mask_str(text, plan)))
-        return [_mask(v, plan, byte_arrays) for v in node]
+            return list(_utf8(next(texts)))
+        return [_rebuild(v, byte_arrays, texts) for v in node]
     if isinstance(node, tuple) and node[0] == "obj":
-        return ("obj", tuple((_mask_str(k, plan), _mask(v, plan, byte_arrays))
+        return ("obj", tuple((next(texts), _rebuild(v, byte_arrays, texts))
                              for k, v in node[1]))
     if isinstance(node, tuple) and node[0] == "json":
-        return ("json", _mask(node[1], plan, byte_arrays))
+        return ("json", _rebuild(node[1], byte_arrays, texts))
     return node
 
 
-def _same_but_masked(old, new, plan, byte_arrays):
+def _mask(node, raw, byte_arrays):
+    """The decoded structure with every value (_Forms.raw) masked in every
+    string, key and nested JSON string (and, for byte-array formats, in
+    every array of bytes read as UTF-8). The node itself when none holds
+    one."""
+    texts = _texts(node, byte_arrays, [])
+    masked = raw.mask_each(texts)
+    if masked is texts:
+        return node
+    return _rebuild(node, byte_arrays, iter(masked))
+
+
+def _same_but_masked(old, new, raw, byte_arrays, before=None):
     """True when `new` decodes to `old` decoded and masked. False when it
-    does not, when `new` does not decode, or when the check cannot run."""
+    does not, when `new` does not decode, or when the check cannot run.
+    `before`, when given, is `old` decoded already; `new` None is `old`
+    unchanged."""
     try:
-        before = _expand(_decode(old))
-        after = _expand(_decode(new))
-        return after == _mask(before, plan, byte_arrays)
+        if before is None:
+            before = _decode(old)
+        before = _expand(before)
+        after = before if new is None else _expand(_decode(new))
+        return after == _mask(before, raw, byte_arrays)
     except (ValueError, RecursionError):
         return False
 
 
-def _parses(text):
-    try:
-        _decode(text)
-        return True
-    except (ValueError, RecursionError):
-        return False
-
-
-def _verify(kind, old, new, plan, byte_arrays):
-    """True when `new` changes nothing in `old` but the secret."""
-    if _leftover(new, plan, byte_arrays):
+def _verify(kind, old, new, plan, byte_arrays, forms=None):
+    """True when `new` changes nothing in `old` but the secret. Each line
+    is decoded once, and the values looked for in all its strings at
+    once, so the check costs what reading the file does."""
+    if _leftover(new, plan, byte_arrays, forms):
         return False
     if kind == "json":
         return _same_but_masked(old.lstrip("\ufeff"), new.lstrip("\ufeff"),
-                                plan, byte_arrays)
+                                _Forms.raw(plan), byte_arrays)
     old_lines, new_lines = old.split("\n"), new.split("\n")
     if len(old_lines) != len(new_lines):
         return False
     if kind == "text":
         return True
+    raw = _Forms.raw(plan)
     for index, (was, now) in enumerate(zip(old_lines, new_lines)):
         if index == 0:
             was, now = was.lstrip("\ufeff"), now.lstrip("\ufeff")
@@ -249,9 +468,14 @@ def _verify(kind, old, new, plan, byte_arrays):
         # masked: an untouched line like that has nothing left to check.
         if was == now and "\\" not in was and not byte_arrays:
             continue
-        if not _parses(was):
+        try:
+            decoded = _decode(was)
+        except (ValueError, RecursionError):
             continue            # not JSON before: only the raw text changed
-        if not _same_but_masked(was, now, plan, byte_arrays):
+        # An untouched line with escapes may still hold a value in a form
+        # no encoding has: it is checked against itself, masked.
+        if not _same_but_masked(was, None if was == now else now, raw,
+                                byte_arrays, before=decoded):
             return False
     return True
 
@@ -307,12 +531,13 @@ def rewrite_file(path, values, kind, byte_arrays=False, now=None):
     with open(real, "rb") as fh:
         raw = fh.read()
     old = raw.decode("utf-8", "surrogateescape")
-    new = _replace_text(old, plan, byte_arrays)
+    forms = _Forms.encoded(plan, byte_arrays)
+    new = forms.replace(old)
     if new == old:
         return MaskResult(path)             # nothing to mask: a second run
     if (time.time() if now is None else now) - st0.st_mtime < QUIET_SECONDS:
         return MaskResult(path, skipped=IN_USE)
-    if not _verify(kind, old, new, plan, byte_arrays):
+    if not _verify(kind, old, new, plan, byte_arrays, forms):
         return MaskResult(path, skipped=ALTERED)
     from .. import clean
     backup = clean._backup(real)
