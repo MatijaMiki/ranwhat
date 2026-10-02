@@ -833,20 +833,24 @@ def _said_nothing_read(places, days):
     if places is None:
         return 0
     found = sum(p["found"] for p in places)
+    # A path is one word, and term.wrap gives a word longer than the line
+    # a line of its own, past the edge: each is cut to the line instead,
+    # in the middle, as the text report's "Looked in:" cuts it.
+    room = term.width() - 2
     if found:
         text = ("No transcripts from the last %s, so nothing was checked. "
                 "%d older transcript(s) found; pass a larger --days to read "
                 "them." % (watch_mod._days(days), found))
     else:
         where = " or ".join(
-            "%s (%s)" % (watch_mod._shown_path(p["path"], 4096),
+            "%s (%s)" % (watch_mod._shown_path(p["path"], room),
                          watch_mod._SOURCE_NAMES.get(p["source"], p["source"]))
             for p in places)
         inner = [p for p in places if p.get("projects")]
         point = ", and ".join(dict.fromkeys(
             _point_elsewhere(p["source"]) for p in places if p not in inner))
         text = "No transcripts found in %s, so nothing was checked." % where
-        text += "".join(" " + watch_mod.projects_hint(p) for p in inner)
+        text += "".join(" " + watch_mod.projects_hint(p, room) for p in inner)
         if point:
             text += " Point it elsewhere with %s." % point
     sys.stderr.write("\n".join(term.wrap(text)) + "\n")

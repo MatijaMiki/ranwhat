@@ -808,6 +808,34 @@ class NothingToRead(_Base):
             for line in err.rstrip("\n").split("\n"):
                 self.assertLessEqual(len(line), term.width(), line)
 
+    def test_a_long_path_on_stderr_is_cut_to_fit(self):
+        """An agent pointed at a long path by its own variable: --json's
+        line on stderr printed it whole, past the edge of the terminal.
+        It is cut in the middle to the line, as the text report cuts it,
+        so where it starts and where it ends both still show."""
+        deep = os.path.join(self.nowhere, *["a-rather-long-directory-name"] * 4)
+        env = {"CODEX_HOME": os.path.join(deep, "codex"),
+               "OPENCLAW_STATE_DIR": os.path.join(deep, "openclaw")}
+        for width in ("46", "60", "80"):
+            env["RANWHAT_WIDTH"] = width
+            with mock.patch.dict(os.environ, env):
+                limit = term.width()
+                for argv in (["check", "--json"], ["watch", "--json"],
+                             ["clean", "--json", "--no-interactive"]):
+                    for only in ([], ["--source", "codex"]):
+                        with self.subTest(width=width, argv=argv + only):
+                            rc, _, err = self.run_cli(argv + only
+                                                      + ["--root", self.ROOT])
+                            said = " ".join(err.split())
+                            self.assertEqual(rc, 2)
+                            self.assertIn("No transcripts found", said)
+                            for line in err.rstrip("\n").split("\n"):
+                                self.assertLessEqual(len(line), limit, line)
+                            if only:
+                                self.assertIn("…", said)
+                                self.assertIn("codex (Codex)", said)
+                                self.assertIn("--path codex=PATH", said)
+
     def test_history_older_than_the_window_points_at_days(self):
         old = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 60 * 86400))
         root, st = make_root([tool_use("rm -rf ~/Documents/a", 1, old)],
@@ -890,16 +918,26 @@ class TheRootIsTheProjectsDirectory(_Base):
                     self.assertIn("1 transcript", said)
 
     def test_json_says_so_on_stderr(self):
+        """Whole on a terminal wide enough for them, as the text report
+        says them (above); on a narrower one each path is cut to the line,
+        as there."""
         config, projects, st = self.config()
         for argv in (["check", "--json", "--root", config, "--state-dir", st],
                      ["watch", "--json", "--root", config, "--state-dir", st],
                      ["clean", "--json", "--no-interactive", "--root", config]):
-            with self.subTest(argv=argv[0]):
+            with self.subTest(argv=argv[0]), \
+                    mock.patch.dict(os.environ, {"RANWHAT_WIDTH": "400"}):
                 rc, _, err = self.run_cli(argv)
                 said = " ".join(err.split())
                 self.assertEqual(rc, 2)
                 self.assertIn("--root %s" % shown(projects), said)
                 self.assertIn("CLAUDE_CONFIG_DIR=%s" % shown(config), said)
+            with self.subTest(argv=argv[0], width=WIDTH):
+                rc, _, err = self.run_cli(argv)
+                self.assertEqual(rc, 2)
+                self.assertIn("--root", err)
+                for line in err.rstrip("\n").split("\n"):
+                    self.assertLessEqual(len(line), term.width(), line)
 
     def test_the_suggestion_reads_it(self):
         config, projects, st = self.config()
