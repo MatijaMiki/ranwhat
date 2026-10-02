@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import growth  # noqa: E402
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import watch  # noqa: E402
 from ranwhat.html_report import write_html
 from ranwhat.score import scan

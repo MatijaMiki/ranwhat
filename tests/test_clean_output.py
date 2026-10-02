@@ -19,6 +19,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import clean, term
 
 ANSI = re.compile(r"\033\[[0-9;]*m")

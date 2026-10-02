@@ -24,6 +24,8 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import clean, cli, watch
 
 HANG = 20

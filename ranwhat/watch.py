@@ -226,7 +226,7 @@ def _printable(text):
     return _CONTROL.sub(" ", text)
 
 
-def _evidence(text, span, before=20, after=70):
+def _evidence(text, span, before=20, after=70, known=None):
     """Evidence a human can judge. 'rm -rf' alone tells you nothing; you need
     to see what it was pointed at.
 
@@ -238,6 +238,10 @@ def _evidence(text, span, before=20, after=70):
     Secrets are masked by spans found in the whole text first. A window
     edge that falls inside a value would otherwise show the half it kept,
     which nothing looking at the window alone can recognise as a secret.
+    `known`, a known.Matcher, adds every copy of every value clean finds
+    anywhere in the history, wherever it starts: one typed glued to what
+    is around it (xY3PASSWORD4Kq) is shown by its hint, whole or not at
+    all, as one the rules find.
     """
     from . import clean
     start, end = span
@@ -257,6 +261,8 @@ def _evidence(text, span, before=20, after=70):
             hi = m.start()
             break
     spans = _secret_spans(text)
+    if known:
+        spans = known.merged(text, spans)
     for s, e in spans:
         if s < lo < e:
             lo = s
@@ -280,6 +286,8 @@ def _evidence(text, span, before=20, after=70):
     else:
         evidence = clean.mask_for_display(
             ("…" if lo > 0 else "") + snippet + ("…" if hi < len(text) else ""))
+    if known:
+        evidence = known.mask(evidence)
     if len(_MASKED_HERE) >= _MASKED_HERE_MAX:
         _MASKED_HERE.clear()
     _MASKED_HERE.add(evidence)
@@ -1926,29 +1934,35 @@ def _raw_strings(tool_input):
     return out
 
 
-def _masked(obj, depth=0):
+def _masked(obj, depth=0, known=None):
     from . import clean
     if isinstance(obj, str):
-        # The spans the rules found for this text already, when they did.
-        return clean.mask_for_display(obj, _secret_spans(obj))
+        # The spans the rules found for this text already, when they did,
+        # and with known every copy of a value clean finds anywhere.
+        spans = _secret_spans(obj)
+        if known:
+            spans = known.merged(obj, spans)
+        return clean.mask_for_display(obj, spans)
     if depth > 32:
         return "…"
     if isinstance(obj, (list, tuple)):
-        return [_masked(o, depth + 1) for o in obj]
+        return [_masked(o, depth + 1, known) for o in obj]
     if isinstance(obj, dict):
-        return {str(k): _masked(v, depth + 1) for k, v in obj.items()}
+        return {str(k): _masked(v, depth + 1, known) for k, v in obj.items()}
     return obj
 
 
-def _payload(tool_input):
+def _payload(tool_input, known=None):
     """The whole call as one string, for telling calls apart. The judged text
     cannot do it: it is empty for most tools, which made every Workflow call
     that leaked a key the same call.
 
     Credentials are masked first. Its hash is printed as payload_hash, and a
-    hash over a short password is a dictionary oracle for it."""
+    hash over a short password is a dictionary oracle for it: so with
+    known, a known.Matcher, every value clean finds anywhere is masked too,
+    a password typed where no rule reads one among them."""
     try:
-        return json.dumps(_masked(tool_input), sort_keys=True,
+        return json.dumps(_masked(tool_input, known=known), sort_keys=True,
                           ensure_ascii=False, default=str)
     except (TypeError, ValueError, RecursionError):
         return "unhashable"
@@ -1965,10 +1979,12 @@ MAX_SCAN_CHARS = 64000
 MAX_RAW_CHARS = 4 * MAX_SCAN_CHARS
 
 
-def evaluate(tool_name, tool_input):
+def evaluate(tool_name, tool_input, known=None):
     """Return (hits, payload) for one tool call: the rules it trips, and the
     whole input as masked text for telling flagged calls apart ("" when
-    nothing tripped, since then there is nothing to tell apart)."""
+    nothing tripped, since then there is nothing to tell apart). `known`,
+    a known.Matcher, is every value clean finds in the history, masked in
+    both wherever a copy starts."""
     shell = _shell_text(tool_name, tool_input)
     paths = _read_paths(tool_name, tool_input)
     raw = _raw_strings(tool_input)
@@ -2002,9 +2018,9 @@ def evaluate(tool_name, tool_input):
                     severity, why = severity
             hits.append({"rule": rule.id, "severity": severity,
                          "title": rule.title, "why": why,
-                         "evidence": _evidence(subject, span)})
+                         "evidence": _evidence(subject, span, known=known)})
             break
-    return hits, (_payload(tool_input) if hits else "")
+    return hits, (_payload(tool_input, known) if hits else "")
 
 
 # --------------------------------------------------------------------------
@@ -2048,8 +2064,9 @@ def transcript_place(path):
             os.path.splitext(os.path.basename(path))[0])
 
 
-def scan_transcript(path, source="claude-code"):
-    """Produce Action Records for one transcript."""
+def scan_transcript(path, source="claude-code", known=None):
+    """Produce Action Records for one transcript, with `known` masked in
+    them as evaluate masks it."""
     records = []
     project, session = transcript_place(path)
 
@@ -2061,7 +2078,7 @@ def scan_transcript(path, source="claude-code"):
             tool = "?"
         stamp = entry.get("timestamp")
         tool_input = block.get("input", {})
-        hits, payload = evaluate(tool, tool_input)
+        hits, payload = evaluate(tool, tool_input, known)
         if not hits:
             continue
         records.append({
@@ -2132,7 +2149,7 @@ def _in_window(record, cutoff):
     return when is None or when >= cutoff
 
 
-def scan_all(root=None, since_days=None, limit=None, progress=None):
+def scan_all(root=None, since_days=None, limit=None, progress=None, known=None):
     """Scan every transcript, reporting each distinct action once.
 
     The same tool call appears in more than one transcript -- resumed
@@ -2146,6 +2163,8 @@ def scan_all(root=None, since_days=None, limit=None, progress=None):
     `progress` is called with (index, total, path) before each transcript
     is read, as clean.scan calls it: reading a large history takes
     seconds, and a run that shows nothing for that long looks hung.
+
+    `known`, a known.Matcher, is masked in each record as evaluate masks it.
     """
     records, scanned, seen = [], 0, set()
     cutoff = _cutoff(since_days)
@@ -2157,7 +2176,7 @@ def scan_all(root=None, since_days=None, limit=None, progress=None):
         scanned += 1
         if progress:
             progress(scanned, total, path)
-        for record in scan_transcript(path):
+        for record in scan_transcript(path, known=known):
             if not _in_window(record, cutoff):
                 continue
             key = (record["tool_name"], record["payload_hash"],
@@ -2609,7 +2628,7 @@ def _warn(message):
     print("  warning: %s" % message, file=_sys.stderr)
 
 
-def scan_openclaw_db(path, source="openclaw"):
+def scan_openclaw_db(path, source="openclaw", known=None):
     conn, tmpdir = _open_readonly(path)
     if conn is None:
         _warn("could not open %s (permissions, or the agent holds it locked)"
@@ -2662,7 +2681,7 @@ def scan_openclaw_db(path, source="openclaw"):
                     for tool, tool_input in _find_tool_calls(payload):
                         if not isinstance(tool_input, dict):
                             tool_input = {"_value": tool_input}
-                        hits, payload = evaluate(tool, tool_input)
+                        hits, payload = evaluate(tool, tool_input, known)
                         if not hits:
                             continue
                         key = (tool, _hash(payload))
@@ -2689,14 +2708,15 @@ def scan_openclaw_db(path, source="openclaw"):
     return records
 
 
-def scan_openclaw(state_dir=None, since_days=None):
+def scan_openclaw(state_dir=None, since_days=None, known=None):
     """Every database is read whatever its mtime: a live agent's recent
     rows can sit in its -wal file while the database itself looks old.
     With since_days, each action is kept by its own time, as in scan_all."""
     records, cutoff = [], _cutoff(since_days)
     dbs = openclaw_databases(state_dir)
     for db in dbs:
-        records.extend(r for r in scan_openclaw_db(db) if _in_window(r, cutoff))
+        records.extend(r for r in scan_openclaw_db(db, known=known)
+                       if _in_window(r, cutoff))
     return records, len(dbs)
 
 
@@ -2705,20 +2725,21 @@ _SOURCE_NAMES = {"claude-code": "Claude Code", "openclaw": "OpenClaw"}
 
 
 def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
-                         since_days=None, progress=None):
+                         since_days=None, progress=None, known=None):
     """Scan every requested local agent source into one record stream.
 
     Returns (records, {source: how many it read}): Claude Code transcripts,
     OpenClaw databases. Zero read is not an all-clear: locations() says
-    whether there was anything to read at all. `progress` is scan_all's."""
+    whether there was anything to read at all. `progress` is scan_all's,
+    and `known` (a known.Matcher) is masked in every record."""
     records, counts = [], {}
     if "claude-code" in sources:
         recs, counts["claude-code"] = scan_all(root=root, since_days=since_days,
-                                               progress=progress)
+                                               progress=progress, known=known)
         records += recs
     if "openclaw" in sources:
         recs, counts["openclaw"] = scan_openclaw(state_dir=state_dir,
-                                                 since_days=since_days)
+                                                 since_days=since_days, known=known)
         records += recs
     records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
     return records, counts

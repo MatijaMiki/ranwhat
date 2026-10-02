@@ -1395,7 +1395,7 @@ _RETRIES_TO_ONE_END = 4
 _SEARCH_CHARS = 32 * MAX_STRING
 # The shortest value a key or a connection string gives (_ASSIGN takes
 # eight characters or more, and _is_placeholder calls any shorter one a
-# stand-in), and so the shortest stretch of one known_values looks for.
+# stand-in), and so the shortest value clean returns.
 _MIN_ASSIGNED = 8
 
 
@@ -1764,43 +1764,16 @@ class KnownValues(object):
         return text
 
 
-# watch masks in each action it shows every value clean finds in the
-# transcripts it read: a password read in one place (cat .env) and typed
-# in another where no rule reads one. Finding them all was a whole clean
-# pass, and made watch two to four times slower than main. Only a value
-# its evidence shows can need masking there, so each stretch of the
-# evidence that could be one is looked for in the transcripts, as JSON
-# writes it, and only the lines holding one are read and asked. A value is
-# found wherever a stretch of it shows: whole, after a flag (-pVALUE), or
-# between the separators a command puts around it (user:VALUE@host).
+# A value clean has masked everywhere it found it, before the index
+# (known.py) knew it, is known only by the fingerprint its mask keeps: a
+# copy typed where no rule reads it, past a copy budget, was left by every
+# mask step, and check and watch printed it whole. Such a copy is found
+# where a piece of what they show is all of it: a run between blanks and
+# quotes, the pieces between the separators a command puts around a value
+# (user:VALUE@host), after a flag (-pVALUE), or where one may be glued on.
 _EVIDENCE_RUN = re.compile(r"[^\s\"'`]+")
 _EVIDENCE_SEPARATORS = re.compile(r"[=:@/,;|&<>(){}\[\]]+")
 _EVIDENCE_EDGES = ".,;:!?()[]{}<>\u2026"
-# Which lines holding a stretch are read. Only the first 64 in each
-# transcript were, and a password typed in 70 calls before the .env read
-# that names it was never looked up: watch printed it whole. Now each is
-# read but where the stretch sits after the same characters as in a line
-# read for it already: a stretch in every line (a session's id) sits after
-# the same key each time, and a command typed again types it after the same
-# words. Past this many characters of lines read for one stretch, or this
-# many places looked at, no more are.
-_CONTEXT = 32
-_LINE_CHARS_PER_STRETCH = 4 * MAX_STRING
-_LOOKS_PER_STRETCH = 1 << 16
-# Each stretch looked for costs a pass over the transcripts read, so no
-# more are looked for than this many passes over a megabyte of them allow,
-# and never fewer than _STRETCHES_LEAST. The likeliest secrets go first:
-# what a generator draws, in mixed case with digits, before what reads as
-# an id (a UUID, a hex digest), which paths and commands are full of.
-_STRETCH_BUDGET = 256 * MAX_STRING
-_STRETCHES_LEAST = 8
-_HEXISH = frozenset("0123456789abcdefABCDEF-")
-
-
-def _likeliness(stretch):
-    classes = (any(c.islower() for c in stretch) + any(c.isupper() for c in stretch)
-               + any(c.isdigit() for c in stretch) + any(not c.isalnum() for c in stretch))
-    return (not _HEXISH.issuperset(stretch), classes, len(stretch), stretch)
 
 
 # Where else in a stretch a value may start or end: after or before any
@@ -1849,108 +1822,39 @@ def _pieces(text, urls=False):
     return out
 
 
-def _stretches(text):
-    """The stretches of text that could be, or be in, a value clean finds
-    (_pieces), to be looked for in the transcripts."""
-    return {piece for piece in _pieces(text)
-            if _is_secret_value("password", "", piece)}
+# A mask keeps the fingerprint of the value it took the place of.
+_MASK_MARK = "ranwhat:redacted:"
+_MASKS = re.compile(r"ranwhat:redacted:([0-9a-f]{12})")
 
 
-# A mask keeps the fingerprint of the value it took the place of. Past a
-# copy budget, a copy typed where no rule reads it was left by every mask
-# step, and once the copy the value was found by was masked, nothing knew
-# it: check and watch printed it whole. Each piece of what they show is
-# compared, by its fingerprint, with every mask in the transcripts.
-_MASK_MARK = b"ranwhat:redacted:"
-_MASKS = re.compile(rb"ranwhat:redacted:([0-9a-f]{12})")
+def values_in(path):
+    """(every value the rules find in the transcript at path, the
+    fingerprint each mask in it keeps), read as scan_file reads it and
+    never written: for the index check and watch keep of the values clean
+    finds (known.py). None when it cannot be read. A value scan_file
+    counts in a transcript it was not found in is found in another, so
+    the values of every transcript are every value clean finds."""
+    values, masks = set(), set()
 
-
-def known_values(texts, root=CLAUDE_PROJECTS, since_days=None, progress=None):
-    """{fingerprint: value} for each value clean finds in the transcripts
-    of root (since_days as scan takes it) that shows in any of texts, or
-    a stretch of which does. Never written anywhere: for mask_known.
-    check and watch ask every transcript, whatever their --days: a value
-    read before the window is still a secret where one in it shows it.
-    A value a mask took the place of is known by the mask's fingerprint,
-    whole, where texts show it. `progress` is called as scan calls it."""
-    texts = [t for t in texts if t]
-    looked, pieces = set(), set()
-    for text in texts:
-        looked |= _stretches(text)
-        pieces |= _pieces(text, urls=True)
-    if not pieces:
-        return {}
-    paths = discover(root, since_days)
-    size = 0
-    for path in paths:
-        try:
-            size += os.path.getsize(path)
-        except OSError:
-            pass
-    keep = max(_STRETCHES_LEAST, _STRETCH_BUDGET // max(1, size))
-    order = sorted(looked, key=_likeliness, reverse=True)[:keep]
-    # Looked for as the bytes JSON writes each as: a transcript is read
-    # whole and never decoded, but for the lines that hold one.
-    forms = [(stretch, tuple(form.encode("utf-8", "replace") for form in _written(stretch)))
-             for stretch in order]
-    shown = _JOIN.join(texts)
-    known, masks = {}, set()
-    seen = set()                    # (stretch, the characters before it)
-    spent = dict.fromkeys(order, 0)
-    looks = dict.fromkeys(order, 0)
-    for index, path in enumerate(paths, 1):
-        if progress:
-            progress(index, len(paths), path)
-        try:
-            with open(path, "rb") as fh:
-                content = fh.read()
-        except OSError:
-            continue
-        if _MASK_MARK in content:
-            masks.update(fp.decode("ascii") for fp in _MASKS.findall(content))
-        if _odd_escape_in(content):
-            content = _as_dumps(content.decode("utf-8", "replace")).encode(
-                "utf-8", "replace")
-        lines = {}                  # (start, end) of a line -> the stretches in it
-        for stretch, written in forms:
-            for form in written:
-                at, line = content.find(form), (0, -1)
-                while (at != -1 and spent[stretch] < _LINE_CHARS_PER_STRETCH
-                       and looks[stretch] < _LOOKS_PER_STRETCH):
-                    looks[stretch] += 1
-                    if at >= line[1]:
-                        end = content.find(b"\n", at)
-                        line = (content.rfind(b"\n", 0, at) + 1,
-                                len(content) if end == -1 else end)
-                    before = (stretch, content[max(line[0], at - _CONTEXT):at])
-                    if before in seen:
-                        at = content.find(form, at + len(form))
-                        continue
-                    seen.add(before)
-                    held = lines.setdefault(line, set())
-                    if stretch not in held:
-                        held.add(stretch)
-                        spent[stretch] += line[1] - line[0]
-                    # The whole line is read for it: on to the next.
-                    at = content.find(form, line[1])
-        for (start, end), held in sorted(lines.items()):
-            try:
-                node = json.loads(content[start:end].decode("utf-8", "replace"))
-            except (ValueError, RecursionError):
-                continue
-            for _container, _key, text in _strings(node):
-                inside = [stretch for stretch in held if stretch in text]
-                if not inside:
+    def collect(value, _label, _text, _copies):
+        values.add(value)
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace",
+                  newline="") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped:
                     continue
-                for value, _label in _scan(text, spans=False)[0]:
-                    if value in shown or any(stretch in value for stretch in inside):
-                        known[_fingerprint(value)] = value
-    if masks:
-        for piece in pieces:
-            fp = _fingerprint(piece)
-            if fp in masks:
-                known.setdefault(fp, piece)
-    return known
+                if _MASK_MARK in stripped:
+                    masks.update(_MASKS.findall(stripped))
+                try:
+                    obj = json.loads(stripped)
+                except (ValueError, RecursionError):
+                    continue          # not JSON, or deeper than it reads
+                _walk(obj, collect)
+    except OSError:
+        return None
+    return values, masks
 
 
 def mask_known(text, values):

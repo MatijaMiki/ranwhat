@@ -25,6 +25,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import clean, cli, term, watch
 
 try:
@@ -1220,11 +1222,12 @@ class ProgressFromTheFirstTranscript(_Base):
     only for the search for secrets after. watch never showed one at all.
     Each pass now has its line from the first transcript, in words of its
     own, so a count going back to 1 reads as the next pass, not a restart,
-    and it is gone before anything is printed."""
+    and it is gone before anything is printed. The first is the index of
+    the values clean finds, which on a first run reads every transcript."""
 
+    INDEX = "\r  indexing secrets (first run) 1/1\033[K"
     ACTIONS = "\r  checking actions 1/1\033[K"
     SECRETS = "\r  looking for secrets 1/1\033[K"
-    SHOWN = "\r  hiding secrets in the report 1/1\033[K"
 
     def stderr(self, *argv, **env):
         root, st = make_root(ACTION + SECRET)
@@ -1240,15 +1243,15 @@ class ProgressFromTheFirstTranscript(_Base):
 
     def test_check_counts_actions_then_secrets(self):
         err = self.stderr("check")
-        self.assertTrue(err.startswith(self.ACTIONS), repr(err))
+        self.assertTrue(err.startswith(self.INDEX), repr(err))
+        self.assertLess(err.index(self.INDEX), err.index(self.ACTIONS))
         self.assertLess(err.index(self.ACTIONS), err.index(self.SECRETS))
-        self.assertLess(err.index(self.SECRETS), err.index(self.SHOWN))
         self.assertTrue(err.endswith("\r\033[K"), repr(err))
         self.assertNotIn("reading transcripts", err)
 
     def test_watch_has_a_line_too(self):
         err = self.stderr("watch")
-        self.assertEqual(err, self.ACTIONS + self.SHOWN + "\r\033[K")
+        self.assertEqual(err, self.INDEX + self.ACTIONS + "\r\033[K")
 
     def test_never_in_json_on_a_pipe_or_a_dumb_terminal(self):
         for argv, env in ((["watch", "--json"], {}), (["check", "--json"], {}),
@@ -1535,9 +1538,12 @@ class RealTerminal(unittest.TestCase):
                 "--state-dir", st]
         for cols in (80, 40):
             raw = _pty_run(argv, {"TERM": "xterm", "NO_COLOR": ""}, cols)
+            # The index is read on the first run only: the second has
+            # nothing new to read for it.
+            self.assertEqual("indexing secrets (first run) 1/1" in raw, cols == 80)
             self.assertIn("checking actions 1/1", raw)
             self.assertIn("looking for secrets 1/1", raw)
-            last = raw.rindex("hiding secrets in the report")
+            last = raw.rindex("looking for secrets")
             self.assertIn("\r\033[K", raw[last:])
             self.assertNotIn(" " * 46, raw)
             rows = _screen(raw.replace("\r\n", "\n"), cols)
@@ -1552,8 +1558,9 @@ class RealTerminal(unittest.TestCase):
                 "--state-dir", st]
         for cols in (80, 40):
             raw = _pty_run(argv, {"TERM": "xterm", "NO_COLOR": ""}, cols)
+            self.assertEqual("indexing secrets (first run) 1/1" in raw, cols == 80)
             self.assertIn("checking actions 1/1", raw)
-            last = raw.rindex("hiding secrets in the report")
+            last = raw.rindex("checking actions")
             self.assertIn("\r\033[K", raw[last:])
             rows = _screen(raw.replace("\r\n", "\n"), cols)
             self.assertEqual(rows[0], "", rows[:3])

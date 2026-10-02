@@ -24,6 +24,7 @@ from .score import scan as _run_scan, ProfileError, _validate as _validate_profi
 from .report import render
 from . import watch as watch_mod
 from . import clean as clean_mod
+from . import known as known_mod
 from . import catalog as catalog_mod
 from . import term
 
@@ -583,23 +584,38 @@ def _mask_known(records, known):
                 hit["evidence"] = known.mask(hit.get("evidence") or "")
 
 
-def _found_by_clean(args, records, progress=None):
-    """The values clean finds in the transcripts that the actions show,
-    for masking them: {fingerprint: value}, never written anywhere.
-    watch --json printed whole the password check hid. Nothing is read
-    again when no action was found, or none in Claude Code's transcripts,
-    which are all clean searches, and only what the evidence shows is
-    looked for (clean.known_values): a whole clean pass made watch two to
-    four times slower than main.
+def _known(args, step):
+    """Every value clean finds in the transcripts under --root, in all of
+    history whatever --days says, as a known.Matcher for masking what check
+    and watch print: a password read in a session older than the window is
+    no less a password where a command in it types it. The index keeps
+    them between runs (known.py), so only a transcript new or changed since
+    the last run is read for them, with its own line of progress."""
+    index = known_mod.Index.open(args.root)
+    return index.update(progress=step(_INDEXING_FIRST if index.first else _INDEXING))
 
-    Looked for in every transcript, whatever --days says: a password read
-    in a session older than the window is no less a password when a
-    command in the window types it, and check and watch printed it whole."""
-    if not any(r.get("source") == "claude-code" and r.get("hits") for r in records):
-        return {}
-    return clean_mod.known_values(
-        [hit.get("evidence") for record in records for hit in record.get("hits", ())],
-        root=args.root, since_days=None, progress=progress)
+
+def _remember(args, values):
+    """Keep in the index each value clean found, once it has masked some
+    (known.Index.remember): a copy it did not reach, typed glued where no
+    rule reads it, is still known by the fingerprint the mask keeps, when
+    check or watch first index the history after it."""
+    if values:
+        known_mod.Index.open(args.root).remember(values.values())
+
+
+def _masked_strings(node, mask):
+    """node with every string in it, in lists, dicts, sets and tuples, put
+    through mask: what check and watch print or hand on as JSON."""
+    if isinstance(node, str):
+        return mask(node)
+    if isinstance(node, dict):
+        return {k: _masked_strings(v, mask) for k, v in node.items()}
+    if isinstance(node, (list, tuple)):
+        return type(node)(_masked_strings(v, mask) for v in node)
+    if isinstance(node, (set, frozenset)):
+        return type(node)(_masked_strings(v, mask) for v in node)
+    return node
 
 
 def _check(args):
@@ -617,17 +633,21 @@ def _check(args):
     bar, step = _progress_line(args)
     known = {}
     try:
+        everywhere = _known(args, step)
         records, counts = watch_mod.scan_sources_counted(
             sources=watch_mod.SOURCES, root=args.root,
             state_dir=args.state_dir, since_days=args.days,
-            progress=step(_ACTIONS))
+            progress=step(_ACTIONS), known=everywhere)
         findings, scanned, _ = clean_mod.scan(
             root=args.root, since_days=args.days, apply=False,
             progress=step(_SECRETS), known=known)
         _mask_known(records, known)
-        # What the window's clean pass found is masked; what the actions
-        # still show may be a value read before the window.
-        _mask_known(records, _found_by_clean(args, records, step(_SHOWN)))
+        # Then every value clean finds anywhere, in all that is printed:
+        # each action's evidence was masked as it was read, and this masks
+        # what else a record or a finding holds.
+        if everywhere:
+            records = _masked_strings(records, everywhere.mask)
+            findings = _masked_strings(findings, everywhere.mask)
     finally:
         bar.clear()
     sources = sum(counts.values())
@@ -803,12 +823,14 @@ def _clean_nothing_read(args):
 
 
 # What each pass over the transcripts says while it runs, the same words
-# for the same pass in every command: watch's read for actions, clean's
-# for secrets, and the look for the values the actions show. Each its own,
-# so a count going back to 1 reads as the next pass, not a restart.
+# for the same pass in every command: the read for the values clean finds,
+# kept in the index (on a first run every transcript, and later only those
+# new or changed), watch's read for actions, and clean's for secrets. Each
+# its own, so a count going back to 1 reads as the next pass, not a restart.
+_INDEXING = "indexing secrets"
+_INDEXING_FIRST = "indexing secrets (first run)"
 _ACTIONS = "checking actions"
 _SECRETS = "looking for secrets"
-_SHOWN = "hiding secrets in the report"
 
 
 def _progress_line(args):
@@ -1043,6 +1065,8 @@ def _main(argv=None):
         # fresh machine, or history kept somewhere else.
         places = None if scanned else watch_mod.locations(
             ("claude-code",), root=args.root)
+        if changed:
+            _remember(args, known)
         if args.json:
             print(_json_text({"scanned": scanned, "applied": args.apply,
                               "changed": changed,
@@ -1057,18 +1081,21 @@ def _main(argv=None):
         # large history just to act on what they read is wasteful.
         if (findings and not args.apply and not args.no_interactive
                 and sys.stdin.isatty()):
-            clean_mod.review(findings, scanned, values=known,
-                             paths=clean_mod.discover(args.root, args.days))
+            if clean_mod.review(findings, scanned, values=known,
+                                paths=clean_mod.discover(args.root, args.days)):
+                _remember(args, known)
         return 0
 
     if args.command == "watch":
         sources = args.source or watch_mod.SOURCES
         bar, step = _progress_line(args)
         try:
+            everywhere = _known(args, step)
             records, counts = watch_mod.scan_sources_counted(
                 sources=sources, root=args.root, state_dir=args.state_dir,
-                since_days=args.days, progress=step(_ACTIONS))
-            _mask_known(records, _found_by_clean(args, records, step(_SHOWN)))
+                since_days=args.days, progress=step(_ACTIONS), known=everywhere)
+            if everywhere:
+                records = _masked_strings(records, everywhere.mask)
         finally:
             bar.clear()
         n = sum(counts.values())

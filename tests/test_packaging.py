@@ -12,6 +12,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 import ranwhat
 
 

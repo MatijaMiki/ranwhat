@@ -140,6 +140,23 @@ ordinary config are left alone, and so are published documentation examples
 `AKIA1234567890ABCDEF`. Backups go to `~/.ranwhat/backups`, and the
 rewritten file is parsed back before it replaces the original.
 
+### The secrets index
+
+`check` and `watch` hide every secret `clean` finds anywhere in your
+history, whatever `--days` says, wherever a copy of one shows up. To know
+them without reading every transcript on every run, they keep an index in
+`~/.ranwhat/known/` (`$RANWHAT_HOME/known/` when that is set), one file per
+transcript directory, and read a transcript again only when its size or
+modification time changes. The first run reads them all, and says so.
+
+The index holds salted fingerprints, never a secret or any piece of one:
+for each, a keyed BLAKE2b hash of its first six characters, its length, and
+keyed hashes of the whole value and of the fingerprint its mask keeps. The
+key is random, made once per machine, and sits beside the index. Both
+files are readable by you alone. `clean` adds the secrets it masks, so a
+copy it missed stays hidden too. Deleting the directory is safe: the next
+run builds it again.
+
 ## Precision is the feature
 
 A watcher that cries wolf gets muted in a day, and a muted watcher records

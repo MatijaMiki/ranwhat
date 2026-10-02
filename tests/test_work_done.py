@@ -19,6 +19,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import clean, introspect, term, watch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -265,38 +267,6 @@ class EvidenceShownWholeIsNotScannedAgain(unittest.TestCase):
         self.assertTrue(hits)
         for hit in hits:
             self.assertNotIn("Hq7xT2mVp9LwZr4kNd", hit["evidence"])
-
-
-class WatchLooksForFewStretches(unittest.TestCase):
-    """2,240 deletions of URLs, each its own, made as many stretches, and
-    watch looked for each in every transcript, then asked each string of
-    every line for all of them: two seconds on a megabyte."""
-
-    def test_urls_are_no_stretch(self):
-        self.assertEqual(clean._stretches("curl -u admin:<ab…cd> https://h/LJA8sQ7zKp2"), set())
-
-    def test_the_likeliest_are_looked_for_within_a_budget(self):
-        rng = random.Random(20261002)
-        texts = ["rm -rf /srv/%s" % "".join(rng.choice(
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-            for _ in range(20)) for _i in range(500)]
-        texts.append("rm -rf /tmp/c3a3ee4e-247e-4e0b-b2f1-b43fecf4758f/x")
-        root = tempfile.mkdtemp(prefix="stretch-")
-        self.addCleanup(shutil.rmtree, root, True)
-        os.makedirs(os.path.join(root, "-a-app"))
-        with open(os.path.join(root, "-a-app", "s.jsonl"), "w", encoding="utf-8") as fh:
-            fh.write('{"type": "user", "message": {"content": "nothing here"}}\n')
-        asked = []
-        real = clean._written
-
-        def spy(value):
-            asked.append(value)
-            return real(value)
-        with mock.patch.object(clean, "_written", spy), \
-             mock.patch.object(clean, "_STRETCH_BUDGET", 0):
-            clean.known_values(texts, root=root)
-        self.assertEqual(len(asked), clean._STRETCHES_LEAST)
-        self.assertNotIn("c3a3ee4e-247e-4e0b-b2f1-b43fecf4758f", asked)
 
 
 class ReadingCommandsImportNoNetwork(unittest.TestCase):

@@ -20,7 +20,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ranwhat import clean, watch
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
+from ranwhat import clean, known, watch
 from ranwhat.clean import find_secrets
 
 PW = "Hq7xT2mVp9LwZr4kNd"
@@ -373,9 +375,10 @@ class GluedToWhatIsBeforeIt(_Reports):
                         self.assertIn(_MASKED, _shown(out))
 
     def test_each_place_a_value_can_start_or_end(self):
-        stretches = clean._stretches("./share.sh -U admin%%%s+x9 -c x" % PW)
-        self.assertIn(PW, stretches)
-        self.assertIn(PW + "+x9", stretches)
+        text = "./share.sh -U admin%%%s+x9 -c x" % PW
+        at = text.index(PW)
+        self.assertEqual(known.Matcher.of([PW, PW + "+x9"]).spans(text),
+                         [(at, at + len(PW)), (at, at + len(PW) + 3)])
 
 
 class TypedManyTimesBeforeTheRead(_Reports):
@@ -398,19 +401,6 @@ class TypedManyTimesBeforeTheRead(_Reports):
                     out = _cli(argv)
                     self.assertNotIn(PW, out)
                     self.assertIn(_MASKED, _shown(out))
-
-    def test_lines_that_read_alike_are_read_once(self):
-        """A stretch in every line, after the same words (a session's id),
-        is no secret's: its lines are not each decoded and asked."""
-        root = _tempdir(self, "alike-")
-        stretch = "Qz7mWx2KpL9vRt4N"
-        rows = [{"type": "user", "sessionId": stretch, "message": {"content": "line %d" % k}}
-                for k in range(3000)]
-        _write(os.path.join(root, "-Users-a-app", "sess.jsonl"), rows, 600)
-        decoded = mock.Mock(wraps=json.loads)
-        with mock.patch.object(clean.json, "loads", decoded):
-            self.assertEqual(clean.known_values(["rm -rf /srv/%s" % stretch], root=root), {})
-        self.assertLess(decoded.call_count, 10)
 
 
 def _escaped(value, how):
