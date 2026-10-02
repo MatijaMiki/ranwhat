@@ -256,7 +256,13 @@ class EndToEnd(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _run(self, *args):
-        env = dict(os.environ, HOME=self.home, NO_COLOR="1", PYTHONPATH=ROOT)
+        # Python writes to a pipe in the locale's encoding: cp1252 on
+        # Windows, where the report's "·" came back as byte 0xb7, the
+        # reader thread decoding it as UTF-8 died, and stdout was None.
+        # The child is told the encoding this reads, as in
+        # test_malformed_transcripts.
+        env = dict(os.environ, HOME=self.home, NO_COLOR="1", PYTHONPATH=ROOT,
+                   PYTHONIOENCODING="utf-8")
         env.pop("CLAUDE_CONFIG_DIR", None)
         p = subprocess.run([sys.executable, "-m", "ranwhat"] + list(args)
                            + ["--root", self.root, "--days", "3650"],
