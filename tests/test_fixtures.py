@@ -439,13 +439,13 @@ class StaysLinear(growth.Assertions, unittest.TestCase):
 
     def test_watch_on_a_command_full_of_fixtures(self):
         self.assertEqual(self.assertScalesLinearly(
-            lambda count: ("echo AKIA1234567890ABCDEF sk_" "live_51HxAbCdEfGhIjKlMnOpQr "
+            lambda count: ("echo AKIA" "1234567890ABCDEF sk_" "live_51HxAbCdEfGhIjKlMnOpQr "
                            * count(1200))[:64000],
             literal_hits), [])
 
     def test_clean_on_a_megabyte_of_fixtures(self):
         self.assertEqual(self.assertScalesLinearly(
-            lambda count: ("AKIA1234567890ABCDEF gh" "p_" + "Ab12" * 9 + "\n") * count(16000),
+            lambda count: ("AKIA" "1234567890ABCDEF gh" "p_" + "Ab12" * 9 + "\n") * count(16000),
             clean.find_secrets), [])
 
     def test_long_bodies_skip_statistics_and_stay_flagged(self):
