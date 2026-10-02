@@ -6,6 +6,7 @@ asking the terminal about colour for every line of a report, importing
 the network stack for commands that never use it, and reading a value
 as a call before asking whether it could be a secret at all.
 """
+import io
 import os
 import random
 import re
@@ -29,18 +30,36 @@ def _finding(i):
             "origins": {"api/.env"}, "projects": {"/x"}, "count": 1}
 
 
-class AReportAsksAboutColourOnce(unittest.TestCase):
+class _Terminal(io.StringIO):
+    def isatty(self):
+        return True
 
-    def _counted(self):
+
+class AReportAsksAboutColourOnce(unittest.TestCase):
+    """A report asks term about colour once, whatever the answer. painters()
+    kept the answer only when it was no: on a terminal each painted piece
+    asked again, 6,015 times for clean's report of a thousand findings and
+    5,008 for watch's. Every CI runner but Windows's, whose stdout is a
+    console, had answered no, so each render is drawn both ways here."""
+
+    def render(self, draw, terminal):
         counted = mock.Mock(wraps=term._colour_depth)
-        return counted, mock.patch.object(term, "_colour_depth", counted)
+        stdout = _Terminal() if terminal else io.StringIO()
+        with mock.patch.object(term, "_colour_depth", counted), \
+             mock.patch.dict(os.environ, {"TERM": "xterm"}), \
+             mock.patch("sys.stdout", stdout):
+            os.environ.pop("NO_COLOR", None)
+            text = draw()
+        # Asked, and answered as this stream would be.
+        self.assertEqual("\033[" in text, terminal)
+        return counted.call_count
 
     def test_clean_render(self):
         findings = {f["fingerprint"]: f for f in map(_finding, range(1000))}
-        counted, patch = self._counted()
-        with patch:
-            clean.render(findings, 3, 0, False)
-        self.assertLess(counted.call_count, 10)
+        for terminal in (True, False):
+            with self.subTest(terminal=terminal):
+                self.assertLess(self.render(
+                    lambda: clean.render(findings, 3, 0, False), terminal), 10)
 
     def test_watch_render(self):
         records = [{"source": "claude-code", "session": "s", "project": "-x",
@@ -51,10 +70,10 @@ class AReportAsksAboutColourOnce(unittest.TestCase):
                               "why": "Deletes files.",
                               "evidence": "rm -rf ~/Documents/p%d" % i}]}
                    for i in range(1000)]
-        counted, patch = self._counted()
-        with patch:
-            watch.render(records, 1, 30)
-        self.assertLess(counted.call_count, 10)
+        for terminal in (True, False):
+            with self.subTest(terminal=terminal):
+                self.assertLess(self.render(
+                    lambda: watch.render(records, 1, 30), terminal), 10)
 
 
 class AShapeIsLookedForOnlyWhereItsMarkIs(unittest.TestCase):

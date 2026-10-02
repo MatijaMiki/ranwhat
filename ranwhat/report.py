@@ -1,6 +1,8 @@
 """Terminal rendering."""
 from __future__ import annotations
 
+import functools
+
 from . import term
 from .catalog import AUTHORITY_RANK
 
@@ -27,9 +29,13 @@ def _plain(s):
 def painters():
     """BOLD, DIM, RED, YEL, GRN and CYA, as they paint stdout now. A report
     asks once: each line asking term again, a megabyte of findings asked
-    86,000 times, a tenth of a second spent on the answer it had."""
+    86,000 times, a tenth of a second spent on the answer it had. A yes is
+    kept as a no is: the painters handed out for one were BOLD and the rest,
+    which ask term again, so on a terminal a thousand findings still asked
+    six thousand times."""
     if term.colour():
-        return BOLD, DIM, RED, YEL, GRN, CYA
+        return tuple(functools.partial(term.sgr, code)
+                     for code in ("1", "2", "31", "33", "32", "36"))
     return (_plain,) * 6
 
 

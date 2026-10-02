@@ -71,11 +71,16 @@ def colour(stream=None):
     return _colour_depth(stream) > 0
 
 
+def sgr(code, s):
+    """`s` in SGR `code`, for a caller that has asked colour() already."""
+    return "\033[%sm%s\033[0m" % (code, s)
+
+
 def paint(code, s, stream=None):
     """`s` in SGR `code`, or `s` as it is where colour() says no."""
     if not colour(stream):
         return s
-    return "\033[%sm%s\033[0m" % (code, s)
+    return sgr(code, s)
 
 
 def brand(s, stream=None):
