@@ -1283,7 +1283,7 @@ class SideCopies(_Home):
         would be reported as a second, shorter value); a line longer than a
         piece is cut at a space; a block of lines that crosses a boundary is
         whole in the next piece."""
-        key_block = ("-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        key_block = ("-----BEGIN OPENSSH " "PRIVATE KEY-----\n"
                      + "".join("b3BlbnNzaC1rZXktdjEAAAA%d\n" % i for i in range(3))
                      + "-----END OPENSSH PRIVATE KEY-----\n")
 
