@@ -12,8 +12,9 @@ The database is opened read-only. It belongs to a running agent.
 
 Ported from watch with no change in what is read; watch keeps its names
 (openclaw_state_dir, openclaw_databases, scan_openclaw_db, _find_tool_calls,
-_as_iso) for these. It is not searched for secrets yet (searched = False):
-check says so under its report, as before.
+_as_iso) for these. clean searches it for secrets too (design 3.9's
+follow-up): every text cell of every table read for tool calls, through the
+same read-only open. It is never masked: a database is read only.
 
 Nothing here imports watch or clean at import time.
 """
@@ -28,7 +29,7 @@ import re
 import sqlite3
 
 from . import _paths, _sqlite, _stamps
-from .base import Source, Store, ToolCall, newest_first
+from .base import SecretText, Source, Store, ToolCall, newest_first
 
 ENV = "OPENCLAW_STATE_DIR"
 
@@ -47,6 +48,11 @@ def state_dir():
 # various framework wrappers).
 NAME_KEYS = ("name", "toolName", "tool_name", "tool", "function_name")
 ARG_KEYS = ("input", "arguments", "args", "params", "parameters", "toolInput")
+
+# What clean's report says of a database that holds a secret: why it is
+# left as it is, and what to do instead.
+WHY_READ_ONLY = ("OpenClaw keeps this in a database; delete the session in "
+                 "OpenClaw.")
 
 
 def databases(state_dir_=None):
@@ -186,7 +192,6 @@ class OpenClawSource(Source):
     env = (ENV,)
     path_means = ("an OpenClaw state directory, the one --state-dir takes "
                   "(default ~/.openclaw)")
-    searched = False
 
     def default_paths(self, env, home, platform):
         """$OPENCLAW_STATE_DIR when set, else ~/.openclaw: what state_dir()
@@ -203,7 +208,8 @@ class OpenClawSource(Source):
         except OSError:
             mtime = 0.0
         return Store(self.id, path, "sqlite", unit=self.unit,
-                     session=agent_id(path), mtime=mtime)
+                     session=agent_id(path), mtime=mtime,
+                     why_read_only=WHY_READ_ONLY)
 
     def stores(self, locations, since_days=None):
         """Every database, whatever its mtime: a live agent's recent rows
@@ -213,20 +219,19 @@ class OpenClawSource(Source):
             found += [self.store_at(path) for path in databases(loc.path)]
         return newest_first(found, since_days)
 
-    def tool_calls(self, store):
-        """Every tool call found by shape in a JSON text cell, in table and
-        row order, with the row's time (as_iso of its first time column
-        that reads as one). session is the agent, project the table. An
-        input that is not an object is {"_value": input}, as watch has
-        always judged it. A database that cannot be opened or read warns
-        and yields nothing; the copy a locked one is read from is removed."""
-        path = store.path
+    def _rows(self, path):
+        """(table, row number, its text columns, their cells, its time
+        cells) for every row of every table that has a text column, read
+        through a read-only open of the database (_sqlite.open_readonly),
+        from a cursor. A database that cannot be opened or read warns and
+        yields nothing, and a table whose rows cannot be selected is passed
+        over. The copy a locked one is read from is removed however the
+        reader stops."""
         conn, tmpdir = _sqlite.open_readonly(path)
         if conn is None:
             self.warn(path, "could not open %s (permissions, or the agent "
                             "holds it locked)" % path)
             return
-        agent = agent_id(path)
         try:
             try:
                 tables = [r[0] for r in conn.execute(
@@ -249,28 +254,73 @@ class OpenClawSource(Source):
                 except sqlite3.Error:
                     continue
                 n_text = len(cols)
-                for row in rows:
-                    stamp = next((as_iso(v) for v in row[n_text:]
-                                  if as_iso(v)), None)
-                    for cell in row[:n_text]:
-                        if not isinstance(cell, (str, bytes)):
-                            continue
-                        if isinstance(cell, bytes):
-                            try:
-                                cell = cell.decode("utf-8")
-                            except UnicodeDecodeError:
-                                continue
-                        if cell[:1] not in ("{", "["):
-                            continue
-                        try:
-                            payload = json.loads(cell)
-                        except ValueError:
-                            continue
-                        for tool, tool_input in find_tool_calls(payload):
-                            if not isinstance(tool_input, dict):
-                                tool_input = {"_value": tool_input}
-                            yield ToolCall(self.id, path, tool, tool_input,
-                                           session=agent, project=table,
-                                           timestamp=stamp)
+                for index, row in enumerate(rows, 1):
+                    yield table, index, cols, row[:n_text], row[n_text:]
         finally:
             _sqlite.close(conn, tmpdir)
+
+    def tool_calls(self, store):
+        """Every tool call found by shape in a JSON text cell, in table and
+        row order, with the row's time (as_iso of its first time column
+        that reads as one). session is the agent, project the table. An
+        input that is not an object is {"_value": input}, as watch has
+        always judged it. A database that cannot be opened or read warns
+        and yields nothing; the copy a locked one is read from is removed."""
+        path = store.path
+        agent = agent_id(path)
+        rows = self._rows(path)
+        try:
+            for table, _index, _cols, cells, stamps in rows:
+                stamp = next((as_iso(v) for v in stamps if as_iso(v)), None)
+                for cell in cells:
+                    if not isinstance(cell, (str, bytes)):
+                        continue
+                    if isinstance(cell, bytes):
+                        try:
+                            cell = cell.decode("utf-8")
+                        except UnicodeDecodeError:
+                            continue
+                    if cell[:1] not in ("{", "["):
+                        continue
+                    try:
+                        payload = json.loads(cell)
+                    except ValueError:
+                        continue
+                    for tool, tool_input in find_tool_calls(payload):
+                        if not isinstance(tool_input, dict):
+                            tool_input = {"_value": tool_input}
+                        yield ToolCall(self.id, path, tool, tool_input,
+                                       session=agent, project=table,
+                                       timestamp=stamp)
+        finally:
+            rows.close()
+
+    def secret_texts(self, store):
+        """Every text cell of every table tool_calls reads, in table and row
+        order: the JSON it holds, decoded, or else the text itself (a BLOB
+        read as UTF-8, any byte that is not UTF-8 kept as it is). "where"
+        is "<table> row <n>, <column>". The schema is not documented, so no
+        cell is known to be a call's output, and none names a file a value
+        was read out of. Never raises: a database that cannot be read
+        warns."""
+        rows = self._rows(store.path)
+        try:
+            for table, index, cols, cells, _stamps in rows:
+                for col, cell in zip(cols, cells):
+                    if isinstance(cell, bytes):
+                        cell = cell.decode("utf-8", "surrogateescape")
+                    if not isinstance(cell, str) or not cell:
+                        continue
+                    node = cell
+                    if cell[:1] in ("{", "["):
+                        try:
+                            node = json.loads(cell)
+                        except (ValueError, RecursionError):
+                            node = cell
+                    yield SecretText(node, where="%s row %d, %s"
+                                     % (table, index, col))
+        except Exception as e:      # never raise: say so and go on
+            self.warn(store.path, "stopped reading %s (%s: %s)"
+                      % (store.path, type(e).__name__, e))
+        finally:
+            rows.close()

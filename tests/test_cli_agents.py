@@ -780,7 +780,9 @@ class SourcesCommand(_Cli):
 
     def test_what_clean_does_with_each(self):
         by_id = {e["id"]: e for e in self.entries(*self.base_flags())}
-        self.assertEqual(by_id["openclaw"]["masking"], "not searched")
+        # OpenClaw was "not searched" until design 3.9's follow-up
+        self.assertNotIn("not searched", [e["masking"] for e in by_id.values()
+                                          if e["id"] is not None])
         self.assertEqual(by_id["claude-code"]["locations"][0],
                          {"path": os.path.abspath(self.claude), "how": "--root",
                           "exists": True, "found": 0})
@@ -790,7 +792,26 @@ class SourcesCommand(_Cli):
         self.assertIn("--source muse-code", text)
         self.assertIn("--source grok", text)
         self.assertIn("Cursor:", text)
-        self.assertIn("clean does not search it for secrets yet", text)
+        self.assertNotIn("clean does not search it", text)
+
+    def test_openclaw_is_searched_read_only(self):
+        import sqlite3
+        path = os.path.join(self.openclaw, "agents", "a1", "agent",
+                            "openclaw-agent.sqlite")
+        os.makedirs(os.path.dirname(path))
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE log (id TEXT, body TEXT, createdAt INTEGER)")
+        conn.commit()
+        conn.close()
+        [entry] = self.entries("--source", "openclaw", *self.base_flags())
+        self.assertEqual((entry["status"], entry["transcripts"],
+                          entry["read_only_files"], entry["masking"]),
+                         ("found", 1, 1, "read-only"))
+        rc, out, _ = self.run_cli("sources", "--source", "openclaw",
+                                  *self.base_flags())
+        text = " ".join(out.split())
+        self.assertIn("OpenClaw (openclaw): found, 1 database", text)
+        self.assertIn("clean reads it only; it never changes these files", text)
 
 
 class Review(_Cli):

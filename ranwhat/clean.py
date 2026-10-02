@@ -2746,7 +2746,6 @@ class Searched(object):
         self.changed = []           # files masked
         self.read_only = {}         # read-only file holding a finding -> Store
         self.skipped = {}           # file not masked -> (source id, why)
-        self.unsearched = 0         # OpenClaw databases, not searched yet
         self.stores = {}            # path -> Store, each adapter file searched
         self.values = {}            # fingerprint -> value
 
@@ -2905,9 +2904,9 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     """Find (and with apply mask) the secrets in every requested agent's
     history: a Searched.
 
-    Claude Code is read by scan, as before. OpenClaw is not searched yet:
-    its databases are counted in `unsearched`. Every other agent is read
-    through its adapter (scan_store), and a value found in one agent's
+    Claude Code is read by scan, as before. Every other agent is read
+    through its adapter (scan_store), OpenClaw's databases too, read only
+    (design 3.9's follow-up), and a value found in one agent's
     files is looked for in the others' (_copies_in_stores, and
     _copies_in_other_transcripts for Claude Code's). A finding also says
     which agents hold it ("sources"), in which files ("stores", {path: id})
@@ -2925,9 +2924,7 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     out = Searched()
     values = {}
     others = []
-    for source in agents.adapters(selected):
-        if not source.searched:
-            continue
+    for source in agents.searched(selected):
         _locations, stores = agents.discover(source, paths.get(source.id),
                                              since_days)
         if stores:                  # an agent not on this machine is not named
@@ -2965,9 +2962,6 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                 read(store.path, signed,
                      {values[fp] for fp in findings}, masks)
             _merge(out.findings, findings)
-    if "openclaw" in selected:
-        out.unsearched = len(_registry.get("openclaw").stores(
-            _registry.get("openclaw").locations(paths.get("openclaw"))))
 
     if out.findings and out.stores:
         _copies_in_stores(list(out.stores.values()), out.findings, values, by_id)
@@ -3100,23 +3094,14 @@ _ROTATE_WHY = ("They have been written to disk in plaintext and sat in a model "
               "leaking again. It does not make them safe.")
 
 
-# check reads OpenClaw for actions; nothing here reads it for secrets.
-UNSEARCHED = ("OpenClaw history is not searched for secrets. Its %d "
-              "database(s) were read for actions only.")
-
-
 def render(findings, scanned, changed_files, applied, footer=True,
-           advice=True, unsearched=0, shown=None, others=None, read_only=None,
+           advice=True, shown=None, others=None, read_only=None,
            skipped=None, notes=None):
     """check passes footer=False and advice=False: it prints one footer for
     all sections, and its own next step, since "Run with --apply" is wrong
     there. They gate only those lines; the rotation warning and every finding
     always print. Every line fits the terminal: prose is wrapped, a row too
     wide for one line puts its details on the next, and paths are cut.
-
-    `unsearched` is how many OpenClaw databases check read for actions.
-    Then "No secrets found" is said of the transcripts alone, and a line
-    says what was not searched.
 
     `shown`, when given, masks each label and path before it is printed:
     a value found may sit in another finding's key name or in the path
@@ -3148,13 +3133,9 @@ def render(findings, scanned, changed_files, applied, footer=True,
         count = sum(scanned.values()) if isinstance(scanned, dict) else scanned
         L += [DIM(term.rule("-")), "  %d transcript(s) scanned" % count, ""]
 
-    unread = [DIM(line) for line in term.wrap(UNSEARCHED % unsearched)] \
-        if unsearched else []
     notes = [DIM(line) for note in notes or () for line in term.wrap(note)]
     if not findings:
-        where = ("No secrets found in Claude Code transcripts." if not labelled
-                 else "No secrets found in what was read.")
-        L += ["  " + GRN(where if unsearched else "No secrets found.")] + unread
+        L += ["  " + GRN("No secrets found.")]
         if notes:
             L += [""] + notes
         return "\n".join(L + [""])
@@ -3191,8 +3172,6 @@ def render(findings, scanned, changed_files, applied, footer=True,
             L.append(DIM(_fit("      read only  %s, not masked (below)"
                               % _files(len(held)), width)))
     L.append("")
-    if unread:
-        L += unread + [""]
     if read_only:
         L += _read_only_lines(read_only, DIM, width) + [""]
 

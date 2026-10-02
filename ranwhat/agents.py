@@ -8,7 +8,8 @@ ones, and say here, in the same words, how much they read.
 
 Claude Code and OpenClaw keep the readers they had before the adapters
 (design 3.9): watch.scan_all, clean.scan and watch.scan_openclaw. Every
-other agent is read through its adapter.
+other agent is read through its adapter, and so is OpenClaw for secrets
+(searched()).
 
 Nothing here imports watch, clean or known: each of them imports this.
 """
@@ -32,6 +33,15 @@ def chosen(selected=None):
 def adapters(selected=None):
     """chosen(selected), without the two ported sources."""
     return [s for s in chosen(selected) if s.id not in PORTED]
+
+
+def searched(selected=None):
+    """The adapters clean searches for secrets through secret_texts, in
+    registry order: chosen(selected) that are searched, but Claude Code,
+    which clean.scan reads. OpenClaw is one of them (design 3.9's
+    follow-up), though watch reads its tool calls with its own reader."""
+    return [s for s in chosen(selected)
+            if s.searched and s.id != "claude-code"]
 
 
 # What discover found, kept for the length of one command (run()): check

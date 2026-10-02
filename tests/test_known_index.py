@@ -990,5 +990,89 @@ class TheIndexKeepsAShortTag(_Index):
         self.assertEqual([len(v[0]) for v in doc["values"].values()], [4])
 
 
+class OpenClawDatabasesAreIndexed(_Index):
+    """OpenClaw's databases were the one store the index did not read, so a
+    password clean finds in one was printed whole where a command typed it.
+    They are read like every other agent's store now (design 3.9's
+    follow-up), and read again when the database or its -wal changes: a
+    live agent's newest rows are in its -wal while the database itself
+    keeps its size and time."""
+
+    def database(self, rows):
+        """agents/a1/agent/openclaw-agent.sqlite under the state directory,
+        in WAL mode with its writer left open, as a running agent keeps it."""
+        import sqlite3
+        path = os.path.join(self.state, "agents", "a1", "agent",
+                            "openclaw-agent.sqlite")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path)
+        self.addCleanup(conn.close)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE log (id TEXT, body TEXT, createdAt INTEGER)")
+        conn.commit()
+        self.add(conn, rows)
+        return path, conn
+
+    def add(self, conn, rows):
+        for row in rows:
+            conn.execute("INSERT INTO log VALUES (?, ?, ?)", row)
+            conn.commit()
+        conn.execute("SELECT count(*) FROM log").fetchall()
+
+    def rows(self, i, value, age, key="DB_PASSWORD", typed=None):
+        when = int(time.time() - age)
+        out = [("%d" % i, json.dumps({"content": [{
+            "type": "tool_use", "name": "bash",
+            "input": {"command": "cat .env"}}]}), when),
+               ("%dr" % i, json.dumps({"content": [{
+                   "type": "tool_result", "content": "%s=%s\n" % (key, value)}]}),
+                when)]
+        if typed:
+            out.append(("%dt" % i, json.dumps({"content": [{
+                "type": "tool_use", "name": "bash",
+                "input": {"command": SCRIPT % (typed[0] + value + typed[1])}}]}),
+                when))
+        return out
+
+    def test_typed_in_the_same_database(self):
+        root, _project = self.root()
+        self.database(self.rows(1, PW, 2000, typed=GLUES[0]))
+        self.assertNeverShown(root, PW)
+
+    def test_typed_by_another_agent(self):
+        root, project = self.root()
+        self.database(self.rows(1, PW, 2000))
+        _write(os.path.join(project, "sessB.jsonl"), _typed(2, PW, 600), 600)
+        self.assertNeverShown(root, PW)
+
+    def test_a_row_in_its_wal_is_read_again(self):
+        root, project = self.root()
+        path, conn = self.database(self.rows(1, PW, 3000))
+        read = self.rescans()
+        _run(["watch", "--root", root, "--state-dir", self.state])
+        self.assertEqual(read, ["openclaw-agent.sqlite"])
+        del read[:]
+        st = os.stat(path)
+        self.add(conn, self.rows(2, PW2, 2000, key="API_TOKEN"))
+        self.assertEqual((os.stat(path).st_size, os.stat(path).st_mtime_ns),
+                         (st.st_size, st.st_mtime_ns))
+        _write(os.path.join(project, "sessB.jsonl"), _typed(3, PW2, 600, ("Q", "7")), 600)
+        self.assertNeverShown(root, PW2)
+        self.assertEqual(sorted(read), ["openclaw-agent.sqlite", "sessB.jsonl"])
+
+    def test_check_reads_it_once(self):
+        root, _project = self.root()
+        self.database(self.rows(1, PW, 3000, typed=GLUES[1]))
+        read = []
+        real = clean.scan_store
+
+        def counted(source, store, values):
+            read.append(os.path.basename(store.path))
+            return real(source, store, values)
+        with mock.patch.object(clean, "scan_store", counted):
+            _run(["check", "--root", root, "--state-dir", self.state])
+        self.assertEqual(read, ["openclaw-agent.sqlite"])
+
+
 if __name__ == "__main__":
     unittest.main()

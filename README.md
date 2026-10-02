@@ -65,7 +65,7 @@ moves the agent itself); one that is not on your machine is skipped.
 | Kimi CLI | `~/.kimi/sessions/<folder>/<session>/wire.jsonl` and `context*.jsonl` (`$KIMI_SHARE_DIR`) | JSONL |
 | Pi | `~/.pi/agent/sessions/--<cwd>--/*.jsonl` (`$PI_CODING_AGENT_DIR`) | JSONL |
 | Muse Code | `~/.local/share/muse/sessions/YYYY/MM/DD/<session>/session.jsonl` (`$XDG_DATA_HOME/muse`) | JSONL |
-| OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/*.sqlite` | SQLite |
+| OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/*.sqlite` | SQLite, read only |
 
 Meta Muse runs in Meta's cloud and keeps nothing on your machine, so there
 is nothing to read; Muse Code, Meta's coding CLI, is supported.
@@ -131,9 +131,10 @@ ranwhat clean --apply       # mask everything without asking
 
 `clean` searches every agent's history, and masks a value only in a file
 the agent lets it rewrite: a plain JSONL, JSON or text file nothing has
-written to in the last two minutes. Databases (Codex's thread index) and
-compressed files are read only: the report names each one that holds a
-secret and how to remove it in the agent instead.
+written to in the last two minutes. Databases (Codex's thread index,
+OpenClaw's agent databases) and compressed files are read only: the report
+names each one that holds a secret and how to remove it in the agent
+instead.
 
 Scanning a real history takes a while, so the session stays open on what it
 just found rather than making you re-scan to act on it:

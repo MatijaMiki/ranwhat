@@ -2341,9 +2341,9 @@ def _total(scanned):
 
 def _scanned_words(scanned):
     """What a scan read, in its own units. An OpenClaw database is one per
-    agent, not a transcript, and clean, which counts transcripts, reads
-    none: counted together, check said 2 where clean said 1. (A report
-    that read anything names each agent instead: _head.)"""
+    agent, not a transcript: counted as one, check said 2 transcripts where
+    clean, which then read no OpenClaw, said 1. (A report that read
+    anything names each agent instead: _head.)"""
     if not isinstance(scanned, dict):
         return "%d transcript(s)" % scanned
     transcripts, databases = scanned.get("claude-code", 0), scanned.get("openclaw", 0)

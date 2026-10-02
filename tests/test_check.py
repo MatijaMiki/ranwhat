@@ -805,9 +805,10 @@ class NothingToRead(_Base):
         self.assertNotAllClear(out)
         self.assertIn("No transcripts found", out)
         self.assertIn(self.ROOT, out)
-        for hint in ("--root", "CLAUDE_CONFIG_DIR"):
-            self.assertIn(hint, out)
-        self.assertNotIn("--state-dir", out)       # clean reads no OpenClaw
+        # clean searches OpenClaw too, and says where it looked for it
+        for hint in ("--root", "CLAUDE_CONFIG_DIR", "--state-dir",
+                     "OPENCLAW_STATE_DIR"):
+            self.assertIn(hint, " ".join(out.split()))
 
     def test_clean_apply_with_nothing_to_read_exits_2(self):
         with mock.patch.object(clean, "scan", lambda *a, **k: ({}, 0, [])):
@@ -874,15 +875,20 @@ class NothingToRead(_Base):
         self.assertEqual((rc, json.loads(out)), (2, []))
         self.assertIn("--days", err)
 
-    def test_openclaw_alone_does_not_clear_claude_code(self):
+    def test_openclaw_alone_is_what_each_section_read(self):
+        """With OpenClaw unsearched, clean's section said where it had
+        looked for Claude Code instead of "No secrets found". OpenClaw is
+        searched now, so each section names what it read, as for any
+        other agent read alone."""
         state = make_openclaw("rm -rf ~/Documents/thesis", int(time.time()) - 3600)
         rc, out, _ = self.run_cli(["check", "--root", self.ROOT,
                                    "--state-dir", state])
         self.assertEqual(rc, 0)                  # OpenClaw was read
         self.assertIn("Bulk or recursive deletion", out)
-        secrets = out.split("  ranwhat clean", 1)[1]
-        self.assertNotIn("No secrets found", secrets)
-        self.assertIn(self.ROOT, secrets)
+        secrets = " ".join(out.split("  ranwhat clean", 1)[1].split())
+        self.assertIn("Read OpenClaw: 1 database", secrets)
+        self.assertIn("No secrets found.", secrets)
+        self.assertNotIn("not searched", out)
 
     def test_a_read_that_finds_nothing_is_still_an_all_clear(self):
         rc, out, _ = self.check([tool_use("ls", 1)])
@@ -1013,22 +1019,37 @@ class TheRootIsTheProjectsDirectory(_Base):
                         self.assertLessEqual(len(line), limit, (argv, line))
 
 
-class OpenClawIsNotSearchedForSecrets(_Base):
-    """watch's section counted each OpenClaw database as a transcript ("2
-    transcript(s) scanned"), and clean's, which reads no OpenClaw, said "1
-    transcript(s) scanned" and "No secrets found." With a live-shaped key in
-    an OpenClaw tool result, right after the `cat .env` watch had just
-    flagged, that was an all-clear on history nobody searched."""
+class OpenClawIsSearchedForSecrets(_Base):
+    """OpenClaw was the one agent clean never searched: check said so under
+    its report ("OpenClaw history is not searched for secrets"), and a
+    password read out of its database was printed whole by watch, check
+    and their --json wherever a later command typed it. Its databases are
+    searched now, read only, as every other agent's database is (design
+    3.9's follow-up), and the index knows what they hold.
+
+    Before that, watch's section counted each database as a transcript ("2
+    transcript(s) scanned") and clean's said "No secrets found." with a
+    live-shaped key in an OpenClaw tool result: an all-clear on history
+    nobody searched."""
+
+    PASSWORD = "Vb6nM3qW" "z8Kt2Lp5Rx"
+    TYPED = "./deploy.sh prod %s -e 'DROP DATABASE prod '"
 
     def setUp(self):
         super().setUp()
         self.root, _ = make_root([tool_use("ls", 1)])
         self.state = make_openclaw("cat .env", int(time.time()) - 3600)
-        db = os.path.join(self.state, "agents", "a1", "agent", "openclaw-agent.sqlite")
-        conn = sqlite3.connect(db)
+        self.db = os.path.join(self.state, "agents", "a1", "agent",
+                               "openclaw-agent.sqlite")
+        conn = sqlite3.connect(self.db)
         conn.execute("INSERT INTO log VALUES (?, ?, ?)", ("2", json.dumps(
-            {"content": [{"type": "tool_result", "content": STRIPE}]}),
+            {"content": [{"type": "tool_result", "content": STRIPE + "\n"
+                          + "DB_PASSWORD=" + self.PASSWORD + "\n"}]}),
             int(time.time()) - 3500))
+        conn.execute("INSERT INTO log VALUES (?, ?, ?)", ("3", json.dumps(
+            {"content": [{"type": "tool_use", "name": "bash", "input": {
+                "command": self.TYPED % self.PASSWORD}}]}),
+            int(time.time()) - 3400))
         conn.commit()
         conn.close()
         self.argv = ["--root", self.root, "--state-dir", self.state]
@@ -1041,24 +1062,67 @@ class OpenClawIsNotSearchedForSecrets(_Base):
                       " ".join(watch_part.split()))
         self.assertIn("Credential material accessed", watch_part)
         self.assertNotIn("2 transcript", out)
-        self.assertIn("Read Claude Code: 1 transcript\n", clean_part)
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
+                      " ".join(clean_part.split()))
 
-    def test_no_all_clear_on_history_it_did_not_search(self):
-        _, out, _ = self.run_cli(["check"] + self.argv)
+    def test_what_it_holds_is_found_and_said_to_be_read_only(self):
+        _, out, err = self.run_cli(["check"] + self.argv)
         clean_part = " ".join(out.split("  ranwhat clean", 1)[1].split())
-        self.assertNotIn("No secrets found.", clean_part)
-        self.assertIn("OpenClaw history is not searched for secrets", clean_part)
+        self.assertIn("2 distinct secret(s)", clean_part)
+        self.assertIn("agent OpenClaw", clean_part)
+        self.assertIn("read only 1 file, not masked (below)", clean_part)
+        self.assertIn("OpenClaw, 1 file: OpenClaw keeps this in a database; "
+                      "delete the session in OpenClaw.", clean_part)
+        self.assertNotIn("not searched", out + err)
+        self.assertNotIn("No secrets found", out)
 
-    def test_json_keeps_its_shape_and_says_so_on_stderr(self):
+    def test_json_lists_them_and_says_nothing_on_stderr(self):
         rc, out, err = self.run_cli(["check", "--json"] + self.argv)
-        self.assertEqual(rc, 0)
-        self.assertEqual(sorted(json.loads(out)), ["actions", "days", "secrets"])
-        self.assertIn("OpenClaw history is not searched for secrets", " ".join(err.split()))
+        self.assertEqual((rc, err), (0, ""))
+        doc = json.loads(out)
+        self.assertEqual(sorted(doc), ["actions", "days", "secrets"])
+        self.assertEqual(len(doc["secrets"]), 2)
+        for finding in doc["secrets"]:
+            self.assertEqual((finding["sources"], finding["read_only"],
+                              finding["files"]),
+                             (["openclaw"], [self.db], [self.db]))
+
+    def test_no_report_prints_a_value_found_there(self):
+        """The password is typed with nothing beside it that says it is
+        one: only what clean found in the database hides it."""
+        masked = clean.DISPLAY_MASK % clean._hint(self.PASSWORD)
+        for argv in (["check"], ["check", "--json"], ["watch"],
+                     ["watch", "--json"]):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_cli(argv + self.argv)
+                self.assertEqual(rc, 0)
+                self.assertNotIn(self.PASSWORD, out + err)
+                shown = (out if "--json" not in argv else json.dumps(
+                    json.loads(out), ensure_ascii=False))
+                self.assertIn(masked + " -e 'DROP DATABASE prod '", shown)
 
     def test_watch_counts_a_database_as_one(self):
         _, out, _ = self.run_cli(["watch"] + self.argv)
         self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
                       " ".join(out.split()))
+
+    def test_clean_reads_it_and_help_says_so(self):
+        rc, out, _ = self.run_cli(["clean", "--no-interactive"] + self.argv)
+        self.assertEqual(rc, 0)
+        said = " ".join(out.split())
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
+                      said)
+        self.assertIn("2 distinct secret(s)", said)
+        self.assertIn("OpenClaw keeps this in a database", said)
+        shown = io.StringIO()
+        with contextlib.redirect_stdout(shown), \
+                mock.patch.dict(os.environ, {"COLUMNS": "200"}):
+            try:
+                cli.main(["--help"])
+            except SystemExit:
+                pass
+        self.assertIn("check, watch, clean: OpenClaw state directory",
+                      " ".join(shown.getvalue().split()))
 
 
 class NextSteps(_Base):

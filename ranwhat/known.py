@@ -500,9 +500,7 @@ class Index(object):
         """{resolved path: (size, mtime_ns, path, (source, store))} for
         every file of every agent clean searches through its adapter."""
         out = {}
-        for source in agents.adapters():
-            if not source.searched:
-                continue
+        for source in agents.searched():
             _locations, stores = agents.discover(source, self.paths.get(source.id))
             for store in stores:
                 signed = agents.signature(store.path, store.format)

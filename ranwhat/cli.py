@@ -674,9 +674,6 @@ def _check(args):
         bar.clear()
     sources = sum(counts.values())
     scanned = searched.scanned
-    # clean does not search OpenClaw's databases, read above for actions,
-    # for secrets yet, and the report must not read as if it had.
-    unsearched = counts.get("openclaw", 0)
 
     places = None if sources or scanned else watch_mod.locations(
         args.sources, root=args.root, state_dir=args.state_dir,
@@ -687,9 +684,6 @@ def _check(args):
             "actions": records,
             "secrets": [_finding_json(f) for f in findings.values()],
         }))
-        if unsearched:
-            sys.stderr.write("\n".join(term.wrap(
-                clean_mod.UNSEARCHED % unsearched)) + "\n")
         return _said_nothing_read(places, args.days)
 
     from .report import DIM
@@ -703,18 +697,14 @@ def _check(args):
                            else watch_mod.TITLE).rstrip("\n"))
     if scanned:
         print(clean_mod.render(findings, searched.counts, [], False, footer=False,
-                               advice=False, unsearched=unsearched,
-                               others=searched.others,
+                               advice=False, others=searched.others,
                                read_only=searched.read_only,
                                notes=_clean_notes(args, searched)).rstrip("\n"))
     elif sources:
-        # OpenClaw was read, nothing else was: "No secrets found" here
-        # would be an all-clear on transcripts nobody read. With nothing
+        # watch read something clean did not: "No secrets found" here
+        # would be an all-clear on history nobody searched. With nothing
         # read at all, watch's section has already said where it looked.
         print(_clean_nothing_read(args).rstrip("\n"))
-        from .report import DIM
-        print("\n".join(DIM(line) for line in term.wrap(
-            clean_mod.UNSEARCHED % unsearched)))
     print()
 
     cmd = invocation()
@@ -878,9 +868,9 @@ def _clean_nothing_read(args):
     else:
         L = ["", BOLD(title.rstrip()), DIM("  " + tagline[2:])]
     L += [DIM(term.rule("-")), "  0 transcript(s) scanned", ""]
-    places = watch_mod.locations(
-        [i for i in args.sources if i != "openclaw"] or ("claude-code",),
-        root=args.root, paths=args.paths, asked=args.source)
+    places = watch_mod.locations(args.sources, root=args.root,
+                                 state_dir=args.state_dir, paths=args.paths,
+                                 asked=args.source)
     return "\n".join(L + watch_mod._nothing_read(args.days, places, width))
 
 
@@ -1059,7 +1049,7 @@ def _clean_notes(args, searched):
     holding = {i for f in searched.findings.values() for i in f.get("sources", ())}
     masked = {searched.stores[path].source for path in searched.changed
               if path in searched.stores}
-    for source in agents_mod.adapters(args.sources):
+    for source in agents_mod.searched(args.sources):
         if source.id in holding and getattr(source, "clean_note", ""):
             notes.append(_sentence(source.clean_note))
         if source.id in masked and getattr(source, "mask_note", ""):
@@ -1274,7 +1264,7 @@ def _main(argv=None):
                         "(default ~/.claude/projects); the same as "
                         "--path claude-code=PATH")
     p.add_argument("--state-dir", metavar="PATH",
-                   help="check, watch: OpenClaw state directory "
+                   help="check, watch, clean: OpenClaw state directory "
                         "(default ~/.openclaw); the same as "
                         "--path openclaw=PATH")
     p.add_argument("--source", action="append", choices=list(sources_mod.ids()),
@@ -1362,14 +1352,11 @@ def _main(argv=None):
             bar.clear()
         findings, scanned, changed = (searched.findings, searched.scanned,
                                       searched.changed)
-        # clean has never searched OpenClaw, and says so only when asked
-        # for it by name.
-        unsearched = searched.unsearched if "openclaw" in (args.source or ()) else 0
         # Zero read is not "No secrets found": it is a wrong --root, a
         # fresh machine, or history kept somewhere else.
         places = None if scanned else watch_mod.locations(
-            [i for i in args.sources if i != "openclaw"] or ("claude-code",),
-            root=args.root, paths=args.paths, asked=args.source)
+            args.sources, root=args.root, state_dir=args.state_dir,
+            paths=args.paths, asked=args.source)
         # Every value found is masked in what clean prints, as check masks
         # it: one may sit in another finding's key name, in the path
         # another was read from, or in a transcript's name, and the report,
@@ -1388,12 +1375,9 @@ def _main(argv=None):
             return _said_nothing_read(places, args.days)
         if places is not None:
             print(_clean_nothing_read(args))
-            if unsearched:
-                print("\n".join(term.wrap(clean_mod.UNSEARCHED % unsearched)))
             return 2
         print(clean_mod.render(findings, searched.counts, changed, args.apply,
-                               shown=shown, unsearched=unsearched,
-                               others=searched.others,
+                               shown=shown, others=searched.others,
                                read_only=searched.read_only,
                                skipped=searched.skipped,
                                notes=_clean_notes(args, searched)))

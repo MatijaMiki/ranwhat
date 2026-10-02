@@ -248,7 +248,7 @@ class Source(object):
     path_means = ""         # what `--path <id>=PATH` points at
     needs_projects = False  # found through other sources' project dirs
     checked = ""            # the agent release the spec was checked against
-    searched = True         # False: clean does not search it (OpenClaw, for now)
+    searched = True         # False: clean does not search it for secrets
     byte_arrays = False     # stores carry text as JSON byte lists (Grok Build)
 
     def __init__(self):

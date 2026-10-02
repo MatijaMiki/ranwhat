@@ -230,9 +230,12 @@ class OldNamesKept(unittest.TestCase):
         self.assertEqual(watch.OPENCLAW_STATE_DEFAULT, openclaw.STATE_DEFAULT)
 
     def test_clean(self):
-        for name in ("scan", "scan_file", "project_path", "UNSEARCHED",
+        for name in ("scan", "scan_file", "project_path",
                      "_named_by_call", "_named_by_input"):
             self.assertTrue(hasattr(clean, name), name)
+        # Kept by the port, gone with design 3.9's follow-up: OpenClaw is
+        # searched for secrets, and nothing is left to say it is not.
+        self.assertFalse(hasattr(clean, "UNSEARCHED"))
 
 
 class NoNetworkModule(unittest.TestCase):
