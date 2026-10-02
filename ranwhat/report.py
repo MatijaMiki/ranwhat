@@ -1,14 +1,16 @@
 """Terminal rendering."""
 from __future__ import annotations
-import sys
+
+import functools
 
 from . import term
 from .catalog import AUTHORITY_RANK
 
 def _c(code, s):
-    if not sys.stdout.isatty():
-        return s
-    return "\033[%sm%s\033[0m" % (code, s)
+    # term decides, for every colour here and in watch and clean: asking
+    # only isatty() ignored NO_COLOR and TERM=dumb everywhere but the
+    # wordmark.
+    return term.paint(code, s)
 
 BOLD = lambda s: _c("1", s)
 DIM = lambda s: _c("2", s)
@@ -18,6 +20,23 @@ GRN = lambda s: _c("32", s)
 CYA = lambda s: _c("36", s)
 
 SEV_COLOR = {"critical": RED, "high": YEL, "medium": CYA, "low": DIM}
+
+
+def _plain(s):
+    return s
+
+
+def painters():
+    """BOLD, DIM, RED, YEL, GRN and CYA, as they paint stdout now. A report
+    asks once: each line asking term again, a megabyte of findings asked
+    86,000 times, a tenth of a second spent on the answer it had. A yes is
+    kept as a no is: the painters handed out for one were BOLD and the rest,
+    which ask term again, so on a terminal a thousand findings still asked
+    six thousand times."""
+    if term.colour():
+        return tuple(functools.partial(term.sgr, code)
+                     for code in ("1", "2", "31", "33", "32", "36"))
+    return (_plain,) * 6
 
 
 def _bar(n, width=24):
