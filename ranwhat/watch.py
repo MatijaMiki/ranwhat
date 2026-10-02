@@ -2364,9 +2364,18 @@ def _why_lines(why, width):
     return tuple(lines)
 
 
-def render(records, scanned, days, footer=True, locations=None, notes=None):
+# The header of watch's report: its name, and what it is.
+TITLE = ("  ranwhat watch  ", "· local agent flight recorder")
+
+
+def render(records, scanned, days, footer=True, locations=None, notes=None,
+           title=TITLE):
     """`footer=False` is for check, which prints one footer for all sections.
     It gates only the closing rule and footer line, never a finding.
+
+    `title` is the header, (name, what it is): check gives its own when
+    this is all it prints above its tail, with nothing read. A header too
+    wide for the terminal puts what it is on the line under the name.
 
     `scanned` is how many transcripts were read, or what
     scan_sources_counted returned, which keeps OpenClaw's databases apart.
@@ -2395,8 +2404,12 @@ def render(records, scanned, days, footer=True, locations=None, notes=None):
     labelled = isinstance(scanned, dict) and any(
         n for source, n in scanned.items() if source != "claude-code")
     scanned = _total(scanned)
-    L = ["", BOLD("  ranwhat watch  ") + DIM("· local agent flight recorder"),
-         DIM(term.rule("-"))] + head + [""]
+    name, tagline = title
+    if len(name + tagline) <= width:
+        L = ["", BOLD(name) + DIM(tagline)]
+    else:
+        L = ["", BOLD(name.rstrip()), DIM("  " + tagline[2:])]
+    L += [DIM(term.rule("-"))] + head + [""]
     notes = [DIM(line) for note in notes or () for line in term.wrap(note)]
     if not records and not scanned:
         L += _nothing_read(days, locations, width)

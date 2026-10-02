@@ -765,6 +765,31 @@ class NothingToRead(_Base):
         self.assertEqual(self.lines(out).count(FOOTER), 1)
         self.assertEqual(err, "")
 
+    def test_check_says_it_under_its_own_name(self):
+        """With nothing read, watch's section is all check prints above its
+        tail, and it opened with watch's header ("ranwhat watch · local
+        agent flight recorder") in a report check printed."""
+        old = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 60 * 86400))
+        root, st = make_root([tool_use("ls", 1, old)], age_days=60)
+        for argv in (["check"] + self.NOWHERE,
+                     ["check", "--root", root, "--state-dir", st]):
+            for width in ("46", "60", "80"):
+                with mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                    with self.subTest(argv=argv[:2], width=width):
+                        rc, out, _ = self.run_cli(argv)
+                        self.assertEqual(rc, 2)
+                        self.assertTrue(out.startswith(
+                            "\n  ranwhat check  · watch and clean in "
+                            "one pass\n"), out[:80])
+                        self.assertNotIn("ranwhat watch", out)
+                        self.assertNotIn("flight recorder", out)
+                        self.assertNotIn("ranwhat clean", out)
+                        self.assertEqual(self.lines(out).count(FOOTER), 1)
+        # watch's own report keeps its own
+        rc, out, _ = self.run_cli(["watch"] + self.NOWHERE)
+        self.assertTrue(out.startswith("\n  ranwhat watch  · local agent "
+                                       "flight recorder\n"), out[:80])
+
     def test_it_is_said_once(self):
         _, out, _ = self.run_cli(["check"] + self.NOWHERE)
         self.assertEqual(out.count(self.ROOT), 1, out)

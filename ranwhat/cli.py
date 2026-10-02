@@ -694,9 +694,13 @@ def _check(args):
 
     from .report import DIM
     # Each section once, then one tail. Printing the two standalone reports
-    # back to back gave three footers and two conflicting next steps.
+    # back to back gave three footers and two conflicting next steps. With
+    # nothing read, watch's section is the whole report above the tail, so
+    # it goes under check's own name.
     print(watch_mod.render(records, counts, args.days, footer=False,
-                           locations=places).rstrip("\n"))
+                           locations=places,
+                           title=_CHECK_TITLE if places is not None
+                           else watch_mod.TITLE).rstrip("\n"))
     if scanned:
         print(clean_mod.render(findings, searched.counts, [], False, footer=False,
                                advice=False, unsearched=unsearched,
@@ -747,6 +751,11 @@ def _check(args):
     tail += ["", term.rule("-"), term.FOOTER, ""]
     print("\n".join(tail))
     return 2 if places is not None else 0
+
+
+# The header of check's report when it read nothing: watch's section,
+# under check's name, is all of it.
+_CHECK_TITLE = ("  ranwhat check  ", "· watch and clean in one pass")
 
 
 def _notes(args):
