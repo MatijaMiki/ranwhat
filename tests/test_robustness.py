@@ -11,6 +11,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import watch
 from ranwhat.html_report import write_html
 from ranwhat.score import ProfileError, scan
@@ -57,6 +59,42 @@ class MalformedProfilesAreRejected(unittest.TestCase):
     def test_non_string_scope(self):
         with self.assertRaises(ProfileError):
             scan({"credentials": [{"provider": "aws", "scopes": [123]}]})
+
+    def test_non_string_provider(self):
+        for provider in (5, ["openai"], {"a": 1}):
+            with self.subTest(provider=provider):
+                with self.assertRaises(ProfileError) as ctx:
+                    scan({"credentials": [{"provider": provider, "scopes": []}]})
+                self.assertIn("credentials[0].provider", str(ctx.exception))
+
+    def test_pulling_usage_for_a_malformed_profile_is_a_message(self):
+        """--pull-usage read the providers before the profile was checked,
+        and sorting a 5 beside "openai" was a TypeError traceback."""
+        import contextlib
+        import io
+        import json
+        from unittest import mock
+        from ranwhat import cli
+        d = tempfile.mkdtemp(prefix="rb-profile-")
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        for credentials in ([{"provider": "openai", "label": "a", "scopes": ["model.request"]},
+                             {"provider": 5, "label": "b", "scopes": []}],
+                            [{"provider": ["openai"], "scopes": []}],
+                            {"openai": {}}, ["openai"]):
+            path = os.path.join(d, "p.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"agent": "x", "credentials": credentials}, fh)
+            err = io.StringIO()
+            with self.subTest(credentials=credentials), \
+                    mock.patch.dict(os.environ), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(err):
+                for name in [k for k in os.environ if k.startswith("RANWHAT_")]:
+                    del os.environ[name]          # no token: nothing to send
+                with self.assertRaises(SystemExit) as ctx:
+                    cli.main(["scan", path, "--pull-usage"])
+                self.assertTrue(str(ctx.exception.code).startswith("ranwhat: "),
+                                ctx.exception.code)
 
     def test_non_numeric_controls(self):
         with self.assertRaises(ProfileError):

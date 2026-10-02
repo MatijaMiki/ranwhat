@@ -12,7 +12,7 @@ $ ranwhat watch --days 90
 
   ranwhat watch  · local agent flight recorder
   --------------------------------------------------------------
-  4 source(s) over 90 days
+  4 transcript(s) scanned, last 90 days
 
   1 critical  3 high
 
@@ -52,7 +52,7 @@ nothing in your critical path.
 
 | Source | Location | Format |
 |---|---|---|
-| Claude Code | `~/.claude/projects/*/*.jsonl` | JSONL |
+| Claude Code | `~/.claude/projects/*/*.jsonl` and each session's `subagents/**/agent-*.jsonl`, or the same under `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
 | OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/*.sqlite` | SQLite |
 
 Nine rules: credential access, secret literals in commands, package
@@ -90,6 +90,10 @@ Capability catalogues for Google, GitHub, GitLab, Microsoft 365, Slack, Discord,
 Unrecognised
 scopes are classified by action verb and flagged unclassified, never assumed
 safe.
+
+A fine-grained GitHub token or a restricted Stripe key comes back from `live`
+as a finding, not a score: neither provider lists its permissions through its
+API. Copy them into a profile as that credential's `scopes` and `scan` it.
 
 ### `ranwhat clean`: secrets sitting in your transcripts
 
@@ -135,6 +139,34 @@ ordinary config are left alone, and so are published documentation examples
 (AWS's `AKIAIOSFODNN7EXAMPLE`) and obvious test fixtures such as
 `AKIA1234567890ABCDEF`. Backups go to `~/.ranwhat/backups`, and the
 rewritten file is parsed back before it replaces the original.
+
+### The secrets index
+
+`check` and `watch` hide every secret `clean` finds anywhere in your
+history, whatever `--days` says, wherever a copy of one shows up. To know
+them without reading every transcript on every run, they keep an index in
+`~/.ranwhat/known/` (`$RANWHAT_HOME/known/` when that is set), one file per
+transcript directory, and read a transcript again only when its size or
+modification time changes. The first run reads them all, and says so.
+`check` fills it from its own search for secrets, so no transcript is read
+for them twice.
+
+The index holds salted fingerprints, never a secret: for each, 16 bits of
+a keyed BLAKE2b hash of its first six characters (a tag a great many
+beginnings share, so it narrows a guess at them by no more than 16 bits),
+its length, and keyed hashes of the whole value and of the fingerprint its
+mask keeps. The key is random, made once per machine, and sits beside the
+index. Both files are readable by you alone. `clean` adds each secret
+before it masks it, so a copy it missed stays hidden too, however the
+session ends.
+
+If the index is deleted, damaged or loses its key, the next run builds it
+again from the transcripts. A secret `clean` has already masked cannot be
+learned again that way: the transcript keeps only its mask's fingerprint.
+A copy the mask missed is then still hidden where it stands apart from
+what is around it, and where it is glued into a command `check` or `watch`
+shows, if it is no longer than 64 characters. Glued into anything else, it
+is not. So keep the index unless you are starting over.
 
 ## Precision is the feature
 

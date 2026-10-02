@@ -5,11 +5,16 @@ Every call here is a metadata read: "what is this token allowed to do".
 Nothing in this module exercises a granted permission, and nothing writes.
 Tokens are held in memory for the duration of a call and are never logged,
 persisted, or transmitted anywhere except to the issuing provider.
+
+A provider that will not say what a token may do gets "scopes_known": False
+and a "note" saying where to look instead. An empty list alone reads as a
+token that may do nothing, and scored as the safest credential there is.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,7 +33,15 @@ def _header_safe(value):
     return all(" " <= c <= "~" or "\xa0" <= c <= "\xff" for c in value)
 
 
+def _headers(message):
+    """Response headers by lower-cased name. HTTP names are case-blind, and
+    a plain dict of them is not: X-OAuth-Scopes sent as x-oauth-scopes
+    read as absent."""
+    return {k.lower(): v for k, v in (message or {}).items()}
+
+
 def _request(url, method="GET", headers=None, data=None):
+    """(status, headers by lower-cased name, body)."""
     body = None
     if data is not None:
         body = urllib.parse.urlencode(data).encode()
@@ -47,9 +60,9 @@ def _request(url, method="GET", headers=None, data=None):
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             raw = resp.read().decode("utf-8", "replace")
-            return resp.status, dict(resp.headers), raw
+            return resp.status, _headers(resp.headers), raw
     except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers or {}), e.read().decode("utf-8", "replace")
+        return e.code, _headers(e.headers), e.read().decode("utf-8", "replace")
     except ValueError:
         # Whatever else http.client refuses in a header or the URL, its
         # message quotes it, token included. from None: not shown as the cause.
@@ -76,8 +89,14 @@ def google(access_token):
     }
 
 
+# Classic personal access tokens and OAuth app tokens, and the 40 hex
+# characters both were before 2021: for these the scopes header is complete.
+_GITHUB_CLASSIC = re.compile(r"(?:gh[po]_[A-Za-z0-9]+|[0-9a-f]{40})\Z")
+
+
 def github(token):
-    """GitHub returns granted scopes in a response header on any authed call."""
+    """GitHub returns granted scopes in a response header on any authed call,
+    for classic tokens. For a fine-grained one the header is empty."""
     status, headers, raw = _request(
         "https://api.github.com/user",
         headers={"Authorization": "Bearer %s" % token,
@@ -85,15 +104,23 @@ def github(token):
     )
     if status != 200:
         raise IntrospectionError("github returned %s: %s" % (status, raw[:200]))
-    scopes_header = headers.get("X-OAuth-Scopes", "")
-    scopes = [s.strip() for s in scopes_header.split(",") if s.strip()]
+    scopes_header = headers.get("x-oauth-scopes")
+    scopes = [s.strip() for s in (scopes_header or "").split(",") if s.strip()]
     login = json.loads(raw).get("login", "github")
-    if not scopes:
-        # fine-grained PAT: header is empty, permissions are not enumerable
-        return {"provider": "github", "label": login, "scopes": [],
-                "note": "Fine-grained token: GitHub does not expose its "
-                        "permission set via API. Enumerate it in settings."}
-    return {"provider": "github", "label": login, "scopes": scopes}
+    if scopes or (scopes_header is not None and _GITHUB_CLASSIC.match(token)):
+        # A classic token sent with an empty header was given no scope,
+        # and reads public data only. That is known, and is nothing.
+        return {"provider": "github", "label": login, "scopes": scopes}
+    if token.startswith("github_pat_"):
+        note = ("Fine-grained token. GitHub does not list its permissions "
+                "through the API. They are on the token's page under "
+                "Settings, Developer settings.")
+    else:
+        note = ("GitHub did not list this token's permissions. It lists "
+                "them only for classic tokens; any other kind has them where "
+                "it was made, such as a GitHub App's settings.")
+    return {"provider": "github", "label": login, "scopes": [],
+            "scopes_known": False, "note": note}
 
 
 def slack(token):
@@ -105,7 +132,7 @@ def slack(token):
     payload = json.loads(raw) if raw else {}
     if status != 200 or not payload.get("ok"):
         raise IntrospectionError("slack auth.test failed: %s" % payload.get("error", status))
-    scopes = [s.strip() for s in headers.get("X-OAuth-Scopes", "").split(",") if s.strip()]
+    scopes = [s.strip() for s in headers.get("x-oauth-scopes", "").split(",") if s.strip()]
     return {
         "provider": "slack",
         "label": payload.get("team", "slack"),
@@ -116,22 +143,25 @@ def slack(token):
 def stripe(api_key):
     """Stripe has no scope introspection endpoint. The key prefix is the
     strongest available signal, and an unrestricted live key is itself the
-    finding."""
+    finding: the catalogue's "all" says what it can do."""
     prefix = api_key[:3]
     if prefix == "sk_":
         return {
             "provider": "stripe",
             "label": "stripe-secret-key",
             "scopes": ["all"],
-            "note": "Unrestricted secret key. Every Stripe capability is available.",
         }
     if prefix == "rk_":
+        # There is no --scopes flag. A profile that declares them is the
+        # way to score what the key can do.
         return {
             "provider": "stripe",
             "label": "stripe-restricted-key",
             "scopes": [],
-            "note": "Restricted key. Stripe does not expose its grant set via API; "
-                    "enumerate it in the dashboard and pass with --scopes.",
+            "scopes_known": False,
+            "note": "Restricted key. Stripe does not list its permissions "
+                    "through the API. They are on the key's page in the "
+                    "Dashboard, under Developers, API keys.",
         }
     raise IntrospectionError("unrecognised Stripe key format")
 

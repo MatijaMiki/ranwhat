@@ -19,13 +19,15 @@ import random
 import string
 import sys
 import tempfile
-import time
 import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ranwhat import clean, watch
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import growth  # noqa: E402
+from ranwhat import clean, watch  # noqa: E402
 
 B32 = string.ascii_uppercase + "234567"
 B62 = string.ascii_letters + string.digits
@@ -229,7 +231,7 @@ class SameShapesAsClean(unittest.TestCase):
 H, C = watch.HIGH, watch.CRITICAL
 
 
-class RecursiveForceHoweverSpelled(unittest.TestCase):
+class RecursiveForceHoweverSpelled(growth.Assertions, unittest.TestCase):
     """W7: only `rm` with r and f in one flag cluster was matched."""
 
     def test_split_and_long_flags_are_matched(self):
@@ -271,15 +273,16 @@ class RecursiveForceHoweverSpelled(unittest.TestCase):
         """A lookahead version walked the rest of the run from every `rm`
         inside it: 64,000 characters of ` -rm` took fifteen seconds."""
         rule = next(r for r in watch.RULES if r.id == "fs.destructive")
-        for payload in ("rm" + " -r" * 20000 + " x",
-                        "rm" + " --recursive" * 5000 + " x",
-                        "rm" + " -rm" * 16000,
-                        "rm" + " -x'rm" * 12000,
-                        "rm " + "-" * 60000 + " x",
-                        " ; ".join(["rm -r -v"] * 5000)):
-            t = time.perf_counter()
-            self.assertIsNone(rule.match(payload[:watch.MAX_SCAN_CHARS]))
-            self.assertLess(time.perf_counter() - t, 0.5, payload[:30])
+        for build in (lambda n: "rm" + " -r" * n(20000) + " x",
+                      lambda n: "rm" + " --recursive" * n(5000) + " x",
+                      lambda n: "rm" + " -rm" * n(16000),
+                      lambda n: "rm" + " -x'rm" * n(12000),
+                      lambda n: "rm " + "-" * n(60000) + " x",
+                      lambda n: " ; ".join(["rm -r -v"] * n(5000))):
+            what = build(growth.sized(1))[:30]
+            self.assertIsNone(self.assertScalesLinearly(
+                build, lambda payload: rule.match(payload[:watch.MAX_SCAN_CHARS]),
+                what), what)
 
 
 if __name__ == "__main__":

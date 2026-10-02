@@ -17,6 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from ranwhat import watch
 from ranwhat.clean import _hint, _is_member_access, _origins, find_secrets, scan_file
 
 # find_secrets skips strings shorter than any credential shape, so a short
@@ -81,7 +82,7 @@ class KeyIdHints(unittest.TestCase):
     def test_two_key_ids_can_be_told_apart(self):
         self.assertEqual(_hint("AKIA4TRUE7KEYX9QZ2WB"), "AKIA…Z2WB")
         self.assertEqual(_hint("AKIA4TRUE7KEYX9QZ2WY"), "AKIA…Z2WY")
-        self.assertEqual(_hint("ASIA2SYNTH7KEY3QZ5WB"), "ASIA…Z5WB")
+        self.assertEqual(_hint("ASIA" "2SYNTH7KEY3QZ5WB"), "ASIA…Z5WB")
 
     def test_the_hint_reaches_the_report(self):
         found = _scan("AWS_ACCESS_KEY_ID=AKIA4TRUE7KEYX9QZ2WB\n")
@@ -108,6 +109,42 @@ MEMBER_ACCESS = [
     "let token = res.data.token",
     "token = creds.access_token",
     "f(token=args.token)",
+    # A constant read off a settings object, the way Django does it
+    "SECRET_KEY = settings.SECRET_KEY",
+    "password = cfg.DB_PASSWORD",
+    "token=creds.GITHUB_TOKEN",
+    "password=secrets.DB_PASSWORD",
+    "client_secret=settings.CLIENT_SECRET",
+    "API_TOKEN = conf.API_TOKEN",
+    # a constant named for a secret of its own, which a generator never draws
+    "SECRET_KEY = settings.DJANGO_SECRET_KEY",
+    "SECRET_KEY = secrets.DJANGO_SECRET_KEY",
+    "API_KEY = settings.OPENAI_API_KEY",
+    "JWT_SECRET = cfg.JWT_SIGNING_SECRET",
+    "DB_PASSWORD = creds.DATABASE_PASSWORD",
+    # a function, by its module path
+    "SECRET_KEY=django.utils.crypto.get_random_string",
+    # read off a capitalised receiver, as Rails and Django settings are
+    "config.secret_key = Rails.application.secret_key_base",
+    "SECRET_KEY = Settings.SECRET_KEY",
+    "secret_key_base = Rails.application.credentials.secret_key_base",
+    "secret_key = Settings.secret_key",
+    # an attribute named for a secret in words of its own
+    "config.secret_key = app.config.secret_key_base",
+]
+
+# Counts of a model's tokens, read off a usage object. tokens names a
+# secret, and these were reported as ones to rotate.
+TOKEN_COUNTS = [
+    "const inputTokens = usage.input_tokens ?? 0;",
+    "const outputTokens = usage.output_tokens ?? 0;",
+    "promptTokens = usage.prompt_tokens",
+    "totalTokens = response.usage.total_tokens",
+    "const fullConvTokens = parsed.conversation?.inputTokens ?? 0;",
+    "  _outputTokens: b.usage?.outputTokens,",
+    "remainingTokens = budget.remaining",
+    "_inputTokens: b.inputTokenCount",
+    "const totalInputTokens = stats.totalInput;",
 ]
 
 # Literals, some of them dotted, some weak -- a weak password is still live.
@@ -128,6 +165,9 @@ LITERALS = [
     "API_TOKEN=args.token",
     "password: correct.horse.battery",
     "db_password = hunter.sunset.river",
+    "PASSWORD=summer.MONKEY",
+    "password = river.HORSE_BATTERY",
+    "SECRET=correct.horse.battery_staple",
     "token = quick.brown.fox",
     "token = oauth2.token",
     "token = Zq7Kp.Wx9vB",
@@ -157,6 +197,10 @@ LITERALS = [
     "password: summer.monkey",
     "token: quiet.river.bypass",
     "password: tiger.sapphire.passkey",
+    # a single word that names a secret ends a passphrase as well as a chain
+    "password: quiet.river.secret",
+    "token = Summer.Monkey.Token",
+    "tokens = Xk9mPq2vRt7wLz",
 ]
 
 
@@ -166,6 +210,29 @@ class MemberAccessIsCode(unittest.TestCase):
         for text in MEMBER_ACCESS:
             with self.subTest(text=text):
                 self.assertEqual(n(text), 0)
+
+    def test_watch_agrees(self):
+        """The constants were a critical secret.literal in watch too."""
+        for text in MEMBER_ACCESS:
+            with self.subTest(text=text):
+                hits = watch.evaluate("Bash", {"command": text})[0]
+                self.assertNotIn("secret.literal", [h["rule"] for h in hits])
+
+    def test_counting_tokens_is_not_holding_one(self):
+        for text in TOKEN_COUNTS:
+            with self.subTest(text=text):
+                self.assertEqual(n(text), 0)
+                hits = watch.evaluate("Write", {"file_path": "/x/usage.ts",
+                                                "content": text + "\n"})[0]
+                self.assertEqual(hits, [])
+
+    def test_watch_lets_settings_code_be_written(self):
+        content = ("Devise.setup do |config|\n"
+                   "  config.secret_key = Rails.application.secret_key_base\n"
+                   "end\n")
+        hits = watch.evaluate("Write", {"file_path": "/x/config/initializers/devise.rb",
+                                        "content": content})[0]
+        self.assertEqual(hits, [])
 
     def test_literals_are_still_secrets(self):
         for text in LITERALS:
@@ -180,7 +247,8 @@ class MemberAccessIsCode(unittest.TestCase):
                  ("password", "", "Summer.Monkey"), ("password", "", "Blue$ky.Pass"),
                  ("auth_token", "", "kQzXvB.pWmRtY.nLsKey"),
                  ("API_TOKEN", "", "args.token"), ("token", '"', "user.token"),
-                 ("token", "", "oauth2.token"),
+                 ("token", "", "oauth2.token"), ("password", "", "Admin.Password"),
+                 ("password", "", "quiet.river.secret"), ("token", "", "Summer.Monkey.Token"),
                  ("token", "", "eyJhbGciOiJIUzIbNiJ.eyJzdWIiOiJzeWbaCJ.sflKxwRJSMeKKFQTfwpMeJfPOkyJVadQsswc")]
         for key, quote, value in cases:
             with self.subTest(value=value):

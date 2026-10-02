@@ -7,12 +7,15 @@ is handed live credentials. Each test here corresponds to a real finding.
 import os
 import sys
 import tempfile
-import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ranwhat import watch
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import growth  # noqa: E402
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
+from ranwhat import watch  # noqa: E402
 from ranwhat.html_report import write_html
 from ranwhat.score import scan
 
@@ -80,24 +83,23 @@ class CredentialsNeedNotTouchArgv(unittest.TestCase):
             _token(args, "stripe")
 
 
-class UntrustedTranscriptContent(unittest.TestCase):
+class UntrustedTranscriptContent(growth.Assertions, unittest.TestCase):
     """Transcript contents are attacker-influenceable: anything that reaches
     an agent's context can end up in the text these patterns run against."""
 
     def test_no_catastrophic_backtracking(self):
         payloads = [
-            "<<'A'\n" + "x" * 5000 + "\n" + "rm " + " -r" * 400,
-            "rm -rf " + " ".join("f%d" % i for i in range(20000)),
-            " ; ".join(["rm -rf ~/x"] * 5000),
-            'bash -c "' * 200 + "rm -rf /" + '"' * 200,
-            "rm " + "-" * 50000 + " x",
-            "<<'E'\nx\nE\n" * 3000,
+            lambda n: "<<'A'\n" + "x" * n(5000) + "\n" + "rm " + " -r" * n(400),
+            lambda n: "rm -rf " + " ".join("f%d" % i for i in range(n(20000))),
+            lambda n: " ; ".join(["rm -rf ~/x"] * n(5000)),
+            lambda n: 'bash -c "' * n(200) + "rm -rf /" + '"' * n(200),
+            lambda n: "rm " + "-" * n(50000) + " x",
+            lambda n: "<<'E'\nx\nE\n" * n(3000),
         ]
-        for payload in payloads:
-            start = time.time()
-            watch.evaluate("Bash", {"command": payload})
-            self.assertLess(time.time() - start, 5.0,
-                            "possible ReDoS on %r" % payload[:40])
+        for build in payloads:
+            self.assertScalesLinearly(
+                build, lambda payload: watch.evaluate("Bash", {"command": payload}),
+                "possible ReDoS on %r" % build(growth.sized(1))[:40])
 
     def test_input_is_bounded(self):
         watch.evaluate("Bash", {"command": "echo " + "a" * 500_000})

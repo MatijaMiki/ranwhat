@@ -13,17 +13,19 @@ Every value here is synthetic, or a published vendor documentation example.
 # them, does not take a fixture for a leak. Python joins them at compile
 # time; the value under test is unchanged.
 
+import json
 import os
 import random
 import string
 import sys
-import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ranwhat import clean, fixtures, watch
-from ranwhat.fixtures import fixture_reason
+import growth  # noqa: E402
+from ranwhat import clean, fixtures, watch  # noqa: E402
+from ranwhat.fixtures import fixture_reason  # noqa: E402
 
 B32 = string.ascii_uppercase + "234567"
 B62 = string.ascii_letters + string.digits
@@ -63,32 +65,46 @@ PEM = ("-----BEGIN RSA PRIVATE KEY-----\n%s\n-----END RSA PRIVATE KEY-----"
        % rnd(_RNG, B62 + "+/", 64))
 
 
+KNOWN_FIXTURES = {
+    "AKIA" "IOSFODNN7EXAMPLE": "published documentation example",
+    "akiaiosfodnn7example": "published documentation example",
+    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY": "published documentation example",
+    "AKIA" "I44QH8DHBEXAMPLE": "published documentation example",
+    "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY": "published documentation example",
+    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzEXAMPLEKEY9": "EXAMPLE marker",
+    "AKIA" "1234567890ABCDEF": "sequential run",
+    "AKIA" "1234567890ABCDEF.": "sequential run",
+    "sk_" "live_51HxAbCdEfGhIjKlMnOpQr": "sequential run",
+    "sk_" "live_51HxAbCdEfGhIjKlMnOpQrStUv": "sequential run",
+    "sk_" "live_aBcDeFgHiJkLmNoPqRsTuVwX": "sequential run",
+    "gh" "p_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345": "sequential run",
+    "gh" "p_" + "Ab12" * 9: "repeated chunk",
+    "my_example_token_9f8e7d": "placeholder wording",
+    "xox" "b-1234567890-1234567890123-aBcDeFgHiJkLmNoPqRsTuVwX": "sequential run",
+    "sk_" "live_ENVSECRET_xyz789": "placeholder name",
+    "rk_" "live_TEST_KEY_abc123": "placeholder name",
+    "gh" "p_YOUR_TOKEN_1": "placeholder name",
+    "xox" "b-YourBotToken_here": "placeholder name",
+    # Stripe's own documentation test keys, the current one and the one
+    # before it, and an alphabet in test mode as in live.
+    "sk_" "test_4eC39HqLyjWDarjtT1zdp7dc": "published documentation example",
+    "sk_" "test_BQokikJOvBiI2HlWgH4olfQ2": "published documentation example",
+    "sk_" "test_51ABCDEFGHIJKLMNOPQRSTUVWXYZ": "sequential run",
+    "rk_" "test_aBcDeFgHiJkLmNoPqRsTuVwX": "sequential run",
+    "sk_" "test_YOUR_SECRET_KEY": "placeholder name",
+}
+
+
 class Predicate(unittest.TestCase):
 
     def test_reasons_for_known_fixtures(self):
-        cases = {
-            "AKIAIOSFODNN7EXAMPLE": "published documentation example",
-            "akiaiosfodnn7example": "published documentation example",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY": "published documentation example",
-            "AKIAI44QH8DHBEXAMPLE": "published documentation example",
-            "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY": "published documentation example",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzEXAMPLEKEY9": "EXAMPLE marker",
-            "AKIA1234567890ABCDEF": "sequential run",
-            "AKIA1234567890ABCDEF.": "sequential run",
-            "sk_" "live_51HxAbCdEfGhIjKlMnOpQr": "sequential run",
-            "sk_" "live_51HxAbCdEfGhIjKlMnOpQrStUv": "sequential run",
-            "sk_" "live_aBcDeFgHiJkLmNoPqRsTuVwX": "sequential run",
-            "gh" "p_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345": "sequential run",
-            "gh" "p_" + "Ab12" * 9: "repeated chunk",
-            "my_example_token_9f8e7d": "placeholder wording",
-            "xox" "b-1234567890-1234567890123-aBcDeFgHiJkLmNoPqRsTuVwX": "sequential run",
-        }
+        cases = KNOWN_FIXTURES
         for value, reason in cases.items():
             self.assertEqual(fixture_reason(value), reason, value)
             self.assertTrue(fixtures.is_fixture(value), value)
 
     def test_real_shapes_are_not_fixtures(self):
-        for value in (REAL_AKIA, "AKIAIOSFODNN7REALKEY", "sk_" "live_" + REAL24,
+        for value in (REAL_AKIA, "AKIA" "IOSFODNN7REALKEY", "sk_" "live_" + REAL24,
                       "gh" "p_" + GHP36, SLACK, AWS_RANDOM, AWS_ACCOUNT_RUN,
                       PEM, "sk_" "live_FAKEBODY1_abc456", ""):
             self.assertIsNone(fixture_reason(value), value)
@@ -98,17 +114,20 @@ class CleanStillFlags(unittest.TestCase):
 
     def test_real_format_keys(self):
         for text in ("AWS_ACCESS_KEY_ID=" + REAL_AKIA,
-                     "AWS=AKIAIOSFODNN7REALKEY",
+                     "AWS=AKIA" "IOSFODNN7REALKEY",
                      "export STRIPE_KEY=sk_" "live_" + REAL24 + " and done",
                      "GITHUB_TOKEN=gh" "p_" + GHP36,
                      PEM,
                      "AGENTSCAN_STRIPE_TOKEN=sk_" "live_FAKEBODY1_abc456",
-                     "AWS_ACCESS_KEY_ID=" + AWS_ACCOUNT_RUN):
+                     "AWS_ACCESS_KEY_ID=" + AWS_ACCOUNT_RUN,
+                     "STRIPE_SECRET_KEY=sk_" "test_" + RANDOM32[:24],
+                     "STRIPE_SECRET_KEY=sk_" "test_" + REAL24 + "x",
+                     "STRIPE_SECRET_KEY=sk_" "test_51" + RANDOM32 + RANDOM32):
             self.assertEqual(n(text), 1, text)
 
     def test_a_fixture_beside_a_real_key_hides_only_itself(self):
         found = clean.find_secrets(
-            "fixture AKIAIOSFODNN7EXAMPLE and real %s" % AWS_RANDOM)
+            "fixture AKIA" "IOSFODNN7EXAMPLE and real %s" % AWS_RANDOM)
         self.assertEqual([v for v, _ in found], [AWS_RANDOM])
 
     def test_human_chosen_values_get_no_sequence_heuristics(self):
@@ -184,13 +203,13 @@ class CleanStillFlags(unittest.TestCase):
 class CleanIgnoresFixtures(unittest.TestCase):
 
     def test_documentation_examples(self):
-        for text in ("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+        for text in ("AWS_ACCESS_KEY_ID=AKIA" "IOSFODNN7EXAMPLE",
                      "AWS_ACCESS_KEY_ID=akiaiosfodnn7example",
                      "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
                      "Qk AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYzEXAMPLEKEY9",
                      "AWS_ACCESS_KEY_ID=AKIAI44QH8DHBEXAMPLE",
                      "AWS_SECRET_ACCESS_KEY=je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY",
-                     "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
+                     "aws_access_key_id = AKIA" "IOSFODNN7EXAMPLE\n"
                      "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"):
             self.assertEqual(n(text), 0, text)
 
@@ -206,6 +225,54 @@ class CleanIgnoresFixtures(unittest.TestCase):
                      "SLACK_BOT_TOKEN=xox" "b-1234567890-1234567890123-aBcDeFgHiJkLmNoPqRsTuVwX",
                      "API_TOKEN=my_example_token_9f8e7d"):
             self.assertEqual(n(text), 0, text)
+
+
+# A fixture was silent or reported depending on the name beside it:
+# "sk_" "live_ENVSECRET_xyz789" under STRIPE_KEY, which names no secret, went
+# unreported, and under STRIPE_API_KEY it was a critical leak.
+KEY_NAMES = ("STRIPE_KEY", "STRIPE_SECRET_KEY", "STRIPE_API_KEY", "STRIPE_SECRET",
+             "API_TOKEN", "SECRET", "password", "client_secret", "apiKey",
+             "auth_token", "private_key", "DSN", "DB_PASSWORD", "SECRET_KEY",
+             "AWS_ACCESS_KEY_ID")
+SYNTAXES = (lambda k, v: "%s=%s" % (k, v),
+            lambda k, v: "export %s=%s && node app.js" % (k, v),
+            lambda k, v: "%s: %s" % (k, v),
+            lambda k, v: "%s='%s'" % (k, v),
+            lambda k, v: json.dumps({k: v}))
+
+
+class FixturesUnderAnyKeyName(unittest.TestCase):
+
+    def test_every_recognised_fixture_is_silent_under_every_key(self):
+        for value in KNOWN_FIXTURES:
+            for key in KEY_NAMES:
+                for syntax in SYNTAXES:
+                    text = syntax(key, value)
+                    with self.subTest(text=text):
+                        self.assertEqual(clean.find_secrets(text), [])
+                        self.assertEqual(literal_hits(text), [])
+
+    def test_a_name_after_a_prefix_hides_only_a_name(self):
+        """None of these providers issues an underscore in its body, so the
+        value is not its key. It is still reported when a digit says the part after
+        the prefix could be generated, when enough is left over to be a
+        secret of its own, or when a whole key sits in front of the name."""
+        for value in ("sk_" "live_FAKEBODY1_abc456",
+                      "sk_" "live_ENVSECRET1_xyz789",
+                      "sk_" "live_ENVSECRET_q8Vn3LxT0wRb",
+                      "sk_" "live_" + REAL24 + "_old",
+                      "gh" "p_" + GHP36 + "_TOKEN",
+                      "xox" "b-" + SLACK[5:] + "_bot"):
+            self.assertIsNone(fixture_reason(value), value)
+            for key in ("STRIPE_API_KEY", "SECRET_KEY", "password"):
+                self.assertEqual(n("%s=%s" % (key, value)), 1, (key, value))
+
+    def test_only_prefixes_no_word_starts_with(self):
+        """AKIA, ASIA and AC begin ordinary words, and a password chosen by a
+        person may too."""
+        for text in ("DB_PASSWORD=ASIATRIP_2024x", "DB_PASSWORD=ACME_PROD_7q",
+                     "DB_PASSWORD=AKIAPass_2024x"):
+            self.assertEqual(n(text), 1, text)
 
 
 class WatchStillFires(unittest.TestCase):
@@ -230,7 +297,7 @@ class WatchStillFires(unittest.TestCase):
         self.assertCritical("grep -r %s ." % AWS_ACCOUNT_RUN)
 
     def test_evidence_sits_on_the_live_literal(self):
-        self.assertCritical("echo AKIAIOSFODNN7EXAMPLE sk_" "live_" + REAL24,
+        self.assertCritical("echo AKIA" "IOSFODNN7EXAMPLE sk_" "live_" + REAL24,
                             "sk_" "live_" + REAL24)
         self.assertCritical("export AWS_ACCESS_KEY_ID=%s && %s&& echo "
                             "sk_" "live_51HxAbCdEfGhIjKlMnOpQr" % (REAL_AKIA, "true " * 30),
@@ -254,13 +321,17 @@ class WatchStillFires(unittest.TestCase):
 class WatchIgnoresFixtures(unittest.TestCase):
 
     def test_fixture_only_commands(self):
-        for command in ('grep -r "AKIAIOSFODNN7EXAMPLE" .',
-                        "aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE",
+        for command in ('grep -r "AKIA' 'IOSFODNN7EXAMPLE" .',
+                        "export STRIPE_SECRET_KEY=sk_" "test_4eC39HqLyjWDarjtT1zdp7dc"
+                        " && npm run dev",
+                        "echo sk_" "test_4eC39HqLyjWDarjtT1zdp7dc",
+                        "stripe listen --api-key sk_" "test_51ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                        "aws configure set aws_access_key_id AKIA" "IOSFODNN7EXAMPLE",
                         'grep -r "AKIA1234567890ABCDEF" .',
                         "echo sk_" "live_aBcDeFgHiJkLmNoPqRsTuVwX",
                         "echo sk_" "live_51HxAbCdEfGhIjKlMnOpQr "
                         "gh" "p_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345",
-                        "echo AKIAIOSFODNN7EXAMPLE AKIA1234567890ABCDEF",
+                        "echo AKIA" "IOSFODNN7EXAMPLE AKIA1234567890ABCDEF",
                         "echo xox" "b-1234567890-1234567890123-aBcDeFgHiJkLmNoPqRsTuVwX"):
             self.assertEqual(literal_hits(command), [], command)
 
@@ -282,6 +353,43 @@ def _complete_example(key):
     return "EXAMPLE"
 
 
+class AwsKeyIdsSpelledInWords(unittest.TestCase):
+    """A key ID with words where its random body goes. Letters only, they
+    stopped reading as a variable name, and EXAMPLE counts only past body
+    character 8, where the account ID stops: on a working machine the one
+    new finding was such a placeholder, AKIA…LEEX."""
+
+    VALUES = ("AKIA" "EXAMPLEEXAMPLEEX", "AKIA" "FAKEFAKEFAKEFAKE",
+              "AKIA" "TESTTESTTESTTEST", "AKIA" "YOURACCESSKEYIDX",
+              "AKIA" "EXAMPLEKEYEXAMPL", "ASIA" "EXAMPLEEXAMPLEEX",
+              "AKIA" "EXAMPLEXXXXXXXXX")
+
+    def test_a_fixture(self):
+        for value in self.VALUES:
+            with self.subTest(value=value):
+                self.assertIsNotNone(fixture_reason(value))
+
+    def test_silent_in_clean_and_watch(self):
+        for text in ("AWS_ACCESS_KEY_ID=AKIA" "EXAMPLEEXAMPLEEX",
+                     "AWS_ACCESS_KEY_ID=AKIA" "FAKEFAKEFAKEFAKE",
+                     "AWS_ACCESS_KEY_ID=AKIA" "TESTTESTTESTTEST",
+                     "AWS_ACCESS_KEY_ID=AKIA" "YOURACCESSKEYIDXX",
+                     "AWS_ACCESS_KEY_ID=AKIA" "EXAMPLEKEYEXAMPLE",
+                     "aws configure set aws_access_key_id AKIA" "FAKEFAKEFAKEFAKE"):
+            with self.subTest(text=text):
+                self.assertEqual(n(text), 0)
+                self.assertEqual(literal_hits(text), [])
+
+    def test_random_letters_are_no_words(self):
+        rng = random.Random(13)
+        for _ in range(RandomKeysAreNeverFixtures.N):
+            value = "AKIA" + rnd(rng, string.ascii_uppercase, 16)
+            self.assertIsNone(fixture_reason(value), value)
+        # EXAMPLE alone where the account ID goes leaves the rest a key
+        value = "AKIAEXAMPLE" + rnd(rng, B32, 9)
+        self.assertIsNone(fixture_reason(value), value)
+
+
 class RandomKeysAreNeverFixtures(unittest.TestCase):
     """The arithmetic in fixtures.py says a random key trips a signal with
     probability around 1e-9. Seeded, so a failure reproduces."""
@@ -295,6 +403,8 @@ class RandomKeysAreNeverFixtures(unittest.TestCase):
             lambda: "ASIA" + rnd(rng, B32, 16),
             lambda: "sk_" "live_" + rnd(rng, B62, 24),
             lambda: "sk_" "live_51" + rnd(rng, B62, 97),
+            lambda: "sk_" "test_" + rnd(rng, B62, 24),
+            lambda: "rk_" "test_51" + rnd(rng, B62, 97),
             lambda: "gh" "p_" + rnd(rng, B62, 36),
             lambda: "sk-ant-api03-" + rnd(rng, B64URL, 95),
             lambda: "sk-" + rnd(rng, HEX, 32),
@@ -324,19 +434,19 @@ class RandomKeysAreNeverFixtures(unittest.TestCase):
                     self.assertIsNone(fixture_reason(value), value)
 
 
-class StaysLinear(unittest.TestCase):
+class StaysLinear(growth.Assertions, unittest.TestCase):
+    # `count`, not the usual n, which this module names a function.
 
     def test_watch_on_a_command_full_of_fixtures(self):
-        command = ("echo AKIA1234567890ABCDEF sk_" "live_51HxAbCdEfGhIjKlMnOpQr " * 1200)[:64000]
-        t = time.perf_counter()
-        self.assertEqual(literal_hits(command), [])
-        self.assertLess(time.perf_counter() - t, 1.0)
+        self.assertEqual(self.assertScalesLinearly(
+            lambda count: ("echo AKIA" "1234567890ABCDEF sk_" "live_51HxAbCdEfGhIjKlMnOpQr "
+                           * count(1200))[:64000],
+            literal_hits), [])
 
     def test_clean_on_a_megabyte_of_fixtures(self):
-        text = ("AKIA1234567890ABCDEF gh" "p_" + "Ab12" * 9 + "\n") * 16000
-        t = time.perf_counter()
-        self.assertEqual(clean.find_secrets(text), [])
-        self.assertLess(time.perf_counter() - t, 3.0)
+        self.assertEqual(self.assertScalesLinearly(
+            lambda count: ("AKIA" "1234567890ABCDEF gh" "p_" + "Ab12" * 9 + "\n") * count(16000),
+            clean.find_secrets), [])
 
     def test_long_bodies_skip_statistics_and_stay_flagged(self):
         self.assertIsNone(fixture_reason("sk_" "live_" + "abcdefgh" * 100))
