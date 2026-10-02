@@ -76,6 +76,60 @@ class WhereACommandTakesItsPassword(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(find_secrets(text + "\n# padding padding padding"), [])
 
+    def test_found_where_more_commands_take_it(self):
+        for command in (
+                'sqlcmd -S prod -U sa -P %s -Q "DROP DATABASE prod"',
+                "sqlcmd -S prod -U sa -P'%s' -i drop.sql",
+                "influx -username admin -password %s -execute 'DROP DATABASE prod'",
+                "mongosh -u admin -p %s --eval 'db.dropDatabase()'",
+                "mongodump --uri mongodb://db/prod -u admin -p'%s' --out dump",
+                "ldapsearch -x -D cn=admin,dc=corp -w %s -b dc=corp",
+                "ldapmodify -x -D cn=admin,dc=corp -w '%s' -f change.ldif",
+                "htpasswd -b .htpasswd admin %s",
+                "htpasswd -bc /etc/nginx/.htpasswd admin '%s' && nginx -s reload",
+                "htpasswd -nbB admin %s",
+                "keytool -list -keystore prod.jks -storepass %s",
+                "keytool -importkeystore -srckeystore a.p12 -srcstorepass %s"
+                " -destkeystore b.jks",
+                "jarsigner -keystore prod.jks -keypass %s app.jar release",
+                "$c = ConvertTo-SecureString '%s' -AsPlainText -Force",
+                'ConvertTo-SecureString -String "%s" -AsPlainText -Force',
+                "ConvertTo-SecureString -AsPlainText -Force -String '%s'",
+                "smbclient //files/share -U admin%%%s -c 'get .env'",
+                "smbclient -U 'CORP\\admin%%%s' //files/share",
+                "rpcclient -U admin%%%s dc01 -c enumdomusers"):
+            text = command % PW
+            with self.subTest(command=command):
+                self.assertEqual([v for v, _l in find_secrets(text)], [PW])
+
+    def test_every_command_is_worth_scanning(self):
+        """A string holding none of clean._CHEAP is never asked, so each
+        rule's marker must hold one, or the rule never runs."""
+        for marker, _pattern, _label in clean._TYPED:
+            with self.subTest(marker=marker):
+                # curl's rule reads user:password, and every colon is asked.
+                self.assertTrue(marker == "curl" or any(t in marker for t in clean._CHEAP))
+
+    def test_no_password_typed_to_more_commands(self):
+        for text in (
+                "sqlcmd -S prod -E -Q 'SELECT 1'",
+                "sqlcmd -S prod -U sa -P $SA_PASSWORD -Q 'SELECT 1'",
+                "rsync -avP build/ deploy@prod.example.test:/srv/app/",
+                "influx -username admin -password '' -execute 'SHOW DATABASES'",
+                "mongosh --port 27017 prod --eval 'db.stats()'",
+                "ldapsearch -x -W -D cn=admin,dc=corp -b dc=corp",
+                "ldapsearch -x -D cn=admin,dc=corp -y /run/secrets/ldap -b dc=corp",
+                "htpasswd -c .htpasswd admin",
+                "htpasswd -b .htpasswd admin $HTPASSWD",
+                "keytool -list -keystore prod.jks -storepass:env STOREPASS",
+                "keytool -list -keystore prod.jks -storepass:file pass.txt",
+                "ConvertTo-SecureString $plain -AsPlainText -Force",
+                "smbclient -L //files -U admin",
+                "smbclient //files/share -U admin%$SMB_PASSWORD",
+                "net use Z: \\\\files\\share /persistent:no"):
+            with self.subTest(text=text):
+                self.assertEqual(find_secrets(text + "\n# padding padding padding"), [])
+
     def test_watch_masks_it_in_the_evidence(self):
         command = "mysql -u root -p%s -e 'DROP DATABASE prod'" % PW
         hits, payload = watch.evaluate("Bash", {"command": command})
@@ -163,6 +217,73 @@ class ReadOutsideTheWindow(_Reports):
                     out = _cli(argv)
                     self.assertIn("DROP DATABASE", out)
                     self.assertNotIn(PW, out)
+
+
+# Each command watch reports, with the password inside the evidence it
+# prints: the places a command takes one that no rule read but mysql's -p.
+REPORTED = {
+    "sqlcmd": 'sqlcmd -S prod -U sa -P %s -Q "DROP DATABASE prod "',
+    "influx": "influx -username admin -password %s -execute 'DROP DATABASE prod '",
+    "mongosh": "mongosh -u admin -p %s --eval 'DROP DATABASE prod '",
+    "ldapsearch": "ldapsearch -x -D cn=admin,dc=corp -w %s -b dc=corp -f .env",
+    "htpasswd": "htpasswd -b .env.htpasswd admin %s",
+    "keytool": "keytool -list -keystore .env.jks -storepass %s",
+    "pwsh": "pwsh -File .env.ps1 -Command \"$p = ConvertTo-SecureString '%s'"
+            " -AsPlainText -Force\"",
+    "smbclient": "smbclient //files/share -U admin%%%s -c 'get .env'",
+}
+# A script's own argument: no rule can say it is a password.
+SCRIPT = "./deploy.sh prod %s -e 'DROP DATABASE prod '"
+
+
+# The evidence shows the password by its hint, as a reader sees it in
+# either form: the action was reported, and the value masked in it.
+_MASKED = clean.DISPLAY_MASK % clean._hint(PW)
+
+
+def _shown(out):
+    try:
+        return json.dumps(json.loads(out), ensure_ascii=False)
+    except ValueError:
+        return out
+
+
+def _read_then_typed(test, typed, read_age, typed_age=600):
+    """A root where one session reads the password from .env, read_age
+    seconds ago, and another types it, typed_age seconds ago."""
+    root = _tempdir(test, "typed-")
+    project = os.path.join(root, "-Users-a-app")
+    _write(os.path.join(project, "sessA.jsonl"),
+           [_call(1, "cat .env", _stamp(read_age)),
+            _result(1, "DB_PASSWORD=%s\n" % PW, _stamp(read_age))], read_age)
+    _write(os.path.join(project, "sessB.jsonl"),
+           [_call(2, typed % PW, _stamp(typed_age)),
+            _result(2, "ok", _stamp(typed_age))], typed_age)
+    return root
+
+
+class TypedWhereMoreCommandsTakeIt(_Reports):
+    """sqlcmd -P, influx -password, mongosh -p, ldapsearch -w, htpasswd -b,
+    keytool -storepass, ConvertTo-SecureString -AsPlainText and smbclient's
+    -U user%password. Read in a session --days 1 leaves out, the copy typed
+    in the window was printed whole by check, watch and their --json forms,
+    and clean --apply left it on disk."""
+
+    def test_check_and_watch_never_print_it(self):
+        for name, typed in REPORTED.items():
+            root = _read_then_typed(self, typed, 5 * 86400)
+            for argv in self.reports(root, "--days", "1"):
+                with self.subTest(position=name, argv=argv[:2]):
+                    out = _cli(argv)
+                    self.assertNotIn(PW, out)
+                    self.assertIn(_MASKED, _shown(out))
+
+    def test_clean_masks_it_where_it_is_typed(self):
+        for name, typed in REPORTED.items():
+            root = _read_then_typed(self, typed, 5 * 86400)
+            with self.subTest(position=name):
+                _cli(["clean", "--apply", "--days", "1", "--root", root])
+                self.assertEqual(self.plaintext(root), ["sessA.jsonl"])
 
 
 class ALongHistory(_Reports):

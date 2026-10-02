@@ -318,13 +318,16 @@ _NOT_A_SECRET_RUNS = (("change", "me"), ("replace", "me"), ("not", "for", "produ
 
 
 # A string can only hold a secret if it has an assignment, a connection
-# string, or a known credential prefix. Most of a transcript is prose, and
+# string, a known credential prefix, or a command that takes a password
+# (_TYPED: each rule's marker holds one of these, or it never runs). Most of a transcript is prose, and
 # checking this first skips the regex battery on the overwhelming majority.
 # Every shape in _SHAPES_NAMED must start with one of these, or text holding
 # only that shape is never scanned (tests/test_clean_shapes.py checks).
 _CHEAP = ("=", ":", "sk_", "rk_", "sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_",
           "github_pat_", "xox", "AKIA", "ASIA", "AC", "SG.", "eyJ", "BEGIN",
-          "mysql", "mariadb", "sshpass", "redis-cli", "--password", "docker login")
+          "mysql", "mariadb", "sshpass", "redis-cli", "-password", "docker login",
+          "sqlcmd", "mongo", "ldap", "htpasswd", "storepass", "keypass",
+          "SecureString", "smb", "rpcclient")
 
 # A single string longer than this is a data blob -- a build log, a base64
 # payload, a file dump. Secrets in the first megabyte are still found.
@@ -1457,9 +1460,21 @@ def _found(text):
 # search of other transcripts, was printed whole by check and watch and
 # stayed on disk after clean --apply. Each is read within the command the
 # name starts, and the value judged as one beside a key named password is.
+#
+# The same held for sqlcmd -P, influx -password, mongosh -p, ldapsearch -w,
+# htpasswd -b's last word, keytool -storepass, ConvertTo-SecureString
+# -AsPlainText and the user%password smbclient takes after -U.
 _TYPED_VALUE = (r"""(?:'(?P<q>[^'\s]+)'|"(?P<d>[^"\s]+)"|"""
                 r"""(?P<v>(?!-)[^\s'"`;|&<>()\\]+))""")
 _IN_COMMAND = r"\b[^\n|;&]{0,256}?\s"
+# What _TYPED_VALUE takes, unnamed, and the end of the command after it:
+# htpasswd -b takes its password as the last word.
+_LAST_WORD = (r"""(?=(?:'[^'\s]+'|"[^"\s]+"|[^\s'"`;|&<>()\\]+)"""
+              r"""\s*(?:$|[\n|;&]|[0-9]*>))""")
+# smbclient -U user%password, rpcclient's too: the user and the % before
+# the value, quoted or not, as curl's user and colon.
+_SMB_USER = (r"""(?:-U\s*|--user(?:name)?[=\s]\s*)"""
+             r"""(?:'[^'%\s]*%(?=[^'\s]+')|"[^"%\s]*%(?=[^"\s]+")|[^\s'"%]*%)""")
 _TYPED = [
     (marker, re.compile(pattern + _TYPED_VALUE), label)
     for marker, pattern, label in (
@@ -1476,6 +1491,24 @@ _TYPED = [
         ("curl", r"(?<![\w.-])curl" + _IN_COMMAND + r"(?:-u\s*|--user[=\s]\s*)"
          r"(?:'[^':\s]*:(?=[^'\s]+')|\"[^\":\s]*:(?=[^\"\s]+\")|[^\s'\":]*:)",
          "curl user password"),
+        ("sqlcmd", r"(?<![\w.-])sqlcmd" + _IN_COMMAND + r"-P\s*",
+         "SQL Server password"),
+        ("-password", r"(?<=\s)-password\s+", "-password argument"),
+        ("mongo", r"(?<![\w.-])mongo(?:sh|dump|restore|export|import|stat|top|files)?"
+         + _IN_COMMAND + r"-p\s*", "mongo password"),
+        ("ldap", r"(?<![\w.-])ldap(?:search|modify|add|delete|whoami|passwd|compare"
+         r"|modrdn|exop|url)" + _IN_COMMAND + r"-w\s*", "LDAP bind password"),
+        ("htpasswd", r"(?<![\w.-])htpasswd(?=[^\n|;&]{0,256}?\s-[A-Za-z]*b)"
+         r"[^\n|;&]{0,256}?\s" + _LAST_WORD, "htpasswd password"),
+        ("storepass", r"(?<=\s)-(?:src|dest)?storepass\s+", "keystore password"),
+        ("keypass", r"(?<=\s)-(?:src|dest)?keypass\s+", "keystore password"),
+        ("SecureString", r"(?i:(?<![\w.-])ConvertTo-SecureString"
+         r"(?=[^\n|;]{0,256}?\s-AsPlainText\b)"
+         r"(?:\s+-(?:AsPlainText|Force)\b)*(?:\s+-String)?)\s+",
+         "PowerShell plain-text password"),
+        ("smb", r"(?<![\w.-])smb(?:client|cacls|get|map|tree)" + _IN_COMMAND + _SMB_USER,
+         "SMB password"),
+        ("rpcclient", r"(?<![\w.-])rpcclient" + _IN_COMMAND + _SMB_USER, "SMB password"),
     )]
 
 
@@ -2701,7 +2734,8 @@ _PROVIDER = [
     (re.compile(r"render", re.I), "Render: Account settings > API keys"),
     (re.compile(r"turnstile|cloudflare", re.I), "Cloudflare: dashboard > the relevant service"),
     (re.compile(r"telegram", re.I), "Telegram: BotFather > /revoke"),
-    (re.compile(r"database_url|postgres|redis|db_password|mongo|mysql|pgpassword", re.I),
+    (re.compile(r"database_url|postgres|redis|db_password|mongo|mysql|pgpassword|sql server",
+                re.I),
      "Database: change the password, then update every consumer"),
     (re.compile(r"jwt|session|cron|app_key|signing", re.I),
      "Application secret: you generate this one; rotating invalidates sessions"),
