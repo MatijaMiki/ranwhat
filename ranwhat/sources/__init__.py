@@ -3,7 +3,7 @@
 REGISTRY holds them in registry order, which is the order agents are
 listed everywhere: `ranwhat sources`, report sentences, --help and the
 site's table. ADAPTERS names each adapter by module and class, in that
-order; the integration step fills it in.
+order, and importing this package registers every one of them.
 
 Nothing here imports ranwhat.watch or ranwhat.clean: watch imports this
 package, and clean imports watch.
@@ -23,9 +23,24 @@ __all__ = ["ADAPTERS", "REGISTRY", "Location", "MaskResult", "SecretText",
            "sources", "unregister"]
 
 # (module, class) under ranwhat.sources, in registry order (design 4.2):
-# Claude Code first, OpenClaw second to last, grok-dev last. For example
-# ("codex", "CodexSource"). Empty until the adapters are wired in.
-ADAPTERS = ()
+#   Claude Code, Codex, Gemini CLI, Copilot CLI, VS Code Copilot, Cline,
+#   Roo Code, Kilo Code, OpenCode, Continue, Aider, Goose, Zed, Qwen Code,
+#   Grok Build, Droid, Amp, Crush, Kimi Code, Kimi CLI, Pi, Muse Code,
+#   Mistral Vibe, Zoo Code, cecli, OpenClaw, grok-dev.
+# Only the adapters that exist are listed; a later one goes in at its place
+# in that order, not at the end. Claude Code and OpenClaw are not ported yet.
+ADAPTERS = (
+    ("codex", "CodexSource"),
+    ("gemini", "GeminiSource"),
+    ("copilot_cli", "CopilotCliSource"),
+    ("qwen", "QwenSource"),
+    ("grok", "GrokBuildSource"),
+    ("droid", "DroidSource"),
+    ("kimi_code", "KimiCodeSource"),
+    ("kimi", "KimiSource"),
+    ("pi", "PiSource"),
+    ("muse_code", "MuseCodeSource"),
+)
 
 REGISTRY = OrderedDict()
 

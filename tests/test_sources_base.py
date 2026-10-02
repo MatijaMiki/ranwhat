@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -46,6 +47,23 @@ SECRET = "sk_" "live_" "Zq8vR2mT6yLp4WcN0sXe7HbJ"
 PASSWORD = "pw" '"' "\\" "\u00e4" "&<>" "\u2028" "Tq9" "vX2r"
 
 WINDOWS = os.name == "nt"
+
+# Every temp file and folder these tests make (and any the code under test
+# makes) goes in one folder, removed when the module is done.
+_TEMP_ROOT = None
+_TEMP_BEFORE = None
+
+
+def setUpModule():
+    global _TEMP_ROOT, _TEMP_BEFORE
+    _TEMP_ROOT = tempfile.mkdtemp(prefix="srcbase-run-")
+    _TEMP_BEFORE = tempfile.tempdir
+    tempfile.tempdir = _TEMP_ROOT
+
+
+def tearDownModule():
+    tempfile.tempdir = _TEMP_BEFORE
+    shutil.rmtree(_TEMP_ROOT, ignore_errors=True)
 
 
 def _sha(path):
@@ -176,6 +194,28 @@ class Registry(unittest.TestCase):
         for (module, cls), sid in zip(sources.ADAPTERS, sources.ids()):
             mod = __import__("ranwhat.sources." + module, fromlist=[cls])
             self.assertEqual(getattr(mod, cls).id, sid)
+
+    # Design 4.2: the order agents are listed everywhere. OpenClaw sits near
+    # the end on purpose (decision 7); grok-dev is last.
+    ORDER = ("claude-code", "codex", "gemini", "copilot-cli", "vscode-copilot",
+             "cline", "roo", "kilo", "opencode", "continue", "aider", "goose",
+             "zed", "qwen", "grok", "droid", "amp", "crush", "kimi-code",
+             "kimi", "pi", "muse-code", "vibe", "zoo", "cecli", "openclaw",
+             "grok-dev")
+    WAVE_1 = ("codex", "gemini", "copilot-cli", "qwen", "grok", "droid",
+              "kimi-code", "kimi", "pi", "muse-code")
+
+    def test_wave_1_is_wired_in(self):
+        for sid in self.WAVE_1:
+            self.assertIn(sid, sources.ids())
+
+    def test_registry_order_is_the_designs(self):
+        # Ids not in the design's list are named here so a new adapter
+        # cannot slip in without a place in the order.
+        stray = [s for s in sources.ids() if s not in self.ORDER]
+        self.assertEqual(stray, [])
+        ranks = [self.ORDER.index(s) for s in sources.ids()]
+        self.assertEqual(ranks, sorted(ranks), sources.ids())
 
     def test_every_registered_source_says_what_reports_need(self):
         for source in sources.sources():
