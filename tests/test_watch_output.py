@@ -51,6 +51,11 @@ def plain(text):
     return ANSI.sub("", text)
 
 
+# Yesterday, in UTC: the command line windows actions by their own time, so
+# a fixed date would drop out of its reports a month later.
+DAY = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 86400))
+
+
 def transcript(calls):
     """A Claude Code transcript root holding these (tool, input) calls."""
     root = tempfile.mkdtemp(prefix="watch-out-")
@@ -59,7 +64,7 @@ def transcript(calls):
     with open(os.path.join(proj, "s.jsonl"), "w", encoding="utf-8") as fh:
         for i, (name, tool_input) in enumerate(calls):
             fh.write(json.dumps({
-                "timestamp": "2026-09-20T10:%02d:00Z" % i,
+                "timestamp": DAY + "T10:%02d:00Z" % i,
                 "message": {"role": "assistant", "content": [
                     {"type": "tool_use", "id": "t%d" % i, "name": name,
                      "input": tool_input}]}}) + "\n")
@@ -311,7 +316,7 @@ class LocalTime(unittest.TestCase):
         root, st = transcript([bash("rm -rf ~/Documents/old")])
         doc = json.loads(run_cli(["watch", "--json", "--root", root,
                                   "--state-dir", st]))
-        self.assertEqual(doc[0]["timestamp"], "2026-09-20T10:00:00Z")
+        self.assertEqual(doc[0]["timestamp"], DAY + "T10:00:00Z")
 
     def test_openclaw_epochs_are_marked_utc(self):
         self.assertEqual(watch._as_iso(1758550000), "2025-09-22T14:06:40Z")

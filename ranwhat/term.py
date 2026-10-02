@@ -5,8 +5,9 @@ both directions. On a narrow window the output wrapped twice, once by this
 tool and again by the terminal, producing ragged half-lines. On a wide one it
 used a third of the screen.
 
-Colour honours NO_COLOR (no-color.org) and only engages on a tty, so piping to
-a file or a pager still produces plain text.
+Colour honours NO_COLOR (no-color.org) and TERM=dumb, and only engages on a
+tty, so piping to a file or a pager still produces plain text. colour() is
+the one place that decides, for every module that paints.
 """
 from __future__ import annotations
 
@@ -43,11 +44,17 @@ def rule(char="─", stream=None):
 
 
 def _colour_depth(stream=None):
-    """0 = none, 8 = basic ANSI, 24 = truecolour."""
+    """0 = none, 8 = basic ANSI, 24 = truecolour.
+
+    NO_COLOR counts when set to anything but the empty string, as
+    no-color.org defines it."""
     stream = stream or sys.stdout
-    if os.environ.get("NO_COLOR") is not None:
+    if os.environ.get("NO_COLOR"):
         return 0
-    if not hasattr(stream, "isatty") or not stream.isatty():
+    try:
+        if not stream.isatty():
+            return 0
+    except Exception:             # no isatty, or a closed stream
         return 0
     if os.environ.get("TERM") == "dumb":
         return 0
@@ -55,6 +62,20 @@ def _colour_depth(stream=None):
     if "truecolor" in ct or "24bit" in ct:
         return 24
     return 8
+
+
+def colour(stream=None):
+    """Whether escapes may be written to `stream` (default stdout). Every
+    colour in the package asks this, so NO_COLOR, TERM=dumb and a pipe turn
+    all of it off, not only the wordmark."""
+    return _colour_depth(stream) > 0
+
+
+def paint(code, s, stream=None):
+    """`s` in SGR `code`, or `s` as it is where colour() says no."""
+    if not colour(stream):
+        return s
+    return "\033[%sm%s\033[0m" % (code, s)
 
 
 def brand(s, stream=None):
@@ -72,14 +93,16 @@ def brand(s, stream=None):
     return s
 
 
-def wrap(text, indent="  ", stream=None, first=None):
+def wrap(text, indent="  ", stream=None, first=None, limit=None):
     """Fold prose to the terminal, without importing textwrap for one job.
 
     `first` replaces `indent` on the first line only, for a bullet or a label
     with the rest of the text hanging under it. It counts against the width
     like any other text. A word longer than the line gets a line to itself.
+    `limit` is the width, when the caller measured it already.
     """
-    limit = width(stream)
+    if limit is None:
+        limit = width(stream)
     start = indent if first is None else first
     out, line = [], ""
     for word in text.split():

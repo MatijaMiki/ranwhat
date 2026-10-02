@@ -16,6 +16,7 @@ OTLP receiver slots in behind the same Action Record interface.
 
 from __future__ import annotations
 
+import bisect
 import datetime
 import functools
 import glob
@@ -23,6 +24,7 @@ import shlex
 import hashlib
 import json
 import os
+import posixpath
 import re
 import shutil
 import sqlite3
@@ -31,19 +33,32 @@ import time
 
 from . import term
 
-CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
+def claude_projects():
+    """Where Claude Code keeps its transcripts. CLAUDE_CONFIG_DIR is Claude
+    Code's own override for ~/.claude, and projects/ sits inside it
+    wherever it is. Read when asked, like OPENCLAW_STATE_DIR: reading only
+    ~/.claude/projects found nothing on such a machine, and said all clear."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
+    return os.path.join(os.path.expanduser(base), "projects")
+
+
+# Resolved once, at import, for the --root default and clean.scan's, so one
+# run of either command reads one directory. Code that can pass root=None
+# should: it gets claude_projects() at the time of the call.
+CLAUDE_PROJECTS = claude_projects()
 
 CRITICAL, HIGH, MEDIUM = "critical", "high", "medium"
 
 
 class Rule(object):
     def __init__(self, rid, severity, title, why, patterns=(), scan_raw=False,
-                 paths=False, find=None):
+                 paths=False, find=None, hide=None):
         self.id = rid
         self.severity = severity
         self.title = title
         self.why = why
-        self.patterns = [re.compile(p, re.I) for p in patterns]
+        self.patterns = [p if hasattr(p, "search") else re.compile(p, re.I)
+                         for p in patterns]
         # Most rules see only the parts of a shell command that actually
         # execute. A rule with scan_raw sees every string the call carried,
         # because for it the mere presence of the string is the finding: a
@@ -56,6 +71,10 @@ class Rule(object):
         # Tried before the patterns, for what a regex cannot say in linear
         # time: text -> (start, end) of the first match, or None.
         self.find = find
+        # For a shell command: text -> the same text, the same length, with
+        # what the rule must not judge blanked out. Offsets survive, so the
+        # evidence still quotes the command as it was written.
+        self.hide = hide
 
     def match(self, text):
         """(start, end) of the first match, or None."""
@@ -73,6 +92,54 @@ class Rule(object):
 _SEARCH_CMD = re.compile(
     r"^\s*(?:sudo\s+)?(?:grep|egrep|fgrep|rg|ripgrep|ag|ack|find|locate|mdfind)\b")
 _SEARCH_ACTS = re.compile(r"-delete\b|-exec\b|-ok\b|\|\s*xargs\b")
+# git grep searches the tree, and git log given -S, -G or --grep searches
+# history, for a string: neither runs it. Options before the subcommand
+# may take a value (git -C repo grep). git grep -O hands what it finds to
+# a program of its own choosing, which is no search.
+_GIT_SEARCH = re.compile(
+    r"^\s*(?:sudo\s+)?git(?:\s+-[^\s|;&]+(?:\s+[^\s|;&-][^\s|;&]*)?)*\s+"
+    r"(?:grep\b|log\b(?=[\s\S]*\s(?:-[SG]|--grep\b|--pickaxe-)))")
+_GIT_PAGER = re.compile(r"(?<!\S)(?:-O|--open-files-in-pager\b)")
+
+
+class _Found(object):
+    """A match that is not a regex's: its span."""
+
+    def __init__(self, start, end):
+        self._span = (start, end)
+
+    def span(self):
+        return self._span
+
+
+class _Gap(object):
+    """head, anything but a separator, then tail: what the regex
+    head[^|;&]*tail finds, in linear time, with search() as a compiled
+    regex has it.
+
+    As one regex every head read on to the end of its stretch looking for
+    the tail, and 64,000 characters of `git push ` took three seconds. A
+    later head in the same stretch can reach only tails the first one
+    reaches, so only the first head in each stretch is tried."""
+
+    def __init__(self, head, tail, stops="|;&"):
+        self.head = re.compile(head, re.I)
+        self.tail = re.compile(tail, re.I)
+        self.stop = re.compile("[%s]" % re.escape(stops))
+
+    def search(self, text, pos=0):
+        while True:
+            head = self.head.search(text, pos)
+            if not head:
+                return None
+            stop = self.stop.search(text, head.end())
+            end = stop.start() if stop else len(text)
+            tail = self.tail.search(text, head.end(), end)
+            if tail:
+                return _Found(head.start(), tail.end())
+            if not stop:
+                return None
+            pos = stop.end()
 
 
 # Commands whose arguments are literal text, never a path being acted on.
@@ -86,11 +153,12 @@ _GIT_RM_CACHED = re.compile(r"^\s*(?:sudo\s+)?git\s+rm\b[^|;&]*--cached\b")
 _COMMENT = re.compile(r"(?:^|\s)#.*$")
 
 
-def _is_inert(segment):
-    """True when a segment cannot perform the action its text mentions."""
+def _is_inert(segment, into_shell=False):
+    """True when a segment cannot perform the action its text mentions.
+    Text piped into a shell (echo "rm -rf ~" | sh) is run by it."""
     if not segment.strip() or segment.lstrip().startswith("#"):
         return True
-    if _TEXT_ONLY.match(segment) or _GIT_RM_CACHED.match(segment):
+    if _GIT_RM_CACHED.match(segment) or (_TEXT_ONLY.match(segment) and not into_shell):
         return True
     return _is_search(segment)
 
@@ -103,6 +171,8 @@ def _is_search(segment):
     """
     if not segment or not segment.strip():
         return False
+    if _GIT_SEARCH.match(segment):
+        return not _GIT_PAGER.search(segment)
     return bool(_SEARCH_CMD.match(segment)) and not _SEARCH_ACTS.search(segment)
 
 
@@ -123,19 +193,7 @@ def _secret_spans(text):
     Cached because a hit asks twice, once to find a secret and once to mask
     the evidence around it. Imported late: clean imports this module."""
     from . import clean
-    spans = []
-    for value, _label in clean.find_secrets(text):
-        at = text.find(value)
-        while at != -1:
-            spans.append((at, at + len(value)))
-            at = text.find(value, at + 1)
-    merged = []
-    for lo, hi in sorted(spans):
-        if merged and lo < merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
-        else:
-            merged.append((lo, hi))
-    return tuple(merged)
+    return clean.secret_spans(text)
 
 
 def _first_secret(text):
@@ -147,13 +205,21 @@ def _first_secret(text):
 
 # Terminal control characters. A command carrying \033[2J or a tab is text
 # to report, not something to replay on the reader's terminal.
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# And half of a UTF-16 surrogate pair: Node writes one alone for an emoji
+# cut in two, and no UTF-8 stream will print it.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 
-# Command separators, the same ones _SPLIT_OPS splits on. A match spanning
+# Command separators, the same ones _command_spans splits at. A match spanning
 # lines (a private key) is bounded without the newline, or it would lose the
 # `cat <<EOF` that says where it went.
-_BREAKS = re.compile(r"\s*(?:\|\||&&|;|\||\n)\s*")
-_INLINE_BREAKS = re.compile(r"\s*(?:\|\||&&|;|\|)\s*")
+#
+# The blanks before a separator are taken from where they start, never from
+# inside them (_AT_BLANKS): tried from every blank of a long run, each try
+# read on to the end of the run looking for a separator, and sixty thousand
+# blanks took seventeen seconds.
+_AT_BLANKS = r"(?:(?!\s)|(?<!\s))\s*"
+_BREAKS = re.compile(_AT_BLANKS + r"(?:\|\||&&|;|\||\n)\s*")
+_INLINE_BREAKS = re.compile(_AT_BLANKS + r"(?:\|\||&&|;|\|)\s*")
 
 
 def _printable(text):
@@ -205,8 +271,26 @@ def _evidence(text, span, before=20, after=70):
         pos = e
     out.append(text[pos:hi])
     snippet = _printable("".join(out)).strip()
-    return clean.mask_for_display(
-        ("…" if lo > 0 else "") + snippet + ("…" if hi < len(text) else ""))
+    if not spans and lo == 0 and hi == len(text) and not _CONTROL.search(text):
+        # All of text, in which the rules found nothing: a second look at
+        # the same text finds the same. Once a value is masked the text is
+        # not the same, and a second look can read what its hint now
+        # stands apart from (<AKIA…>curl -u admin:...).
+        evidence = snippet
+    else:
+        evidence = clean.mask_for_display(
+            ("…" if lo > 0 else "") + snippet + ("…" if hi < len(text) else ""))
+    if len(_MASKED_HERE) >= _MASKED_HERE_MAX:
+        _MASKED_HERE.clear()
+    _MASKED_HERE.add(evidence)
+    return evidence
+
+
+# Evidence _evidence has masked, which render need not mask again. It masks
+# each hit's evidence for records this module did not build, and asked
+# clean a third time about every one it did.
+_MASKED_HERE = set()
+_MASKED_HERE_MAX = 100000
 
 
 # Paths whose entire purpose is to be thrown away.
@@ -252,6 +336,12 @@ def _rm_targets(text):
                 if _REDIRECT.match(raw).end() == len(raw):
                     skip_next = True      # "> file" written with a space
                 continue
+            # The ) of a subshell or a $( ) it closes: (rm -rf ~). As many
+            # as close one opened before the word, counted once: a count and
+            # a copy for each ) made a run of them quadratic.
+            extra = raw.count(")") - raw.count("(")
+            if extra > 0:
+                raw = raw[:len(raw) - min(extra, len(raw) - len(raw.rstrip(")")))]
             targets.append(raw.strip("\"\'"))
     return targets
 
@@ -286,14 +376,80 @@ def _normalise_target(t):
     return t if len(t) <= 1 else t.rstrip("/")
 
 
+def _home():
+    return os.path.expanduser("~")
+
+
+# Home as the shell spells it: ~, $HOME, ${HOME}, and ${HOME:?}, ${HOME:-x}
+# and the rest that expand to it while it is set. Then ~name, a user's
+# home, which sits beside this one.
+_HOME_PREFIX = re.compile(r"(?:~|\$HOME\b|\$\{HOME(?::?[-=?][^}]*)?\})(?=/|$)")
+_USER_HOME = re.compile(r"~([A-Za-z_][\w.-]*)(?=/|$)")
+# A last part that matches everything in a directory: *, .*, {*,.*}, .[!.]*
+# A string test, not a regex: with * in the classes on both sides of the
+# one * it had to hold, a run of them was split at every place, and 64,000
+# did not finish in twenty seconds.
+_GLOB_ONLY = "*?.{},[]!^"
+
+
+def _everything_in(t):
+    """Where the last part of t starts, at its /, when that part only
+    matches everything in the directory before it; or -1."""
+    slash = t.rfind("/")
+    last = t[slash + 1:]
+    return slash if slash != -1 and "*" in last and not last.strip(_GLOB_ONLY) else -1
+
+
+def _as_absolute(target, home):
+    """The absolute path a target names, with home put in for ~, $HOME and
+    ${HOME}, a last part that matches everything in it dropped, and every
+    . and .. walked; or None when it is not absolute. Quotes are the
+    shell's, so they go: "$HOME"/.. is $HOME/.."""
+    t = target.replace('"', "").replace("'", "")
+    m = _HOME_PREFIX.match(t) or _USER_HOME.match(t)
+    if m:
+        if not home.startswith("/"):
+            return None
+        if m.re is _USER_HOME:
+            base = posixpath.join(posixpath.dirname(home.rstrip("/")), m.group(1))
+        else:
+            base = home
+        t = base + t[m.end():]
+    if not t.startswith("/"):
+        return None
+    everything = _everything_in(t)
+    if everything != -1:
+        t = t[:everything] or "/"
+    # POSIX keeps a leading // as it is, and //Users/me is /Users/me.
+    return posixpath.normpath("/" + t.lstrip("/"))
+
+
 def _is_catastrophic(t):
-    return _normalise_target(t) in _CATASTROPHIC or t in ("/*", "~/*", "$HOME/*")
+    """The target is the root, a system directory, the home directory or
+    anything above it, however it is spelled: rm -rf /Users/<you> deletes
+    what rm -rf ~ does, and ~/.. is /Users."""
+    if _normalise_target(t) in _CATASTROPHIC or t in ("/*", "~/*", "$HOME/*"):
+        return True
+    if not t.startswith(("/", "~", "$", '"', "'")):
+        return False
+    home = _home()
+    path = _as_absolute(t, home)
+    if path is None:
+        return False
+    if path in _CATASTROPHIC:
+        return True
+    return (home.startswith("/") and home != "/"
+            and (home + "/").startswith(path.rstrip("/") + "/"))
 
 
 # Deletions that are not `rm`, so they have no target the refiner can judge.
 # A temp `rm` alongside one of these says nothing about what it removed.
-_UNJUDGED_DELETION = re.compile(
-    r"find\s+[^|;&]*-delete\b|shred\s+|truncate\s+-s\s*0")
+_FIND_DELETE = _Gap(r"find\s+", r"-delete\b")
+_SHRED_OR_TRUNCATE = re.compile(r"shred\s+|truncate\s+-s\s*0")
+
+
+def _unjudged_deletion(text):
+    return bool(_FIND_DELETE.search(text) or _SHRED_OR_TRUNCATE.search(text))
 
 # A link or mount made earlier in the same command can point a temp path
 # anywhere: `ln -s ~ /tmp/h; rm -rf /tmp/h/Documents` deletes Documents.
@@ -303,7 +459,7 @@ _LINKING = re.compile(
 
 def _linked_before_rm(text):
     linked = False
-    for segment in _SPLIT_OPS.split(text):
+    for segment in _commands(text):
         segment = _KEY_PREFIX.sub("", segment)
         if _LINKING.match(segment):
             linked = True
@@ -322,7 +478,7 @@ def _refine_deletion(text, severity, tool_input=None):
     targets, vouched, escalate = _deletion_context(text, tool_input)
     if escalate or any(_is_catastrophic(t) for t in targets):
         return CRITICAL
-    if not targets or _UNJUDGED_DELETION.search(text) or _linked_before_rm(text):
+    if not targets or _unjudged_deletion(text) or _linked_before_rm(text):
         return severity
     for t in targets:
         if _is_ephemeral(t):
@@ -433,7 +589,7 @@ def _simple_commands(command, limit=256):
     """Split shell source into simple commands as the shell would.
 
     Returns [(op_before, words, op_after)], each word (raw, value, expands).
-    Quote-aware, unlike _SPLIT_OPS, so `echo "x; cd /tmp"` holds no cd, and
+    Quote-aware, as _command_spans is, so `echo "x; cd /tmp"` holds no cd, and
     comments are comments even when they contain `<<`. Stops at the first
     construct it does not model -- subshells, groups, command substitution,
     heredocs, process substitution, case -- and returns only what came
@@ -768,9 +924,15 @@ def _resolved_deletions(command, depth=0, aliased=False):
 _NOT_SECRET_SUFFIXES = (".example", ".sample", ".template", ".dist",
                         ".defaults", ".pub")
 
+# A service account's key file has service-account somewhere in its name
+# before .json. The name up to the first one is taken by a lookahead and
+# matched again by reference, which cannot backtrack: as two runs around
+# the words, every service_account in one long word read on to its end,
+# and 63K of them took two seconds.
 _CRED_PATH = re.compile(
     r"(?:^|[\s\"'=(])((?:[\w./~$-]*/)?(?:\.env[\w.-]*|credentials|"
-    r"\.netrc|id_[a-z0-9]+(?:\.pub)?|[\w.-]*\.pem|[\w.-]*\.key))",
+    r"\.netrc|id_[a-z0-9]+(?:\.pub)?|[\w.-]*\.pem|[\w.-]*\.key|\.kube/config|"
+    r"(?=(?P<account>[\w.-]*?service[-_]account))(?P=account)[\w.-]*\.json))",
     re.I)
 
 # Commands that handle a file without ever reading its contents.
@@ -781,10 +943,23 @@ _GIT_METADATA = re.compile(r"^\s*(?:sudo\s+)?git\s+(?:check-ignore|ls-files|stat
 
 _KEY_PREFIX = re.compile(r"^\s*(?:command|file_path|path|pattern|args?)\s+")
 
-# The command redacts as it goes -- that is care, not exposure.
+# The command redacts as it goes -- that is care, not exposure: it
+# replaces values with nothing or a mask, or runs a sed whose substitution
+# writes ***.
 _REDACTING = re.compile(
-    r"s[/|#;,]\s*=\.\*|=<(?:set|redacted|present)>|:\*\*\*|<redacted"
-    r"|sed[^|;&]*\bs[/|#;,][^|;&]*\*\*\*", re.I)
+    r"s[/|#;,]\s*=\.\*|=<(?:set|redacted|present)>|:\*\*\*|<redacted", re.I)
+_SED_SUBSTITUTION = re.compile(r"\bs[/|#;,]")
+
+
+def _redacting(segment):
+    """Whether one command masks what it reads. The sed test was one regex
+    with two runs in it, and a sed in front of each of 142,000 s/ did not
+    finish; it is three lookups in one command now."""
+    if _REDACTING.search(segment):
+        return True
+    sed = segment.lower().find("sed")
+    script = _SED_SUBSTITUTION.search(segment, sed + 3) if sed != -1 else None
+    return script is not None and segment.find("***", script.end()) != -1
 
 
 def _cred_targets(text):
@@ -797,33 +972,246 @@ def _is_template(target):
     return base.endswith(_NOT_SECRET_SUFFIXES)
 
 
+# A credential file handed to what uses it, not read out: loaded into the
+# shell, given to a program as its env file, identity, kubeconfig or key
+# file, or named by a variable that a program reads. Each alternative
+# names the file it hands over; -i is an identity only beside ssh and its
+# kin, and everything after ssh-add is one.
+_HANDED_OVER = re.compile(
+    r"^\s*(?:sudo\s+)?(?:source|\.)\s+['\"]?(?P<source>[^\s'\";&|]+)"
+    r"|--(?:env-file|kubeconfig|key-file|keyfile|identity-file|private-key)"
+    r"(?:=|\s+)['\"]?(?P<flag>[^\s'\";&|]+)"
+    r"|(?:^|\s)-i\s*['\"]?(?P<identity>[^\s'\";&|]+)"
+    r"|-o\s*['\"]?IdentityFile[= ]['\"]?(?P<option>[^\s'\";&|]+)"
+    r"|(?:^|\s)[A-Za-z_][A-Za-z0-9_]*=['\"]?(?P<variable>[^\s'\";&|]+)")
+# ssh and its kin as a program: not the .ssh directory a key sits in, which
+# made any -i before ~/.ssh/id_rsa an identity (base64 -i prints the key).
+_SSH_LIKE = re.compile(r"(?<![\w.-])(?:ssh|scp|sftp|sshfs|autossh)(?![\w.-])")
+_SSH_ADD = re.compile(r"^\s*(?:sudo\s+)?ssh-add\b")
+# What rsync and tar are told to skip.
+_EXCLUDED = re.compile(r"--exclude(?:=|\s+)['\"]?(\S+)")
+
+# A command that prints the environment, or a variable from it. declare
+# and typeset print with -p or -x among their flags, which a lookahead
+# finds: two runs of letters around the p could split a run of p's in n
+# squared ways, and 63,000 of them did not finish in twenty seconds.
+_PRINTS_ENVIRONMENT = re.compile(
+    r"^\s*(?:sudo\s+)?(?:printenv\b|env(?:\s+-0)?\s*$|set\s*$|export(?:\s+-p)?\s*$"
+    r"|(?:declare|typeset)\s+-(?=[A-Za-z]*[px])[A-Za-z]+\s*$"
+    r"|(?:echo|printf|print)\b.*\$)")
+
+# What prints what a file handed over holds, though the command does not
+# start by printing: an interpreter or a here-string reading a variable,
+# echo in a shell the file was handed to, printenv anywhere (op run --
+# printenv), env as the last word (docker run --env-file .env alpine env),
+# and the subcommands that print the configuration or secrets they were
+# given: docker compose config, kubectl config view --raw, kubectl get
+# secret -o yaml. Each was critical before handing over was told from
+# reading, and became silent.
+_READS_ENVIRONMENT = re.compile(
+    r"\bos\.environ\b|\bprocess\.env\b|\bgetenv\b|\bENV\[|\$ENV\{|\bDeno\.env\b"
+    r"|<<<\s*[\"']?\$")
+_ECHO_WORD = re.compile(r"(?<![\w.-])(?:echo|printf)(?![\w.-])")
+_OUTPUT_FORMAT = re.compile(
+    r"(?<![\w-])(?:-o\s*|--output[=\s]\s*)['\"]?(?:ya?ml|json|jsonpath|go-template"
+    r"|template)")
+_WORD_QUOTES = "\"'`()"
+
+
+def _shows_what_it_was_handed(segment):
+    """Whether one command prints what a credential file handed to it, or
+    to the shell, holds. Each test is one pass over the command."""
+    if _READS_ENVIRONMENT.search(segment):
+        return True
+    echo = _ECHO_WORD.search(segment)
+    if echo and segment.find("$", echo.end()) != -1:
+        return True
+    words = [w.strip(_WORD_QUOTES) for w in segment.split()]
+    names = [w.rsplit("/", 1)[-1] for w in words]
+    if "printenv" in names:
+        return True
+    commands = [n for n in names if n and not n.startswith("-")]
+    if commands and commands[-1] == "env":
+        return True
+    compose = next((i for i, n in enumerate(names)
+                    if n in ("compose", "docker-compose")), None)
+    if compose is not None and "config" in names[compose + 1:]:
+        return True
+    pairs = set(zip(names, names[1:]))
+    if "kubectl" in names:
+        if ("config", "view") in pairs and ("--raw" in names or "--flatten" in names):
+            return True
+        if any(a == "get" and (b in ("secret", "secrets")
+                               or b.startswith(("secret/", "secrets/")))
+               for a, b in pairs) and _OUTPUT_FORMAT.search(segment):
+            return True
+    return False
+
+
+_PRINTED_WHY = ("The agent handed a file whose only purpose is to hold secrets "
+                "to the shell or a program, and the same command printed what "
+                "it holds. Whatever it printed is now in a model context you "
+                "do not control.")
+
+
+def _all_handed_over(segment, found):
+    """Whether every credential path found in segment sits inside a file the
+    segment hands over. One pass over the segment for what it hands over,
+    then a lookup per path: a regex built per path and run over the whole
+    segment made five thousand ssh -i keys take three seconds."""
+    if _SSH_ADD.match(segment):
+        return True
+    ssh = _SSH_LIKE.search(segment) is not None
+    spans = [m.span(m.lastgroup) for m in _HANDED_OVER.finditer(segment)
+             if m.lastgroup != "identity" or ssh]
+    starts = [lo for lo, _hi in spans]
+    for m in found:
+        i = bisect.bisect_right(starts, m.start(1)) - 1
+        if i < 0 or m.end(1) > spans[i][1]:
+            return False
+    return True
+
+
+def _prints_environment(tool_input):
+    """Whether the command prints the environment, a variable in it, or
+    what a file handed to a program holds. Asked of the command as
+    written: echo is dropped from what runs, since its words are text, but
+    here it is the printing, and an interpreter's source is where it reads
+    the variable."""
+    if not isinstance(tool_input, dict):
+        return False
+    command = " ; ".join(c for c in (_words(tool_input.get(k)) for k in _COMMAND_KEYS)
+                         if c)
+    return any(_PRINTS_ENVIRONMENT.match(segment) or _shows_what_it_was_handed(segment)
+               for segment in _commands(_strip_heredocs(command)[:MAX_SCAN_CHARS]))
+
+
+# A variable set to a credential file's path, and each place it is read
+# back. One pass: an assignment starts only where a name does.
+_SET_OR_EXPANDED = re.compile(
+    r"(?<![A-Za-z0-9_$])(?P<name>[A-Za-z_][A-Za-z0-9_]*)=['\"]?"
+    r"(?P<value>[^\s'\";&|]+)"
+    r"|\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<bare>[A-Za-z_][A-Za-z0-9_]*))")
+
+
+def _with_paths_put_back(text):
+    """text with each $NAME and ${NAME} read after NAME was set to a
+    credential file's path replaced by that path. Only a prefix hands a
+    file to the program it runs (KUBECONFIG=~/.kube/config kubectl): a bare
+    assignment hands it to nothing, and `F=~/.aws/credentials; cat "$F"`
+    reads the file as `cat ~/.aws/credentials` does. Read as handed over,
+    it was dropped, where it had been critical.
+
+    What is put back is held to MAX_SCAN_CHARS: a long path read back
+    thousands of times would otherwise grow the text by their product."""
+    if "$" not in text or "=" not in text:
+        return text
+    paths, out, pos, added = {}, [], 0, 0
+    for m in _SET_OR_EXPANDED.finditer(text):
+        name = m.group("name")
+        if name:
+            if _CRED_PATH.match(m.group("value")):
+                paths[name] = m.group("value")
+            else:
+                paths.pop(name, None)
+            continue
+        path = paths.get(m.group("braced") or m.group("bare"))
+        if path is not None:
+            added += len(path)
+            if added > MAX_SCAN_CHARS:
+                break
+            out.append(text[pos:m.start()])
+            out.append(path)
+            pos = m.end()
+    if not out:
+        return text
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def _refine_credential(text, severity, tool_input=None):
+    """Re-rank a credential match by what the command did with the file.
+    Reading it is critical. Handing it to a program (source .env, docker
+    --env-file, ssh -i, kubectl --kubeconfig) puts none of it in the
+    model's context, unless the command then prints the environment, and
+    that is reported as what it is, with its own why. A variable that
+    names the file is judged where it is read back."""
+    text = _with_paths_put_back(text)
     targets = _cred_targets(text)
     if not targets:
         return severity
 
-    real = []
-    for t in targets:
-        if _is_template(t):
-            continue                      # template or public key
-        if re.search(r"--exclude(?:=|\s+)['\"]?%s" % re.escape(t), text):
-            continue                      # named only in order to be skipped
-        real.append(t)
+    # Named after --exclude, it is named only in order to be skipped. Every
+    # argument is collected once and a target looked up among them: a
+    # regex built per target was a pass over the command each.
+    excluded = sorted(m.group(1) for m in _EXCLUDED.finditer(text))
 
+    def skipped(t):
+        i = bisect.bisect_left(excluded, t)
+        return i < len(excluded) and excluded[i].startswith(t)
+
+    real = {t for t in targets if not _is_template(t) and not skipped(t)}
     if not real:
         return None
 
     # Which segment actually touched it?
-    for segment in _SPLIT_OPS.split(text):
-        if not any(t in segment for t in real):
-            continue
+    handed = False
+    for segment in _commands(text):
         segment = _KEY_PREFIX.sub("", segment)
+        found = [m for m in _CRED_PATH.finditer(segment) if m.group(1) in real]
+        if not found:
+            continue
         if _NON_READING.match(segment) or _GIT_METADATA.match(segment):
             continue                      # moved, listed, or asked about
-        if _REDACTING.search(segment):
+        if _redacting(segment):
             return MEDIUM                 # read, but deliberately masked
+        if _all_handed_over(segment, found):
+            handed = True
+            continue
         return severity
+    if handed and _prints_environment(tool_input):
+        return severity, _PRINTED_WHY
     return None
+
+
+# Where a command writes rather than reads: an output redirection and its
+# target (>, >>, >|, 1>, &>), and every file tee copies its input into.
+# Not `2>&1` or `>&2`, which name a descriptor, and not `<>`, which reads.
+_OUTPUT_REDIRECT = re.compile(
+    r"(?<![<>&\d])(?:\d+|&)?>>?\|?[ \t]*"
+    r"(?:'[^'\n]*'|\"[^\"\n]*\"|[^\s;&|<>()'\"]+)")
+_TEE = re.compile(r"\s*(?:sudo\s+)?(?:\S*/)?tee(?=\s|$)")
+_WORD = re.compile(r"\S+")
+_INPUT = re.compile(r"\d*<+")
+
+
+def _without_writes(text):
+    """text with every file it only writes blanked out, at the same offsets.
+
+    `cat > .env <<'EOF'` and `echo PORT=1 | tee .env` create a credential
+    file; neither reads one, and both were reported as a read. A redirection
+    from a file (`tee copy < .env`) is a read, and is kept."""
+    if ">" not in text and "tee" not in text:
+        return text
+    text = _OUTPUT_REDIRECT.sub(lambda m: " " * len(m.group()), text)
+    if "tee" not in text:
+        return text
+    chars = list(text)
+    for start, end, _op in _command_spans(text):
+        tee = _TEE.match(text, start, end)
+        if not tee:
+            continue
+        feeding = False
+        for w in _WORD.finditer(text, tee.end(), end):
+            if feeding:
+                feeding = False           # what `<` reads: keep it
+                continue
+            op = _INPUT.match(w.group())
+            if op:
+                feeding = op.end() == len(w.group())
+                continue
+            chars[w.start():w.end()] = " " * (w.end() - w.start())
+    return "".join(chars)
 
 
 def _refine_read_path(text, severity, tool_input=None):
@@ -836,9 +1224,10 @@ def _refine_read_path(text, severity, tool_input=None):
     return severity
 
 
-# rm as a command word: first, after a separator, quote or bracket, or as the
-# last part of a path (/bin/rm). Then the option words that follow it.
-_RM_WORD = re.compile(r"(?<![^\s;&|(`'\"/])rm(?=\s)")
+# rm as a command word: first, after a separator, quote or bracket, as the
+# last part of a path (/bin/rm), or escaped (\\rm, which skips an alias of
+# rm -i). Then the option words that follow it.
+_RM_WORD = re.compile(r"(?<![^\s;&|(`'\"/\\])rm(?=\s)")
 _OPTION_WORD = re.compile(r"\s+(-\S*)")
 
 
@@ -875,6 +1264,69 @@ def _rm_recursive_force(text):
         pos = end
 
 
+# The command word of a stage, after any sudo, VAR=value or directory: one
+# that reads local files and is given something to read, and one that
+# sends to the network.
+_STAGE_PREFIX = r"(?:sudo\s+(?:-\S+\s+)*)?(?:\w+=\S*\s+)*(?:\S*/)?"
+_FILE_READER = re.compile(
+    _STAGE_PREFIX + r"(?P<reader>cat|tar|zip|base64|tac|head|tail|less|more|gzip"
+    r"|bzip2|xz|zstd|lz4|xxd|od|strings|jq|yq|sed|awk|gawk)\s+[^\s|;]")
+_NETWORK_SENDER = re.compile(_STAGE_PREFIX + r"(?:curl|wget|nc)(?![\w.-])")
+_SPACES = re.compile(r"\s*")
+# Readers whose words are all files to print: given anything, they read it.
+_READS_ANY_WORD = frozenset(("cat", "tar", "zip", "base64"))
+# Filters, whose first word is their program and only the ones after it
+# are files: jq '.a' reads its input, jq '.a' f.json reads f.json.
+_FILTERS = frozenset(("jq", "yq", "sed", "awk", "gawk"))
+# Options of head and tail that take the next word as their value.
+_COUNT_OPTIONS = frozenset(("-n", "-c", "--lines", "--bytes"))
+
+
+def _reads_a_file(name, stage):
+    """Whether the stage, run by the reader `name`, is given a file to
+    read rather than reading its input: ps aux | head -20, dmesg | tail
+    and curl ... | jq '.items' read what is piped in."""
+    if name in _READS_ANY_WORD:
+        return True
+    words = _argv(stage)
+    if words is None:
+        words = stage.split()
+    files, skip = 0, False
+    for word in words[1:]:
+        if skip:
+            skip = False
+        elif word.startswith("-"):
+            skip = word in _COUNT_OPTIONS and name in ("head", "tail")
+        else:
+            files += 1
+    return files > (1 if name in _FILTERS else 0)
+
+
+def _file_piped_out(text):
+    """Span from a command that reads local files to the curl, wget or nc
+    its output is piped into, however many stages sit between them
+    (`tar czf - src | gzip | curl -T - …`), or None.
+
+    Read from what _executable_text kept, split where the shell splits it,
+    so a quoted or escaped | joins nothing. Not a regex: one stage at a
+    time is linear however many readers a long command holds."""
+    reader = None
+    for start, end, op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        if reader is not None:
+            sender = _NETWORK_SENDER.match(text, at, end)
+            if sender:
+                return reader, sender.end()
+        else:
+            found = _FILE_READER.match(text, at, end)
+            if found and _reads_a_file(found.group("reader"),
+                                       text[found.start("reader"):end]):
+                reader = at
+        if op != "|":
+            reader = None
+    return None
+
+
 REFINERS = {"fs.destructive": _refine_deletion,
             "cred.read": _refine_credential}
 PATH_REFINERS = {"cred.read": _refine_read_path}
@@ -887,9 +1339,9 @@ RULES = [
          "it read is now in a model context you do not control.",
          [r"(?:^|[\s\"'=/])\.env(?:\.[\w-]+)?\b",
           r"\.aws/credentials", r"\.ssh/id_[\w]+", r"\.netrc",
-          r"\.config/gcloud", r"service[-_]account.*\.json",
+          r"\.config/gcloud", _Gap(r"service[-_]account", r"\.json", "\n"),
           r"security\s+find-generic-password", r"\.kube/config"],
-         paths=True),
+         paths=True, hide=_without_writes),
 
     # clean's own rules decide what is a credential, fixtures and
     # placeholders included, so watch never flags a value clean ignores or
@@ -907,8 +1359,8 @@ RULES = [
          "Destructive git operation",
          "History rewriting or branch deletion. This is the class of action "
          "that destroys the record of what else happened.",
-         [r"git\s+push\b[^|;&]*--force(?!-with-lease)",
-          r"git\s+push\b[^|;&]*\s-f\b",
+         [_Gap(r"git\s+push\b", r"--force(?!-with-lease)"),
+          _Gap(r"git\s+push\b", r"\s-f\b"),
           r"git\s+reset\s+--hard",
           r"git\s+branch\s+-D\b",
           r"git\s+clean\s+-[a-z]*f",
@@ -926,7 +1378,7 @@ RULES = [
          "Bulk or recursive deletion",
          "Recursive deletion. Recoverable only if something else was backing "
          "it up.",
-         [r"find\s+[^|;&]*-delete\b",
+         [_FIND_DELETE,
           r"git\s+rm\s+-r", r"shred\s+", r"truncate\s+-s\s*0"],
          find=_rm_recursive_force),
 
@@ -951,16 +1403,17 @@ RULES = [
          "Log or history tampering",
          "An action whose effect is to remove the record of other actions.",
          [r"history\s+-c", r">\s*~?/?\.(?:bash|zsh)_history",
-          r"rm\s+[^|;&]*\.(?:bash|zsh)_history",
-          r"aws\s+cloudtrail\s+(?:delete|stop)-", r"rm\s+-rf?\s+[^|;&]*\.git\b"]),
+          _Gap(r"rm\s+", r"\.(?:bash|zsh)_history"),
+          r"aws\s+cloudtrail\s+(?:delete|stop)-",
+          _Gap(r"rm\s+-rf?\s+", r"\.git\b")]),
 
     Rule("exfil.shape", HIGH,
          "Local file piped to the network",
          "File contents sent outbound in a single command. This is the shape of "
          "exfiltration whether or not that was the intent.",
-         [r"(?:cat|tar|zip|base64)\s+[^|;&]+\|\s*(?:curl|wget|nc)\b",
-          r"curl\s+[^|;&]*(?:--data-binary|-d)\s*@",
-          r"curl\s+[^|;&]*-F\s+[\"']?file=@"]),
+         [_Gap(r"curl\s+", r"(?:--data-binary|-d)\s*@"),
+          _Gap(r"curl\s+", r"-F\s+[\"']?file=@")],
+         find=_file_piped_out),
 ]
 
 
@@ -974,17 +1427,46 @@ _CONTENT_KEYS = {"content", "new_string", "old_string", "body", "text",
                  # that says "clean up the rm -rf targets" is not a deletion.
                  "description", "explanation", "reason", "thought", "title"}
 
-_HEREDOC = re.compile(
-    r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^\2\s*$",
-    re.S | re.M)
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# A line that could end a here-document: the word alone, then nothing but
+# blanks.
+_TERMINATOR = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)[^\S\n]*$", re.M)
 
 
 def _strip_heredocs(command):
     """Remove heredoc bodies. The body is data being written to disk, not a
-    sequence of commands being executed."""
+    sequence of commands being executed. A << with no line of its word
+    after it is not one (1 << x in a python -c string), and is kept.
+
+    The operator stays as it was written, `<<'EOF'`. A placeholder here
+    was quoted as evidence, and read as `<redacted` by _REDACTING, which
+    made any read beside a heredoc look deliberately masked.
+
+    Every line that could end one is found first, in one pass. As one regex
+    each << read on to the end of the command looking for its terminator:
+    a megabyte of them took minutes, and this runs before the command is
+    cut to MAX_SCAN_CHARS."""
     if not command or "<<" not in command:
         return command
-    return _HEREDOC.sub("<<REDACTED_HEREDOC", command)
+    ends = {}                     # word -> starts and ends of its lines
+    for m in _TERMINATOR.finditer(command):
+        starts, stops = ends.setdefault(m.group(1), ([], []))
+        starts.append(m.start())
+        stops.append(m.end())
+    out, copied, pos = [], 0, 0
+    while True:
+        op = _HEREDOC.search(command, pos)
+        if not op:
+            break
+        lines = ends.get(op.group(2))
+        i = bisect.bisect_left(lines[0], op.end()) if lines else 0
+        if not lines or i == len(lines[0]):
+            pos = op.start() + 1          # no terminator: not a heredoc
+            continue
+        out.append(command[copied:op.end()])
+        copied = pos = lines[1][i]
+    out.append(command[copied:])
+    return "".join(out)
 
 
 # Interpreters whose -c/-e payload is source in ANOTHER language. "rm -rf"
@@ -994,8 +1476,60 @@ _FOREIGN_INTERPRETERS = {"python", "python2", "python3", "node", "nodejs",
                          "perl", "ruby", "php", "osascript", "awk", "jq"}
 _SHELL_INTERPRETERS = {"sh", "bash", "zsh", "dash", "ksh"}
 _PAYLOAD_FLAGS = {"-c", "-e", "--eval", "--command"}
+_INTERPRETERS = _FOREIGN_INTERPRETERS | _SHELL_INTERPRETERS
 
-_SPLIT_OPS = re.compile(r"\s*(?:\|\||&&|;|\||\n)\s*")
+# What hides a separator from the shell, or is one. Hidden: a quoted
+# string (to the end of the command when it is never closed), an escaped
+# character (a backslash-newline joins two lines) and a comment. Then the
+# separators, |, |&, ;, &&, || and a newline, with the blanks around each;
+# not the | of a >| redirection. |& pipes stderr too, and is a |.
+#
+# Split on every separator, quoted or not, a grep alternation, an echo or
+# a commit message was cut into pieces, and each piece after a quoted |
+# or ; was judged as a command of its own: grep -E "a|rm -rf|b" f was a
+# deletion. One regex pass, which skips what cannot matter in C.
+#
+# In $'...' a backslash escapes the quote. Read as '...', the \' in
+# $'it\'s' closed it, and its last quote opened a string that never
+# closed, so nothing after it was split or judged.
+#
+# Every alternative starts with a character of its own, so the regex skips
+# in C to the next one that can start a match. Begun with a lookaround,
+# it was tried at every character: a long argument (a base64 blob to
+# echo) took a quarter of a millisecond a few kilobytes, three times as
+# long. A separator starts at the first blank of the run before it, or on
+# itself, as _AT_BLANKS lets it; a newline only where no blank is before
+# it, as there.
+_ANSI_C = r"""\$'(?:[^'\\]|\\[\s\S])*(?P<aq>')?"""
+_HIDING = (_ANSI_C + r"""|'[^']*(?P<sq>')?|"(?:[^"\\]|\\[\s\S])*(?P<dq>")?|\\[\s\S]?"""
+           r"""|#(?<![^ \t\n;&|(]#)[^\n]*""")
+_SEPARATOR_MARK = r"(?:\|\||&&|;|\|&|\|(?<!>\|))"
+_HIDING_OR_SEPARATOR = re.compile(
+    _HIDING + r"|(?P<op>\s(?<!\s\s)\s*(?:" + _SEPARATOR_MARK + r"|\n)\s*"
+    r"|" + _SEPARATOR_MARK + r"\s*|\n(?<!\s\n)\s*)")
+
+
+@functools.lru_cache(maxsize=64)
+def _command_spans(text):
+    """(start, end, separator) of each command in text, split where the
+    shell splits it. The separator is the one after it, without its
+    blanks: "|" when the shell pipes it into the next, "" for the last.
+    The rules that hide what they must not judge, and the one that follows
+    a pipe, each ask it of the same command, so it is split once."""
+    spans, pos = [], 0
+    for m in _HIDING_OR_SEPARATOR.finditer(text):
+        op = m.group("op")
+        if op is not None:
+            op = op.strip() or "\n"
+            spans.append((pos, m.start(), "|" if op == "|&" else op))
+            pos = m.end()
+    spans.append((pos, len(text), ""))
+    return tuple(spans)
+
+
+def _commands(text):
+    """The commands in text, split where the shell splits them."""
+    return [text[start:end] for start, end, _op in _command_spans(text)]
 
 # Fallback for when the payload contains quoting that shlex cannot parse --
 # which is common, because the payload is source code in another language.
@@ -1010,13 +1544,18 @@ _FOREIGN_OPEN = re.compile(
     % "|".join(sorted(_FOREIGN_INTERPRETERS)))
 
 
-def _neutralize_foreign_payloads(command):
+def _neutralize_foreign_payloads(command, bodies=None):
     """Blank out the source payload of a non-shell interpreter.
 
     Must run on the whole command before splitting on shell operators,
     because the payload frequently contains ';' and '|' of its own and
     splitting first tears it into fragments that no longer look like an
     interpreter call.
+
+    The payload becomes an ellipsis between its own quotes, so evidence
+    around it reads as the command with its source elided, not as a
+    placeholder name. Given a list, bodies is given every command
+    substitution the shell runs in a payload before handing it over.
     """
     out, pos = [], 0
     while True:
@@ -1034,55 +1573,250 @@ def _neutralize_foreign_payloads(command):
                 break
             i += 1
         out.append(command[pos:m.end()])
-        out.append("FOREIGN_SOURCE")
+        if bodies is not None and quote == '"':
+            # The shell runs a $( ) in a double-quoted payload before the
+            # interpreter sees it.
+            bodies.extend(_substitutions(command[m.end():i], quoted=True))
+        # The closing quote stays, so the quotes around the payload still
+        # balance and _real_pipes reads what follows as unquoted.
+        out.append("…" + (quote if i < len(command) else ""))
         pos = min(i + 1, len(command))
     return "".join(out)
 
 
-def _executable_text(command, depth=0):
+# A command substitution, $( ) or `...`, runs before the command it sits
+# in, inside double quotes as much as outside them. Single quotes, $'...',
+# a backslash and a comment hide one; a double quote does not. Inside $( )
+# the quoting starts afresh, and a ( opened there is closed before it is.
+# Each context has what can change it found by one regex, so a run of
+# characters that cannot is read in C.
+_SUB_OUTSIDE = re.compile(_ANSI_C + r"""|'[^']*'?|\\[\s\S]?|\$\(|["`]"""
+                          r"""|(?<![^ \t\n;&|(])#[^\n]*""")
+_SUB_INSIDE = re.compile(_ANSI_C + r"""|'[^']*'?|\\[\s\S]?|\$\(|["`()]"""
+                         r"""|(?<![^ \t\n;&|(])#[^\n]*""")
+_SUB_QUOTED = re.compile(r"""\\[\s\S]?|\$\(|["`]""")
+_SUB_BACKTICKS = re.compile(r"""\\[\s\S]?|`""")
+_SUB_CONTEXT = {"top": _SUB_OUTSIDE, "$(": _SUB_INSIDE, '"': _SUB_QUOTED,
+                "`": _SUB_BACKTICKS}
+
+
+def _substitutions(text, quoted=False):
+    """The text inside each outermost $( ) and `...` of text that the shell
+    runs, in order, read as far as MAX_SCAN_CHARS. One left open runs to
+    the end. A substitution inside another is in the text of the outer
+    one, and is found when that is judged. quoted: text is inside double
+    quotes."""
+    end = min(len(text), MAX_SCAN_CHARS)
+    stack = [['"' if quoted else "top", 0, 0]]     # [kind, body start, parens]
+    bodies, opened, pos = [], 0, 0
+    while pos < end:
+        context = stack[-1]
+        m = _SUB_CONTEXT[context[0]].search(text, pos, end)
+        if not m:
+            break
+        token, pos = m.group(), m.end()
+        if token == "$(" or (token == "`" and context[0] != "`"):
+            stack.append([token, pos, 0])
+            opened += 1
+        elif token == '"':
+            if context[0] == '"':
+                stack.pop()
+            else:
+                stack.append(['"', pos, 0])
+        elif token == "(":
+            context[2] += 1
+        elif (token == ")" and not context[2]) or token == "`":
+            stack.pop()
+            opened -= 1
+            if not opened:
+                bodies.append(text[context[1]:m.start()])
+        elif token == ")":
+            context[2] -= 1
+    for context in stack:
+        if context[0] in ("$(", "`"):
+            bodies.append(text[context[1]:end])       # left open
+            break
+    return bodies
+
+
+def _segments(command):
+    """Each command in command, and whether the shell pipes its output into
+    the next one."""
+    for start, end, op in _command_spans(command):
+        yield command[start:end], op == "|"
+
+
+# Programs whose quoted arguments are text, never run: words to print, a
+# pattern to search for, a message or a body. Any other program may run
+# one as shell, and a list of the ones that do (sh -c, ssh, eval, watch)
+# missed heroku run, nix-shell --run, concurrently and ansible -a. git and
+# its kin only in a subcommand that takes a message or a pattern, with
+# any options before it (git -C repo commit), since git rebase --exec runs
+# its argument.
+_TAKES_TEXT = re.compile(
+    r"\s*(?:sudo\s+(?:-\S+\s+)*)?(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:\S*/)?"
+    r"(?:echo|printf|grep|egrep|fgrep|zgrep|rg|ag|ack"
+    r"|(?:git|hg|jj|svn)(?:\s+-\S+(?:\s+[^\s-]\S*)?)*\s+"
+    r"(?:commit|log|tag|grep|notes|show|shortlog|describe|stash)"
+    r"|gh\s+(?:pr|issue|release|gist|api|repo|label|search))(?![\w.-])")
+# Text piped into a shell is run by it: echo "ls; rm -rf ~" | sh. What may
+# stand between the pipe and the shell hands its input on: sudo or doas
+# and their options, one of which may take a value (sudo -u USER bash),
+# env with its options and assignments, command -p, exec and its options,
+# nohup and nice. A value is the word after an option that is not one,
+# so a run of options is read once.
+_OPTIONS = r"(?:\s+-[^\s|;&]*(?:\s+[^\s|;&=-][^\s|;&]*)?)*"
+_HANDS_ON = (
+    r"(?:[^\s|;&]*/)?(?:(?:sudo|doas)" + _OPTIONS
+    + r"|env(?:\s+-[^\s|;&]*(?:\s+[^\s|;&=-][^\s|;&=]*)?"
+    r"|\s+[A-Za-z_][A-Za-z0-9_]*=[^\s|;&]*)*"
+    r"|command(?:\s+-p)*|exec" + _OPTIONS + r"|nohup|nice(?:\s+-n)?(?:\s+-?\d+)?)\s+")
+_INTO_SHELL = re.compile(
+    r"\|&?\s*(?:" + _HANDS_ON + r")*(?:[^\s|;&]*/)?"
+    r"(?:sh|bash|zsh|dash|ksh|fish)(?![\w.-])")
+_HIDDEN = re.compile(_HIDING)
+_INNER_SEPARATOR = re.compile(r"\|\||&&|;|\||\n")
+
+
+def _quoted_commands_elided(segment, run_as_shell=False):
+    """segment with what follows a separator inside a quoted string elided,
+    when the program it is given to takes it as text.
+
+    The pieces after a quoted separator are not commands: `git commit -m
+    "note; rm -rf ~/x"` deletes nothing. What comes before the first one
+    is kept, and every other program keeps it all, since it may run it
+    (`heroku run "ls; rm -rf x"`)."""
+    if (run_as_shell or ("'" not in segment and '"' not in segment)
+            or not _TAKES_TEXT.match(segment)):
+        return segment
+    out, pos = [], 0
+    for m in _HIDDEN.finditer(segment):
+        quote = m.group()[:1]
+        if quote not in ("'", '"', "$"):
+            continue
+        sep = _INNER_SEPARATOR.search(segment, m.start() + 1, m.end())
+        if not sep:
+            continue
+        closed = m.group("sq") or m.group("dq") or m.group("aq") or ""
+        out.append(segment[pos:sep.start()] + "…" + closed)
+        pos = m.end()
+    out.append(segment[pos:])
+    return "".join(out)
+
+
+_QUOTING = re.compile(r"""['"\\]""")
+_SHELL_BLANKS = re.compile(r"[ \t\r\n]+")
+
+
+def _argv(segment):
+    """shlex.split(segment), or None when that cannot be had.
+
+    With no quote and no backslash in it, the same words come from a split
+    on blanks, in C. shlex builds each word a character at a time, by
+    concatenation, which made one long quoted word quadratic: eleven
+    seconds for a megabyte. A segment that long is not split at all."""
+    if not _QUOTING.search(segment):
+        return [w for w in _SHELL_BLANKS.split(segment) if w]
+    if len(segment) > MAX_SCAN_CHARS:
+        return None
+    try:
+        return shlex.split(segment)
+    except ValueError:
+        return None
+
+
+# A first word with no quote or backslash in it, which shlex would give
+# back as it is.
+_PLAIN_FIRST_WORD = re.compile(r"\s*([^\s'\"\\]+)(?:\s|$)")
+
+
+def _reduce_segment(segment, depth, into_shell=False):
+    """What runs of one segment, or None when nothing does. into_shell
+    says the command pipes into a shell, which runs what was text."""
+    foreign = _FOREIGN_PAYLOAD.match(segment)
+    if foreign:
+        return segment[:foreign.end()]
+
+    # Only an interpreter's segment is ever cut to its command, so any
+    # other runs as it is, but for what follows a quoted separator, and is
+    # not split into words to find that out.
+    first = _PLAIN_FIRST_WORD.match(segment)
+    if first and first.group(1).rsplit("/", 1)[-1] not in _INTERPRETERS:
+        return _quoted_commands_elided(segment, into_shell)
+
+    argv = _argv(segment)
+    if argv is None:
+        return segment                    # unbalanced quotes: keep it all
+    if not argv:
+        return None
+
+    binary = os.path.basename(argv[0]).split("/")[-1]
+    payload_idx = next((i for i, a in enumerate(argv) if a in _PAYLOAD_FLAGS), None)
+
+    if binary in _FOREIGN_INTERPRETERS and payload_idx is not None:
+        return " ".join(argv[:payload_idx + 1])
+    if binary in _SHELL_INTERPRETERS and payload_idx is not None:
+        head = " ".join(argv[:payload_idx + 1])
+        body = argv[payload_idx + 1] if payload_idx + 1 < len(argv) else ""
+        return head + " " + _executable_text(body, depth + 1)
+    return _quoted_commands_elided(segment, into_shell)
+
+
+def _executable_text(command, depth=0, limit=None):
     """Reduce a shell command to only the parts that are actually executed.
 
     Drops heredoc bodies and the source payloads of foreign interpreters,
     recursing into shell interpreters. This is what stops a script that
     *contains* a dangerous string from reading as a dangerous action.
+
+    What is kept is joined by ` | ` where the shell pipes one into the
+    next, and by ` ; ` otherwise. Joined by ` ; ` throughout, no rule
+    could see a pipe, and `tar czf - src | curl -T - …` went unreported.
+    A search dropped from the middle of a pipe passes on what it reads,
+    so `cat .env | grep -v '#' | curl …` is still one pipe; echo does not.
+
+    With a limit, it stops once that many characters are kept: the rest
+    would only be cut off after, and reducing it all cost a second or two
+    a megabyte.
     """
     if not command or depth > 3:
         return command or ""
     command = _strip_heredocs(command)
-    command = _neutralize_foreign_payloads(command)
+    bodies = []
+    command = _neutralize_foreign_payloads(command, bodies)
 
-    kept = []
-    for segment in _SPLIT_OPS.split(command):
-        segment = _COMMENT.sub("", segment).strip()
-        if not segment or _is_inert(segment):
+    out, flowing, kept_chars = [], False, 0
+    into_shell = "|" in command and _INTO_SHELL.search(command) is not None
+    for raw, piped in _segments(command):
+        segment = _COMMENT.sub("", raw).strip()
+        kept = (None if not segment or _is_inert(segment, into_shell)
+                else _reduce_segment(segment, depth, into_shell))
+        if kept != raw.strip() and ("$(" in raw or "`" in raw):
+            # What was dropped as text may hold a command the shell runs
+            # first: echo "$(rm -rf ~)", git commit -m "$(ls; cat .env)".
+            bodies += _substitutions(raw)
+        if kept is None:
+            flowing = flowing and piped and _is_search(segment)
             continue
-        foreign = _FOREIGN_PAYLOAD.match(segment)
-        if foreign:
-            kept.append(segment[:foreign.end()])
-            continue
+        if out:
+            out.append(" | " if flowing else " ; ")
+        out.append(kept)
+        flowing = piped
+        kept_chars += len(kept) + 3
+        if limit is not None and kept_chars >= limit:
+            break
 
-        try:
-            argv = shlex.split(segment)
-        except ValueError:
-            kept.append(segment)          # unbalanced quotes: keep it all
-            continue
-        if not argv:
-            continue
-
-        binary = os.path.basename(argv[0]).split("/")[-1]
-        payload_idx = next((i for i, a in enumerate(argv) if a in _PAYLOAD_FLAGS), None)
-
-        if binary in _FOREIGN_INTERPRETERS and payload_idx is not None:
-            kept.append(" ".join(argv[:payload_idx + 1]))
-            continue
-        if binary in _SHELL_INTERPRETERS and payload_idx is not None:
-            head = " ".join(argv[:payload_idx + 1])
-            body = argv[payload_idx + 1] if payload_idx + 1 < len(argv) else ""
-            kept.append(head + " " + _executable_text(body, depth + 1))
-            continue
-        kept.append(segment)
-
-    return " ; ".join(kept)
+    # Each substitution is a command of its own, after the rest, so a pipe
+    # the rest is joined by stays as the shell has it.
+    for body in dict.fromkeys(bodies):
+        if limit is not None and kept_chars >= limit:
+            break
+        inner = _executable_text(body, depth + 1, limit)
+        if inner:
+            out.append(" ; " if out else "")
+            out.append(inner)
+            kept_chars += len(inner) + 3
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1144,7 +1878,7 @@ def _shell_text(tool_name, tool_input):
                     if a)
     if argv:
         commands = commands[:-1] + [" ".join(commands[-1:] + [argv])]
-    parts = [_executable_text(c) for c in commands]
+    parts = [_executable_text(c, limit=MAX_SCAN_CHARS) for c in commands]
     return " ; ".join(p for p in parts if p)[:MAX_SCAN_CHARS]
 
 
@@ -1195,7 +1929,8 @@ def _raw_strings(tool_input):
 def _masked(obj, depth=0):
     from . import clean
     if isinstance(obj, str):
-        return clean.mask_for_display(obj)
+        # The spans the rules found for this text already, when they did.
+        return clean.mask_for_display(obj, _secret_spans(obj))
     if depth > 32:
         return "…"
     if isinstance(obj, (list, tuple)):
@@ -1240,26 +1975,33 @@ def evaluate(tool_name, tool_input):
 
     hits = []
     for rule in RULES:
+        # (subject, what the rule judges in it, refiners). The two differ
+        # only by what rule.hide blanks, so a span in one is a span in both.
         if rule.scan_raw:
-            subjects = [(s, REFINERS) for s in raw]
+            subjects = [(s, s, REFINERS) for s in raw]
         else:
-            subjects = [(shell, REFINERS)]
+            seen = rule.hide(shell) if rule.hide and shell else shell
+            subjects = [(shell, seen, REFINERS)]
             if rule.paths:
-                subjects.append((paths, PATH_REFINERS))
-        for subject, refiners in subjects:
+                subjects.append((paths, paths, PATH_REFINERS))
+        for subject, seen, refiners in subjects:
             if not subject:
                 continue
-            span = rule.match(subject)
+            span = rule.match(seen)
             if not span:
                 continue
-            severity = rule.severity
+            severity, why = rule.severity, rule.why
             refine = refiners.get(rule.id)
             if refine:
-                severity = refine(subject, severity, tool_input)
+                # a severity, None to drop the hit, or (severity, why) when
+                # the rule's own why does not fit what happened
+                severity = refine(seen, severity, tool_input)
                 if severity is None:
                     continue
+                if isinstance(severity, tuple):
+                    severity, why = severity
             hits.append({"rule": rule.id, "severity": severity,
-                         "title": rule.title, "why": rule.why,
+                         "title": rule.title, "why": why,
                          "evidence": _evidence(subject, span)})
             break
     return hits, (_payload(tool_input) if hits else "")
@@ -1278,8 +2020,10 @@ def _iter_claude_tool_calls(path):
         for line in fh:
             try:
                 entry = json.loads(line)
-            except ValueError:
-                continue
+            except (ValueError, RecursionError):
+                continue              # not JSON, or deeper than it reads
+            if not isinstance(entry, dict):
+                continue              # JSON, but a list or a string: no entry
             msg = entry.get("message")
             if not isinstance(msg, dict):
                 continue
@@ -1291,14 +2035,31 @@ def _iter_claude_tool_calls(path):
                     yield entry, block
 
 
+def transcript_place(path):
+    """(project, session) a transcript belongs to: the directory it sits in
+    under the projects root, and its own name. A subagent's transcript sits
+    under <project>/<session>/subagents/, and belongs to that session."""
+    parts = os.path.normpath(path).split(os.sep)
+    if parts[-1].startswith("agent-") and "subagents" in parts[:-1]:
+        at = len(parts) - 2 - parts[-2::-1].index("subagents")   # the last one
+        if at >= 2:
+            return parts[at - 2], parts[at - 1]
+    return (os.path.basename(os.path.dirname(path)),
+            os.path.splitext(os.path.basename(path))[0])
+
+
 def scan_transcript(path, source="claude-code"):
     """Produce Action Records for one transcript."""
     records = []
-    session = os.path.splitext(os.path.basename(path))[0]
-    project = os.path.basename(os.path.dirname(path))
+    project, session = transcript_place(path)
 
     for entry, block in _iter_claude_tool_calls(path):
+        # A name or a time that is not a string is none: an object there
+        # could not be told apart from another, and ended the run.
         tool = block.get("name", "?")
+        if not isinstance(tool, str):
+            tool = "?"
+        stamp = entry.get("timestamp")
         tool_input = block.get("input", {})
         hits, payload = evaluate(tool, tool_input)
         if not hits:
@@ -1307,7 +2068,7 @@ def scan_transcript(path, source="claude-code"):
             "source": source,
             "session": session,
             "project": project,
-            "timestamp": entry.get("timestamp"),
+            "timestamp": stamp if isinstance(stamp, str) else None,
             "tool_name": tool,
             "tool_call_id": block.get("id"),
             "payload_hash": _hash(payload),
@@ -1318,8 +2079,25 @@ def scan_transcript(path, source="claude-code"):
     return records
 
 
-def discover(root=CLAUDE_PROJECTS, since_days=None):
-    paths = sorted(glob.glob(os.path.join(root, "*", "*.jsonl")),
+def _transcripts(root):
+    """Every transcript under root: each session's, and each one its
+    subagents wrote, under <session>/subagents/ and a workflow's run below
+    it. Read only at the first level, everything a subagent ran or saw went
+    unread, and check said all clear. Nothing else there is a transcript:
+    a workflow's journal.jsonl holds the results its agents returned."""
+    return (glob.glob(os.path.join(root, "*", "*.jsonl"))
+            + glob.glob(os.path.join(root, "*", "*", "subagents", "**",
+                                     "agent-*.jsonl"), recursive=True))
+
+
+def discover(root=None, since_days=None):
+    """Transcripts under root (default: claude_projects()), newest first.
+
+    With since_days, only files written inside the window. That is a
+    prefilter, not the window itself: a file older than the window cannot
+    hold an action inside it, but a recent one can hold old actions, so
+    scan_all judges each action by its own time as well."""
+    paths = sorted(_transcripts(root or claude_projects()),
                    key=lambda p: os.path.getmtime(p), reverse=True)
     if since_days:
         cutoff = time.time() - since_days * 86400
@@ -1327,19 +2105,53 @@ def discover(root=CLAUDE_PROJECTS, since_days=None):
     return paths
 
 
-def scan_all(root=CLAUDE_PROJECTS, since_days=None, limit=None):
+def _epoch(stamp):
+    """Seconds since the epoch for an action's own timestamp, or None when
+    it has none that can be read. A stamp with no zone is taken as local
+    time, which is how _local_time shows it."""
+    when, _zoned = _parse_stamp(stamp)
+    if when is None:
+        return None
+    try:
+        return when.timestamp()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _cutoff(since_days):
+    return time.time() - since_days * 86400 if since_days else None
+
+
+def _in_window(record, cutoff):
+    """False only for an action whose own time is before the cutoff. One
+    with no readable time is kept: dropping it could hide the one action
+    that mattered, and render says it may be older."""
+    if cutoff is None:
+        return True
+    when = _epoch(record.get("timestamp"))
+    return when is None or when >= cutoff
+
+
+def scan_all(root=None, since_days=None, limit=None):
     """Scan every transcript, reporting each distinct action once.
 
     The same tool call appears in more than one transcript -- resumed
     sessions and sidechains both replay it -- so without this the report
     shows the identical command two and three times.
+
+    With since_days, an action is reported only if it happened inside the
+    window. Windowing by file alone listed a 2025 deletion under "over 1
+    days" because its transcript had been written to today.
     """
     records, scanned, seen = [], 0, set()
+    cutoff = _cutoff(since_days)
     for path in discover(root, since_days):
         if limit and scanned >= limit:
             break
         scanned += 1
         for record in scan_transcript(path):
+            if not _in_window(record, cutoff):
+                continue
             key = (record["tool_name"], record["payload_hash"],
                    record.get("timestamp"))
             if key in seen:
@@ -1359,8 +2171,15 @@ _STAMP = re.compile(
 
 def _parse_stamp(stamp):
     """(datetime, zoned) for an ISO 8601 timestamp, or (None, False). Parsed
-    by hand: Python 3.9's fromisoformat takes neither Z nor every fraction."""
-    m = _STAMP.match(stamp.strip()) if isinstance(stamp, str) else None
+    by hand: Python 3.9's fromisoformat takes neither Z nor every fraction.
+    The window, the report's count of undated actions and each line ask it
+    of the same stamp, so each is parsed once."""
+    return _parse_text_stamp(stamp) if isinstance(stamp, str) else (None, False)
+
+
+@functools.lru_cache(maxsize=4096)
+def _parse_text_stamp(stamp):
+    m = _STAMP.match(stamp.strip())
     if not m:
         return None, False
     zone = m.group(7)
@@ -1405,9 +2224,126 @@ def _fit(text, limit):
     return text[:max(0, limit - 1)].rstrip() + "…"
 
 
-def render(records, scanned, days, footer=True):
+def _days(days):
+    return "1 day" if days == 1 else "%d days" % days
+
+
+def _shown_path(path, limit):
+    """A path as the reader may type it back: ~ for home, and cut in the
+    middle on a narrow terminal, so where it starts and where it ends both
+    stay readable."""
+    home = os.path.expanduser("~")
+    if home not in ("", "/", "~") and (path == home
+                                       or path.startswith(home + os.sep)):
+        path = "~" + path[len(home):]
+    path = _printable(path)
+    if len(path) <= limit:
+        return path
+    keep = max(2, limit - 1)
+    return path[:keep // 2] + "…" + path[len(path) - (keep - keep // 2):]
+
+
+# How to point Claude Code's reader elsewhere. --root takes the directory
+# the transcripts are in and CLAUDE_CONFIG_DIR the one above it, and "pass
+# --root PATH or set CLAUDE_CONFIG_DIR" gave them as one: --root ~/.claude
+# read nothing, and the hint repeated the advice that had just failed.
+ELSEWHERE = ("--root DIR/projects or set CLAUDE_CONFIG_DIR=DIR, where DIR "
+             "is what Claude Code uses in place of ~/.claude")
+
+
+def projects_hint(place, limit=4096):
+    """For a Claude Code place that holds no transcript but whose projects
+    directory does, which flag reads it, with its paths cut to limit."""
+    inner = place["projects"]
+    shown = _shown_path(inner["path"], limit)
+    config = "CLAUDE_CONFIG_DIR="
+    return ("--root takes the projects directory, and %s holds %d "
+            "transcript(s). To read them, pass --root %s or set %s%s instead."
+            % (shown, inner["found"], shown, config,
+               _shown_path(place["path"], max(8, limit - len(config)))))
+
+
+def _nothing_read(days, places, width):
+    """Lines for a scan that read no transcript. Never an all-clear: a
+    mistyped --root, a fresh machine and history kept elsewhere all read
+    nothing, and each printed "Nothing flagged"."""
+    from .report import DIM, YEL
+
+    def say(text, paint):
+        return ["  " + paint(line[2:]) for line in term.wrap(text)]
+
+    found = sum(p["found"] for p in places or ())
+    if found and days:
+        # All of it older than the window: --days, not --root, is the fix.
+        return (say("No transcripts from the last %s, so nothing was "
+                    "checked." % _days(days), YEL)
+                + say("%d older transcript(s) found. Pass a larger --days "
+                      "to read them." % found, DIM) + [""])
+    if places is None:
+        L = say("No transcripts found%s, so nothing was checked." % (
+            " in the last %s" % _days(days) if days else ""), YEL)
+        L += say("If your agent history is kept somewhere else, pass %s, "
+                 "or --state-dir PATH for OpenClaw." % ELSEWHERE, DIM)
+        if days:
+            L += say("To read further back, pass a larger --days.", DIM)
+        return L + [""]
+    L = say("No transcripts found, so nothing was checked.", YEL)
+    L.append(DIM("  Looked in:"))
+    for p in places:
+        L.append(DIM("    %-12s %s" % (_SOURCE_NAMES.get(p["source"], p["source"]),
+                                       _shown_path(p["path"], width - 17))))
+    sources = [p["source"] for p in places]
+    inner = [p for p in places if p.get("projects")]
+    for p in inner:
+        L += say(projects_hint(p, width - 4), DIM)
+    if "claude-code" in sources and not inner:
+        L += say("If Claude Code keeps its history somewhere else, pass %s."
+                 % ELSEWHERE, DIM)
+    if "openclaw" in sources:
+        L += say("For OpenClaw, pass --state-dir PATH or set "
+                 "OPENCLAW_STATE_DIR.", DIM)
+    return L + [""]
+
+
+def _total(scanned):
+    return sum(scanned.values()) if isinstance(scanned, dict) else scanned
+
+
+def _scanned_words(scanned):
+    """What a scan read, in its own units. An OpenClaw database is one per
+    agent, not a transcript, and clean, which counts transcripts, reads
+    none: counted together, check said 2 where clean said 1."""
+    if not isinstance(scanned, dict):
+        return "%d transcript(s)" % scanned
+    transcripts, databases = scanned.get("claude-code", 0), scanned.get("openclaw", 0)
+    if not databases:
+        return "%d transcript(s)" % transcripts
+    if not transcripts:
+        return "%d OpenClaw database(s)" % databases
+    return "%d transcript(s) and %d OpenClaw database(s)" % (transcripts, databases)
+
+
+@functools.lru_cache(maxsize=256)
+def _why_lines(why, width):
+    """A hit's why, wrapped under it. A rule's why is the same for every
+    hit, so each is wrapped once a report."""
+    lines = term.wrap(why, indent=" " * 9, limit=width)
+    if lines:
+        lines[0] = "      -> " + lines[0][9:]
+    return tuple(lines)
+
+
+def render(records, scanned, days, footer=True, locations=None):
     """`footer=False` is for check, which prints one footer for all sections.
     It gates only the closing rule and footer line, never a finding.
+
+    `scanned` is how many transcripts were read, or what
+    scan_sources_counted returned, which keeps OpenClaw's databases apart.
+
+    `locations` is what locations() returned for the same scan. With it, a
+    scan that read nothing says where it looked, or that everything there
+    is older than the window; without it, it still says nothing was read
+    rather than that nothing was flagged.
 
     A record with several hits is headed by its most severe one, and each
     hit's evidence and why print under that hit's own title: a deletion
@@ -1415,12 +2351,19 @@ def render(records, scanned, days, footer=True):
     Evidence is cut to the terminal and marked where it was cut, and each
     why is wrapped rather than sliced mid-word."""
     from . import clean
-    from .report import BOLD, DIM, RED, YEL, CYA, GRN
+    from .report import painters
+    BOLD, DIM, RED, YEL, GRN, CYA = painters()
     colour = {CRITICAL: RED, HIGH: YEL, MEDIUM: CYA}
     width = term.width()
+    head = "  %s scanned" % _scanned_words(scanned)
+    scanned = _total(scanned)
+    if days:
+        head += ", last %s" % _days(days)
     L = ["", BOLD("  ranwhat watch  ") + DIM("· local agent flight recorder"),
-         DIM(term.rule("-")),
-         "  %d source(s) over %d days" % (scanned, days), ""]
+         DIM(term.rule("-")), head, ""]
+    if not records and not scanned:
+        L += _nothing_read(days, locations, width)
+        return "\n".join(L)
     if not records:
         L += ["  " + GRN("Nothing flagged."),
               DIM("  Every tool call was read, none tripped a rule."), ""]
@@ -1431,6 +2374,16 @@ def render(records, scanned, days, footer=True):
         counts[r["severity"]] = counts.get(r["severity"], 0) + 1
     L.append("  " + "  ".join(colour[k](BOLD("%d %s" % (v, k)))
                               for k, v in sorted(counts.items())))
+    undated = sum(1 for r in records if _epoch(r.get("timestamp")) is None)
+    if undated and days:
+        # Kept by the window, since it cannot be placed in it or out of it,
+        # so not claimed to be inside it.
+        note = ("1 of these has no readable time, so it may be older"
+                if undated == 1 else
+                "%d of these have no readable time, so they may be older"
+                % undated)
+        L += [DIM(line) for line in term.wrap(
+            "%s than %s." % (note, _days(days)))]
     L.append("")
     for r in records:
         hits = sorted(r["hits"], key=lambda h: -_RANK.get(h.get("severity"), -1))
@@ -1454,12 +2407,11 @@ def render(records, scanned, days, footer=True):
                 L.append("    " + colour.get(h["severity"], DIM)("+ ")
                          + BOLD(label))
             # Masked again here, for records this module did not build.
-            evidence = _printable(clean.mask_for_display(h.get("evidence") or ""))
-            L.append(DIM("      " + _fit(evidence, width - 6)))
-            why = term.wrap(h.get("why") or "", indent=" " * 9)
-            if why:
-                why[0] = "      -> " + why[0][9:]
-            L += [DIM(line) for line in why]
+            evidence = h.get("evidence") or ""
+            if evidence not in _MASKED_HERE:
+                evidence = clean.mask_for_display(evidence)
+            L.append(DIM("      " + _fit(_printable(evidence), width - 6)))
+            L += [DIM(line) for line in _why_lines(h.get("why") or "", width)]
         L.append("")
     if footer:
         L += [DIM(term.rule("-")), DIM(term.FOOTER), ""]
@@ -1729,27 +2681,70 @@ def scan_openclaw_db(path, source="openclaw"):
     return records
 
 
-def scan_openclaw(state_dir=None):
-    records = []
+def scan_openclaw(state_dir=None, since_days=None):
+    """Every database is read whatever its mtime: a live agent's recent
+    rows can sit in its -wal file while the database itself looks old.
+    With since_days, each action is kept by its own time, as in scan_all."""
+    records, cutoff = [], _cutoff(since_days)
     dbs = openclaw_databases(state_dir)
     for db in dbs:
-        records.extend(scan_openclaw_db(db))
+        records.extend(r for r in scan_openclaw_db(db) if _in_window(r, cutoff))
     return records, len(dbs)
 
 
 SOURCES = ("claude-code", "openclaw")
+_SOURCE_NAMES = {"claude-code": "Claude Code", "openclaw": "OpenClaw"}
+
+
+def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
+                         since_days=None):
+    """Scan every requested local agent source into one record stream.
+
+    Returns (records, {source: how many it read}): Claude Code transcripts,
+    OpenClaw databases. Zero read is not an all-clear: locations() says
+    whether there was anything to read at all."""
+    records, counts = [], {}
+    if "claude-code" in sources:
+        recs, counts["claude-code"] = scan_all(root=root, since_days=since_days)
+        records += recs
+    if "openclaw" in sources:
+        recs, counts["openclaw"] = scan_openclaw(state_dir=state_dir,
+                                                 since_days=since_days)
+        records += recs
+    records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
+    return records, counts
 
 
 def scan_sources(sources=SOURCES, root=None, state_dir=None, since_days=None):
-    """Scan every requested local agent source into one record stream."""
-    records, scanned = [], 0
+    """scan_sources_counted, with every source's count added up."""
+    records, counts = scan_sources_counted(sources, root, state_dir, since_days)
+    return records, sum(counts.values())
+
+
+def locations(sources=SOURCES, root=None, state_dir=None):
+    """Where each requested source keeps its history, and how many
+    transcripts are there whatever their age:
+    [{"source": ..., "path": ..., "found": n}], JSON as it is.
+
+    What tells "nothing to read" from "read, and nothing tripped": no
+    transcripts found anywhere means a wrong --root, a fresh machine, or
+    history kept somewhere else, and must not read as an all-clear."""
+    out = []
     if "claude-code" in sources:
-        recs, n = scan_all(root=root or CLAUDE_PROJECTS, since_days=since_days)
-        records += recs
-        scanned += n
+        path = root or claude_projects()
+        place = {"source": "claude-code", "path": path,
+                 "found": len(_transcripts(path))}
+        # --root takes the projects directory, and ~/.claude is the obvious
+        # path to give it. With none there, one holding transcripts inside
+        # it is named, as "projects": {"path": ..., "found": n}.
+        inner = os.path.join(path, "projects")
+        if not place["found"] and os.path.isdir(inner):
+            n = len(_transcripts(inner))
+            if n:
+                place["projects"] = {"path": inner, "found": n}
+        out.append(place)
     if "openclaw" in sources:
-        recs, n = scan_openclaw(state_dir=state_dir)
-        records += recs
-        scanned += n
-    records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
-    return records, scanned
+        path = state_dir or openclaw_state_dir()
+        out.append({"source": "openclaw", "path": path,
+                    "found": len(openclaw_databases(path))})
+    return out

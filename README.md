@@ -12,7 +12,7 @@ $ ranwhat watch --days 90
 
   ranwhat watch  · local agent flight recorder
   --------------------------------------------------------------
-  4 source(s) over 90 days
+  4 transcript(s) scanned, last 90 days
 
   1 critical  3 high
 
@@ -52,7 +52,7 @@ nothing in your critical path.
 
 | Source | Location | Format |
 |---|---|---|
-| Claude Code | `~/.claude/projects/*/*.jsonl` | JSONL |
+| Claude Code | `~/.claude/projects/*/*.jsonl` and each session's `subagents/**/agent-*.jsonl`, or the same under `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
 | OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/*.sqlite` | SQLite |
 
 Nine rules: credential access, secret literals in commands, package
@@ -90,6 +90,10 @@ Capability catalogues for Google, GitHub, GitLab, Microsoft 365, Slack, Discord,
 Unrecognised
 scopes are classified by action verb and flagged unclassified, never assumed
 safe.
+
+A fine-grained GitHub token or a restricted Stripe key comes back from `live`
+as a finding, not a score: neither provider lists its permissions through its
+API. Copy them into a profile as that credential's `scopes` and `scan` it.
 
 ### `ranwhat clean`: secrets sitting in your transcripts
 

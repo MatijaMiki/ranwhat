@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -404,6 +405,49 @@ class ResolvedCatastrophicTargetsEscalate(Harness):
             "cd /tmp && rm -rf ~", "cd /tmp && rm -rf /",
             'SB=/tmp/x; rm -rf "$SB" /',
         ], level=C)
+
+
+class TheHomeDirectoryHoweverSpelled(Harness):
+    """rm -rf ~ was critical and rm -rf /Users/<you>, the same directory,
+    only high; ~/.., which is /Users, was high while /Users was critical.
+    The target was matched as written, with no home and no .. resolved."""
+
+    HOME = "/Users/someone"
+
+    def setUp(self):
+        patch = mock.patch.object(watch, "_home", return_value=self.HOME)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_every_spelling_of_home_or_above_is_critical(self):
+        self.assertFlagged([
+            "rm -rf /Users/someone", "rm -rf /Users/someone/", "rm -rf /Users/someone/*",
+            "rm -rf ~/..", "rm -rf ~/../", "rm -rf ~/./", "rm -rf $HOME/..",
+            'rm -rf "$HOME"/..', "rm -rf ${HOME}/..", "rm -rf /Users/someone/..",
+            "rm -rf /Users/someone/Documents/..", "rm -rf /Users/someone/Documents/../..",
+            "cd /tmp && rm -rf /Users/someone",
+        ], level=C)
+
+    def test_what_is_inside_it_is_still_high(self):
+        self.assertFlagged([
+            "rm -rf /Users/someone/Documents", "rm -rf ~/Documents/old/..",
+            "rm -rf ~/../other", "rm -rf /Users/someone2",
+        ])
+
+    def test_the_spellings_a_shell_also_reads_as_home(self):
+        """\\rm skips an rm -i alias and was not read as rm at all; a
+        subshell's ), ${HOME:?}, a brace that lists everything in it, a
+        doubled leading slash and ~name were each high."""
+        self.assertFlagged([
+            "\\rm -rf ~", "\\rm -rf /Users/someone", "(rm -rf ~)", "$(rm -rf ~)",
+            'rm -rf "${HOME:?}/"', "rm -rf ${HOME:?}", "rm -rf ${HOME:-/tmp}",
+            "rm -rf ~/{*,.*}", "rm -rf ~/.*", "rm -rf //Users/someone",
+            "rm -rf ~someone", "rm -rf ~someone/",
+        ], level=C)
+        self.assertFlagged([
+            "\\rm -rf ~/Documents", "(rm -rf ~/Documents)", "rm -rf ~/{a,b}",
+            "rm -rf ~someone/Documents", "rm -rf ~other",
+        ])
 
 
 class OtherRulesAreUntouched(unittest.TestCase):

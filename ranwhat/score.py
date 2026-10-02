@@ -67,6 +67,10 @@ def _validate(profile):
         if not isinstance(cred, dict):
             raise ProfileError("%s must be an object, got %s"
                                % (where, type(cred).__name__))
+        provider = cred.get("provider")
+        if provider is not None and not isinstance(provider, str):
+            raise ProfileError("%s.provider must be a string, got %s"
+                               % (where, type(provider).__name__))
         for key in ("scopes", "scopes_used"):
             val = cred.get(key)
             if val is None:
@@ -82,6 +86,14 @@ def _validate(profile):
             if bad:
                 raise ProfileError("%s.%s contains a non-string entry: %r"
                                    % (where, key, bad[0]))
+        known = cred.get("scopes_known")
+        if known is not None and not isinstance(known, bool):
+            raise ProfileError("%s.scopes_known must be true or false, got %r"
+                               % (where, known))
+        note = cred.get("note")
+        if note is not None and not isinstance(note, str):
+            raise ProfileError("%s.note must be a string, got %s"
+                               % (where, type(note).__name__))
 
     controls = profile.get("controls") or {}
     if not isinstance(controls, dict):
@@ -253,15 +265,55 @@ def verdict(authority, observability, reversibility):
     }
 
 
-def _pull_usage_command(path):
-    """The re-scan that would evidence usage, spelled so it runs as printed.
-    Imported here, not at the top: cli imports this module."""
-    from .cli import invocation, _quote
-    return "%s scan %s --pull-usage" % (
-        invocation(), _quote(path) if path else "<profile>")
+def _and(names):
+    names = list(names)
+    return names[0] if len(names) == 1 else "%s and %s" % (
+        ", ".join(names[:-1]), names[-1])
 
 
-def _coverage_findings(profile, rows, path=None):
+def _pull_usage_advice(providers, path=None, pulled=False):
+    """What would evidence these providers' usage, true where it is read.
+
+    demo has no profile on disk, so it gets no command: `<profile>` in one
+    is shell redirection. A scan gets the re-scan of its own file, and what
+    each provider needs for it, since without its token a pull is skipped.
+    After a pull, the same command is not advised again: the lines it
+    printed say why each provider got no record. A provider usage.PULLS
+    does not cover is never promised one. Imported here, not at the top:
+    cli imports this module."""
+    from .cli import invocation, _shell_path
+    from .usage import PULLS
+    pullable = [p for p in providers if p in PULLS]
+    declared = [p for p in providers if p not in PULLS]
+    out = []
+    if pullable and pulled:
+        out.append("--pull-usage got no record for %s in this run. The "
+                   "usage lines printed before this report say why."
+                   % _and(pullable))
+    elif pullable and path:
+        out.append("Run `%s scan %s --pull-usage` to check %s against each "
+                   "provider's own record." % (invocation(), _shell_path(path),
+                                                _and(pullable)))
+        tokens = ["RANWHAT_%s_TOKEN" % p.upper()
+                  for p in pullable if p != "aws"]
+        if tokens:
+            out.append("It needs %s set in the environment." % _and(tokens))
+        if "github" in pullable:
+            out.append("For github it also needs --github-org ORG: GitHub "
+                       "keeps usage only in an organisation's audit log.")
+        if "aws" in pullable:
+            out.append("For aws it uses the AWS CLI's own credentials.")
+    elif pullable:
+        out.append("A scan of your own profile with --pull-usage checks %s "
+                   "against each provider's own record." % _and(pullable))
+    if declared:
+        out.append("There is no usage pull for %s, so %s usage can only be "
+                   "declared." % (_and(declared),
+                                  "its" if len(declared) == 1 else "their"))
+    return " ".join(out)
+
+
+def _coverage_findings(profile, rows, path=None, pulled=False):
     """Classify each provider's usage evidence, and say so.
 
     Three states, not two. A provider whose usage was hand-declared in the
@@ -306,8 +358,8 @@ def _coverage_findings(profile, rows, path=None):
             "title": "Usage is self-attested for %d provider(s)" % len(self_attested),
             "body": "Usage for these providers was declared in the profile rather "
                     "than pulled from the provider's own audit trail. The findings "
-                    "hold only as far as that declaration does. Run `%s` to make "
-                    "them independently evidenced." % _pull_usage_command(path),
+                    "hold only as far as that declaration does. "
+                    + _pull_usage_advice(self_attested, path, pulled),
             "evidence": self_attested,
         })
 
@@ -322,6 +374,36 @@ def _coverage_findings(profile, rows, path=None):
         })
 
     return out
+
+
+def _unlisted_findings(credentials):
+    """A credential whose provider would not say what it may do.
+
+    It adds no rows, so without this the report scored it as a token that
+    may do nothing: `live` on a fine-grained GitHub token or a restricted
+    Stripe key printed no finding at all, and introspect's note saying why
+    went nowhere."""
+    out = []
+    for cred in credentials:
+        if cred.get("scopes_known") is not False or cred.get("scopes"):
+            continue
+        provider = cred.get("provider", "generic")
+        label = cred.get("label", provider)
+        who = label if label == provider else "%s (%s)" % (label, provider)
+        body = ((cred.get("note") or "").strip() + " The scores leave this "
+                "credential out, so they can understate what the agent is "
+                "allowed to do. To score it, add its permissions to a profile "
+                "as this credential's scopes and scan that profile.")
+        out.append({
+            "severity": "high",
+            "title": "Permissions could not be listed for %s" % who,
+            "body": body.strip(),
+            "evidence": [],
+        })
+    return out
+
+
+_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
 def findings(rows, controls, ba):
@@ -402,9 +484,10 @@ def findings(rows, controls, ba):
     return out
 
 
-def scan(profile, path=None):
+def scan(profile, path=None, pulled=False):
     """`path` is the file the profile was read from, if any, so advice to
-    re-scan it can name it."""
+    re-scan it can name it. `pulled` is whether --pull-usage already ran,
+    so that advice is not to run it again."""
     credentials, controls = _validate(profile)
     rows = _resolve(credentials)
 
@@ -420,8 +503,11 @@ def scan(profile, path=None):
                    "reversibility": _grade(r)},
         "verdict": verdict(a, o, r),
         "blast_radius": ba,
-        "findings": (findings(rows, controls, ba)
-                     + _coverage_findings(profile, rows, path)),
+        # Stable: each part is already ordered, and stays so within a rank.
+        "findings": sorted(findings(rows, controls, ba)
+                           + _unlisted_findings(credentials)
+                           + _coverage_findings(profile, rows, path, pulled),
+                           key=lambda f: _SEVERITY_ORDER[f["severity"]]),
         "usage_coverage": profile.get("usage_coverage") or [],
         "scopes": rows,
         "counts": {

@@ -9,13 +9,17 @@ commands, and a finding that is never real teaches people to skip the report.
 The failure that matters is the other one: hiding a real key. So every rule
 here is written to fail towards flagging.
 
-- Published documentation values match exactly, never by prefix or stem.
+- Published documentation values match exactly, or cut short with nothing
+  added, never by a stem with more after it.
 - Statistics (sequential runs, repeated chunks) apply only to
   provider-generated formats, recognised by a full match on a fixed prefix.
   A human-chosen password that happens to be abcdefgh12345678 is weak, but it
   is still a password, so free-form values never get them. They get only the
   documentation list, a capitalised EXAMPLE, and "my_example_..." wording,
   and only when too little else is left to be a secret.
+- A provider's prefix with a name where its body would be, and a character
+  that provider never issues ("sk_" "live_ENVSECRET_xyz789"), is a placeholder
+  only while too little is left over to be a secret on its own.
 - A signal must cover most of every key-length window of the value. A real
   key with a run or EXAMPLE appended, prepended or overlapping one edge still
   has a window that is the real key, and that window is unexplained.
@@ -26,20 +30,27 @@ from __future__ import annotations
 import functools
 import re
 
-# Published vendor documentation examples: full-value matches only. The AWS
+# Published vendor documentation examples: whole values, or cut short. The AWS
 # stems (AKIAIOSFODNN7...) are deliberately not matched on their own, because
-# AKIAIOSFODNN7REALKEY is not a published value.
+# "AKIA" "IOSFODNN7REALKEY" is not a published value.
+#
+# Stripe's API reference shows the same test-mode key to every reader, the
+# current one and the one before it, and the copies people paste of them
+# are no one's. Written in two parts, as the tests write a token, so a
+# scanner reading this source does not take them for a leak.
 _DOC_EXAMPLES = (
-    "AKIAIOSFODNN7EXAMPLE",
+    "AKIA" "IOSFODNN7EXAMPLE",
     "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
     "AKIAI44QH8DHBEXAMPLE",
     "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY",
+    "sk_" "test_4eC39HqLyjWDarjtT1zdp7dc",
+    "sk_" "test_BQokikJOvBiI2HlWgH4olfQ2",
 )
 _DOCS = frozenset(v.casefold() for v in _DOC_EXAMPLES)
 # The part of each documentation value before its EXAMPLE marker. Counted
 # only alongside the marker itself, for edited copies of the doc secret key.
 _DOC_STEMS = tuple(re.compile(re.escape(v[:v.index("EXAMPLE")]))
-                   for v in _DOC_EXAMPLES)
+                   for v in _DOC_EXAMPLES if "EXAMPLE" in v)
 
 # Provider formats whose bodies are generated, never typed by a person.
 # (name, full-match regex with a body group, minimum real body length, kind)
@@ -56,7 +67,9 @@ _DOC_STEMS = tuple(re.compile(re.escape(v[:v.index("EXAMPLE")]))
 # JWT and PEM are absent because their contents are structured.
 _FORMATS = (
     ("aws", re.compile(r"(?:AKIA|ASIA)(?P<body>[A-Z0-9]{16})"), 16, "aws"),
-    ("stripe", re.compile(r"(?:sk|rk)_live_(?P<body>[A-Za-z0-9]+)"), 24, "b62"),
+    # Test mode as well as live: under a key named for a secret a test key
+    # is reported, and an alphabet typed after sk_test_ is as much a fixture.
+    ("stripe", re.compile(r"(?:sk|rk)_(?:live|test)_(?P<body>[A-Za-z0-9]+)"), 24, "b62"),
     ("github", re.compile(r"gh[pousr]_(?P<body>[A-Za-z0-9]+)"), 36, "b62"),
     ("github_pat", re.compile(r"github_pat_(?P<body>[A-Za-z0-9_]+)"), 40, "b62"),
     ("slack", re.compile(r"xox[baprs]-(?P<body>[A-Za-z0-9-]+)"), 20, "b62"),
@@ -94,6 +107,28 @@ _EXAMPLE_ANY = re.compile(r"example", re.I)
 # clean already treats "example_..." and "your_...".
 _PHRASE = re.compile(r"(?:my|our|the|an?|some)[-_]example(?:[-_][A-Za-z0-9_-]*)?", re.I)
 
+# A provider's prefix with a name where its body would be:
+# "sk_" "live_ENVSECRET_xyz789", ghp_YOUR_TOKEN_1. Reached only when the value
+# holds a character outside the provider's alphabet (_FORMATS did not match
+# it), so it is not their key, and the name right after the prefix says
+# what it stands in for. That must not depend on the key name beside it:
+# under STRIPE_KEY it went unreported and under STRIPE_API_KEY it was a leak.
+#
+# Only prefixes no word starts with (AKIA, ASIA and AC begin ordinary words,
+# and so may a password). It stays a secret when a digit says the part after
+# the prefix could be generated ("sk_" "live_FAKEBODY1_abc456"), when a stretch
+# as long as the provider's key is in it, or when enough is left over to be
+# a secret on its own.
+_NAMED = (
+    (re.compile(r"(?:sk|rk)_(?:live|test)_"), 24),
+    (re.compile(r"gh[pousr]_"), 36),
+    (re.compile(r"github_pat_"), 40),
+    (re.compile(r"xox[baprs]-"), 20),
+)
+_SEGMENT = re.compile(r"[A-Za-z0-9]+")
+# One case, or whole capitalised words: ENVSECRET, your, YourBotToken.
+_NAME = re.compile(r"[A-Z]+|[a-z]+(?:[A-Z][a-z]+)*|(?:[A-Z][a-z]+)+")
+
 # AWS key IDs are base32 (A-Z, 2-7). Body characters 0-7, and one bit of
 # character 8, encode the account ID, so a run that lands there would repeat
 # in every key that account ever issues: a permanent miss that no
@@ -101,6 +136,53 @@ _PHRASE = re.compile(r"(?:my|our|the|an?|some)[-_]example(?:[-_][A-Za-z0-9_-]*)?
 # a character a real key ID cannot contain.
 _AWS_IMPOSSIBLE = frozenset("0189")
 _AWS_RANDOM_FROM = 8
+
+# Words typed where a key ID's body goes: "AKIA" "EXAMPLEEXAMPLEEX",
+# "AKIA" "FAKEFAKEFAKEFAKE", "AKIA" "YOURACCESSKEYIDXX". In letters only,
+# the gate above left them reported. A real body is drawn at random, and
+# across a million bodies of letters these words covered at most eight of
+# the sixteen characters, so twelve is a placeholder whichever characters
+# they are, and a body of the account's own encoding is not one. The shape
+# takes sixteen characters, so the last word may be cut short.
+_AWS_WORDS = ("EXAMPLE", "SAMPLE", "SECRET", "ACCESS", "DUMMY", "FAKE", "TEST",
+              "YOUR", "KEY", "AWS", "MY", "ID", "XX")
+_AWS_WORD = re.compile("|".join(_AWS_WORDS[:-1]) + "|X{2,}")
+_AWS_WORDS_MIN = 12
+
+
+def _aws_periodic(body):
+    """A body that is one chunk of at most eight characters over and over:
+    AKIA and then AKIA four times, or ABCD four times. _aws_gate leaves the
+    first eight alone, since they are the account's, but here the eight
+    drawn after them repeat those: a real key does that once in a
+    trillion. Asked of every key ID, so most are let go on their last
+    character, which a period of eight or less has seen before."""
+    if body[-1:] not in body[-1 - _AWS_RANDOM_FROM:-1]:
+        return False
+    for q in range(1, _AWS_RANDOM_FROM + 1):
+        if body[q:] == body[:-q]:
+            return True
+    return False
+
+
+# A documentation value cut short, where a slash or an escape before one
+# ended what was read of it: wJalrXUtnFEMI. Nothing in it is anyone's.
+_DOC_CUT_MIN = 12
+_DOC_HEADS = frozenset(v[:_DOC_CUT_MIN] for v in _DOC_EXAMPLES)
+
+
+def _aws_words(body):
+    # Asked of every key ID, so most are let go on one findall: no cut
+    # word could make up what the whole ones leave.
+    if sum(map(len, _AWS_WORD.findall(body))) + len(_AWS_WORDS[0]) - 1 < _AWS_WORDS_MIN:
+        return False
+    covered, end = 0, 0
+    for m in _AWS_WORD.finditer(body):
+        covered += len(m.group())
+        end = m.end()
+    cut = max((k for word in _AWS_WORDS for k in range(2, len(word))
+               if len(body) - k >= end and body.endswith(word[:k])), default=0)
+    return covered + cut >= _AWS_WORDS_MIN
 
 
 def _normalise(value):
@@ -121,9 +203,48 @@ def _step(a, b):
     return d if d in (1, -1) else 0
 
 
+# Each digit and lower-case letter as bytes, mapped to the one after it
+# and the one before it in its own alphabet. Anything else maps to a byte
+# no ASCII text holds.
+_NEXT, _PREVIOUS = bytearray(b"\x80" * 256), bytearray(b"\x81" * 256)
+for _alphabet in (b"0123456789", b"abcdefghijklmnopqrstuvwxyz"):
+    for _a, _b in zip(_alphabet, _alphabet[1:]):
+        _NEXT[_a], _PREVIOUS[_b] = _b, _a
+_NEXT, _PREVIOUS = bytes(_NEXT), bytes(_PREVIOUS)
+
+
+def _may_run(body, min_len):
+    """Whether ASCII body holds a run _runs would report: min_len - 1 pairs
+    in a row where each character is the one after (or each the one before)
+    the last. Most bodies hold none, and walking each a pair at a time in
+    Python was most of the cost of a megabyte of distinct keys, so the
+    body is compared with itself shifted by one, a whole body at a time."""
+    b = body.encode("ascii").lower()
+    n = len(b) - 1
+    if n < min_len - 1:
+        return False
+    shifted = int.from_bytes(b[1:], "big")
+    stretch = b"\0" * (min_len - 1)
+    return any(stretch in (int.from_bytes(b[:-1].translate(table), "big")
+                           ^ shifted).to_bytes(n, "big")
+               for table in (_NEXT, _PREVIOUS))
+
+
+@functools.lru_cache(maxsize=None)
+def _periods(min_len, longest):
+    """A regex that finds the start of a stretch _repeats would report: a
+    chunk of at most `longest` characters repeated for min_len and two
+    periods more, the least a stretch with an interior of min_len holds."""
+    return re.compile("|".join(
+        r"(.{%d})\%d{%d}" % (q, q, (min_len + 2 * q) // q - 1)
+        for q in range(1, longest + 1)), re.S)
+
+
 def _runs(body, min_len):
     """Spans of consecutive characters stepping by one in a single direction:
     0123456789, abcdefgh, AbCdEfGh."""
+    if body.isascii() and not _may_run(body, min_len):
+        return []
     spans, start, direction = [], 0, 0
     for i in range(1, len(body)):
         d = _step(body[i - 1], body[i])
@@ -146,6 +267,13 @@ def _repeats(body, min_len):
     key's first or last chunk, placed beside it, would mark the real key's
     own characters as explained.
     """
+    # A period q needs min_len + 2q characters, so a short body is asked
+    # only about the periods it has room for.
+    longest = min(_PERIOD_MAX, (len(body) - min_len) // 2)
+    if longest < 1:
+        return []
+    if body.isascii() and not _periods(min_len, longest).search(body):
+        return []
     spans = []
     n = len(body)
     for q in range(1, _PERIOD_MAX + 1):
@@ -186,6 +314,8 @@ def _generated_reason(body, min_len, kind):
     signals = (("EXAMPLE marker", _markers(body)),
                ("sequential run", _runs(body, _RUN[kind])),
                ("repeated chunk", _repeats(body, _RUN[kind])))
+    if not (signals[0][1] or signals[1][1] or signals[2][1]):
+        return None                       # nothing to explain any of it
     explained = [False] * len(body)
     reasons = []
     for reason, spans in signals:
@@ -209,6 +339,21 @@ def _generated_reason(body, min_len, kind):
         if count < _MIN_EXPLAINED:
             return None
     return " + ".join(reasons)
+
+
+def _named_reason(v):
+    for prefix, min_len in _NAMED:
+        m = prefix.match(v)
+        if not m:
+            continue
+        segments = _SEGMENT.findall(v, m.end())
+        if not segments or not _NAME.fullmatch(segments[0]):
+            return None
+        if any(len(s) >= min_len for s in segments):
+            return None
+        rest = sum(len(s) for s in segments if not _NAME.fullmatch(s))
+        return "placeholder name" if rest < _FREEFORM_REST else None
+    return None
 
 
 def _freeform_reason(v):
@@ -241,13 +386,18 @@ def fixture_reason(value):
     if not value:
         return None
     v = _normalise(value)
-    if v.casefold() in _DOCS:
+    if v.casefold() in _DOCS or (v[:_DOC_CUT_MIN] in _DOC_HEADS and any(
+            doc.startswith(v) for doc in _DOC_EXAMPLES)):
         return "published documentation example"
     for _name, pattern, min_len, kind in _FORMATS:
         m = pattern.fullmatch(v)
         if m:
+            if kind == "aws" and _aws_words(m.group("body")):
+                return "placeholder words"
+            if kind == "aws" and _aws_periodic(m.group("body")):
+                return "repeated chunk"
             return _generated_reason(m.group("body"), min_len, kind)
-    return _freeform_reason(v)
+    return _named_reason(v) or _freeform_reason(v)
 
 
 def is_fixture(value):

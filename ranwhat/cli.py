@@ -10,6 +10,8 @@ Live mode never transmits a token anywhere except the issuing provider.
 from __future__ import annotations
 
 import argparse
+import errno
+import io
 import json
 import os
 import re
@@ -18,15 +20,33 @@ import shutil
 import sys
 import time
 
-from .score import scan as _run_scan, ProfileError
+from .score import scan as _run_scan, ProfileError, _validate as _validate_profile
 from .report import render
-from . import introspect
-from . import usage as usage_mod
 from . import watch as watch_mod
 from . import clean as clean_mod
-from . import feed as feed_mod
 from . import catalog as catalog_mod
 from . import term
+
+# introspect, usage and feed talk to providers and to the feed, and import
+# urllib's HTTP stack to do it: a fifth of the time `watch` took to start.
+# Only live, scan --pull-usage and update use them, so each is imported
+# there, and cli.introspect, cli.usage_mod and cli.feed_mod still name them.
+_LAZY = {"introspect": "introspect", "usage_mod": "usage", "feed_mod": "feed"}
+# introspect.PROVIDERS, named here for the flags each takes, and usage's
+# default window (tests/test_work_done.py checks that they agree).
+_PROVIDER_NAMES = ("google", "github", "slack", "stripe")
+_DEFAULT_WINDOW_DAYS = 90
+
+
+def _module(name):
+    import importlib
+    return importlib.import_module("." + _LAZY[name], __package__)
+
+
+def __getattr__(name):
+    if name in _LAZY:
+        return _module(name)
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
 
 def _token(args, provider):
@@ -59,11 +79,12 @@ def _token(args, provider):
     return value or None
 
 
-def run_scan(profile, path=None):
+def run_scan(profile, path=None, pulled=False):
     """Score a profile, turning a malformed one into a message. `path` is the
-    file it came from, for advice that has to name it."""
+    file it came from, and `pulled` whether --pull-usage ran, for advice
+    that has to name the one and not repeat the other."""
     try:
-        return _run_scan(profile, path=path)
+        return _run_scan(profile, path=path, pulled=pulled)
     except ProfileError as e:
         raise SystemExit("ranwhat: %s" % e)
 
@@ -97,20 +118,58 @@ def _bundled(name):
         return _load(os.path.join(here, "demo", name))
 
 
+def _usage_line(provider, text):
+    """One provider's line about its usage pull, on stderr, folded under
+    its own column."""
+    for line in term.wrap(text, indent=" " * 18,
+                          first="  usage: %-8s " % provider):
+        print(line, file=sys.stderr)
+
+
 def _pull_usage(profile, args):
     """Best-effort usage pulls. A provider that cannot report usage is left
-    explicitly unverified rather than silently empty.
+    explicitly unverified rather than silently empty, and every provider
+    that is not asked says why: skipped in silence, the report went on
+    advising the very command that had just skipped it.
 
     Returns the profile and whether any provider was asked, which decides
-    whether the report may say nothing was transmitted."""
+    whether the report may say nothing was transmitted.
+
+    The profile is checked first, as the scan would check it: the
+    providers were read from it before that, and a provider of 5 beside
+    "openai" ended the run in a traceback."""
+    try:
+        _validate_profile(profile)
+    except ProfileError as e:
+        raise SystemExit("ranwhat: %s" % e)
+    usage_mod, introspect = _module("usage_mod"), _module("introspect")
     results, asked = {}, False
     providers = {c.get("provider") for c in profile.get("credentials", [])}
+    providers.discard(None)
 
+    for provider in sorted(providers - set(usage_mod.PULLS)):
+        _usage_line(provider, "no usage pull, so it stays as declared")
     for provider in sorted(providers & set(usage_mod.PULLS)):
-        token = _token(args, provider)
-        # aws reads the AWS CLI's own credentials; every other pull needs one.
-        if provider != "aws" and not token:
-            continue
+        if provider == "aws":
+            # aws reads the AWS CLI's own credentials, so it needs the CLI.
+            # Without it nothing is sent, and the footer must not say so.
+            if not shutil.which("aws"):
+                _usage_line(provider, "skipped, the aws CLI is not on PATH")
+                continue
+            token = None
+        else:
+            token = _token(args, provider)
+            if not token:
+                _usage_line(provider, "skipped, set RANWHAT_%s_TOKEN to "
+                                      "pull it" % provider.upper())
+                continue
+            if provider == "github" and not args.github_org:
+                # GitHub keeps usage only in an organisation's audit log,
+                # and github_usage sends nothing without one.
+                _usage_line(provider, "skipped, pass --github-org ORG to "
+                                      "pull it from that organisation's "
+                                      "audit log")
+                continue
         asked = True
         try:
             if provider == "aws":
@@ -122,10 +181,9 @@ def _pull_usage(profile, args):
             else:
                 results[provider] = usage_mod.PULLS[provider](
                     token, window_days=args.window_days)
-            print("  usage: %-8s %s" % (provider, results[provider][1].level),
-                  file=sys.stderr)
+            _usage_line(provider, results[provider][1].level)
         except introspect.IntrospectionError as e:
-            print("  usage: %-8s unavailable (%s)" % (provider, e), file=sys.stderr)
+            _usage_line(provider, "unavailable (%s)" % e)
 
     if results:
         usage_mod.apply_usage(profile, results)
@@ -141,7 +199,9 @@ def _emit(result, args, online=False):
     if args.html:
         from .html_report import write_html
         write_html(result, args.html)
-        print("  html report: %s\n" % args.html)
+        # After JSON on stdout, one more line there stops it parsing.
+        print("  html report: %s\n" % args.html,
+              file=sys.stderr if args.json else sys.stdout)
 
 
 TAGLINE = "Flight recorder and authority scanner for AI agents."
@@ -156,7 +216,7 @@ NETWORK = ("No account needed. live and --pull-usage ask only the provider "
 # Descriptions wrap under their own column on a narrow terminal, rather than
 # being folded again by the terminal into ragged half-lines.
 COMMANDS = (
-    ("check", "everything on this machine worth knowing about"),
+    ("check", "watch and clean in one pass, changing nothing"),
     ("watch", "what your agents already ran on this machine"),
     ("clean", "credentials sitting in plaintext in agent transcripts"),
     ("scan", "the authority a set of credentials carries"),
@@ -164,6 +224,12 @@ COMMANDS = (
     ("demo", "see the output without setting anything up"),
     ("update", "refresh the capability catalogue (needs a subscription)"),
 )
+
+# The commands whose report html_report can write.
+_HTML_COMMANDS = ("demo", "scan", "live")
+
+# --days when it is not given. A suggested command repeats any other value.
+DEFAULT_DAYS = 30
 
 
 _UV_BUCKET = re.compile(r"^archive-v\d+$")
@@ -349,6 +415,7 @@ def _update(args):
     only one that talks to ranwhat's own server. It sends the subscription
     token and nothing else. --status reads the cache and stays offline.
     """
+    feed_mod = _module("feed_mod")
     if args.status:
         st = feed_mod.status()
         if not st["active"]:
@@ -406,8 +473,107 @@ def _finding_json(f):
     """A clean finding as JSON. files, origins and projects are sets in
     memory; converting only files made check --json and clean --json crash
     on the first secret found, which hid every secret from automation."""
-    return dict(f, **{k: sorted(f[k]) for k in ("files", "origins", "projects")
-                      if isinstance(f.get(k), (set, frozenset))})
+    out = dict(f)
+    for k in ("files", "origins", "projects"):
+        v = f.get(k)
+        if isinstance(v, (set, frozenset)):
+            out[k] = sorted(v) if len(v) > 1 else list(v)
+    return out
+
+
+_ESCAPE = json.encoder.encode_basestring_ascii
+
+
+def _json_float(v):
+    if v != v:
+        return "NaN"
+    if v in (float("inf"), float("-inf")):
+        return "Infinity" if v > 0 else "-Infinity"
+    return float.__repr__(v)
+
+
+def _json_key(k):
+    if isinstance(k, str):
+        return k
+    if isinstance(k, float):
+        return _json_float(k)
+    if k is True or k is False or k is None:
+        return json.dumps(k)
+    if isinstance(k, int):
+        return int.__repr__(k)
+    raise TypeError("keys must be str, int, float, bool or None, not %s"
+                    % k.__class__.__name__)
+
+
+def _json_text(doc, pad=""):
+    """json.dumps(doc, indent=2), the same text. The standard library
+    writes indented JSON in pure Python, one piece at a time, and a
+    megabyte of distinct secrets spent a third of a second there."""
+    if isinstance(doc, str):
+        return _ESCAPE(doc)
+    if doc is None or doc is True or doc is False:
+        return json.dumps(doc)
+    if isinstance(doc, int):
+        return int.__repr__(doc)
+    if isinstance(doc, float):
+        return _json_float(doc)
+    inner = pad + "  "
+    if isinstance(doc, (list, tuple)):
+        if not doc:
+            return "[]"
+        return "[\n%s%s\n%s]" % (inner, (",\n" + inner).join(
+            [_ESCAPE(v) if v.__class__ is str else _json_text(v, inner)
+             for v in doc]), pad)
+    return _json_object(doc, pad, inner)
+
+
+def _json_object(doc, pad, inner):
+    """_json_text for a dict, and anything else json would refuse."""
+    if isinstance(doc, dict):
+        if not doc:
+            return "{}"
+        # A string or a whole number, most values, is written here rather
+        # than by a call each.
+        deeper = inner + "  "
+        return "{\n%s%s\n%s}" % (inner, (",\n" + inner).join(
+            [_ESCAPE(k if k.__class__ is str else _json_key(k)) + ": "
+             + (_ESCAPE(v) if v.__class__ is str
+                else int.__repr__(v) if v.__class__ is int
+                # a finding's files: a list of one string, as often as not
+                else "[\n%s%s\n%s]" % (deeper, _ESCAPE(v[0]), inner)
+                if v.__class__ is list and len(v) == 1 and v[0].__class__ is str
+                else _json_text(v, inner))
+             for k, v in doc.items()]), pad)
+    return json.dumps(doc)            # raises the TypeError json would
+
+
+def _mask_known(records, known):
+    """Mask in each action's evidence every value clean found, `known`.
+
+    watch masks what a call shows to be a secret. A password clean found
+    in a tool's output is shown nowhere as one when a later command types
+    it with no key beside it (mysql -pPASSWORD), and check listed it by
+    its hint in one section and whole in the other."""
+    if known and any(record.get("hits") for record in records):
+        known = clean_mod.KnownValues(known.values())
+        for record in records:
+            for hit in record.get("hits", ()):
+                hit["evidence"] = known.mask(hit.get("evidence") or "")
+
+
+def _found_by_clean(args, records):
+    """The values clean finds in the transcripts watch read that its
+    actions show, for masking them: {fingerprint: value}, never written
+    anywhere. watch --json printed whole the password check hid. Nothing
+    is read again when no action was found, or none in Claude Code's
+    transcripts, which are all clean searches, and only what the
+    evidence shows is looked for (clean.known_values): a whole clean pass
+    made watch two to four times slower than main."""
+    if not any(r.get("source") == "claude-code" and r.get("hits") for r in records):
+        return {}
+    return clean_mod.known_values(
+        [hit.get("evidence") for record in records for hit in record.get("hits", ())],
+        root=args.root, since_days=args.days)
 
 
 def _check(args):
@@ -419,61 +585,190 @@ def _check(args):
     should not require. Nothing is modified: masking stays an explicit choice
     under `clean`.
     """
-    records, sources = watch_mod.scan_sources(
+    records, counts = watch_mod.scan_sources_counted(
         sources=watch_mod.SOURCES, root=args.root,
         state_dir=args.state_dir, since_days=args.days)
+    sources = sum(counts.values())
+    # clean searches Claude Code transcripts only. OpenClaw's databases,
+    # read above for actions, are not searched for secrets, and the report
+    # must not read as if they were.
+    unsearched = counts.get("openclaw", 0)
 
     bar, _progress = _progress_line(args)
+    known = {}
     try:
         findings, scanned, _ = clean_mod.scan(
             root=args.root, since_days=args.days, apply=False,
-            progress=_progress)
+            progress=_progress, known=known)
     finally:
         bar.clear()
+    _mask_known(records, known)
 
+    places = None if sources else watch_mod.locations(
+        root=args.root, state_dir=args.state_dir)
     if args.json:
-        print(json.dumps({
+        print(_json_text({
             "days": args.days,
             "actions": records,
             "secrets": [_finding_json(f) for f in findings.values()],
-        }, indent=2))
-        return 0
+        }))
+        if unsearched:
+            sys.stderr.write("\n".join(term.wrap(
+                clean_mod.UNSEARCHED % unsearched)) + "\n")
+        return _said_nothing_read(places, args.days)
 
     from .report import DIM
     # Each section once, then one tail. Printing the two standalone reports
     # back to back gave three footers and two conflicting next steps.
-    print(watch_mod.render(records, sources, args.days,
-                           footer=False).rstrip("\n"))
-    print(clean_mod.render(findings, scanned, 0, False,
-                           footer=False, advice=False).rstrip("\n"))
+    print(watch_mod.render(records, counts, args.days, footer=False,
+                           locations=places).rstrip("\n"))
+    if scanned:
+        print(clean_mod.render(findings, scanned, 0, False, footer=False,
+                               advice=False, unsearched=unsearched).rstrip("\n"))
+    elif sources:
+        # OpenClaw was read, Claude Code was not: "No secrets found" here
+        # would be an all-clear on transcripts nobody read. With nothing
+        # read at all, watch's section has already said where it looked.
+        print(_clean_nothing_read(args).rstrip("\n"))
+        from .report import DIM
+        print("\n".join(DIM(line) for line in term.wrap(
+            clean_mod.UNSEARCHED % unsearched)))
     print()
 
     cmd = invocation()
     steps = []
     if findings:
         # Bare `clean` on a terminal opens the review over these findings.
-        steps.append(("clean", "review each secret, then mask it"))
+        steps.append((["clean"] + _carried(args, "days", "root"),
+                      "review each secret, then mask it"))
     if records:
-        steps.append(("watch --json", "the actions, machine readable"))
+        # Not `watch --json`: watch masks what a call shows to be a secret,
+        # and only check masks too what clean found elsewhere. Suggested
+        # here, it printed whole the passwords this report had just hidden.
+        steps.append((["check", "--json"]
+                      + _carried(args, "days", "root", "state_dir"),
+                      "the actions and secrets, machine readable"))
     # Not `scan profile.json`: nothing writes one, so on a first run it
     # failed with "no such file". demo runs anywhere.
-    steps.append(("demo", "an authority scan, on an example"))
-    pad = max(len(c) for c, _ in steps)
+    steps.append((["demo"], "an authority scan, on an example"))
     # clean's "Dry run" line is gone from this report, so say here that
     # nothing was masked, or a reader may assume check handled the secrets.
     tail = ["  " + term.brand("What to do with this"),
             DIM("  Nothing was changed. check only reads."), ""]
-    rows = ["    %s %-*s  %s" % (cmd, pad, c, why) for c, why in steps]
+    pad = max(len(" ".join(words)) for words, _ in steps)
+    rows = ["    %s %-*s  %s" % (cmd, pad, " ".join(words), why)
+            for words, why in steps]
     if all(len(r) <= term.width() for r in rows):
         tail += rows
     else:
         # Too narrow for two columns: each reason goes under its command.
-        for c, why in steps:
-            tail.append("    %s %s" % (cmd, c))
+        for words, why in steps:
+            tail += _command_lines(cmd, words)
             tail += term.wrap(why, indent="      ")
     tail += ["", term.rule("-"), term.FOOTER, ""]
     print("\n".join(tail))
-    return 0
+    return 2 if places is not None else 0
+
+
+def _carried(args, *names):
+    """This run's own --days, --root and --state-dir, as shell words, so a
+    suggested command reads what this one read. Dropped, `clean` after
+    `check --days 365 --root X` opened its review on other secrets than
+    the ones just listed. Only values other than the default are carried,
+    so a plain run suggests plain commands."""
+    words = []
+    if "days" in names and args.days != DEFAULT_DAYS:
+        words += ["--days", str(args.days)]
+    if "root" in names and args.root != watch_mod.CLAUDE_PROJECTS:
+        words += ["--root", _shell_path(args.root)]
+    if "state_dir" in names and args.state_dir:
+        words += ["--state-dir", _shell_path(args.state_dir)]
+    return words
+
+
+def _shell_path(path):
+    """A path as one shell word, under ~ when it is inside the home
+    directory, which keeps a suggested command short enough to fit. A
+    quoted ~ is not expanded, so only what follows it is quoted."""
+    home = os.path.expanduser("~")
+    if os.name != "nt" and home not in ("", "/", "~"):
+        if path == home:
+            return "~"
+        if path.startswith(home + os.sep):
+            return "~/" + _quote(path[len(home) + 1:])
+    return _quote(path)
+
+
+def _command_lines(cmd, words, indent="    ", more="        "):
+    """`cmd` and its words as lines to paste, folded between words with a
+    trailing backslash, which a POSIX shell joins back into one command.
+    A word is never split, so a path longer than the line has a line to
+    itself; `cmd` is kept whole, since it may hold a quoted path. Windows
+    shells continue lines differently, so there it stays one line."""
+    if os.name == "nt":
+        return [indent + " ".join([cmd] + list(words))]
+    width = term.width()
+    out, line = [], indent + cmd
+    for i, word in enumerate(words):
+        mark = 0 if i == len(words) - 1 else 2       # room for " \"
+        if len(line) + 1 + len(word) + mark > width:
+            out.append(line + " \\")
+            line = more + word
+        else:
+            line += " " + word
+    return out + [line]
+
+
+_POINT_ELSEWHERE = {
+    "claude-code": watch_mod.ELSEWHERE.replace(" set ", " "),
+    "openclaw": "--state-dir PATH or OPENCLAW_STATE_DIR",
+}
+
+
+def _said_nothing_read(places, days):
+    """For --json, whose [] or zeros cannot tell "read, and nothing found"
+    from "nothing there to read": when `places` is not None, one message on
+    stderr saying where it looked and how to point it elsewhere, and exit
+    status 2. Otherwise 0, and nothing is said."""
+    if places is None:
+        return 0
+    found = sum(p["found"] for p in places)
+    if found:
+        text = ("No transcripts from the last %s, so nothing was checked. "
+                "%d older transcript(s) found; pass a larger --days to read "
+                "them." % (watch_mod._days(days), found))
+    else:
+        where = " or ".join(
+            "%s (%s)" % (watch_mod._shown_path(p["path"], 4096),
+                         watch_mod._SOURCE_NAMES.get(p["source"], p["source"]))
+            for p in places)
+        inner = [p for p in places if p.get("projects")]
+        point = ", and ".join(_POINT_ELSEWHERE[p["source"]] for p in places
+                              if p["source"] in _POINT_ELSEWHERE
+                              and p not in inner)
+        text = "No transcripts found in %s, so nothing was checked." % where
+        text += "".join(" " + watch_mod.projects_hint(p) for p in inner)
+        if point:
+            text += " Point it elsewhere with %s." % point
+    sys.stderr.write("\n".join(term.wrap(text)) + "\n")
+    return 2
+
+
+def _clean_nothing_read(args):
+    """clean's section for a run with no transcript to read. clean.render
+    says "No secrets found" for that, an all-clear on nothing read, so its
+    header is followed by where it looked instead, in watch's words."""
+    from .report import BOLD, DIM
+    width = term.width()
+    title, tagline = clean_mod._TITLE, clean_mod._TAGLINE
+    if len(title + tagline) <= width:
+        L = ["", BOLD(title) + DIM(tagline)]
+    else:
+        L = ["", BOLD(title.rstrip()), DIM("  " + tagline[2:])]
+    L += [DIM(term.rule("-")), "  0 transcript(s) scanned", ""]
+    places = watch_mod.locations(("claude-code",), root=args.root)
+    return "\n".join(L + watch_mod._nothing_read(args.days, places, width))
+
 
 def _progress_line(args):
     """One status line for check and clean, in the same words. It never names
@@ -487,7 +782,120 @@ def _progress_line(args):
     return bar, progress
 
 
+def _takes_no_path(command, path):
+    """The error for a path given to a command other than scan. For one
+    that reads transcripts, which flag reads that path: --root, or --root
+    with its projects directory when that is where the transcripts are."""
+    said = "%s takes no path" % command
+    if command not in ("check", "watch", "clean"):
+        return said
+    root = _root_for(path)
+    if os.path.isdir(root) and watch_mod._transcripts(root):
+        if _same_file(root, path):
+            return ("%s. To read the transcripts in %s, pass --root %s"
+                    % (said, path, _quote(root)))
+        return ("%s. To read the transcripts in %s, pass the projects directory "
+                "that holds them: --root %s" % (said, path, _quote(root)))
+    # Nothing there or near it is a transcript: a project's source, a path
+    # that does not exist, an empty project directory. Pointed at with
+    # --root, each read nothing and exited 2, so the step offered is the
+    # projects directory a run with no path reads, when that holds any.
+    none = "%s. No Claude Code transcripts are in or near %s" % (said, path)
+    default = watch_mod.CLAUDE_PROJECTS
+    if _same_file(default, path):
+        return none + ", where Claude Code keeps them."
+    if os.path.isdir(default) and watch_mod._transcripts(default):
+        return none + ". Run %s with no path to read the ones in %s." % (
+            command, _shell_path(default))
+    return none + ", nor in %s, where Claude Code keeps them." % _shell_path(default)
+
+
+def _holds_projects(path):
+    """Whether path is a projects directory: transcripts in the directories
+    under it. A session's directory has them too, in its subagents/."""
+    own = os.path.join(path, "subagents")
+    return any(os.path.dirname(t) != own for t in watch_mod._transcripts(path))
+
+
+# How far above a path the projects directory holding it may be: a
+# workflow's subagent sits at <project>/<session>/subagents/workflows/<run>.
+_ROOT_ABOVE = 6
+
+
+def _root_for(path):
+    """The --root that reads the transcripts at path. --root takes the
+    projects directory and reads <root>/*/*.jsonl, so for a project's
+    directory, a session's or a transcript, it is the one above that holds
+    it, and for a home or config directory the projects directory inside.
+    Suggested as given, each read nothing and said "No transcripts found"."""
+    full = os.path.abspath(path)
+    if os.path.isfile(full):
+        project, _session = watch_mod.transcript_place(full)
+        parts = full.split(os.sep)[:-1]
+        if not full.endswith(".jsonl") or project not in parts:
+            return path
+        at = len(parts) - 1 - parts[::-1].index(project)     # the last one
+        root = os.sep.join(parts[:at]) or os.sep
+        return root if _holds_projects(root) else path
+    if not os.path.isdir(full):
+        return path
+    if _holds_projects(full):
+        return path
+    for inner in (os.path.join(full, "projects"),
+                  os.path.join(full, ".claude", "projects")):
+        if _holds_projects(inner):
+            return inner
+    above = full
+    for _ in range(_ROOT_ABOVE):
+        parent = os.path.dirname(above)
+        if parent == above:
+            break
+        above = parent
+        if any(_inside(os.path.abspath(t), full) for t in watch_mod._transcripts(above)):
+            return above
+    return path
+
+
 def main(argv=None):
+    """The command line. A report piped into head or a pager that closes
+    early ended in a BrokenPipeError traceback; it ends quietly instead.
+    And a character the terminal cannot show (a lone half of a surrogate
+    pair a transcript spelled, or anything past ASCII on a terminal that
+    takes only that) is shown as "?" rather than ending the run."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream.errors == "strict":
+                stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, io.UnsupportedOperation):
+            pass                      # not a text stream we may change
+    try:
+        status = _main(argv)
+        sys.stdout.flush()            # a closed pipe says so here, not at exit
+        return status
+    except OSError as error:
+        if not _closed_pipe(error):
+            raise
+        _quiet_stdout()
+        return 1
+
+
+def _closed_pipe(error, windows=os.name == "nt"):
+    """Whether error is a write to a pipe whose reader has gone: a
+    BrokenPipeError, or on Windows an OSError with EINVAL."""
+    return isinstance(error, BrokenPipeError) or (windows and error.errno == errno.EINVAL)
+
+
+def _quiet_stdout():
+    """Send what is left to say to nowhere, so Python's own flush at exit
+    meets no closed pipe either."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
+        pass
+
+
+def _main(argv=None):
     p = argparse.ArgumentParser(prog="ranwhat",
                                 description=TAGLINE + " " + NETWORK)
     p.add_argument("command", nargs="?",
@@ -495,8 +903,9 @@ def main(argv=None):
                             "clean", "update"])
     p.add_argument("profile", nargs="?", help="path to a profile JSON")
     p.add_argument("--json", action="store_true", help="emit raw JSON")
-    p.add_argument("--html", metavar="PATH", help="also write an HTML report")
-    for name in introspect.PROVIDERS:
+    p.add_argument("--html", metavar="PATH",
+                   help="demo, scan, live: also write the report as HTML")
+    for name in _PROVIDER_NAMES:
         p.add_argument("--%s" % name, metavar="TOKEN",
                        help="%s credential. Prefer RANWHAT_%s_TOKEN in the "
                             "environment: a value passed here is visible to "
@@ -510,9 +919,9 @@ def main(argv=None):
                         "permissions were actually exercised (read-only)")
     p.add_argument("--aws-profile", metavar="NAME", help="AWS CLI profile for usage pull")
     p.add_argument("--github-org", metavar="ORG", help="GitHub org for audit-log usage pull")
-    p.add_argument("--window-days", type=int, default=usage_mod.DEFAULT_WINDOW_DAYS,
+    p.add_argument("--window-days", type=int, default=_DEFAULT_WINDOW_DAYS,
                    help="usage lookback window (default 90)")
-    p.add_argument("--days", type=int, default=30,
+    p.add_argument("--days", type=int, default=DEFAULT_DAYS,
                    help="check, watch, clean: how far back to read local "
                         "agent history (default 30)")
     p.add_argument("--root", metavar="PATH", default=watch_mod.CLAUDE_PROJECTS,
@@ -539,7 +948,21 @@ def main(argv=None):
     p.add_argument("--status", action="store_true",
                    help="update: report the cached feed and exit without "
                         "touching the network")
-    args = p.parse_args(argv)
+    # Intermixed, so a flag may come before scan's path: on Python 3.9,
+    # `scan --json profile.json` ended the positionals at --json and then
+    # refused the path as an unrecognized argument.
+    args = p.parse_intermixed_args(argv)
+
+    if args.profile is not None and args.command != "scan":
+        # Taken and ignored, `check DIR` reported on the default history as
+        # if it were DIR, and `clean DIR --apply` would have masked it.
+        p.error(_takes_no_path(args.command, args.profile))
+
+    if args.html and args.command not in _HTML_COMMANDS:
+        # Accepted and ignored, it exited 0 and left no file behind.
+        p.error("--html is only for demo, scan and live"
+                + ("; %s has no HTML report" % args.command
+                   if args.command else ""))
 
     if args.command is None:
         _overview(p)
@@ -564,35 +987,48 @@ def main(argv=None):
 
     if args.command == "clean":
         bar, _progress = _progress_line(args)
+        known = {}            # for the review: never written anywhere
         try:
             findings, scanned, changed = clean_mod.scan(
                 root=args.root, since_days=args.days, apply=args.apply,
-                progress=_progress)
+                progress=_progress, known=known)
         finally:
             bar.clear()
+        # Zero read is not "No secrets found": it is a wrong --root, a
+        # fresh machine, or history kept somewhere else.
+        places = None if scanned else watch_mod.locations(
+            ("claude-code",), root=args.root)
         if args.json:
-            print(json.dumps({"scanned": scanned, "applied": args.apply,
+            print(_json_text({"scanned": scanned, "applied": args.apply,
                               "changed": changed,
                               "findings": [_finding_json(f)
-                                           for f in findings.values()]}, indent=2))
-        else:
-            print(clean_mod.render(findings, scanned, changed, args.apply))
-            # The findings are already in memory; making someone re-scan a
-            # large history just to act on what they read is wasteful.
-            if (findings and not args.apply and not args.no_interactive
-                    and sys.stdin.isatty()):
-                clean_mod.review(findings, scanned)
+                                           for f in findings.values()]}))
+            return _said_nothing_read(places, args.days)
+        if places is not None:
+            print(_clean_nothing_read(args))
+            return 2
+        print(clean_mod.render(findings, scanned, changed, args.apply))
+        # The findings are already in memory; making someone re-scan a
+        # large history just to act on what they read is wasteful.
+        if (findings and not args.apply and not args.no_interactive
+                and sys.stdin.isatty()):
+            clean_mod.review(findings, scanned, values=known)
         return 0
 
     if args.command == "watch":
-        records, n = watch_mod.scan_sources(
-            sources=args.source or watch_mod.SOURCES,
-            root=args.root, state_dir=args.state_dir, since_days=args.days)
+        sources = args.source or watch_mod.SOURCES
+        records, counts = watch_mod.scan_sources_counted(
+            sources=sources, root=args.root, state_dir=args.state_dir,
+            since_days=args.days)
+        n = sum(counts.values())
+        places = None if n else watch_mod.locations(
+            sources, root=args.root, state_dir=args.state_dir)
+        _mask_known(records, _found_by_clean(args, records))
         if args.json:
-            print(json.dumps(records, indent=2))
-        else:
-            print(watch_mod.render(records, n, args.days))
-        return 0
+            print(_json_text(records))
+            return _said_nothing_read(places, args.days)
+        print(watch_mod.render(records, counts, args.days, locations=places))
+        return 2 if places is not None else 0
 
     if args.command == "demo":
         _emit(run_scan(_bundled("support-copilot.json")), args)
@@ -604,11 +1040,13 @@ def main(argv=None):
         profile, online = _load(args.profile), False
         if args.pull_usage:
             profile, online = _pull_usage(profile, args)
-        _emit(run_scan(profile, args.profile), args, online=online)
+        _emit(run_scan(profile, args.profile, pulled=args.pull_usage), args,
+              online=online)
         return 0
 
     # live
     creds, errors = [], []
+    introspect = _module("introspect")
     for name, fn in introspect.PROVIDERS.items():
         token = _token(args, name)
         if not token:
@@ -630,7 +1068,7 @@ def main(argv=None):
     profile = {"agent": "live-scan", "credentials": creds, "controls": controls}
     if args.pull_usage:
         profile, _ = _pull_usage(profile, args)
-    _emit(run_scan(profile), args, online=True)
+    _emit(run_scan(profile, pulled=args.pull_usage), args, online=True)
     return 0
 
 

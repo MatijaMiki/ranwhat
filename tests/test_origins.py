@@ -8,6 +8,7 @@ synthetic.
 """
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -223,12 +224,23 @@ def _text(text):
     return {"message": {"content": [{"type": "text", "text": text}]}}
 
 
+def _typed(text):
+    """What the user typed, which Claude Code writes as a plain string."""
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def _queued(text):
+    """A message typed while the agent was busy."""
+    return {"type": "queue-operation", "operation": "enqueue", "content": text}
+
+
 class OriginOfAFinding(unittest.TestCase):
     """End to end through scan_file: the secret is always found, and the
     origin it is credited to is the right one or none."""
 
     def _scan(self, rows):
         d = tempfile.mkdtemp(prefix="origin-")
+        self.addCleanup(shutil.rmtree, d, True)
         path = os.path.join(d, "s.jsonl")
         with open(path, "w", encoding="utf-8") as fh:
             for r in rows:
@@ -294,6 +306,97 @@ class OriginOfAFinding(unittest.TestCase):
         rows = [_call("grep -r AWS_ACCESS_KEY_ID .", "t1"),
                 _result("./api/.env:AWS_ACCESS_KEY_ID=%s\n" % KEY, "t1")]
         self.assertEqual(self._scan(rows), {"./api/.env"})
+
+    # Only a tool result is read out of a file. Two real AWS key IDs, pasted
+    # in a user message, showed "read from d.key": the name came from prose
+    # two lines up explaining that d.key was attribute access.
+
+    def test_pasted_text_is_not_credited_to_a_name_in_earlier_prose(self):
+        said = _text('Note that "server.key" in that code is attribute access')
+        for pasted in (_typed, _queued, _text):
+            with self.subTest(pasted=pasted.__name__):
+                rows = [said, pasted("AWS_ACCESS_KEY_ID=%s" % KEY)]
+                self.assertEqual(self._scan(rows), set())
+
+    def test_pasted_text_is_not_credited_to_a_file_read_earlier(self):
+        rows = [_call("cat api/.env", "t1"), _result("DEBUG=1\n", "t1"),
+                _typed("AWS_ACCESS_KEY_ID=%s" % KEY)]
+        self.assertEqual(self._scan(rows), set())
+
+    def test_prose_naming_a_file_beside_the_value_is_not_an_origin(self):
+        rows = [_typed('"server.key" is attribute access. '
+                       "AWS_ACCESS_KEY_ID=%s" % KEY)]
+        self.assertEqual(self._scan(rows), set())
+
+    def test_a_result_whose_call_is_not_in_the_file_gets_no_origin(self):
+        rows = [_call("cat api/.env", "t1"), _result("DEBUG=1\n", "t1"),
+                _result("AWS_ACCESS_KEY_ID=%s\n" % KEY, "t9")]
+        self.assertEqual(self._scan(rows), set())
+
+    def test_without_ids_a_result_goes_with_the_call_just_before_it(self):
+        rows = [_call("cat api/.env"), _result("DEBUG=1\n"),
+                _call("env"), _result("AWS_ACCESS_KEY_ID=%s\n" % KEY)]
+        self.assertEqual(self._scan(rows), set())
+
+    def test_a_value_typed_into_a_call_is_not_read_from_what_it_names(self):
+        """On a working machine every secret credited from a call's own
+        input was typed into a command that also mentioned api/.env."""
+        rows = [_call("python3 -c \"rows = [call('cat api/.env')]; "
+                      "key = '%s'\"" % KEY, "t1")]
+        self.assertEqual(self._scan(rows), set())
+
+    def test_a_file_a_command_writes_is_not_what_it_read(self):
+        """`cat > f <<'EOF'` writes what follows. On a working machine every
+        origin left after the fix above came from source written this way
+        that mentioned .env, by a command whose tests then printed a key."""
+        write = ("cat > tests/t.py <<'PYEOF'\nrows = [call('cat api/.env')]\n"
+                 "PYEOF\npython3 -m unittest tests.t")
+        rows = [_call(write, "t1"), _result("KEY = %s\n" % KEY, "t1")]
+        self.assertEqual(self._scan(rows), set())
+        after = "cat > notes.txt <<EOF\nhello\nEOF\ncat api/.env"
+        rows = [_call(after, "t1"), _result("AWS_ACCESS_KEY_ID=%s\n" % KEY, "t1")]
+        self.assertEqual(self._scan(rows), {"api/.env"})
+
+    def test_output_that_merely_mentions_a_file_is_not_read_from_it(self):
+        listing = ('READS = [\n    ("cat .env", [".env"]),\n]\n'
+                   'KEY = "%s"\n' % KEY)
+        rows = [_call("sed -n 1,40p tests/test_origins.py", "t1"),
+                _result(listing, "t1")]
+        self.assertEqual(self._scan(rows), set())
+
+    def test_grep_output_is_credited_line_by_line(self):
+        out = ("./api/.env:3:DEBUG=1\n"
+               "./src/app.py:9:AWS_ACCESS_KEY_ID=%s\n" % KEY)
+        rows = [_call("grep -rn AWS_ACCESS_KEY_ID .", "t1"), _result(out, "t1")]
+        self.assertEqual(self._scan(rows), set())
+        for out, want in (("api/.env:3:AWS_ACCESS_KEY_ID=%s\n" % KEY, "api/.env"),
+                          ("x.py:1:y\n.env:AWS_ACCESS_KEY_ID=%s\n" % KEY, ".env")):
+            with self.subTest(out=out):
+                rows = [_call("rg -n AWS_ACCESS_KEY_ID", "t1"), _result(out, "t1")]
+                self.assertEqual(self._scan(rows), {want})
+
+    def test_a_yaml_key_is_not_a_grep_prefix(self):
+        rows = [_call("kubectl get secret app -o yaml", "t1"),
+                _result("id_rsa: %s\n" % KEY, "t1")]
+        self.assertEqual(self._scan(rows), set())
+
+    def test_a_file_the_user_attached_is_credited_to_that_file(self):
+        """@api/.env in a prompt puts the file into the transcript as an
+        attachment that names it, which is as much a read as `cat`."""
+        for kind, body in (("file", "content"), ("edited_text_file", "snippet")):
+            with self.subTest(kind=kind):
+                rows = [_text('Note that "server.key" is attribute access'),
+                        {"type": "attachment", "attachment": {
+                            "type": kind, "filename": "/Users/me/app/api/.env",
+                            "displayPath": "api/.env",
+                            body: "AWS_ACCESS_KEY_ID=%s\n" % KEY}}]
+                self.assertEqual(self._scan(rows), {"/Users/me/app/api/.env"})
+
+    def test_without_ids_prose_between_a_call_and_its_result_changes_nothing(self):
+        rows = [_call("cat api/.env"),
+                _text('Note that "server.key" in that code is attribute access'),
+                _result("AWS_ACCESS_KEY_ID=%s\n" % KEY)]
+        self.assertEqual(self._scan(rows), {"api/.env"})
 
 
 if __name__ == "__main__":

@@ -413,8 +413,8 @@ class SuggestedCommands(unittest.TestCase):
         from ranwhat import cli
         args = argparse.Namespace(root=self.t, state_dir=self.t, days=30, json=False)
         finding = {"fp": {"files": {"/synthetic/t.jsonl"}}}
-        with mock.patch.object(cli.watch_mod, "scan_sources",
-                               return_value=([{"synthetic": 1}], [])), \
+        with mock.patch.object(cli.watch_mod, "scan_sources_counted",
+                               return_value=([{"synthetic": 1}], {})), \
              mock.patch.object(cli.clean_mod, "scan",
                                return_value=(finding, 1, 0)), \
              mock.patch.object(cli.watch_mod, "render", return_value=""), \
