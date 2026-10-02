@@ -321,6 +321,49 @@ class ReadBeforeTheWindowTypedAsAnArgument(_Reports):
         self.assertEqual(doc["secrets"], [])
 
 
+class GluedToWhatIsBeforeIt(_Reports):
+    """-U admin%PASSWORD joins the password to the user with a %, which
+    split no stretch: watch looked for admin%PASSWORD, which no transcript
+    holds, and printed the value clean found in the .env read, the export
+    or the JSON config whole. check, reading everything, masked it."""
+
+    GLUED = "./share.sh //files/share -U admin%%%s -c 'get .env'"
+
+    def exposures(self):
+        config = json.dumps({"database": {"host": "db.internal", "password": PW}},
+                            indent=2)
+        return {
+            "env": [_call(1, "cat .env", _stamp(2000)),
+                    _result(1, "DB_PASSWORD=%s\n" % PW, _stamp(2000))],
+            "export": [_call(1, "export DB_PASSWORD=%s" % PW, _stamp(2000)),
+                       _result(1, "", _stamp(2000))],
+            "json config": [_call(1, "cat config/settings.json", _stamp(2000)),
+                            _result(1, config, _stamp(2000))],
+        }
+
+    def test_watch_never_prints_it(self):
+        typed = [_call(2, self.GLUED % PW, _stamp(600)), _result(2, "ok", _stamp(600))]
+        for exposure, read in self.exposures().items():
+            for same in (True, False):
+                root = _tempdir(self, "glued-")
+                project = os.path.join(root, "-Users-a-app")
+                if same:
+                    _write(os.path.join(project, "sess.jsonl"), read + typed, 600)
+                else:
+                    _write(os.path.join(project, "sessA.jsonl"), read, 2000)
+                    _write(os.path.join(project, "sessB.jsonl"), typed, 600)
+                for argv in self.reports(root):
+                    with self.subTest(exposure=exposure, same=same, argv=argv[:2]):
+                        out = _cli(argv)
+                        self.assertNotIn(PW, out)
+                        self.assertIn(_MASKED, _shown(out))
+
+    def test_each_place_a_value_can_start_or_end(self):
+        stretches = clean._stretches("./share.sh -U admin%%%s+x9 -c x" % PW)
+        self.assertIn(PW, stretches)
+        self.assertIn(PW + "+x9", stretches)
+
+
 class ALongHistory(_Reports):
     """The newest transcript is long, and the session that read the
     password read many keys with it: the search of other transcripts ran

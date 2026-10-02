@@ -1735,6 +1735,28 @@ def _likeliness(stretch):
     return (not _HEXISH.issuperset(stretch), classes, len(stretch), stretch)
 
 
+# Where else in a stretch a value may start or end: after or before any
+# character but a letter, a digit or one of ._- (which values hold), as
+# smbclient -U admin%PASSWORD joins one to the user. The pieces between
+# two of them are asked too, for a value glued on at both ends, as long
+# as there are no more than this many: past it, only what starts or
+# ends at each.
+_GLUE = re.compile(r"[^A-Za-z0-9._-]")
+_GLUE_PAIRED = 8
+
+
+def _glued(piece):
+    """The stretches of piece that start or end where something may be
+    glued to a value."""
+    at = [m.start() for m in _GLUE.finditer(piece)]
+    if not at:
+        return ()
+    starts, ends = [0] + [k + 1 for k in at], at + [len(piece)]
+    if len(at) > _GLUE_PAIRED:
+        return [piece[k:] for k in starts] + [piece[:k] for k in ends]
+    return [piece[i:j] for i in starts for j in ends if j - i >= _MIN_ASSIGNED]
+
+
 def _stretches(text):
     """The stretches of text that could be, or be in, a value clean finds.
     Not a URL: what in one is a secret, a password or a parameter, the
@@ -1748,6 +1770,8 @@ def _stretches(text):
         if run[0] == "-" and run[1:2].isalpha():
             pieces.add(run[2:])                   # -pVALUE
         pieces.update(_EVIDENCE_SEPARATORS.split(run))
+        for piece in list(pieces):
+            pieces.update(_glued(piece))          # admin%VALUE
         for piece in pieces:
             piece = piece.strip(_EVIDENCE_EDGES)
             if (len(piece) >= _MIN_ASSIGNED and _ELLIPSIS not in piece
