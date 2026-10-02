@@ -8,9 +8,11 @@ Nothing in this package imports watch or clean at import time, so watch
 can import the registry without a cycle. The masker reaches clean's backup
 and redaction marker from inside a function, when it runs.
 
-Ported sources (claude-code, openclaw) must hand ToolCall the input exactly
-as watch passes it to evaluate() today, a dict: decode_input leaves a dict
-alone, but would wrap or parse anything else.
+Ported sources (claude-code, openclaw) hand ToolCall the input exactly as
+watch passed it to evaluate() before the port. OpenClaw's is always a dict,
+which decode_input leaves alone. Claude Code's is whatever the transcript
+holds, so it passes decode=False: a string there was judged as a string,
+and parsing it would judge a different call.
 """
 
 from __future__ import annotations
@@ -154,7 +156,8 @@ class ToolCall(_Record):
     exactly as it does today, by tool name. An adapter that recognises a
     tool name from its spec sets kind and known=True. For a name it does not
     know, known is False and kind is "other"; watch then judges it by name.
-    tool_input is decoded here (see decode_input)."""
+    tool_input is decoded here (see decode_input), unless decode is False:
+    then it is kept exactly as recorded, for Claude Code."""
     __slots__ = ("source", "store", "session", "project", "timestamp",
                  "tool_name", "tool_call_id", "kind", "known", "actor",
                  "status", "not_after", "command", "workdir", "paths",
@@ -164,7 +167,7 @@ class ToolCall(_Record):
                  known=False, session=None, project=None, timestamp=None,
                  tool_call_id=None, actor="agent", status=None,
                  not_after=None, command=None, workdir=None, paths=(),
-                 consumed=(), output=None):
+                 consumed=(), output=None, decode=True):
         if kind is not None:
             _check("kind", kind, KINDS)
         if known and kind is None:
@@ -193,7 +196,7 @@ class ToolCall(_Record):
         self.command = command
         self.workdir = workdir
         self.paths = tuple(paths)
-        self.tool_input = decode_input(tool_input)
+        self.tool_input = decode_input(tool_input) if decode else tool_input
         self.consumed = frozenset(consumed)
         self.output = output
 

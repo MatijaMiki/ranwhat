@@ -19,27 +19,25 @@ from __future__ import annotations
 import bisect
 import datetime
 import functools
-import glob
 import shlex
 import hashlib
 import json
 import os
 import posixpath
 import re
-import shutil
-import sqlite3
-import tempfile
 import time
 
+from . import sources as _registry
 from . import term
+from .sources import _sqlite
+from .sources import claude_code as _claude
+from .sources import openclaw as _openclaw
 
-def claude_projects():
-    """Where Claude Code keeps its transcripts. CLAUDE_CONFIG_DIR is Claude
-    Code's own override for ~/.claude, and projects/ sits inside it
-    wherever it is. Read when asked, like OPENCLAW_STATE_DIR: reading only
-    ~/.claude/projects found nothing on such a machine, and said all clear."""
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
-    return os.path.join(os.path.expanduser(base), "projects")
+# Claude Code's and OpenClaw's reading lives in their adapters
+# (ranwhat/sources/claude_code.py and openclaw.py, design 3.9). The names
+# below are those adapters' own functions, kept here for the CLI, clean
+# and the tests that use them.
+claude_projects = _claude.projects_dir
 
 
 # Resolved once, at import, for the --root default and clean.scan's, so one
@@ -2028,103 +2026,72 @@ def evaluate(tool_name, tool_input, known=None):
     return hits, (_payload(tool_input, known) if hits else "")
 
 
+# A name in neither _SHELL_TOOLS nor _READ_TOOLS: what a call is judged
+# under when the adapter knows its kind but found no command or paths in it.
+NEUTRAL = "ranwhat:%s"
+
+
+def judge(call, known=None):
+    """(hits, payload) for one sources.ToolCall (design 3.5), with `known`
+    masked as evaluate masks it.
+
+    A call of a ported source (kind None) and one whose tool name its
+    adapter does not know are judged by name, exactly as evaluate judges
+    them. A known shell call is judged as the command it ran, with the
+    input keys the adapter turned into that command left out and any
+    working directory kept; a known read, by the paths it opened. Anything
+    else, and a shell or read call whose command or paths were not found,
+    answers only to the rules that read every string: file content is not
+    an action."""
+    if call.kind is None or not call.known:
+        return evaluate(call.tool_name, call.tool_input, known)
+    rest = {k: v for k, v in call.tool_input.items() if k not in call.consumed}
+    if call.kind == "shell" and call.command:
+        judged = dict(rest, command=call.command)
+        if call.workdir:
+            judged["workdir"] = call.workdir   # keeps _deletion_context conservative
+        return evaluate("Bash", judged, known)
+    if call.kind == "read" and call.paths:
+        return evaluate("Read", dict(rest, paths=list(call.paths)), known)
+    return evaluate(NEUTRAL % call.kind, call.tool_input, known)
+
+
+def _record(call, hits, payload, source):
+    """The Action Record for a judged call that tripped a rule."""
+    return {
+        "source": source,
+        "session": call.session,
+        "project": call.project,
+        "timestamp": call.timestamp,
+        "tool_name": call.tool_name,
+        "tool_call_id": call.tool_call_id,
+        "payload_hash": _hash(payload),
+        "severity": max(hits, key=lambda h: ["medium", "high", "critical"]
+                        .index(h["severity"]))["severity"],
+        "hits": hits,
+    }
+
+
 # --------------------------------------------------------------------------
 # Source: Claude Code JSONL transcripts
 # --------------------------------------------------------------------------
 
-def _iter_claude_tool_calls(path):
-    try:
-        fh = open(path, "r", encoding="utf-8", errors="replace")
-    except OSError:
-        return
-    with fh:
-        for line in fh:
-            try:
-                entry = json.loads(line)
-            except (ValueError, RecursionError):
-                continue              # not JSON, or deeper than it reads
-            if not isinstance(entry, dict):
-                continue              # JSON, but a list or a string: no entry
-            msg = entry.get("message")
-            if not isinstance(msg, dict):
-                continue
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    yield entry, block
-
-
-def transcript_place(path):
-    """(project, session) a transcript belongs to: the directory it sits in
-    under the projects root, and its own name. A subagent's transcript sits
-    under <project>/<session>/subagents/, and belongs to that session."""
-    parts = os.path.normpath(path).split(os.sep)
-    if parts[-1].startswith("agent-") and "subagents" in parts[:-1]:
-        at = len(parts) - 2 - parts[-2::-1].index("subagents")   # the last one
-        if at >= 2:
-            return parts[at - 2], parts[at - 1]
-    return (os.path.basename(os.path.dirname(path)),
-            os.path.splitext(os.path.basename(path))[0])
+_iter_claude_tool_calls = _claude.tool_uses
+transcript_place = _claude.place
+_transcripts = _claude.transcripts
+discover = _claude.discover
 
 
 def scan_transcript(path, source="claude-code", known=None):
     """Produce Action Records for one transcript, with `known` masked in
     them as evaluate masks it."""
+    src = _claude.ClaudeCodeSource()
     records = []
-    project, session = transcript_place(path)
-
-    for entry, block in _iter_claude_tool_calls(path):
-        # A name or a time that is not a string is none: an object there
-        # could not be told apart from another, and ended the run.
-        tool = block.get("name", "?")
-        if not isinstance(tool, str):
-            tool = "?"
-        stamp = entry.get("timestamp")
-        tool_input = block.get("input", {})
-        hits, payload = evaluate(tool, tool_input, known)
-        if not hits:
-            continue
-        records.append({
-            "source": source,
-            "session": session,
-            "project": project,
-            "timestamp": stamp if isinstance(stamp, str) else None,
-            "tool_name": tool,
-            "tool_call_id": block.get("id"),
-            "payload_hash": _hash(payload),
-            "severity": max(hits, key=lambda h: ["medium", "high", "critical"]
-                            .index(h["severity"]))["severity"],
-            "hits": hits,
-        })
+    for call in src.tool_calls(src.store_at(path)):
+        hits, payload = judge(call, known)
+        if hits:
+            records.append(_record(call, hits, payload, source))
     return records
-
-
-def _transcripts(root):
-    """Every transcript under root: each session's, and each one its
-    subagents wrote, under <session>/subagents/ and a workflow's run below
-    it. Read only at the first level, everything a subagent ran or saw went
-    unread, and check said all clear. Nothing else there is a transcript:
-    a workflow's journal.jsonl holds the results its agents returned."""
-    return (glob.glob(os.path.join(root, "*", "*.jsonl"))
-            + glob.glob(os.path.join(root, "*", "*", "subagents", "**",
-                                     "agent-*.jsonl"), recursive=True))
-
-
-def discover(root=None, since_days=None):
-    """Transcripts under root (default: claude_projects()), newest first.
-
-    With since_days, only files written inside the window. That is a
-    prefilter, not the window itself: a file older than the window cannot
-    hold an action inside it, but a recent one can hold old actions, so
-    scan_all judges each action by its own time as well."""
-    paths = sorted(_transcripts(root or claude_projects()),
-                   key=lambda p: os.path.getmtime(p), reverse=True)
-    if since_days:
-        cutoff = time.time() - since_days * 86400
-        paths = [p for p in paths if os.path.getmtime(p) >= cutoff]
-    return paths
 
 
 def _epoch(stamp):
@@ -2451,265 +2418,34 @@ def render(records, scanned, days, footer=True, locations=None):
 
 
 # --------------------------------------------------------------------------
-# Source: OpenClaw
-#
-# OpenClaw keeps per-agent transcripts in SQLite at
-#   $OPENCLAW_STATE_DIR/agents/<agentId>/agent/openclaw-agent.sqlite
-# documented only as "append-only, tree-structured (id + parentId)" holding
-# conversation, tool calls and compaction summaries. The table and column
-# names are not documented, and pinning them from a guess would break on the
-# next release. So the schema is discovered at runtime and tool calls are
-# recognised by shape rather than by column name.
-#
-# The database is opened read-only. It belongs to a running agent.
+# Source: OpenClaw (ranwhat/sources/openclaw.py: where it is, the schema
+# discovered at runtime, and tool calls recognised by shape)
 # --------------------------------------------------------------------------
 
-OPENCLAW_STATE_DEFAULT = os.path.expanduser("~/.openclaw")
-
-
-def openclaw_state_dir():
-    """Read the env var when asked, not at import time -- a caller that sets
-    OPENCLAW_STATE_DIR after importing was silently ignored."""
-    return os.environ.get("OPENCLAW_STATE_DIR", OPENCLAW_STATE_DEFAULT)
-
-# Keys that carry a tool's name, and keys that carry its arguments, across the
-# shapes in circulation (Anthropic tool_use, OpenAI function calls, and the
-# various framework wrappers).
-_NAME_KEYS = ("name", "toolName", "tool_name", "tool", "function_name")
-_ARG_KEYS = ("input", "arguments", "args", "params", "parameters", "toolInput")
-
-
-def openclaw_databases(state_dir=None):
-    root = state_dir or openclaw_state_dir()
-    return sorted(glob.glob(os.path.join(
-        root, "agents", "*", "agent", "openclaw-agent.sqlite")))
-
-
-def _open_readonly(path):
-    """Read-only, and resilient to the agent holding a WAL lock."""
-    try:
-        conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=5)
-        conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
-        return conn, None
-    except sqlite3.Error:
-        pass
-    # Live WAL: work on a copy rather than touching the agent's database.
-    tmp = tempfile.mkdtemp(prefix="ranwhat-")
-    copy = os.path.join(tmp, os.path.basename(path))
-    try:
-        shutil.copy2(path, copy)
-        for suffix in ("-wal", "-shm"):
-            if os.path.exists(path + suffix):
-                shutil.copy2(path + suffix, copy + suffix)
-        return sqlite3.connect("file:%s?mode=ro" % copy, uri=True), tmp
-    except (OSError, sqlite3.Error):
-        return None, tmp
-
-
-_TIME_COL = re.compile(r"^(created_?at|timestamp|ts|time|updated_?at|date)$", re.I)
-
-
-def _time_columns(conn, table):
-    return [r[1] for r in conn.execute("PRAGMA table_info(%s)"
-                                       % _quote_ident(table))
-            if _TIME_COL.match(r[1] or "")]
-
-
-def _as_iso(value):
-    """Rows carry epoch seconds, epoch millis or an ISO string depending on
-    the writer. Normalise what we can and drop what we cannot."""
-    if value in (None, ""):
-        return None
-    if isinstance(value, str):
-        if not value[:4].isdigit():
-            return None
-        # Converted to UTC and marked so, as Claude Code's stamps are, so
-        # render can show it in the reader's zone. A stamp with no zone is
-        # left without one: which zone it meant is not known.
-        when, zoned = _parse_stamp(value)
-        if zoned:
-            try:
-                return when.astimezone(datetime.timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ")
-            except (ValueError, OverflowError):
-                pass
-        return value[:19]
-    try:
-        n = float(value)
-    except (TypeError, ValueError):
-        return None
-    if n > 1e11:          # milliseconds
-        n /= 1000.0
-    if n < 1e8:           # not a plausible epoch
-        return None
-    try:
-        return datetime.datetime.fromtimestamp(
-            n, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    except (ValueError, OverflowError, OSError):
-        return None
-
-
-def _quote_ident(name):
-    """Escape a SQLite identifier by doubling quotes.
-
-    Stripping them instead was safe but silently wrong: a table whose name
-    contains a quote became a name that does not exist, the query errored,
-    and its rows were skipped without a word.
-    """
-    return '"%s"' % name.replace('"', '""')
-
-
-def _text_columns(conn, table):
-    cols = []
-    for row in conn.execute("PRAGMA table_info(%s)" % _quote_ident(table)):
-        name, ctype = row[1], (row[2] or "").upper()
-        if ctype in ("", "TEXT", "BLOB", "JSON") or "CHAR" in ctype:
-            cols.append(name)
-    return cols
-
-
-def _find_tool_calls(obj, depth=0):
-    """Recognise tool calls by shape, anywhere in a decoded JSON structure.
-
-    Deduplicated: an OpenAI-style {"function": {...}} matches both the explicit
-    branch and the generic walk that recurses into it.
-    """
-    found = _find_tool_calls_raw(obj, depth)
-    out, seen = [], set()
-    for name, args in found:
-        key = (name, json.dumps(args, sort_keys=True, default=str)[:512])
-        if key not in seen:
-            seen.add(key)
-            out.append((name, args))
-    return out
-
-
-def _find_tool_calls_raw(obj, depth=0):
-    found = []
-    if depth > 8:
-        return found
-    if isinstance(obj, list):
-        for item in obj:
-            found.extend(_find_tool_calls_raw(item, depth + 1))
-        return found
-    if not isinstance(obj, dict):
-        return found
-
-    # OpenAI-style: {"function": {"name": ..., "arguments": "<json string>"}}
-    fn = obj.get("function")
-    if isinstance(fn, dict) and any(k in fn for k in _NAME_KEYS):
-        args = fn.get("arguments")
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except ValueError:
-                args = {"_raw": args}
-        found.append((str(next(fn[k] for k in _NAME_KEYS if k in fn)), args or {}))
-
-    name = next((obj[k] for k in _NAME_KEYS if isinstance(obj.get(k), str)), None)
-    args = next((obj[k] for k in _ARG_KEYS if isinstance(obj.get(k), (dict, str))), None)
-    if name and args is not None:
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except ValueError:
-                args = {"_raw": args}
-        if obj.get("type") in (None, "tool_use", "tool_call", "function_call", "tool"):
-            found.append((name, args))
-
-    for value in obj.values():
-        if isinstance(value, (dict, list)):
-            found.extend(_find_tool_calls_raw(value, depth + 1))
-        elif isinstance(value, str) and value[:1] in ("{", "["):
-            try:
-                found.extend(_find_tool_calls_raw(json.loads(value), depth + 1))
-            except ValueError:
-                pass
-    return found
-
-
-def _warn(message):
-    import sys as _sys
-    print("  warning: %s" % message, file=_sys.stderr)
+OPENCLAW_STATE_DEFAULT = _openclaw.STATE_DEFAULT
+openclaw_state_dir = _openclaw.state_dir
+openclaw_databases = _openclaw.databases
+_open_readonly = _sqlite.open_readonly
+_quote_ident = _sqlite.quote_ident
+_as_iso = _openclaw.as_iso
+_find_tool_calls = _openclaw.find_tool_calls
 
 
 def scan_openclaw_db(path, source="openclaw", known=None):
-    conn, tmpdir = _open_readonly(path)
-    if conn is None:
-        _warn("could not open %s (permissions, or the agent holds it locked)"
-              % path)
-        return []
-
-    agent_id = path.split(os.sep + "agents" + os.sep)[-1].split(os.sep)[0] \
-        if os.sep + "agents" + os.sep in path else "openclaw"
+    """Action Records for one OpenClaw database, with `known` masked in
+    them as evaluate masks it. A call repeated in the database is one
+    record, the first, whatever its time."""
+    src = _openclaw.OpenClawSource()
     records, seen = [], set()
-
-    try:
-        try:
-            tables = [r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name NOT LIKE 'sqlite_%'")]
-        except sqlite3.Error as e:
-            # Not a database, encrypted, or truncated mid-write. One bad file
-            # must not take the rest of the scan down with it.
-            _warn("cannot read %s (%s)" % (path, e))
-            return []
-        for table in tables:
-            cols = _text_columns(conn, table)
-            if not cols:
-                continue
-            tcols = _time_columns(conn, table)
-            quoted = ", ".join(_quote_ident(c) for c in cols + tcols)
-            try:
-                rows = conn.execute("SELECT %s FROM %s"
-                                    % (quoted, _quote_ident(table)))
-            except sqlite3.Error:
-                continue
-            n_text = len(cols)
-            for row in rows:
-                stamp = next((_as_iso(v) for v in row[n_text:]
-                              if _as_iso(v)), None)
-                for cell in row[:n_text]:
-                    if not isinstance(cell, (str, bytes)):
-                        continue
-                    if isinstance(cell, bytes):
-                        try:
-                            cell = cell.decode("utf-8")
-                        except UnicodeDecodeError:
-                            continue
-                    if cell[:1] not in ("{", "["):
-                        continue
-                    try:
-                        payload = json.loads(cell)
-                    except ValueError:
-                        continue
-                    for tool, tool_input in _find_tool_calls(payload):
-                        if not isinstance(tool_input, dict):
-                            tool_input = {"_value": tool_input}
-                        hits, payload = evaluate(tool, tool_input, known)
-                        if not hits:
-                            continue
-                        key = (tool, _hash(payload))
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        records.append({
-                            "source": source,
-                            "session": agent_id,
-                            "project": table,
-                            "timestamp": stamp,
-                            "tool_name": tool,
-                            "tool_call_id": None,
-                            "payload_hash": _hash(payload),
-                            "severity": max(
-                                hits, key=lambda h: ["medium", "high", "critical"]
-                                .index(h["severity"]))["severity"],
-                            "hits": hits,
-                        })
-    finally:
-        conn.close()
-        if tmpdir:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+    for call in src.tool_calls(src.store_at(path)):
+        hits, payload = judge(call, known)
+        if not hits:
+            continue
+        key = (call.tool_name, _hash(payload))
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(_record(call, hits, payload, source))
     return records
 
 
@@ -2725,18 +2461,31 @@ def scan_openclaw(state_dir=None, since_days=None, known=None):
     return records, len(dbs)
 
 
-SOURCES = ("claude-code", "openclaw")
-_SOURCE_NAMES = {"claude-code": "Claude Code", "openclaw": "OpenClaw"}
+# The sources watch reads, in registry order: Claude Code first, OpenClaw
+# last. The other adapters in the registry are not read here yet: each
+# joins when watch and clean are wired to it (design 3.5 and 3.6), and
+# SOURCES is then every registry id.
+_READ_HERE = ("claude-code", "openclaw")
+SOURCES = tuple(i for i in _registry.ids() if i in _READ_HERE)
+_SOURCE_NAMES = {i: _registry.get(i).name for i in SOURCES}
 
 
 def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
-                         since_days=None, progress=None, known=None):
+                         since_days=None, progress=None, known=None,
+                         paths=None):
     """Scan every requested local agent source into one record stream.
 
     Returns (records, {source: how many it read}): Claude Code transcripts,
     OpenClaw databases. Zero read is not an all-clear: locations() says
     whether there was anything to read at all. `progress` is scan_all's,
-    and `known` (a known.Matcher) is masked in every record."""
+    and `known` (a known.Matcher) is masked in every record.
+
+    root and state_dir point Claude Code and OpenClaw elsewhere; `paths`,
+    {source id: path}, points any source, and a root or state_dir given
+    as well wins over it."""
+    paths = paths or {}
+    root = root or paths.get("claude-code")
+    state_dir = state_dir or paths.get("openclaw")
     records, counts = [], {}
     if "claude-code" in sources:
         recs, counts["claude-code"] = scan_all(root=root, since_days=since_days,

@@ -28,8 +28,10 @@ __all__ = ["ADAPTERS", "REGISTRY", "Location", "MaskResult", "SecretText",
 #   Grok Build, Droid, Amp, Crush, Kimi Code, Kimi CLI, Pi, Muse Code,
 #   Mistral Vibe, Zoo Code, cecli, OpenClaw, grok-dev.
 # Only the adapters that exist are listed; a later one goes in at its place
-# in that order, not at the end. Claude Code and OpenClaw are not ported yet.
+# in that order, not at the end. OpenClaw stays near the end on purpose
+# (decision 7): supported, not promoted.
 ADAPTERS = (
+    ("claude_code", "ClaudeCodeSource"),
     ("codex", "CodexSource"),
     ("gemini", "GeminiSource"),
     ("copilot_cli", "CopilotCliSource"),
@@ -40,6 +42,7 @@ ADAPTERS = (
     ("kimi", "KimiSource"),
     ("pi", "PiSource"),
     ("muse_code", "MuseCodeSource"),
+    ("openclaw", "OpenClawSource"),
 )
 
 REGISTRY = OrderedDict()

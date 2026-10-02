@@ -14,14 +14,30 @@ import os
 import shutil
 import sqlite3
 import tempfile
-import urllib.request
+from urllib.parse import quote
+
+
+def _url_path(path, windows=None):
+    """An absolute path as a file: URI's path, percent-encoded, as
+    urllib.request.pathname2url makes it, without importing urllib.request:
+    check, watch and clean import no network module. On Windows,
+    C:\\x\\a b.db is ///C:/x/a%20b.db and \\\\server\\share\\x is
+    ////server/share/x."""
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        return quote(path)
+    path = path.replace("\\", "/")
+    if not path.startswith("//"):
+        path = "/" + path
+    return "//" + quote(path, safe="/:")
 
 
 def _uri(path):
     """A read-only SQLite URI for `path`. Percent-encoding the path means a
     ?, # or % in it names the file instead of starting a query, a fragment
     or an escape."""
-    return "file:%s?mode=ro" % urllib.request.pathname2url(os.path.abspath(path))
+    return "file:%s?mode=ro" % _url_path(os.path.abspath(path))
 
 
 def open_readonly(path):

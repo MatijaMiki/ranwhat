@@ -2181,6 +2181,23 @@ def _named_by_call(block):
     return _origins(json.dumps(args, ensure_ascii=False))
 
 
+def _named_by_input(call):
+    """_named_by_call for a sources.ToolCall (design 3.6): the credential
+    files its input names, with the keys its adapter turned into its
+    command replaced by that command, heredocs stripped. A ported source's
+    call (Claude Code's, kind None) has no command of its own, and names
+    what _named_by_call names for the same input."""
+    args = call.tool_input
+    if call.command is None or not isinstance(args, dict):
+        return _named_by_call({"input": args})
+    named = {k: v for k, v in args.items() if k not in call.consumed}
+    if "command" not in named:
+        named["command"] = call.command
+    else:                         # kept as recorded, and the command beside it
+        named["_command"] = _without_heredocs(call.command)
+    return _named_by_call({"input": named})
+
+
 def _may_name_a_file(args):
     """False only when no key or string in args holds a marker _origins
     needs (_ORIGIN_MARKERS). JSON's escapes add a backslash and letters or
