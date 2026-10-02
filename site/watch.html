@@ -153,7 +153,7 @@
         <div class="row"><span class="k">On real history</span>
           <span class="v"><strong>A later release reported 15 findings on one machine's 90-day history.</strong> Eleven were true deletions of build and temp directories that nobody would want to read, so deletions are now ranked by target. After that change the same history gave 4, and all four were real.</span></div>
         <div class="row"><span class="k">Evidence</span>
-          <span class="v">Every finding carries surrounding context. <span class="icode">rm -rf</span> on its own tells you nothing. The target is the point.</span></div>
+          <span class="v">Every finding carries surrounding context. <span class="icode">rm -rf</span> on its own tells you nothing. The target is the point. A secret in it is masked: every value <a href="/clean">clean</a> finds anywhere in your history, known by an index of salted fingerprints in <span class="icode">~/.ranwhat/known</span>.</span></div>
         <div class="row"><span class="k">Test suite</span>
           <span class="v">Written as invariants rather than expected output.</span></div>
       </div>
