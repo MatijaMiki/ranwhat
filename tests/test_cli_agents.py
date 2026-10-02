@@ -483,8 +483,8 @@ class Flags(_Cli):
         rc, out, _ = self.run_cli("check", "--source", "codex",
                                   "--path", "codex=" + root, *self.base_flags())
         said = " ".join(out.replace("\\\n", " ").split())
-        self.assertIn("clean --root ~/claude/projects --source codex --path "
-                      "codex=~/a0/.codex", said)
+        self.assertIn("clean --root %s --source codex --path codex=%s"
+                      % (cli._shell_path(self.claude), cli._shell_path(root)), said)
 
 
 class Reports(_Cli):
@@ -520,7 +520,7 @@ class Reports(_Cli):
                 self.assertEqual(rc, 2)
                 text = " ".join(out.split())
                 self.assertIn("No transcripts found", text)
-                self.assertIn("~/claude/projects", out)
+                self.assertIn(os.path.join("~", "claude", "projects"), out)
                 self.assertIn("ranwhat sources", text)
                 for name in ("Codex", "Gemini", "Copilot", "Droid", "Muse"):
                     self.assertNotIn(name, text)
@@ -532,7 +532,7 @@ class Reports(_Cli):
         self.assertEqual(rc, 2)
         text = " ".join(out.split())
         self.assertIn("Codex", text)
-        self.assertIn("~/no-codex", text)
+        self.assertIn(os.path.join("~", "no-codex"), text)
         self.assertIn("--path codex=PATH", text)
         rc, out, err = self.run_cli("watch", "--json", "--source", "codex",
                                     "--path", "codex=" + nowhere, *self.base_flags())
