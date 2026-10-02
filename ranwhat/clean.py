@@ -1759,7 +1759,9 @@ def _stretches(text):
 def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
     """{fingerprint: value} for each value clean finds in the transcripts
     of root (since_days as scan takes it) that shows in any of texts, or
-    a stretch of which does. Never written anywhere: for mask_known."""
+    a stretch of which does. Never written anywhere: for mask_known.
+    check and watch ask every transcript, whatever their --days: a value
+    read before the window is still a secret where one in it shows it."""
     texts = [t for t in texts if t]
     looked = set()
     for text in texts:

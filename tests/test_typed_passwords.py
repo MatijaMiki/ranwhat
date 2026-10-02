@@ -286,6 +286,41 @@ class TypedWhereMoreCommandsTakeIt(_Reports):
                 self.assertEqual(self.plaintext(root), ["sessA.jsonl"])
 
 
+class ReadBeforeTheWindowTypedAsAnArgument(_Reports):
+    """No rule can say a script's argument is a password. check and watch
+    knew the values clean finds only in the transcripts --days reads, so
+    one read before the window and typed in it was printed whole, by the
+    `check --json --days 1` check suggests too. With the read 45 days old
+    the default window did the same, and clean --apply, reading only the
+    window, left it for the next report to print again."""
+
+    def test_check_and_watch_never_print_it(self):
+        for read_age, days in ((5 * 86400, ["--days", "1"]), (45 * 86400, [])):
+            root = _read_then_typed(self, SCRIPT, read_age)
+            for argv in self.reports(root, *days):
+                with self.subTest(argv=argv[:2] + days):
+                    out = _cli(argv)
+                    self.assertNotIn(PW, out)
+                    self.assertIn(_MASKED, _shown(out))
+
+    def test_nor_after_clean_reads_the_window(self):
+        root = _read_then_typed(self, SCRIPT, 45 * 86400)
+        self.assertNotIn(PW, _cli(["clean", "--apply", "--root", root]))
+        for argv in self.reports(root):
+            with self.subTest(argv=argv[:2]):
+                self.assertNotIn(PW, _cli(argv))
+
+    def test_the_window_still_bounds_what_is_reported(self):
+        """Only the masking looks past --days: the report is the window's."""
+        root = _read_then_typed(self, SCRIPT, 5 * 86400)
+        out = _cli(["check", "--days", "1", "--root", root,
+                    "--state-dir", self.state])
+        self.assertIn("1 transcript(s) scanned", out)
+        doc = json.loads(_cli(["check", "--json", "--days", "1", "--root", root,
+                               "--state-dir", self.state]))
+        self.assertEqual(doc["secrets"], [])
+
+
 class ALongHistory(_Reports):
     """The newest transcript is long, and the session that read the
     password read many keys with it: the search of other transcripts ran

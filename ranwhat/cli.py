@@ -562,18 +562,22 @@ def _mask_known(records, known):
 
 
 def _found_by_clean(args, records):
-    """The values clean finds in the transcripts watch read that its
-    actions show, for masking them: {fingerprint: value}, never written
-    anywhere. watch --json printed whole the password check hid. Nothing
-    is read again when no action was found, or none in Claude Code's
-    transcripts, which are all clean searches, and only what the
-    evidence shows is looked for (clean.known_values): a whole clean pass
-    made watch two to four times slower than main."""
+    """The values clean finds in the transcripts that the actions show,
+    for masking them: {fingerprint: value}, never written anywhere.
+    watch --json printed whole the password check hid. Nothing is read
+    again when no action was found, or none in Claude Code's transcripts,
+    which are all clean searches, and only what the evidence shows is
+    looked for (clean.known_values): a whole clean pass made watch two to
+    four times slower than main.
+
+    Looked for in every transcript, whatever --days says: a password read
+    in a session older than the window is no less a password when a
+    command in the window types it, and check and watch printed it whole."""
     if not any(r.get("source") == "claude-code" and r.get("hits") for r in records):
         return {}
     return clean_mod.known_values(
         [hit.get("evidence") for record in records for hit in record.get("hits", ())],
-        root=args.root, since_days=args.days)
+        root=args.root, since_days=None)
 
 
 def _check(args):
@@ -603,6 +607,9 @@ def _check(args):
     finally:
         bar.clear()
     _mask_known(records, known)
+    # What the window's clean pass found is masked; what the actions still
+    # show may be a value read before the window.
+    _mask_known(records, _found_by_clean(args, records))
 
     places = None if sources else watch_mod.locations(
         root=args.root, state_dir=args.state_dir)
