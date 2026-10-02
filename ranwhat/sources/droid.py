@@ -33,7 +33,10 @@ cut short, and the prompts the user typed:
   characters from middle section ...]", and the whole text is written to
   artifacts/tool-outputs/<tool id>-<call id>-<8 digits>.log, named after the
   internal tool id (grep_tool_cli, fetch_url, ...). Execute's capped result
-  never reaches that size.
+  never reaches that size. The result names the file in a system reminder,
+  "The full result is saved to <path>.", and a log whose name carries the
+  id of the call whose result names it is tied to that call, as a terminal
+  log is: its secrets get the origin they would have in the transcript.
 - state/history.json, and the older history.json at the root that Droid
   moves there: [{command, timestamp (ISO), type ("message",
   "slash_command" or "bash_command"), mode ("chat" or "bash")}].
@@ -110,6 +113,22 @@ _TERMINAL_DIR = "droid-terminal-"
 _TERMINAL_LOG = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.log\Z")
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+# A result over its tool's limit, written whole to artifacts/tool-outputs:
+# $c() names the file ${_r(toolId)}-${_r(toolCallId)}-${8 digits}.log,
+# where _r() turns every character but letters, digits, ".", "_" and "-"
+# into "-" and keeps 200 of them, and Hc() names that path in a system
+# reminder, a sentence of its own: "The full result is saved to <path>.
+# When your conclusion depends on ...". Only a log already found in the
+# tool-outputs folder of the transcript's own Droid folder, under the name
+# the notice gives, is tied: the notice sits beside the tool's own output,
+# so it never makes ranwhat open a file, and the folder may have moved
+# since (read through --path from a copy).
+_SPILL = "The full result is saved to "
+_SPILL_BYTES = _SPILL.encode("utf-8")
+_SPILL_LINE = re.compile(re.escape(_SPILL) + r"(.+?\.log)\.(?=\s|$)", re.M)
+_SPILL_NAME = re.compile(r"(.+)-[0-9]{8}\.log\Z")
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
 
 # A background Execute's result: its first line, then the line naming the
 # file the process writes all its output to. That file is
@@ -250,6 +269,31 @@ def _saved_paths(text):
     return [m.group(1) for m in _SAVED_LINE.finditer(text)]
 
 
+def _spill_paths(text):
+    """The paths every "The full result is saved to <path>." sentence in
+    `text` names, in order."""
+    if not text or _SPILL not in text:
+        return []
+    return [m.group(1) for m in _SPILL_LINE.finditer(text)]
+
+
+def _spill_name(path, cid):
+    """The file name in `path` when it is a tool output log of the call
+    `cid`: <tool id>-<call id as _r() writes it>-<8 digits>.log. Else
+    None. Either separator is taken: the notice was written on the machine
+    Droid ran on."""
+    if not cid:
+        return None
+    name = re.split(r"[\\/]", path)[-1]
+    m = _SPILL_NAME.match(name)
+    if m is None:
+        return None
+    tail = "-" + (_UNSAFE.sub("-", cid)[:200] or "unknown")
+    if not (m.group(1).endswith(tail) and len(m.group(1)) > len(tail)):
+        return None
+    return name
+
+
 def _background_output(path):
     """`path` when it is a Droid background process's output: an absolute
     path to droid-bg-<13 digits>.out, a regular file and not a link or
@@ -367,8 +411,9 @@ class DroidSource(Source):
         self._bad = set()       # stores already counted as unreadable
         self._tallied = set()   # stores whose skipped lines are counted
         # (path, mtime_ns, size) of a transcript -> [(log, tool_use id,
-        # background)] its results name, so stores() reads a transcript once
-        # a run. A log is a terminal log or a background process's output.
+        # kind)] its results name, so stores() reads a transcript once a
+        # run. A log is a terminal log, a background process's output, or
+        # the name of a tool output log its result spilled into.
         self._saved = {}
         # log key -> (transcript Store, tool_use id): whose output the log
         # is. Transcript path -> the ids of the calls whose logs it owns,
@@ -410,6 +455,9 @@ class DroidSource(Source):
         it was. A background process can outlive that, so its output, still
         growing inside the window, is missed when its session is not."""
         found, seen, transcripts = [], set(), []
+        # each Droid folder's tool-output logs, by name, for the notices
+        # in its own transcripts to be tied to
+        outputs = {}
         cutoff = time.time() - since_days * 86400 if since_days else None
 
         def add(path, format, **fields):
@@ -434,18 +482,27 @@ class DroidSource(Source):
                                     session=_string(header.get("id")) or stem,
                                     project=_string(header.get("cwd")))
                         if store is not None:
-                            transcripts.append(store)
+                            transcripts.append((store, root))
                 logs = os.path.join(root, *TOOL_OUTPUTS)
+                named = outputs.setdefault(_key(root), {})
                 for path in _files(logs, ".log"):
-                    add(path, "text", role="side", unit="tool output")
+                    store = add(path, "text", role="side", unit="tool output")
+                    if store is not None:
+                        named[os.path.normcase(os.path.basename(path))] = store
                 for parts in HISTORIES:
                     path = os.path.join(root, *parts)
                     if os.path.isfile(path):
                         add(path, "json", role="side", unit="prompt history")
-        for transcript in transcripts:
+        for transcript, root in transcripts:
             if cutoff is not None and transcript.mtime < cutoff:
                 continue
-            for log, cid, background in self._saved_outputs(transcript.path):
+            for log, cid, kind in self._saved_outputs(transcript.path):
+                spill = None
+                if kind == "spill":
+                    spill = outputs.get(_key(root), {}).get(os.path.normcase(log))
+                    if spill is None:
+                        continue
+                    log = spill.path
                 key = _key(log)
                 if key not in self._log_owner:
                     self._log_owner[key] = (transcript, cid)
@@ -453,7 +510,12 @@ class DroidSource(Source):
                         self._owner_ids.setdefault(transcript.path, set()).add(cid)
                 where = {"session": transcript.session,
                          "project": transcript.project}
-                if background:
+                if spill is not None:
+                    # already a store, and of the session whose call it is
+                    if self._log_owner[key][0].path == transcript.path:
+                        spill.session = transcript.session
+                        spill.project = transcript.project
+                elif kind == "background":
                     add(log, "text", role="side", unit="background output",
                         masking="read-only", why_read_only=BACKGROUND_WHY,
                         **where)
@@ -462,13 +524,16 @@ class DroidSource(Source):
         return base.newest_first(found, since_days)
 
     def _saved_outputs(self, path):
-        """[(log, tool_use id, background)] for every log a tool_result of
-        the transcript at `path` names: a Droid terminal log on a "Full
-        command output saved to:" line, or a background process's output on
-        an "Output: " line of a background Execute's result. Only lines
-        holding one of those are parsed. Read once per version of the file
-        per run; a file that cannot be read gives [] here and warns when it
-        is read for itself."""
+        """[(log, tool_use id, kind)] for every log a tool_result of the
+        transcript at `path` names: a Droid terminal log on a "Full command
+        output saved to:" line ("terminal"), a background process's output
+        on an "Output: " line of a background Execute's result
+        ("background"), and the name of a tool output log of that very call
+        in a "The full result is saved to" notice ("spill": a name, not a
+        path, for stores() to look for in tool-outputs). Only lines holding
+        one of those are parsed. Read once per version of the file per run;
+        a file that cannot be read gives [] here and warns when it is read
+        for itself."""
         try:
             st = os.stat(path)
         except OSError:
@@ -480,7 +545,8 @@ class DroidSource(Source):
         try:
             with open(path, "rb") as fh:
                 for raw in fh:
-                    if _SAVED_BYTES not in raw and _BACKGROUND_BYTES not in raw:
+                    if (_SAVED_BYTES not in raw and _BACKGROUND_BYTES not in raw
+                            and _SPILL_BYTES not in raw):
                         continue
                     try:
                         obj = json.loads(_lines.decode_line(raw))
@@ -496,11 +562,15 @@ class DroidSource(Source):
                         for named in _saved_paths(text):
                             log = _terminal_log(named)
                             if log is not None:
-                                out.append((log, cid, False))
+                                out.append((log, cid, "terminal"))
                         for named in _background_paths(text):
                             log = _background_output(named)
                             if log is not None:
-                                out.append((log, cid, True))
+                                out.append((log, cid, "background"))
+                        for named in _spill_paths(text):
+                            name = _spill_name(named, cid)
+                            if name is not None:
+                                out.append((name, cid, "spill"))
         except OSError:
             out = []
         self._saved[version] = out
@@ -666,7 +736,8 @@ class DroidSource(Source):
         whatever its type, with each tool_result's content, and each bash
         mode command's stdout and stderr, handed over on their own and tied
         to the call that produced them. A terminal log or background output
-        is tied to the Execute call whose result named it."""
+        is tied to the Execute call whose result named it, and a tool
+        output log to the call whose result spilled into it."""
         if store.format == "jsonl":
             return self._transcript_texts(store)
         if store.format == "json":
@@ -747,9 +818,8 @@ class DroidSource(Source):
     def _log_texts(self, store):
         """A tool-output log, terminal log or background output, read in
         pieces of at most _CHUNK bytes, each cut after a line end where the
-        piece holds one (see _cut). The pieces of a terminal log or
-        background output are tied to the Execute call whose result named
-        it, when stores() found that call this run."""
+        piece holds one (see _cut). The pieces of each are tied to the call
+        whose result named it, when stores() found that call this run."""
         try:
             fh = open(store.path, "rb")
         except OSError as e:
@@ -777,8 +847,8 @@ class DroidSource(Source):
                 line_no += piece.count(b"\n")
 
     def _log_call(self, store):
-        """The Execute call a terminal log or background output holds the
-        output of, or None. The transcript that named it is read again only
+        """The call a terminal log, background output or tool output log
+        holds the output of, or None. The transcript that named it is read again only
         when stores() has tied more of its calls to logs since it was last
         read, so it is read once for all the logs it names."""
         owner = self._log_owner.get(_key(store.path))

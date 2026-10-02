@@ -1095,6 +1095,94 @@ class Secrets(DroidCase):
         self.assertEqual(found[SECRET]["stores"], {log})
         self.assertEqual(self.store(log).unit, "tool output")
 
+    def _spill(self, cid, key_file, tool="grep_tool_cli", stamp="90012345",
+               sid=SID, notice=None):
+        """A Grep whose result spilled to artifacts/tool-outputs: the
+        file named <tool id>-<call id>-<8 digits>.log as $c() names it,
+        holding a grep line for `key_file` among many, and the session
+        whose result names it. Returns (log, transcript)."""
+        full = ("src/a%d.py:1:x = 1\n" * 3000 % tuple(range(3000))
+                + "%s:1:STRIPE_KEY=%s\n" % (key_file, SECRET)
+                + "src/b.py:1:y = 2\n" * 3000)
+        log = self.write("artifacts/tool-outputs/%s-%s-%s.log" % (tool, cid, stamp),
+                         None, raw=full.encode("utf-8"), mode=0o600)
+        path = self.session([header(sid=sid)] + call_lines(
+            10, cid, "Grep", {"pattern": "KEY", "path": "."},
+            output=spilled(full, notice or log)), name=sid)
+        return log, path
+
+    def _origins(self, store):
+        found, _masks = clean.scan_store(self.droid, store, {})
+        [entry] = [e for e in found.values()
+                   if e["fingerprint"] == clean._fingerprint(SECRET)]
+        return entry["origins"]
+
+    def test_a_spilled_grep_result_gets_the_origin_it_has_in_the_transcript(self):
+        # in the transcript, a grep line credits the file in front of it
+        path = self.session([header()] + call_lines(
+            10, "toolu_01SMALL", "Grep", {"pattern": "KEY", "path": "."},
+            output="config/.env.small:1:STRIPE_KEY=%s\n" % SECRET))
+        self.assertEqual(self._origins(self.store(path)), {"config/.env.small"})
+        # spilled to a log the result names, the same line credits the same
+        sid = "99999999-aaaa-4aaa-8aaa-000000000009"
+        log, path = self._spill("toolu_01GREP", "config/.env.test", sid=sid)
+        store = self.store(log)
+        self.assertEqual(self._origins(store), {"config/.env.test"})
+        texts = list(self.droid.secret_texts(store))
+        self.assertEqual({(t.call.tool_call_id, t.call.tool_name) for t in texts},
+                         {("toolu_01GREP", "Grep")})
+        # and it belongs to the session that ran it, as a terminal log does
+        self.assertEqual((store.session, store.project, store.unit),
+                         (sid, "/Users/me/proj", "tool output"))
+
+    def test_a_spill_is_tied_only_where_its_name_carries_the_results_call(self):
+        # the notice names a log of another call
+        other, _path = self._spill("toolu_01MINE", "config/.env.a",
+                                   notice=os.path.join(
+                                       self.root, "artifacts", "tool-outputs",
+                                       "grep_tool_cli-toolu_01THEIRS-90012345.log"))
+        self.write("artifacts/tool-outputs/grep_tool_cli-toolu_01THEIRS-90012345.log",
+                   None, raw=("config/.env.b:1:STRIPE_KEY=%s\n" % SECRET).encode("utf-8"))
+        theirs = os.path.join(self.root, "artifacts", "tool-outputs",
+                              "grep_tool_cli-toolu_01THEIRS-90012345.log")
+        for log in (other, theirs):
+            store = self.store(log)
+            self.assertEqual(self._origins(store), set(), log)
+            self.assertEqual([t.call for t in self.droid.secret_texts(store)],
+                             [None] * len(list(self.droid.secret_texts(store))))
+            self.assertIsNone(store.session)
+
+    def test_a_spill_no_result_names_is_not_tied(self):
+        full = "config/.env.c:1:STRIPE_KEY=%s\n" % SECRET
+        log = self.write("artifacts/tool-outputs/grep_tool_cli-toolu_01LOST-90012345.log",
+                         None, raw=full.encode("utf-8"))
+        # a call of that id whose result names no file
+        self.session([header()] + call_lines(
+            10, "toolu_01LOST", "Grep", {"pattern": "KEY"}, output="no matches"))
+        store = self.store(log)
+        self.assertEqual(self._origins(store), set())
+        self.assertIsNone(store.session)
+
+    def test_a_spill_notice_is_never_followed_outside_tool_outputs(self):
+        # the notice is text beside the tool's own output: a file it names
+        # that is not one of Droid's tool-output logs is never read
+        keyfile = self.write("grep_tool_cli-toolu_01OUT-90012345.log", None,
+                             raw=("KEY=" + SECRET + "\n").encode("utf-8"),
+                             root=os.path.join(self.home, "elsewhere"))
+        transcript = self.session([header()] + call_lines(
+            10, "toolu_01OUT", "Grep", {"pattern": "KEY"},
+            output=spilled("x\n" * 30000, keyfile)))
+        self.assertEqual([s.path for s in self.stores()], [transcript])
+
+    def test_a_moved_droid_folder_still_ties_its_spills(self):
+        # The notice names where the log was written; read through --path
+        # from a copy, the log of that name in the same folder is the one.
+        log, _path = self._spill("toolu_01MOVE", "config/.env.moved",
+                                 notice=os.path.join(
+                                     "/Users/me/.factory", "artifacts", "tool-outputs",
+                                     "grep_tool_cli-toolu_01MOVE-90012345.log"))
+        self.assertEqual(self._origins(self.store(log)), {"config/.env.moved"})
+
     def test_a_bash_mode_commands_output_and_what_was_typed(self):
         path = self.session([
             header(),
