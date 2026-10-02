@@ -1486,7 +1486,8 @@ def _found(text):
         if not _is_placeholder(value):
             found.append((value, "connection string password", m.start("secret")))
 
-    for marker, pattern, label in _TYPED:
+    for marker, pattern, label in (
+            _TYPED if len(text) >= _CHEAP_SHORT or _TYPED_ANY.search(text) else ()):
         if marker not in text:
             continue
         for m in pattern.finditer(text):
@@ -1521,30 +1522,39 @@ _LAST_WORD = (r"""(?=(?:'[^'\s]+'|"[^"\s]+"|[^\s'"`;|&<>()\\]+)"""
 # the value, quoted or not, as curl's user and colon.
 _SMB_USER = (r"""(?:-U\s*|--user(?:name)?[=\s]\s*)"""
              r"""(?:'[^'%\s]*%(?=[^'\s]+')|"[^"%\s]*%(?=[^"\s]+")|[^\s'"%]*%)""")
+
+
+def _named(name):
+    """A command's name not inside a longer word or path: the name first,
+    then what comes before it, so the regex starts with a literal and is
+    tried only where the name is (a lookbehind first tried every
+    character of a string that held the name anywhere)."""
+    return re.escape(name) + r"(?<![\w.-]" + re.escape(name) + ")"
+
+
 _TYPED = [
     (marker, re.compile(pattern + _TYPED_VALUE), label)
     for marker, pattern, label in (
-        ("mysql", r"(?<![\w.-])mysql(?:dump|admin|import|check|show|sh|binlog)?"
+        ("mysql", _named("mysql") + r"(?:dump|admin|import|check|show|sh|binlog)?"
          + _IN_COMMAND + r"-p", "mysql password"),
-        ("mariadb", r"(?<![\w.-])mariadb(?:-dump|-admin|-import|-check|-show)?"
+        ("mariadb", _named("mariadb") + r"(?:-dump|-admin|-import|-check|-show)?"
          + _IN_COMMAND + r"-p", "mysql password"),
-        ("sshpass", r"(?<![\w.-])sshpass\s+-p\s*", "sshpass password"),
-        ("redis-cli", r"(?<![\w.-])redis-cli" + _IN_COMMAND + r"(?:-a|--pass)\s+",
+        ("sshpass", _named("sshpass") + r"\s+-p\s*", "sshpass password"),
+        ("redis-cli", _named("redis-cli") + _IN_COMMAND + r"(?:-a|--pass)\s+",
          "redis password"),
-        ("docker login", r"(?<![\w.-])docker\s+login" + _IN_COMMAND + r"-p\s+",
+        ("docker login", _named("docker") + r"\s+login" + _IN_COMMAND + r"-p\s+",
          "docker login password"),
         ("--password", r"(?<=\s)--password\s+", "--password argument"),
-        ("curl", r"(?<![\w.-])curl" + _IN_COMMAND + r"(?:-u\s*|--user[=\s]\s*)"
+        ("curl", _named("curl") + _IN_COMMAND + r"(?:-u\s*|--user[=\s]\s*)"
          r"(?:'[^':\s]*:(?=[^'\s]+')|\"[^\":\s]*:(?=[^\"\s]+\")|[^\s'\":]*:)",
          "curl user password"),
-        ("sqlcmd", r"(?<![\w.-])sqlcmd" + _IN_COMMAND + r"-P\s*",
-         "SQL Server password"),
+        ("sqlcmd", _named("sqlcmd") + _IN_COMMAND + r"-P\s*", "SQL Server password"),
         ("-password", r"(?<=\s)-password\s+", "-password argument"),
-        ("mongo", r"(?<![\w.-])mongo(?:sh|dump|restore|export|import|stat|top|files)?"
+        ("mongo", _named("mongo") + r"(?:sh|dump|restore|export|import|stat|top|files)?"
          + _IN_COMMAND + r"-p\s*", "mongo password"),
-        ("ldap", r"(?<![\w.-])ldap(?:search|modify|add|delete|whoami|passwd|compare"
+        ("ldap", _named("ldap") + r"(?:search|modify|add|delete|whoami|passwd|compare"
          r"|modrdn|exop|url)" + _IN_COMMAND + r"-w\s*", "LDAP bind password"),
-        ("htpasswd", r"(?<![\w.-])htpasswd(?=[^\n|;&]{0,256}?\s-[A-Za-z]*b)"
+        ("htpasswd", _named("htpasswd") + r"(?=[^\n|;&]{0,256}?\s-[A-Za-z]*b)"
          r"[^\n|;&]{0,256}?\s" + _LAST_WORD, "htpasswd password"),
         ("storepass", r"(?<=\s)-(?:src|dest)?storepass\s+", "keystore password"),
         ("keypass", r"(?<=\s)-(?:src|dest)?keypass\s+", "keystore password"),
@@ -1552,10 +1562,14 @@ _TYPED = [
          r"(?=[^\n|;]{0,256}?\s-AsPlainText\b)"
          r"(?:\s+-(?:AsPlainText|Force)\b)*(?:\s+-String)?)\s+",
          "PowerShell plain-text password"),
-        ("smb", r"(?<![\w.-])smb(?:client|cacls|get|map|tree)" + _IN_COMMAND + _SMB_USER,
+        ("smb", _named("smb") + r"(?:client|cacls|get|map|tree)" + _IN_COMMAND + _SMB_USER,
          "SMB password"),
-        ("rpcclient", r"(?<![\w.-])rpcclient" + _IN_COMMAND + _SMB_USER, "SMB password"),
+        ("rpcclient", _named("rpcclient") + _IN_COMMAND + _SMB_USER, "SMB password"),
     )]
+# Whether a short string holds any rule's marker, in one call: asking each
+# in turn cost more than the rules, on every string clean reads. Over a
+# long one each marker's own search is faster, as for _CHEAP_ANY.
+_TYPED_ANY = re.compile("|".join(re.escape(marker) for marker, _p, _l in _TYPED))
 
 
 def _scan(text, spans=True, where=False):

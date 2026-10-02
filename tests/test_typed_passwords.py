@@ -110,6 +110,20 @@ class WhereACommandTakesItsPassword(unittest.TestCase):
                 # curl's rule reads user:password, and every colon is asked.
                 self.assertTrue(marker == "curl" or any(t in marker for t in clean._CHEAP))
 
+    def test_a_command_s_name_only_where_it_is_one(self):
+        """Each name is read first, for speed, and only where no letter,
+        digit, _, . or - is glued before it, as before."""
+        for text, found in (("mymysql -u root -p%s prod", False),
+                            ("x.sqlcmd -S db -P %s", False),
+                            ("my-smbclient //f/s -U admin%%%s", False),
+                            ("notcurl -u admin:%s https://h", False),
+                            ("/usr/bin/sqlcmd -S db -P %s", True),
+                            ("(mysql -u root -p%s prod)", True),
+                            ("ok;smbclient //f/s -U admin%%%s", True)):
+            with self.subTest(text=text):
+                values = [v for v, _l in find_secrets(text % PW + "\n# padding padding")]
+                self.assertEqual(values, [PW] if found else [])
+
     def test_no_password_typed_to_more_commands(self):
         for text in (
                 "sqlcmd -S prod -E -Q 'SELECT 1'",
