@@ -18,9 +18,9 @@ from collections import OrderedDict
 from .base import (Location, MaskResult, SecretText, Source, Store,
                    ToolCall)
 
-__all__ = ["ADAPTERS", "REGISTRY", "Location", "MaskResult", "SecretText",
-           "Source", "Store", "ToolCall", "get", "ids", "register",
-           "sources", "unregister"]
+__all__ = ["ADAPTERS", "CLOUD_ONLY", "NEXT", "REGISTRY", "Location",
+           "MaskResult", "SecretText", "Source", "Store", "ToolCall", "get",
+           "ids", "register", "sources", "unregister"]
 
 # (module, class) under ranwhat.sources, in registry order (design 4.2):
 #   Claude Code, Codex, Gemini CLI, Copilot CLI, VS Code Copilot, Cline,
@@ -43,6 +43,26 @@ ADAPTERS = (
     ("pi", "PiSource"),
     ("muse_code", "MuseCodeSource"),
     ("openclaw", "OpenClawSource"),
+)
+
+# Agents with nothing on this machine to read (design decision 3): each
+# keeps its history in its vendor's cloud. (name, what to say), in the
+# order `ranwhat sources` lists them, after every adapter. Where the same
+# vendor has a local coding CLI, the sentence names it and its id.
+CLOUD_ONLY = (
+    ("Meta Muse", "It runs in Meta's cloud. Muse Code, Meta's coding CLI, "
+                  "keeps its sessions here and is read: --source muse-code."),
+    ("Grok Bot", "It runs in xAI's cloud and keeps its history there, even "
+                 "for commands it runs on this machine. Grok Build, xAI's "
+                 "coding CLI, is read: --source grok."),
+    ("Amp", "The current Amp keeps its threads on ampcode.com."),
+)
+
+# Agents next in line, (name, what to say): their local format waits on a
+# primary source (design section 8). Cursor is first.
+NEXT = (
+    ("Cursor", "Its history is read once its format is checked against a "
+               "primary source."),
 )
 
 REGISTRY = OrderedDict()

@@ -331,7 +331,7 @@ class ReadBeforeTheWindowTypedAsAnArgument(_Reports):
         root = _read_then_typed(self, SCRIPT, 5 * 86400)
         out = _cli(["check", "--days", "1", "--root", root,
                     "--state-dir", self.state])
-        self.assertIn("1 transcript(s) scanned", out)
+        self.assertIn("Read Claude Code: 1 transcript,", out)
         doc = json.loads(_cli(["check", "--json", "--days", "1", "--root", root,
                                "--state-dir", self.state]))
         self.assertEqual(doc["secrets"], [])

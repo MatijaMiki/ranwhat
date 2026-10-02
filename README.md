@@ -12,7 +12,7 @@ $ ranwhat watch --days 90
 
   ranwhat watch  · local agent flight recorder
   --------------------------------------------------------------
-  4 transcript(s) scanned, last 90 days
+  Read Claude Code: 4 transcripts, last 90 days
 
   1 critical  3 high
 
@@ -48,22 +48,45 @@ Python 3.9+. No dependencies, and nothing is built on your machine.
 ### `ranwhat watch`: what your agents did
 
 Reads transcripts your agents already wrote to disk. No wrapper, no proxy,
-nothing in your critical path.
+nothing in your critical path. Every agent below is read by default, each
+from where it keeps its history (the variable in brackets moves it, as it
+moves the agent itself); one that is not on your machine is skipped.
 
 | Source | Location | Format |
 |---|---|---|
 | Claude Code | `~/.claude/projects/*/*.jsonl` and each session's `subagents/**/agent-*.jsonl`, or the same under `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
+| Codex (CLI, IDE extension, desktop app) | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` and `archived_sessions/` (`$CODEX_HOME`); `history.jsonl`, `shell_snapshots/` and its SQLite thread index are searched for secrets | JSONL; `.jsonl.zst` and SQLite read only |
+| Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.jsonl` and older `session-*.json` (`$GEMINI_CLI_HOME`) | JSONL, JSON |
+| GitHub Copilot CLI | `~/.copilot/session-state/<session>/events.jsonl` (`$COPILOT_HOME`) | JSONL |
+| Qwen Code | `~/.qwen/projects/<project>/chats/*.jsonl` and older `tmp/<hash>/chats/session-*.json` (`$QWEN_RUNTIME_DIR`, `$QWEN_HOME`) | JSONL, JSON |
+| Grok Build | `~/.grok/sessions/<folder>/<session>/updates.jsonl` (`$GROK_HOME`) | JSONL |
+| Droid | `~/.factory/sessions/**/*.jsonl` (`$FACTORY_HOME_OVERRIDE`) | JSONL |
+| Kimi Code | `~/.kimi-code/sessions/<folder>/<session>/agents/*/wire.jsonl` (`$KIMI_CODE_HOME`) | JSONL |
+| Kimi CLI | `~/.kimi/sessions/<folder>/<session>/wire.jsonl` and `context*.jsonl` (`$KIMI_SHARE_DIR`) | JSONL |
+| Pi | `~/.pi/agent/sessions/--<cwd>--/*.jsonl` (`$PI_CODING_AGENT_DIR`) | JSONL |
+| Muse Code | `~/.local/share/muse/sessions/YYYY/MM/DD/<session>/session.jsonl` (`$XDG_DATA_HOME/muse`) | JSONL |
 | OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/*.sqlite` | SQLite |
+
+Meta Muse runs in Meta's cloud and keeps nothing on your machine, so there
+is nothing to read; Muse Code, Meta's coding CLI, is supported.
+Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
+machine; Grok Build, xAI's coding CLI, is supported.
 
 Nine rules: credential access, secret literals in commands, package
 publishing, cloud destruction, financial API calls, log tampering, destructive
-git, recursive deletion, exfiltration-shaped pipes.
+git, recursive deletion, exfiltration-shaped pipes. Each agent's tool calls
+are judged by the same rules; every action says which agent ran it.
 
 ```bash
 ranwhat watch --days 30
-ranwhat watch --source openclaw
+ranwhat watch --source codex                # one agent (repeatable)
+ranwhat watch --path codex=~/work/.codex    # an agent's history elsewhere
 ranwhat watch --json
+ranwhat sources                             # every agent, where it looked, what it found
 ```
+
+`--root` and `--state-dir` still work, as the names of
+`--path claude-code=` and `--path openclaw=`.
 
 ### `ranwhat scan`: what they're allowed to do next
 
@@ -106,6 +129,12 @@ ranwhat clean               # report, then open a review session
 ranwhat clean --apply       # mask everything without asking
 ```
 
+`clean` searches every agent's history, and masks a value only in a file
+the agent lets it rewrite: a plain JSONL, JSON or text file nothing has
+written to in the last two minutes. Databases (Codex's thread index) and
+compressed files are read only: the report names each one that holds a
+secret and how to remove it in the agent instead.
+
 Scanning a real history takes a while, so the session stays open on what it
 just found rather than making you re-scan to act on it:
 
@@ -143,10 +172,12 @@ rewritten file is parsed back before it replaces the original.
 ### The secrets index
 
 `check` and `watch` hide every secret `clean` finds anywhere in your
-history, whatever `--days` says, wherever a copy of one shows up. To know
-them without reading every transcript on every run, they keep an index in
-`~/.ranwhat/known/` (`$RANWHAT_HOME/known/` when that is set), one file per
-transcript directory, and read a transcript again only when its size or
+history, in every agent's, whatever `--days` and `--source` say, wherever
+a copy of one shows up: a password read in a Codex session is hidden where
+Claude Code typed it. To know them without reading every transcript on
+every run, they keep an index in `~/.ranwhat/known/`
+(`$RANWHAT_HOME/known/` when that is set), one file per Claude Code
+transcript directory, and read a file again only when its size or
 modification time changes. The first run reads them all, and says so.
 `check` fills it from its own search for secrets, so no transcript is read
 for them twice.

@@ -26,6 +26,8 @@ from . import watch as watch_mod
 from . import clean as clean_mod
 from . import known as known_mod
 from . import catalog as catalog_mod
+from . import agents as agents_mod
+from . import sources as sources_mod
 from . import term
 
 # introspect, usage and feed talk to providers and to the feed, and import
@@ -220,6 +222,7 @@ COMMANDS = (
     ("check", "watch and clean in one pass, changing nothing"),
     ("watch", "what your agents already ran on this machine"),
     ("clean", "credentials sitting in plaintext in agent transcripts"),
+    ("sources", "every agent ranwhat reads, and where it looked"),
     ("scan", "the authority a set of credentials carries"),
     ("live", "the same, asked of each token's own provider"),
     ("demo", "see the output without setting anything up"),
@@ -494,10 +497,11 @@ def _update(args):
 
 def _finding_json(f):
     """A clean finding as JSON. files, origins and projects are sets in
-    memory; converting only files made check --json and clean --json crash
-    on the first secret found, which hid every secret from automation."""
+    memory, and so are sources and read_only; converting only files made
+    check --json and clean --json crash on the first secret found, which
+    hid every secret from automation."""
     out = dict(f)
-    for k in ("files", "origins", "projects"):
+    for k in ("files", "origins", "projects", "sources", "read_only"):
         v = f.get(k)
         if isinstance(v, (set, frozenset)):
             out[k] = sorted(v) if len(v) > 1 else list(v)
@@ -585,14 +589,15 @@ def _mask_known(records, known):
 
 
 def _known(args, step, index=None):
-    """Every value clean finds in the transcripts under --root, in all of
-    history whatever --days says, as a known.Matcher for masking what check
-    and watch print: a password read in a session older than the window is
-    no less a password where a command in it types it. The index keeps
-    them between runs (known.py), so only a transcript new or changed since
-    the last run is read for them, with its own line of progress, and not
-    one clean has just read for check (`index`, which took what it found)."""
-    index = index or known_mod.Index.open(args.root)
+    """Every value clean finds in the transcripts under --root, and in
+    every other agent's history, in all of it whatever --days and --source
+    say, as a known.Matcher for masking what check and watch print: a
+    password read in a session older than the window, or by another agent,
+    is no less a password where a command types it. The index keeps them
+    between runs (known.py), so only a file new or changed since the last
+    run is read for them, with its own line of progress, and not one clean
+    has just read for check (`index`, which took what it found)."""
+    index = index or known_mod.Index.open(args.root, args.paths)
     return index.update(progress=step(_INDEXING_FIRST if index.first else _INDEXING))
 
 
@@ -605,7 +610,7 @@ def _remembering(args):
     a review ended by closing its terminal, or a check run while it was
     still open, left the index knowing nothing of what it had masked."""
     def remember(values):
-        known_mod.Index.open(args.root).remember(values)
+        known_mod.Index.open(args.root, args.paths).remember(values)
     return remember
 
 
@@ -635,6 +640,7 @@ def _check(args):
     should not require. Nothing is modified: masking stays an explicit choice
     under `clean`.
     """
+    _agent_defaults(args)
     # Up from the first transcript, and down before anything is printed:
     # reading every transcript for its actions took five seconds on a real
     # history, and showed nothing.
@@ -646,15 +652,17 @@ def _check(args):
         # window or changed since. Indexed first, every transcript was
         # read for its secrets twice on a first run: 50 s on a history
         # clean read in 24.
-        index = known_mod.Index.open(args.root)
-        findings, scanned, _ = clean_mod.scan(
-            root=args.root, since_days=args.days, apply=False,
-            progress=step(_SECRETS), known=known, read=index.take)
+        index = known_mod.Index.open(args.root, args.paths)
+        searched = clean_mod.scan_sources(
+            sources=args.sources, root=args.root, paths=args.paths,
+            since_days=args.days, apply=False, progress=step(_SECRETS),
+            known=known, read=index.take)
+        findings = searched.findings
         everywhere = _known(args, step, index)
         records, counts = watch_mod.scan_sources_counted(
-            sources=watch_mod.SOURCES, root=args.root,
+            sources=args.sources, root=args.root,
             state_dir=args.state_dir, since_days=args.days,
-            progress=step(_ACTIONS), known=everywhere)
+            progress=step(_ACTIONS), known=everywhere, paths=args.paths)
         _mask_known(records, known)
         # Then every value clean finds anywhere, in all that is printed:
         # each action's evidence was masked as it was read, and this masks
@@ -665,13 +673,14 @@ def _check(args):
     finally:
         bar.clear()
     sources = sum(counts.values())
-    # clean searches Claude Code transcripts only. OpenClaw's databases,
-    # read above for actions, are not searched for secrets, and the report
-    # must not read as if they were.
+    scanned = searched.scanned
+    # clean does not search OpenClaw's databases, read above for actions,
+    # for secrets yet, and the report must not read as if it had.
     unsearched = counts.get("openclaw", 0)
 
-    places = None if sources else watch_mod.locations(
-        root=args.root, state_dir=args.state_dir)
+    places = None if sources or scanned else watch_mod.locations(
+        args.sources, root=args.root, state_dir=args.state_dir,
+        paths=args.paths)
     if args.json:
         print(_json_text({
             "days": args.days,
@@ -689,10 +698,13 @@ def _check(args):
     print(watch_mod.render(records, counts, args.days, footer=False,
                            locations=places).rstrip("\n"))
     if scanned:
-        print(clean_mod.render(findings, scanned, 0, False, footer=False,
-                               advice=False, unsearched=unsearched).rstrip("\n"))
+        print(clean_mod.render(findings, searched.counts, [], False, footer=False,
+                               advice=False, unsearched=unsearched,
+                               others=searched.others,
+                               read_only=searched.read_only,
+                               notes=_clean_notes(args, searched)).rstrip("\n"))
     elif sources:
-        # OpenClaw was read, Claude Code was not: "No secrets found" here
+        # OpenClaw was read, nothing else was: "No secrets found" here
         # would be an all-clear on transcripts nobody read. With nothing
         # read at all, watch's section has already said where it looked.
         print(_clean_nothing_read(args).rstrip("\n"))
@@ -705,14 +717,15 @@ def _check(args):
     steps = []
     if findings:
         # Bare `clean` on a terminal opens the review over these findings.
-        steps.append((["clean"] + _carried(args, "days", "root"),
+        steps.append((["clean"] + _carried(args, "days", "root", "source", "path"),
                       "review each secret, then mask it"))
     if records:
         # Not `watch --json`: watch masks what a call shows to be a secret,
         # and only check masks too what clean found elsewhere. Suggested
         # here, it printed whole the passwords this report had just hidden.
         steps.append((["check", "--json"]
-                      + _carried(args, "days", "root", "state_dir"),
+                      + _carried(args, "days", "root", "state_dir", "source",
+                                 "path"),
                       "the actions and secrets, machine readable"))
     # Not `scan profile.json`: nothing writes one, so on a first run it
     # failed with "no such file". demo runs anywhere.
@@ -736,12 +749,19 @@ def _check(args):
     return 2 if places is not None else 0
 
 
+def _notes(args):
+    """Sentences on what each agent read this run held that could not be
+    read: files that did not parse or are compressed, calls whose
+    arguments were not kept."""
+    return agents_mod.notes(args.sources)
+
+
 def _carried(args, *names):
-    """This run's own --days, --root and --state-dir, as shell words, so a
-    suggested command reads what this one read. Dropped, `clean` after
-    `check --days 365 --root X` opened its review on other secrets than
-    the ones just listed. Only values other than the default are carried,
-    so a plain run suggests plain commands."""
+    """This run's own --days, --root, --state-dir, --source and --path, as
+    shell words, so a suggested command reads what this one read. Dropped,
+    `clean` after `check --days 365 --root X` opened its review on other
+    secrets than the ones just listed. Only values other than the default
+    are carried, so a plain run suggests plain commands."""
     words = []
     if "days" in names and args.days != DEFAULT_DAYS:
         words += ["--days", str(args.days)]
@@ -749,6 +769,13 @@ def _carried(args, *names):
         words += ["--root", _shell_path(args.root)]
     if "state_dir" in names and args.state_dir:
         words += ["--state-dir", _shell_path(args.state_dir)]
+    if "source" in names:
+        for source_id in args.source or ():
+            words += ["--source", source_id]
+    if "path" in names:
+        for source_id, path in sorted(args.pointed.items()):
+            # ~ there is expanded by ranwhat, whether or not the shell does.
+            words += ["--path", "%s=%s" % (source_id, _shell_path(path))]
     return words
 
 
@@ -791,6 +818,13 @@ _POINT_ELSEWHERE = {
 }
 
 
+def _point_elsewhere(source_id):
+    """How to point one agent's reader somewhere else."""
+    if source_id in _POINT_ELSEWHERE:
+        return _POINT_ELSEWHERE[source_id]
+    return "--path %s=PATH for %s" % (source_id, agents_mod.name(source_id))
+
+
 def _said_nothing_read(places, days):
     """For --json, whose [] or zeros cannot tell "read, and nothing found"
     from "nothing there to read": when `places` is not None, one message on
@@ -809,9 +843,8 @@ def _said_nothing_read(places, days):
                          watch_mod._SOURCE_NAMES.get(p["source"], p["source"]))
             for p in places)
         inner = [p for p in places if p.get("projects")]
-        point = ", and ".join(_POINT_ELSEWHERE[p["source"]] for p in places
-                              if p["source"] in _POINT_ELSEWHERE
-                              and p not in inner)
+        point = ", and ".join(dict.fromkeys(
+            _point_elsewhere(p["source"]) for p in places if p not in inner))
         text = "No transcripts found in %s, so nothing was checked." % where
         text += "".join(" " + watch_mod.projects_hint(p) for p in inner)
         if point:
@@ -832,7 +865,9 @@ def _clean_nothing_read(args):
     else:
         L = ["", BOLD(title.rstrip()), DIM("  " + tagline[2:])]
     L += [DIM(term.rule("-")), "  0 transcript(s) scanned", ""]
-    places = watch_mod.locations(("claude-code",), root=args.root)
+    places = watch_mod.locations(
+        [i for i in args.sources if i != "openclaw"] or ("claude-code",),
+        root=args.root, paths=args.paths)
     return "\n".join(L + watch_mod._nothing_read(args.days, places, width))
 
 
@@ -937,6 +972,221 @@ def _root_for(path):
     return path
 
 
+def _agent_flags(p, args):
+    """--source, --path, --root and --state-dir as every command that
+    reads agent history takes them (design 4.1):
+
+    - args.sources: the ids to read, in registry order (default all);
+    - args.paths: {id: path} for each agent pointed somewhere, Claude
+      Code's and OpenClaw's included;
+    - args.pointed: the ones --path pointed, but for those two, which a
+      suggested command carries as --root and --state-dir;
+    - args.root and args.state_dir, as before.
+
+    --root and --state-dir stay as the names for --path claude-code= and
+    --path openclaw=, so giving one and its --path both is an error, as is
+    an agent ranwhat does not know, and a second --path for one agent."""
+    paths = {}
+    for given in args.path or ():
+        source_id, sep, path = given.partition("=")
+        if not sep or not source_id or not path:
+            p.error("--path takes ID=PATH, such as --path codex=~/.codex")
+        if source_id not in sources_mod.REGISTRY:
+            p.error("--path %s=...: there is no agent %r. ranwhat sources "
+                    "lists them: %s" % (source_id, source_id,
+                                        ", ".join(sources_mod.ids())))
+        if source_id in paths:
+            p.error("--path %s= is given twice; give one" % source_id)
+        paths[source_id] = os.path.expanduser(path)
+    for flag, name, source_id in (("--root", "root", "claude-code"),
+                                  ("--state-dir", "state_dir", "openclaw")):
+        if getattr(args, name) is not None and source_id in paths:
+            p.error("%s and --path %s= both point %s elsewhere; give one"
+                    % (flag, source_id, agents_mod.name(source_id)))
+    args.path_ids = tuple(paths)
+    args.pointed = {i: v for i, v in paths.items() if i not in agents_mod.PORTED}
+    args.root = args.root or paths.get("claude-code") or watch_mod.CLAUDE_PROJECTS
+    args.state_dir = args.state_dir or paths.get("openclaw")
+    paths["claude-code"] = args.root
+    if args.state_dir:
+        paths["openclaw"] = args.state_dir
+    args.paths = paths
+    args.sources = tuple(i for i in sources_mod.ids()
+                         if not args.source or i in args.source)
+
+
+def _agent_defaults(args):
+    """What _agent_flags sets, for a Namespace made some other way (a
+    test's, or a caller's): every agent, each in its default place."""
+    paths = {"claude-code": args.root}
+    if getattr(args, "state_dir", None):
+        paths["openclaw"] = args.state_dir
+    for name, value in (("source", None), ("path", []), ("path_ids", ()),
+                        ("pointed", {}), ("paths", paths),
+                        ("sources", tuple(sources_mod.ids()))):
+        if not hasattr(args, name):
+            setattr(args, name, value)
+
+
+def _sentence(text):
+    """text as a sentence: a capital first, a full stop last."""
+    text = text.strip()
+    if not text:
+        return text
+    text = text[0].upper() + text[1:]
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
+def _clean_notes(args, searched):
+    """_notes, and for each agent that holds a finding what its adapter
+    says of it (clean_note), and for each whose files were masked what to
+    do next (mask_note): an editor that rewrites the file from memory, a
+    copy kept in the agent's cloud."""
+    notes = _notes(args)
+    holding = {i for f in searched.findings.values() for i in f.get("sources", ())}
+    masked = {searched.stores[path].source for path in searched.changed
+              if path in searched.stores}
+    for source in agents_mod.adapters(args.sources):
+        if source.id in holding and getattr(source, "clean_note", ""):
+            notes.append(_sentence(source.clean_note))
+        if source.id in masked and getattr(source, "mask_note", ""):
+            notes.append(_sentence(source.mask_note))
+    return notes
+
+
+# What `ranwhat sources` says of what clean does with an agent's files.
+_MASKING = {
+    "rewrite": "clean can mask it",
+    "read-only": "clean reads it only; it never changes these files",
+    "mixed": "clean can mask %s; %s read only",
+    "not searched": "clean does not search it for secrets yet",
+}
+
+
+def _source_entry(source, args):
+    """What `ranwhat sources --json` says of one adapter."""
+    flag = "--path"
+    if source.id == "claude-code":
+        override = args.root if args.root != watch_mod.CLAUDE_PROJECTS else None
+        flag = "--path" if "claude-code" in (args.path_ids or ()) else "--root"
+    elif source.id == "openclaw":
+        override = args.state_dir
+        flag = "--path" if "openclaw" in (args.path_ids or ()) else "--state-dir"
+    else:
+        override = args.paths.get(source.id)
+    locations, stores = agents_mod.discover(source, override)
+    for loc in locations:
+        if loc.how == "--path":
+            loc.how = flag
+    transcripts = agents_mod.transcripts(stores)
+    read_only = [s for s in stores if s.masking == "read-only"]
+    if not source.searched:
+        masking = "not searched"
+    elif stores and len(read_only) == len(stores):
+        masking = "read-only"
+    elif read_only:
+        masking = "mixed"
+    else:
+        masking = "rewrite"
+    notes = list(agents_mod.notes([source.id], {source.id: locations}))
+    return {"id": source.id, "name": source.name,
+            "status": "found" if stores else "not found",
+            "locations": [{"path": loc.path, "how": loc.how,
+                           "exists": loc.exists, "found": loc.found}
+                          for loc in locations],
+            "unit": source.unit,
+            "transcripts": len(transcripts),
+            "other_files": len(stores) - len(transcripts),
+            "read_only_files": len(read_only),
+            "masking": masking, "path_means": source.path_means,
+            "counts": dict(source.counts), "unreadable": dict(source.unreadable),
+            "notes": notes}
+
+
+def _sources(args):
+    """ranwhat sources: every agent ranwhat knows, in registry order:
+    where it looked for each, whether it found any history and how much,
+    and what clean can do with it. Then the agents with nothing on this
+    machine to read, and the one that is next."""
+    entries = [_source_entry(source, args) for source in agents_mod.chosen(
+        args.sources)]
+    if not args.source:
+        entries += [{"id": None, "name": name, "status": "cloud only",
+                     "note": note} for name, note in sources_mod.CLOUD_ONLY]
+        entries += [{"id": None, "name": name, "status": "next", "note": note}
+                    for name, note in sources_mod.NEXT]
+    if args.json:
+        print(_json_text(entries))
+        return 0
+    from .report import BOLD, DIM, GRN
+    width = term.width()
+    title, tagline = "  ranwhat sources  ", "· the agents ranwhat reads"
+    if len(title + tagline) <= width:
+        L = ["", BOLD(title) + DIM(tagline)]
+    else:
+        L = ["", BOLD(title.rstrip()), DIM("  " + tagline[2:])]
+    L += [DIM(term.rule("-")), ""]
+    for entry in entries:
+        if entry["id"] is None:
+            continue
+        if entry["status"] == "found":
+            amount = agents_mod.amount({entry["id"]: entry["transcripts"]},
+                                       {entry["id"]: entry["other_files"]})
+            status = GRN("found") + ", " + amount.split(": ", 1)[1]
+        else:
+            status = DIM("not found")
+        head = "  %s (%s): " % (entry["name"], entry["id"])
+        L += _status_lines(head, status, width)
+        for loc in entry["locations"]:
+            room = max(16, width - 8 - len(loc["how"]))
+            L.append(DIM(_fit_line("    %s (%s)" % (
+                watch_mod._shown_path(loc["path"], room), loc["how"]), width)))
+        masking = entry["masking"]
+        what = _MASKING[masking]
+        if masking == "mixed":
+            n = entry["transcripts"] + entry["other_files"]
+            what = what % (_n_files(n - entry["read_only_files"]),
+                           _n_files(entry["read_only_files"]) + " "
+                           + ("is" if entry["read_only_files"] == 1 else "are"))
+        if entry["status"] == "found" or masking == "not searched":
+            L += [DIM(line) for line in term.wrap(what, indent="    ")]
+        for note in entry["notes"]:
+            L += [DIM(line) for line in term.wrap(note, indent="    ")]
+        L.append("")
+    for status, heading in (("cloud only", "Cloud only, nothing on this "
+                                          "machine to read:"),
+                            ("next", "Next:")):
+        listed = [e for e in entries if e["id"] is None and e["status"] == status]
+        if listed:
+            L += term.wrap(heading)
+            for entry in listed:
+                L += term.wrap("%s: %s" % (entry["name"], entry["note"]),
+                               indent="      ", first="    ")
+            L.append("")
+    L += term.wrap("Point an agent elsewhere with --path ID=PATH; --source "
+                   "ID reads only that one.")
+    L += ["", DIM(term.rule("-")), DIM(term.FOOTER), ""]
+    print("\n".join(L))
+    return 0
+
+
+def _n_files(n):
+    return agents_mod.plural(n, "file")
+
+
+def _fit_line(text, width):
+    return watch_mod._fit(text, width)
+
+
+def _status_lines(head, status, width):
+    """An agent's name and what was found of it, on one line when they
+    fit, else the status on the line under the name."""
+    plain = re.sub(r"\033\[[0-9;]*m", "", status)
+    if len(head) + len(plain) <= width:
+        return [head + status]
+    return [_fit_line(head.rstrip().rstrip(":") + ":", width), "    " + status]
+
+
 def main(argv=None):
     """The command line. A report piped into head or a pager that closes
     early ended in a BrokenPipeError traceback; it ends quietly instead.
@@ -950,7 +1200,8 @@ def main(argv=None):
         except (AttributeError, ValueError, io.UnsupportedOperation):
             pass                      # not a text stream we may change
     try:
-        status = _main(argv)
+        with agents_mod.run():
+            status = _main(argv)
         sys.stdout.flush()            # a closed pipe says so here, not at exit
         return status
     except OSError as error:
@@ -981,7 +1232,7 @@ def _main(argv=None):
                                 description=TAGLINE + " " + NETWORK)
     p.add_argument("command", nargs="?",
                    choices=["check", "demo", "scan", "live", "watch",
-                            "clean", "update"])
+                            "clean", "sources", "update"])
     p.add_argument("profile", nargs="?", help="path to a profile JSON")
     p.add_argument("--json", action="store_true", help="emit raw JSON")
     p.add_argument("--html", metavar="PATH",
@@ -1005,13 +1256,24 @@ def _main(argv=None):
     p.add_argument("--days", type=int, default=DEFAULT_DAYS,
                    help="check, watch, clean: how far back to read local "
                         "agent history (default 30)")
-    p.add_argument("--root", metavar="PATH", default=watch_mod.CLAUDE_PROJECTS,
-                   help="check, watch, clean: Claude Code transcript directory")
+    p.add_argument("--root", metavar="PATH",
+                   help="check, watch, clean: Claude Code transcript directory "
+                        "(default ~/.claude/projects); the same as "
+                        "--path claude-code=PATH")
     p.add_argument("--state-dir", metavar="PATH",
                    help="check, watch: OpenClaw state directory "
-                        "(default ~/.openclaw)")
-    p.add_argument("--source", action="append", choices=list(watch_mod.SOURCES),
-                   help="watch: limit to a source (repeatable; default all)")
+                        "(default ~/.openclaw); the same as "
+                        "--path openclaw=PATH")
+    p.add_argument("--source", action="append", choices=list(sources_mod.ids()),
+                   metavar="ID",
+                   help="check, watch, clean, sources: read only this agent "
+                        "(repeatable; default every one). IDs: %s"
+                        % ", ".join(sources_mod.ids()))
+    p.add_argument("--path", action="append", metavar="ID=PATH", default=[],
+                   help="check, watch, clean, sources: read this agent's "
+                        "history from PATH instead of its default place "
+                        "(repeatable, one per agent; ranwhat sources says "
+                        "what each PATH is)")
     p.add_argument("--apply", action="store_true",
                    help="clean: mask everything found without asking. Without "
                         "it, clean reports and then opens a review session.")
@@ -1057,6 +1319,13 @@ def _main(argv=None):
     if args.window_days is not None and args.window_days < 1:
         p.error("--window-days must be at least 1")
 
+    _agent_flags(p, args)
+    for source in sources_mod.sources():
+        source.reset()              # each run counts what it could not read
+
+    if args.command == "sources":
+        return _sources(args)
+
     # After the --days check: check dispatched first scanned the future for
     # --days -1 and printed an all-clear.
     if args.command == "check":
@@ -1071,16 +1340,23 @@ def _main(argv=None):
         known = {}            # for the review: never written anywhere
         remember = _remembering(args)
         try:
-            findings, scanned, changed = clean_mod.scan(
-                root=args.root, since_days=args.days, apply=args.apply,
+            searched = clean_mod.scan_sources(
+                sources=args.sources, root=args.root, paths=args.paths,
+                since_days=args.days, apply=args.apply,
                 progress=step(_SECRETS), known=known,
                 remember=remember if args.apply else None)
         finally:
             bar.clear()
+        findings, scanned, changed = (searched.findings, searched.scanned,
+                                      searched.changed)
+        # clean has never searched OpenClaw, and says so only when asked
+        # for it by name.
+        unsearched = searched.unsearched if "openclaw" in (args.source or ()) else 0
         # Zero read is not "No secrets found": it is a wrong --root, a
         # fresh machine, or history kept somewhere else.
         places = None if scanned else watch_mod.locations(
-            ("claude-code",), root=args.root)
+            [i for i in args.sources if i != "openclaw"] or ("claude-code",),
+            root=args.root, paths=args.paths)
         # Every value found is masked in what clean prints, as check masks
         # it: one may sit in another finding's key name, in the path
         # another was read from, or in a transcript's name, and the report,
@@ -1089,40 +1365,57 @@ def _main(argv=None):
         if args.json:
             doc = {"scanned": scanned, "applied": args.apply, "changed": changed,
                    "findings": [_finding_json(f) for f in findings.values()]}
+            if args.apply:
+                # The files holding a finding that were left as they are:
+                # {path: "read-only", "in use", ...}.
+                doc["not_masked"] = dict(
+                    [(path, "read-only") for path in searched.read_only]
+                    + [(path, why) for path, (_i, why) in searched.skipped.items()])
             print(_json_text(_masked_strings(doc, shown) if shown else doc))
             return _said_nothing_read(places, args.days)
         if places is not None:
             print(_clean_nothing_read(args))
+            if unsearched:
+                print("\n".join(term.wrap(clean_mod.UNSEARCHED % unsearched)))
             return 2
-        print(clean_mod.render(findings, scanned, changed, args.apply, shown=shown))
+        print(clean_mod.render(findings, searched.counts, changed, args.apply,
+                               shown=shown, unsearched=unsearched,
+                               others=searched.others,
+                               read_only=searched.read_only,
+                               skipped=searched.skipped,
+                               notes=_clean_notes(args, searched)))
         # The findings are already in memory; making someone re-scan a
         # large history just to act on what they read is wasteful.
         if (findings and not args.apply and not args.no_interactive
                 and sys.stdin.isatty()):
             clean_mod.review(findings, scanned, values=known,
-                             paths=clean_mod.discover(args.root, args.days),
-                             shown=shown, remember=remember)
+                             paths=(clean_mod.discover(args.root, args.days)
+                                    if "claude-code" in args.sources else []),
+                             shown=shown, remember=remember,
+                             stores=searched.stores)
         return 0
 
     if args.command == "watch":
-        sources = args.source or watch_mod.SOURCES
+        sources = args.sources
         bar, step = _progress_line(args)
         try:
             everywhere = _known(args, step)
             records, counts = watch_mod.scan_sources_counted(
                 sources=sources, root=args.root, state_dir=args.state_dir,
-                since_days=args.days, progress=step(_ACTIONS), known=everywhere)
+                since_days=args.days, progress=step(_ACTIONS), known=everywhere,
+                paths=args.paths)
             if everywhere:
                 records = _masked_strings(records, everywhere.mask)
         finally:
             bar.clear()
         n = sum(counts.values())
         places = None if n else watch_mod.locations(
-            sources, root=args.root, state_dir=args.state_dir)
+            sources, root=args.root, state_dir=args.state_dir, paths=args.paths)
         if args.json:
             print(_json_text(records))
             return _said_nothing_read(places, args.days)
-        print(watch_mod.render(records, counts, args.days, locations=places))
+        print(watch_mod.render(records, counts, args.days, locations=places,
+                               notes=_notes(args)))
         return 2 if places is not None else 0
 
     if args.command == "demo":

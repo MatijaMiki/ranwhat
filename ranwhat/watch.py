@@ -27,6 +27,7 @@ import posixpath
 import re
 import time
 
+from . import agents as _agents
 from . import sources as _registry
 from . import term
 from .sources import _sqlite
@@ -2072,6 +2073,20 @@ def _record(call, hits, payload, source):
     }
 
 
+def _adapter_record(call, hits, payload):
+    """_record for a call read through an adapter other than the two
+    ported ones (design 3.5): its kind too, who ran it when that was the
+    user, and that it never ran when the agent says so. "source" is the
+    adapter's id, and "project" the call's working directory."""
+    record = _record(call, hits, payload, call.source)
+    record["kind"] = call.kind
+    if call.actor == "user":
+        record["actor"] = "user"
+    if call.status == "declined":
+        record["status"] = "declined"
+    return record
+
+
 # --------------------------------------------------------------------------
 # Source: Claude Code JSONL transcripts
 # --------------------------------------------------------------------------
@@ -2288,9 +2303,17 @@ def _nothing_read(days, places, width):
         return L + [""]
     L = say("No transcripts found, so nothing was checked.", YEL)
     L.append(DIM("  Looked in:"))
-    for p in places:
-        L.append(DIM("    %-12s %s" % (_SOURCE_NAMES.get(p["source"], p["source"]),
-                                       _shown_path(p["path"], width - 17))))
+    # Names in a column as wide as the longest, but never so wide that a
+    # path has no room beside it: then it goes on the line under its name.
+    names = [_SOURCE_NAMES.get(p["source"], p["source"]) for p in places]
+    pad = max([12] + [len(n) for n in names])
+    for name, p in zip(names, places):
+        if 4 + pad + 1 + 16 <= width:
+            L.append(DIM("    %-*s %s" % (pad, name, _shown_path(
+                p["path"], width - 5 - pad))))
+        else:
+            L.append(DIM("    " + _fit(name, width - 4)))
+            L.append(DIM("      " + _shown_path(p["path"], width - 6)))
     sources = [p["source"] for p in places]
     inner = [p for p in places if p.get("projects")]
     for p in inner:
@@ -2298,9 +2321,17 @@ def _nothing_read(days, places, width):
     if "claude-code" in sources and not inner:
         L += say("If Claude Code keeps its history somewhere else, pass %s."
                  % ELSEWHERE, DIM)
+    for source_id in dict.fromkeys(sources):
+        if source_id in _agents.PORTED:
+            continue
+        source = _registry.get(source_id)
+        L += say("For %s, pass --path %s=PATH, where PATH is %s."
+                 % (source.name, source.id, source.path_means), DIM)
     if "openclaw" in sources:
         L += say("For OpenClaw, pass --state-dir PATH or set "
                  "OPENCLAW_STATE_DIR.", DIM)
+    L += say("ranwhat sources lists every agent ranwhat reads, and where "
+             "each keeps its history.", DIM)
     return L + [""]
 
 
@@ -2311,7 +2342,8 @@ def _total(scanned):
 def _scanned_words(scanned):
     """What a scan read, in its own units. An OpenClaw database is one per
     agent, not a transcript, and clean, which counts transcripts, reads
-    none: counted together, check said 2 where clean said 1."""
+    none: counted together, check said 2 where clean said 1. (A report
+    that read anything names each agent instead: _head.)"""
     if not isinstance(scanned, dict):
         return "%d transcript(s)" % scanned
     transcripts, databases = scanned.get("claude-code", 0), scanned.get("openclaw", 0)
@@ -2332,7 +2364,7 @@ def _why_lines(why, width):
     return tuple(lines)
 
 
-def render(records, scanned, days, footer=True, locations=None):
+def render(records, scanned, days, footer=True, locations=None, notes=None):
     """`footer=False` is for check, which prints one footer for all sections.
     It gates only the closing rule and footer line, never a finding.
 
@@ -2344,6 +2376,9 @@ def render(records, scanned, days, footer=True, locations=None):
     is older than the window; without it, it still says nothing was read
     rather than that nothing was flagged.
 
+    `notes` are sentences printed under the records: what an agent's
+    history held that could not be read (notes()).
+
     A record with several hits is headed by its most severe one, and each
     hit's evidence and why print under that hit's own title: a deletion
     listed under "Credential material accessed" reads as a credential read.
@@ -2354,18 +2389,23 @@ def render(records, scanned, days, footer=True, locations=None):
     BOLD, DIM, RED, YEL, GRN, CYA = painters()
     colour = {CRITICAL: RED, HIGH: YEL, MEDIUM: CYA}
     width = term.width()
-    head = "  %s scanned" % _scanned_words(scanned)
+    head = _head(scanned, days)
+    # Each record says which agent ran it, unless every one is Claude
+    # Code's: then the line above says so once.
+    labelled = isinstance(scanned, dict) and any(
+        n for source, n in scanned.items() if source != "claude-code")
     scanned = _total(scanned)
-    if days:
-        head += ", last %s" % _days(days)
     L = ["", BOLD("  ranwhat watch  ") + DIM("· local agent flight recorder"),
-         DIM(term.rule("-")), head, ""]
+         DIM(term.rule("-"))] + head + [""]
+    notes = [DIM(line) for note in notes or () for line in term.wrap(note)]
     if not records and not scanned:
         L += _nothing_read(days, locations, width)
         return "\n".join(L)
     if not records:
         L += ["  " + GRN("Nothing flagged."),
               DIM("  Every tool call was read, none tripped a rule."), ""]
+        if notes:
+            L += notes + [""]
         return "\n".join(L)
 
     counts = {}
@@ -2389,7 +2429,9 @@ def render(records, scanned, days, footer=True, locations=None):
         title = hits[0]["title"]
         meta = "  ".join(p for p in (
             _local_time(r.get("timestamp")),
-            _printable(str(r.get("tool_name") or ""))) if p)
+            _SOURCE_NAMES.get(r.get("source"), "") if labelled else "",
+            _printable(str(r.get("tool_name") or "")),
+            _RAN.get(r.get("actor")), _RAN.get(r.get("status"))) if p)
         paint = colour.get(r["severity"], DIM)
         if meta and len("  * %s   %s" % (title, meta)) <= width:
             L.append("  " + paint("* ") + BOLD(title) + DIM("   " + meta))
@@ -2412,9 +2454,32 @@ def render(records, scanned, days, footer=True, locations=None):
             L.append(DIM("      " + _fit(_printable(evidence), width - 6)))
             L += [DIM(line) for line in _why_lines(h.get("why") or "", width)]
         L.append("")
+    if notes:
+        L += notes + [""]
     if footer:
         L += [DIM(term.rule("-")), DIM(term.FOOTER), ""]
     return "\n".join(L)
+
+
+# What the meta line of a record adds for a command the user typed into
+# the agent, and for one the agent says never ran (design 3.5).
+_RAN = {"user": "(you ran this)", "declined": "(declined, did not run)"}
+
+
+def _head(scanned, days):
+    """The line under the title: what was read, and how far back. A scan
+    that read anything names each agent and how much of its history it
+    read ("Read Claude Code: 429 transcripts; Codex: 12 sessions"), only
+    the agents it read; one given a bare count, as before."""
+    said = _agents.read_words(scanned) if isinstance(scanned, dict) else None
+    if not said:
+        head = "  %s scanned" % _scanned_words(scanned)
+        if days:
+            head += ", last %s" % _days(days)
+        return [head]
+    if days:
+        said += ", last %s" % _days(days)
+    return term.wrap(said)
 
 
 # --------------------------------------------------------------------------
@@ -2449,25 +2514,76 @@ def scan_openclaw_db(path, source="openclaw", known=None):
     return records
 
 
-def scan_openclaw(state_dir=None, since_days=None, known=None):
+def scan_openclaw(state_dir=None, since_days=None, known=None, progress=None,
+                  done=0, total=None):
     """Every database is read whatever its mtime: a live agent's recent
     rows can sit in its -wal file while the database itself looks old.
-    With since_days, each action is kept by its own time, as in scan_all."""
+    With since_days, each action is kept by its own time, as in scan_all.
+    `progress` is called with (done + i, total, path) before the i-th."""
     records, cutoff = [], _cutoff(since_days)
     dbs = openclaw_databases(state_dir)
-    for db in dbs:
+    total = done + len(dbs) if total is None else total
+    for i, db in enumerate(dbs, 1):
+        if progress:
+            progress(done + i, total, db)
         records.extend(r for r in scan_openclaw_db(db, known=known)
                        if _in_window(r, cutoff))
     return records, len(dbs)
 
 
-# The sources watch reads, in registry order: Claude Code first, OpenClaw
-# last. The other adapters in the registry are not read here yet: each
-# joins when watch and clean are wired to it (design 3.5 and 3.6), and
-# SOURCES is then every registry id.
-_READ_HERE = ("claude-code", "openclaw")
-SOURCES = tuple(i for i in _registry.ids() if i in _READ_HERE)
+# The sources watch reads: every adapter in the registry, in its order,
+# Claude Code first and OpenClaw near the end (design 4.2). Claude Code and
+# OpenClaw are read by scan_all and scan_openclaw above, the others through
+# their adapters.
+SOURCES = _registry.ids()
 _SOURCE_NAMES = {i: _registry.get(i).name for i in SOURCES}
+
+
+def _in_window_call(record, call, cutoff):
+    """_in_window, and for a call with no readable time of its own, the
+    latest time it can have happened (design 3.5): a call cannot be newer
+    than the last write of the store that holds it, so a two-year-old
+    session does not show up in every --days 30 report."""
+    if cutoff is None:
+        return True
+    when = _epoch(record.get("timestamp"))
+    if when is not None:
+        return when >= cutoff
+    latest = _epoch(call.not_after) if call.not_after else None
+    return latest is None or latest >= cutoff
+
+
+def scan_source(source, stores, since_days=None, known=None, progress=None,
+                done=0, total=None):
+    """Action Records for the tool calls in these stores of one adapter,
+    each distinct action once, as scan_all reports Claude Code's. `stores`
+    are its transcripts (agents.discover). `progress` is called with (done
+    + i, total, path) before the i-th is read. An adapter that fails part
+    way warns once, and what it read until then is kept."""
+    records, seen = [], set()
+    cutoff = _cutoff(since_days)
+    total = len(stores) + done if total is None else total
+    for i, store in enumerate(stores, 1):
+        if progress:
+            progress(done + i, total, store.path)
+        try:
+            for call in source.tool_calls(store):
+                hits, payload = judge(call, known)
+                if not hits:
+                    continue
+                record = _adapter_record(call, hits, payload)
+                if not _in_window_call(record, call, cutoff):
+                    continue
+                key = (record["tool_name"], record["payload_hash"],
+                       record.get("timestamp"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                records.append(record)
+        except Exception as error:      # one adapter must not stop the others
+            source.warn(("calls", store.path), "could not read %s %s (%s)"
+                        % (source.name, store.path, error))
+    return records
 
 
 def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
@@ -2476,9 +2592,11 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
     """Scan every requested local agent source into one record stream.
 
     Returns (records, {source: how many it read}): Claude Code transcripts,
-    OpenClaw databases. Zero read is not an all-clear: locations() says
+    OpenClaw databases, and each other agent's transcripts (its sessions,
+    in its own words). Zero read is not an all-clear: locations() says
     whether there was anything to read at all. `progress` is scan_all's,
-    and `known` (a known.Matcher) is masked in every record.
+    counting every source's transcripts together, and `known` (a
+    known.Matcher) is masked in every record.
 
     root and state_dir point Claude Code and OpenClaw elsewhere; `paths`,
     {source id: path}, points any source, and a root or state_dir given
@@ -2487,13 +2605,38 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
     root = root or paths.get("claude-code")
     state_dir = state_dir or paths.get("openclaw")
     records, counts = [], {}
+    # Only the agents with transcripts to read are counted: one that is
+    # not on this machine is not named in the report.
+    others = []
+    for source in _agents.adapters(sources):
+        _locations, stores = _agents.discover(source, paths.get(source.id),
+                                              since_days)
+        stores = _agents.transcripts(stores)
+        if stores:
+            others.append((source, stores))
+    databases = (len(openclaw_databases(state_dir)) if "openclaw" in sources
+                 else 0)
+    extra = sum(len(stores) for _source, stores in others) + databases
+    done = 0
     if "claude-code" in sources:
+        step = progress
+        if progress and extra:
+            def step(i, total, path):
+                progress(i, total + extra, path)
         recs, counts["claude-code"] = scan_all(root=root, since_days=since_days,
-                                               progress=progress, known=known)
+                                               progress=step, known=known)
         records += recs
+        done = counts["claude-code"]
+    for source, stores in others:
+        records += scan_source(source, stores, since_days, known, progress,
+                               done, done + extra)
+        counts[source.id] = len(stores)
+        done += len(stores)
+        extra -= len(stores)
     if "openclaw" in sources:
-        recs, counts["openclaw"] = scan_openclaw(state_dir=state_dir,
-                                                 since_days=since_days, known=known)
+        recs, counts["openclaw"] = scan_openclaw(
+            state_dir=state_dir, since_days=since_days, known=known,
+            progress=progress, done=done, total=done + extra)
         records += recs
     records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
     return records, counts
@@ -2505,14 +2648,22 @@ def scan_sources(sources=SOURCES, root=None, state_dir=None, since_days=None):
     return records, sum(counts.values())
 
 
-def locations(sources=SOURCES, root=None, state_dir=None):
+def locations(sources=SOURCES, root=None, state_dir=None, paths=None):
     """Where each requested source keeps its history, and how many
     transcripts are there whatever their age:
     [{"source": ..., "path": ..., "found": n}], JSON as it is.
 
     What tells "nothing to read" from "read, and nothing tripped": no
     transcripts found anywhere means a wrong --root, a fresh machine, or
-    history kept somewhere else, and must not read as an all-clear."""
+    history kept somewhere else, and must not read as an all-clear.
+
+    Claude Code and OpenClaw are always named when asked for, as before.
+    Any other agent is named only where it keeps transcripts, or where
+    `paths` ({source id: path}) points it: an agent that is not on this
+    machine is not listed (`ranwhat sources` lists every one)."""
+    paths = paths or {}
+    root = root or paths.get("claude-code")
+    state_dir = state_dir or paths.get("openclaw")
     out = []
     if "claude-code" in sources:
         path = root or claude_projects()
@@ -2527,6 +2678,13 @@ def locations(sources=SOURCES, root=None, state_dir=None):
             if n:
                 place["projects"] = {"path": inner, "found": n}
         out.append(place)
+    for source in _agents.adapters(sources):
+        pointed = paths.get(source.id)
+        for loc in source.locations(pointed):
+            n = (len(_agents.transcripts(source.stores([loc])))
+                 if loc.found else 0)
+            if n or pointed:
+                out.append({"source": source.id, "path": loc.path, "found": n})
     if "openclaw" in sources:
         path = state_dir or openclaw_state_dir()
         out.append({"source": "openclaw", "path": path,

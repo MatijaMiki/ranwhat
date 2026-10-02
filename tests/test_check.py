@@ -664,7 +664,7 @@ class APathIsNotARoot(_Base):
                                                 if command == "clean" else
                                                 [command, "--root", projects, "--state-dir", st])
                     self.assertEqual(rc, 0, err)
-                    self.assertIn("2 transcript(s) scanned", out)
+                    self.assertIn("Read Claude Code: 2 transcripts", out)
 
     def test_a_path_with_no_transcripts_near_it_suggests_no_root(self):
         """`check ~/Desktop/app`, a project's source, said to pass --root
@@ -703,7 +703,7 @@ class APathIsNotARoot(_Base):
                         [command, "--state-dir", st]
                         + (["--no-interactive"] if command == "clean" else []))
                     self.assertEqual(rc, 0, err)
-                    self.assertIn("1 transcript(s) scanned", out)
+                    self.assertIn("Read Claude Code: 1 transcript", out)
         # With none in the projects directory either, no step is offered.
         nothing = tempfile.mkdtemp(prefix="check-none-")
         with mock.patch.object(watch, "CLAUDE_PROJECTS", nothing):
@@ -974,11 +974,11 @@ class OpenClawIsNotSearchedForSecrets(_Base):
         rc, out, _ = self.run_cli(["check"] + self.argv)
         self.assertEqual(rc, 0)
         watch_part, clean_part = out.split("  ranwhat clean", 1)
-        self.assertIn("1 transcript(s) and 1 OpenClaw database(s) scanned",
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
                       " ".join(watch_part.split()))
         self.assertIn("Credential material accessed", watch_part)
-        self.assertNotIn("2 transcript(s)", out)
-        self.assertIn("1 transcript(s) scanned", clean_part)
+        self.assertNotIn("2 transcript", out)
+        self.assertIn("Read Claude Code: 1 transcript\n", clean_part)
 
     def test_no_all_clear_on_history_it_did_not_search(self):
         _, out, _ = self.run_cli(["check"] + self.argv)
@@ -994,7 +994,7 @@ class OpenClawIsNotSearchedForSecrets(_Base):
 
     def test_watch_counts_a_database_as_one(self):
         _, out, _ = self.run_cli(["watch"] + self.argv)
-        self.assertIn("1 transcript(s) and 1 OpenClaw database(s) scanned",
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
                       " ".join(out.split()))
 
 

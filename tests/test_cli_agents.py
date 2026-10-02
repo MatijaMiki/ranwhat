@@ -1,0 +1,817 @@
+"""Every agent ranwhat reads, through the whole CLI (design 5.2 and 5.3).
+
+The adapters' own tests read each agent's files through the adapter. These
+run check, watch and clean over them as a user would, with --source and
+--path, and look at what the reports and --json say: a dangerous shell
+call and a credential read flagged and named by agent, a secret found with
+the file it was read out of, masked in a file the agent lets ranwhat
+rewrite and left byte for byte in one it does not, a store that does not
+parse, the --days window, and a value found in one agent's history masked
+where another's shows it.
+
+Every value here is synthetic, and every file is in a temp directory: the
+home directory each adapter defaults to is an empty one, so only the
+folders --path names are read.
+"""
+import hashlib
+import io
+import json
+import os
+import shutil
+import stat
+import sys
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+TESTS = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(TESTS)
+sys.path.insert(0, REPO)
+sys.path.insert(0, TESTS)
+
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
+import agents_fixtures as af  # noqa: E402
+from ranwhat import clean, cli, sources  # noqa: E402
+from ranwhat.sources import _paths, _rewrite  # noqa: E402
+
+SECRET = "sk_" "live_" "Fx7Qw2Er9Ty4Ui1Op6As3Df"
+OTHER = "sk_" "live_" "Mn3Bv5Cx7Zl9Kj2Hg4Fd6Sa"
+# Passwords with no shape of their own, found where a key names them and
+# typed elsewhere with nothing beside them (test_known_index's kind).
+PW = "Hq7xT2mVp9LwZr4kNd"
+PW2 = "Rw4KzQ8nVy2TmXp6Jh"
+SCRIPT = "./deploy.sh prod xY3%s4Kq -e 'DROP DATABASE prod '"
+WIDTHS = ("46", "60", "80")
+
+
+def _sha(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def _read(path):
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _marker(value):
+    return clean.REDACTION % clean._fingerprint(value)
+
+
+def _claude_call(i, command, output, when):
+    stamp = af.iso(when)
+    return [{"type": "assistant", "timestamp": stamp, "message": {"content": [
+        {"type": "tool_use", "id": "t%s" % i, "name": "Bash",
+         "input": {"command": command}}]}},
+        {"type": "user", "timestamp": stamp, "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t%s" % i, "content": output}]}}]
+
+
+class _Cli(unittest.TestCase):
+    """A temp home that holds no agent's history, ranwhat's state and
+    backups in temp folders, and a run of the CLI in this process."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cli-agents-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.home = os.path.join(self.tmp, "home")
+        os.makedirs(self.home)
+        self.backups = os.path.join(self.tmp, "backups")
+        env = {"HOME": self.home, "USERPROFILE": self.home,
+               "RANWHAT_HOME": os.path.join(self.tmp, "state"),
+               "NO_COLOR": "1", "RANWHAT_WIDTH": "80"}
+        patches = [mock.patch.dict(os.environ, env),
+                   mock.patch.object(_paths, "home", return_value=self.home),
+                   mock.patch.object(clean, "BACKUP_ROOT", self.backups)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        for name in af.AGENT_ENV:
+            os.environ.pop(name, None)          # restored by patch.dict
+        # Under the home directory, where a report shows them as ~/...,
+        # and none where an agent keeps its history by default.
+        self.claude = os.path.join(self.home, "claude", "projects")
+        os.makedirs(self.claude)
+        self.openclaw = os.path.join(self.home, "no-openclaw")
+        self.now = time.time() - 600
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
+                mock.patch("sys.stdin", io.StringIO()):
+            try:
+                rc = cli.main(list(argv))
+            except SystemExit as exit:
+                rc = exit.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def base_flags(self):
+        return ["--root", self.claude, "--state-dir", self.openclaw]
+
+    def only(self, agent, root):
+        return ["--source", agent.id, "--path", "%s=%s" % (agent.id, root)] \
+            + self.base_flags()
+
+    def agent_root(self, agent):
+        """A short folder of its own under the home directory: a suggested
+        command repeats it, and a path is never split across lines."""
+        return agent.root(os.path.join(self.home, "a%d" % af.AGENTS.index(agent)))
+
+    def claude_transcript(self, rows, name="s1"):
+        path = os.path.join(self.claude, "-tmp-synthetic", name + ".jsonl")
+        return af.write(path, [json.dumps(r) for r in rows])
+
+    def backup_files(self):
+        return [os.path.join(d, f) for d, _s, files in os.walk(self.backups)
+                for f in files]
+
+    def assertFits(self, text, width):
+        for line in text.split("\n"):
+            self.assertLessEqual(len(line), width, repr(line))
+
+    def assertAllMasked(self, text, *values):
+        for value in values:
+            for form in _rewrite.encodings(value):
+                self.assertNotIn(form, text)
+
+
+def _calls(now):
+    return [("c1", "shell", "rm -rf ~/Documents/x", "removed\n", now),
+            ("c2", "shell", "cat ~/.aws/credentials", "[default]\n", now + 1),
+            ("c3", "read", "~/.ssh/id_rsa", "ok\n", now + 2),
+            ("c4", "shell", "cat .env", "API_KEY=%s\n" % SECRET, now + 3)]
+
+
+class EveryAgentWatched(_Cli):
+    """5.2 items 4, 5 and 8, and the source field: what watch reports of
+    each agent, named by it."""
+
+    def test_dangerous_shell_calls_and_credential_reads_are_flagged(self):
+        for agent in af.AGENTS:
+            with self.subTest(agent=agent.id):
+                root = self.agent_root(agent)
+                agent.write(root, _calls(self.now))
+                rc, out, err = self.run_cli("watch", "--json", *self.only(agent, root))
+                self.assertEqual(rc, 0, err)
+                records = json.loads(out)
+                evidence = " ".join(h["evidence"] for r in records for h in r["hits"])
+                rules = {h["rule"] for r in records for h in r["hits"]}
+                self.assertIn("fs.destructive", rules)
+                self.assertIn("cred.read", rules)
+                self.assertIn("~/Documents/x", evidence)
+                self.assertIn(".aws/credentials", evidence)
+                self.assertIn(".ssh/id_rsa", evidence)
+                self.assertEqual({r["source"] for r in records}, {agent.id})
+                self.assertNotIn(SECRET, out)
+
+    def test_the_report_names_the_agent_and_how_much_it_read(self):
+        for agent in af.AGENTS:
+            with self.subTest(agent=agent.id):
+                root = self.agent_root(agent)
+                agent.write(root, _calls(self.now))
+                rc, out, _ = self.run_cli("watch", *self.only(agent, root))
+                self.assertEqual(rc, 0)
+                name = sources.get(agent.id).name
+                self.assertIn("Read %s: 1 %s" % (name, agent.unit), out)
+                self.assertNotIn("Claude Code", out)
+                # each record's first line, or the line under it when the
+                # time and tool do not fit beside its title
+                lines = out.split("\n")
+                flagged = [i for i, line in enumerate(lines)
+                           if line.startswith("  * ")]
+                self.assertTrue(flagged)
+                for i in flagged:
+                    self.assertIn(name, lines[i] + lines[i + 1])
+
+    def test_every_source_is_read_by_default(self):
+        roots = {}
+        for agent in af.AGENTS:
+            roots[agent.id] = root = self.agent_root(agent)
+            agent.write(root, _calls(self.now)[:1])
+        argv = ["watch", "--json"] + self.base_flags()
+        for agent_id, root in roots.items():
+            argv += ["--path", "%s=%s" % (agent_id, root)]
+        rc, out, err = self.run_cli(*argv)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted({r["source"] for r in json.loads(out)}),
+                         sorted(roots))
+
+    def test_a_store_that_does_not_parse_leaves_the_others_read(self):
+        for agent in af.AGENTS:
+            with self.subTest(agent=agent.id):
+                root = self.agent_root(agent)
+                agent.write(root, _calls(self.now)[:1])
+                bad = agent.garbage(root)
+                for command in (["watch", "--json"],
+                                ["clean", "--json", "--no-interactive"]):
+                    rc, out, err = self.run_cli(*(command + self.only(agent, root)))
+                    self.assertEqual(rc, 0, err)
+                    self.assertLessEqual(err.count(bad), 1, err)
+                rc, out, err = self.run_cli("watch", "--json", *self.only(agent, root))
+                self.assertEqual([h["rule"] for r in json.loads(out) for h in r["hits"]],
+                                 ["fs.destructive"])
+
+    def test_the_days_window(self):
+        for agent in af.AGENTS:
+            with self.subTest(agent=agent.id):
+                root = self.agent_root(agent)
+                old = time.time() - 400 * 86400
+                agent.write(root, [
+                    ("c1", "shell", "rm -rf ~/Documents/old", "x\n", old),
+                    ("c2", "shell", "rm -rf ~/Documents/new", "x\n", self.now)])
+                rc, out, _ = self.run_cli("watch", "--json", "--days", "30",
+                                          *self.only(agent, root))
+                evidence = " ".join(h["evidence"] for r in json.loads(out)
+                                    for h in r["hits"])
+                self.assertIn("Documents/new", evidence)
+                self.assertNotIn("Documents/old", evidence)
+                rc, out, _ = self.run_cli("watch", "--json", "--days", "3650",
+                                          *self.only(agent, root))
+                evidence = " ".join(h["evidence"] for r in json.loads(out)
+                                    for h in r["hits"])
+                self.assertIn("Documents/old", evidence)
+
+
+class EveryAgentCleaned(_Cli):
+    """5.2 items 9, 10 and 11: what clean finds in each agent's history,
+    and what it does to the files."""
+
+    def finding(self, out, value):
+        doc = json.loads(out)
+        [found] = [f for f in doc["findings"]
+                   if f["fingerprint"] == clean._fingerprint(value)]
+        return found
+
+    def test_a_secret_is_found_with_the_file_it_was_read_out_of(self):
+        for agent in af.AGENTS:
+            with self.subTest(agent=agent.id):
+                root = self.agent_root(agent)
+                path = agent.write(root, _calls(self.now))
+                rc, out, err = self.run_cli("clean", "--json", "--no-interactive",
+                                            *self.only(agent, root))
+                self.assertEqual(rc, 0, err)
+                self.assertNotIn(SECRET, out)
+                found = self.finding(out, SECRET)
+                self.assertEqual(found["origins"], [".env"])
+                self.assertEqual(found["sources"], [agent.id])
+                self.assertEqual(found["stores"], {path: agent.id})
+                self.assertEqual(found["read_only"], [])
+                self.assertEqual(json.loads(out)["scanned"], 1 + (agent.id == "grok"))
+
+    def test_masking_round_trip(self):
+        for agent in af.AGENTS:
+            with self.subTest(agent=agent.id):
+                root = self.agent_root(agent)
+                path = agent.write(root, _calls(self.now))
+                before = _read(path)
+                mode = stat.S_IMODE(os.stat(path).st_mode)
+                rc, out, err = self.run_cli("clean", "--apply", "--no-interactive",
+                                            *self.only(agent, root))
+                self.assertEqual(rc, 0, err)
+                after = _read(path)
+                text = after.decode("utf-8")
+                self.assertAllMasked(text, SECRET)
+                self.assertIn(_marker(SECRET), text)
+                plan = _rewrite._plan([SECRET])
+                self.assertEqual(text, _rewrite._replace_text(
+                    before.decode("utf-8"), plan, agent.byte_arrays))
+                for line in text.splitlines():
+                    if line.strip():
+                        json.loads(line)
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), mode)
+                backups = [b for b in self.backup_files() if _read(b) == before]
+                self.assertEqual(len(backups), 1)
+                self.assertIn("Masked in 1 file(s).", out)
+                # the calls are all still there, and a second run changes nothing
+                rc, watched, _ = self.run_cli("watch", "--json",
+                                              *self.only(agent, root))
+                rules = sorted(h["rule"] for r in json.loads(watched) for h in r["hits"])
+                self.assertEqual(rules, ["cred.read", "cred.read", "cred.read",
+                                         "fs.destructive"])
+                self.run_cli("clean", "--apply", "--no-interactive",
+                             *self.only(agent, root))
+                self.assertEqual(_read(path), after)
+                shutil.rmtree(self.backups, True)
+
+    def test_read_only_stores_are_left_byte_for_byte(self):
+        agents = [a for a in af.AGENTS if a.has_read_only]
+        self.assertEqual([a.id for a in agents], ["codex", "qwen"])
+        for agent in agents:
+            with self.subTest(agent=agent.id):
+                root = self.agent_root(agent)
+                agent.write(root, _calls(self.now)[:1])
+                path = agent.read_only(root, OTHER)
+                digest = _sha(path)
+                rc, out, err = self.run_cli("clean", "--json", "--no-interactive",
+                                            *self.only(agent, root))
+                found = self.finding(out, OTHER)
+                self.assertEqual(found["read_only"], [path])
+                rc, out, err = self.run_cli("clean", "--apply", "--no-interactive",
+                                            *self.only(agent, root))
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(_sha(path), digest)
+                self.assertNotIn(OTHER, out)
+                self.assertIn("read only", out)
+                self.assertEqual([b for b in self.backup_files()
+                                  if _read(b) == _read(path)], [])
+
+    def test_a_file_written_within_the_quiet_period_is_not_masked(self):
+        agent = af.AGENTS[0]
+        root = self.agent_root(agent)
+        path = agent.write(root, _calls(self.now), age=5)
+        before = _read(path)
+        rc, out, err = self.run_cli("clean", "--apply", "--no-interactive",
+                                    *self.only(agent, root))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(_read(path), before)
+        self.assertIn("in use", out)
+
+
+class KnownAcrossAgents(_Cli):
+    """A value clean finds in one agent's history is masked wherever
+    another agent's shows it (known.py indexes every source's stores)."""
+
+    def test_a_codex_value_is_masked_in_claude_codes_actions_and_back(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, [
+            ("c1", "shell", "cat .env", "DB_PASSWORD=%s\n" % PW, self.now),
+            ("c2", "shell", SCRIPT % PW2, "ok\n", self.now + 1)])
+        self.claude_transcript(
+            _claude_call(1, SCRIPT % PW, "ok", self.now + 2)
+            + _claude_call(2, "cat .env", "DB_PASSWORD=%s\n" % PW2, self.now + 3))
+        flags = self.base_flags() + ["--path", "codex=" + root]
+        for argv in (["watch", "--json"], ["check", "--json"], ["watch"], ["check"]):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_cli(*(argv + flags))
+                self.assertEqual(rc, 0, err)
+                self.assertIn("DROP DATABASE", out)
+                self.assertNotIn(PW, out)
+                self.assertNotIn(PW2, out)
+        rc, out, _ = self.run_cli("watch", "--json", *flags)
+        self.assertEqual(sorted({r["source"] for r in json.loads(out)}),
+                         ["claude-code", "codex"])
+
+    def test_a_value_found_only_by_codex_is_masked_with_source_claude_code(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, [("c1", "shell", "cat .env", "DB_PASSWORD=%s\n" % PW,
+                            self.now)])
+        self.claude_transcript(_claude_call(1, SCRIPT % PW, "ok", self.now + 2))
+        rc, out, err = self.run_cli("watch", "--json", "--source", "claude-code",
+                                    "--path", "codex=" + root, *self.base_flags())
+        self.assertEqual(rc, 0, err)
+        self.assertIn("DROP DATABASE", out)
+        self.assertNotIn(PW, out)
+
+
+
+class CleanAcrossAgents(_Cli):
+    """A value the rules find in one agent's history is masked where
+    another agent's files hold a copy the rules cannot see."""
+
+    def test_a_value_codex_read_is_masked_where_claude_code_typed_it(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        session = codex.write(root, [
+            ("c1", "shell", "cat .env", "DB_PASSWORD=%s\n" % PW, self.now),
+            ("c2", "shell", SCRIPT % PW2, "ok\n", self.now + 1)])
+        transcript = self.claude_transcript(
+            _claude_call(1, SCRIPT % PW, "ok", self.now + 2)
+            + _claude_call(2, "cat .env", "DB_PASSWORD=%s\n" % PW2, self.now + 3))
+        flags = self.base_flags() + ["--path", "codex=" + root]
+        rc, out, err = self.run_cli("clean", "--json", "--no-interactive", *flags)
+        doc = json.loads(out)
+        [pw] = [f for f in doc["findings"] if f["fingerprint"] == clean._fingerprint(PW)]
+        self.assertEqual(sorted(pw["sources"]), ["claude-code", "codex"])
+        self.assertEqual(sorted(pw["files"]), sorted([session, transcript]))
+        rc, out, err = self.run_cli("clean", "--apply", "--no-interactive", *flags)
+        self.assertEqual(rc, 0, err)
+        for path in (session, transcript):
+            text = _read(path).decode("utf-8")
+            self.assertAllMasked(text, PW, PW2)
+            self.assertIn(_marker(PW), text)
+            self.assertIn(_marker(PW2), text)
+
+
+class Flags(_Cli):
+    """design 4.1 and 5.3: --source and --path on every command that reads
+    agent history, --root and --state-dir as their old names."""
+
+    def argparse_error(self, *argv):
+        rc, out, err = self.run_cli(*argv)
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("error:", err)
+        return " ".join(err.split())
+
+    def test_the_source_choices_are_the_registry_ids(self):
+        said = self.argparse_error("watch", "--source", "cursor")
+        listed = said.split("choose from ")[1].split(")")[0]
+        self.assertEqual([c.strip(" '") for c in listed.split(",")],
+                         list(sources.ids()))
+
+    def test_every_id_on_every_command(self):
+        for command in ("check", "watch", "clean"):
+            for source_id in sources.ids():
+                with self.subTest(command=command, source=source_id):
+                    argv = [command, "--json", "--source", source_id]
+                    if command == "clean":
+                        argv.append("--no-interactive")
+                    rc, out, err = self.run_cli(*(argv + self.base_flags()))
+                    self.assertNotIn("error:", err)
+                    json.loads(out)
+
+    def test_a_bad_id_is_an_error_on_every_command(self):
+        for command in ("check", "watch", "clean", "sources"):
+            with self.subTest(command=command):
+                self.assertIn("invalid choice", self.argparse_error(
+                    command, "--source", "meta-muse"))
+
+    def test_path_for_an_agent_ranwhat_does_not_know_is_an_error(self):
+        said = self.argparse_error("watch", "--path", "cursor=" + self.tmp)
+        self.assertIn("no agent 'cursor'", said)
+        self.assertIn("codex", said)
+
+    def test_path_takes_an_id_and_a_path(self):
+        for given in (self.tmp, "codex=", "=" + self.tmp):
+            with self.subTest(given=given):
+                self.assertIn("ID=PATH", self.argparse_error(
+                    "watch", "--path", given))
+
+    def test_one_path_per_agent(self):
+        self.assertIn("twice", self.argparse_error(
+            "watch", "--path", "codex=" + self.tmp, "--path", "codex=" + self.home))
+
+    def test_root_and_state_dir_are_the_ported_agents_paths(self):
+        self.assertIn("give one", self.argparse_error(
+            "watch", "--root", self.claude, "--path", "claude-code=" + self.claude))
+        self.assertIn("give one", self.argparse_error(
+            "watch", "--state-dir", self.openclaw,
+            "--path", "openclaw=" + self.openclaw))
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/x", "ok", self.now))
+        for argv in (["--root", self.claude],
+                     ["--path", "claude-code=" + self.claude]):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_cli(
+                    "watch", "--json", "--state-dir", self.openclaw, *argv)
+                self.assertEqual(rc, 0, err)
+                self.assertEqual([r["source"] for r in json.loads(out)],
+                                 ["claude-code"])
+
+    def test_source_limits_every_section_of_check(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, _calls(self.now))
+        self.claude_transcript(
+            _claude_call(1, "rm -rf ~/Documents/c", "ok", self.now)
+            + _claude_call(2, "cat .env", "API_KEY=%s\n" % OTHER, self.now))
+        flags = self.base_flags() + ["--path", "codex=" + root]
+        for chosen, other in (("codex", "claude-code"), ("claude-code", "codex")):
+            with self.subTest(source=chosen):
+                rc, out, err = self.run_cli("check", "--json", "--source", chosen,
+                                            *flags)
+                doc = json.loads(out)
+                self.assertEqual({r["source"] for r in doc["actions"]}, {chosen})
+                self.assertEqual({i for f in doc["secrets"] for i in f["sources"]},
+                                 {chosen})
+
+    def test_a_suggested_command_reads_what_this_one_read(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, _calls(self.now))
+        rc, out, _ = self.run_cli("check", "--source", "codex",
+                                  "--path", "codex=" + root, *self.base_flags())
+        said = " ".join(out.replace("\\\n", " ").split())
+        self.assertIn("clean --root ~/claude/projects --source codex --path "
+                      "codex=~/a0/.codex", said)
+
+
+class Reports(_Cli):
+    """Reports name each agent they read and how much, and no other."""
+
+    def test_only_the_agents_read_are_named(self):
+        codex, gemini = af.AGENTS[0], af.AGENTS[1]
+        roots = {a.id: self.agent_root(a) for a in (codex, gemini)}
+        codex.write(roots["codex"], _calls(self.now))
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/c", "ok", self.now))
+        flags = self.base_flags() + ["--path", "codex=" + roots["codex"],
+                                     "--path", "gemini=" + roots["gemini"]]
+        for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_cli(*(argv + flags))
+                self.assertEqual(rc, 0, err)
+                text = " ".join(out.split())
+                self.assertIn("Read Claude Code: 1 transcript; Codex: 1 session", text)
+                self.assertNotIn("Gemini", text)
+                self.assertNotIn("Qwen", text)
+
+    def test_claude_code_alone_still_reads_as_before_but_for_its_name(self):
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/c", "ok", self.now))
+        rc, out, _ = self.run_cli("watch", *self.base_flags())
+        self.assertIn("  Read Claude Code: 1 transcript, last 30 days\n", out)
+        [line] = [l for l in out.split("\n") if l.startswith("  * ")]
+        self.assertNotIn("Claude Code", line)
+
+    def test_nothing_read_says_where_it_looked_and_names_no_absent_agent(self):
+        for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                rc, out, _ = self.run_cli(*(argv + self.base_flags()))
+                self.assertEqual(rc, 2)
+                text = " ".join(out.split())
+                self.assertIn("No transcripts found", text)
+                self.assertIn("~/claude/projects", out)
+                self.assertIn("ranwhat sources", text)
+                for name in ("Codex", "Gemini", "Copilot", "Droid", "Muse"):
+                    self.assertNotIn(name, text)
+
+    def test_an_agent_pointed_at_nothing_is_named(self):
+        nowhere = os.path.join(self.home, "no-codex")
+        rc, out, err = self.run_cli("watch", "--source", "codex",
+                                    "--path", "codex=" + nowhere, *self.base_flags())
+        self.assertEqual(rc, 2)
+        text = " ".join(out.split())
+        self.assertIn("Codex", text)
+        self.assertIn("~/no-codex", text)
+        self.assertIn("--path codex=PATH", text)
+        rc, out, err = self.run_cli("watch", "--json", "--source", "codex",
+                                    "--path", "codex=" + nowhere, *self.base_flags())
+        self.assertEqual((rc, out.strip()), (2, "[]"))
+        self.assertIn("--path codex=PATH", " ".join(err.split()))
+
+    def test_what_could_not_be_read_is_said(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, _calls(self.now)[:1])
+        codex.garbage(root)
+        for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                rc, out, _ = self.run_cli(*(argv + self.only(codex, root)))
+                self.assertIn("1 Codex file was not read: not JSON Lines.",
+                              " ".join(out.split()))
+
+    def test_records_of_other_agents_say_what_kind_of_call(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, _calls(self.now)[:1])
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/c", "ok", self.now))
+        rc, out, _ = self.run_cli("watch", "--json", "--path", "codex=" + root,
+                                  *self.base_flags())
+        by_source = {r["source"]: r for r in json.loads(out)}
+        self.assertEqual(by_source["codex"]["kind"], "shell")
+        self.assertEqual(by_source["codex"]["project"], "/home/dev/app")
+        # Claude Code's records keep exactly the keys they had
+        self.assertEqual(sorted(by_source["claude-code"]), sorted(
+            ["source", "session", "project", "timestamp", "tool_name",
+             "tool_call_id", "payload_hash", "severity", "hits"]))
+
+    def test_every_line_fits(self):
+        roots = {}
+        for agent in af.AGENTS[:4]:
+            roots[agent.id] = root = self.agent_root(agent)
+            agent.write(root, _calls(self.now))
+            agent.read_only(root, OTHER)
+            agent.garbage(root)
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/c", "ok", self.now))
+        flags = list(self.base_flags())
+        for agent_id, root in roots.items():
+            flags += ["--path", "%s=%s" % (agent_id, root)]
+        for width in WIDTHS:
+            for argv in (["watch"], ["check"], ["clean", "--no-interactive"],
+                         ["clean", "--apply", "--no-interactive"], ["sources"],
+                         ["watch", "--path", "kimi=" + os.path.join(self.tmp, "x")]):
+                with self.subTest(width=width, argv=argv), \
+                        mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                    rc, out, err = self.run_cli(*(argv + flags))
+                    self.assertNotIn("error:", err)
+                    self.assertFits(out, int(width))
+                    self.assertNotIn("—", out + err)
+
+
+class Progress(_Cli):
+    """One count for every agent's files together, in each pass."""
+
+    def test_each_pass_counts_every_agent(self):
+        for agent in af.AGENTS[:2]:
+            agent.write(self.agent_root(agent), _calls(self.now)[:1])
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/c", "ok", self.now))
+        flags = list(self.base_flags())
+        for agent in af.AGENTS[:2]:
+            flags += ["--path", "%s=%s" % (agent.id, self.agent_root(agent))]
+
+        class TTY(io.StringIO):
+            def isatty(self):
+                return True
+        for command, words in (("watch", "checking actions"),
+                               ("check", "looking for secrets"),
+                               ("check", "checking actions"),
+                               ("clean", "looking for secrets")):
+            with self.subTest(command=command, words=words):
+                err = TTY()
+                with mock.patch.dict(os.environ, {"TERM": "xterm"}), \
+                        mock.patch("sys.stdout", io.StringIO()), \
+                        mock.patch("sys.stderr", err), \
+                        mock.patch("sys.stdin", io.StringIO()):
+                    cli.main([command] + flags + (["--no-interactive"]
+                                                  if command == "clean" else []))
+                for i in (1, 2, 3):
+                    self.assertIn("%s %d/3" % (words, i), err.getvalue())
+
+
+class AbsentAgentsCostAStatOrTwo(_Cli):
+    """Every run looks for every agent. One that is not on this machine
+    costs a stat of each place it would be, and no listing: counted, not
+    timed, as a stat costs microseconds (design: under 50 ms in all)."""
+
+    def count(self, fn):
+        import builtins
+        counts = {"n": 0}
+        real = {name: getattr(os, name) for name in ("stat", "lstat", "listdir",
+                                                     "scandir")}
+        real_open = builtins.open
+
+        def counted(fn_):
+            def inner(*a, **k):
+                counts["n"] += 1
+                return fn_(*a, **k)
+            return inner
+        patches = [mock.patch.object(os, name, counted(f)) for name, f in real.items()]
+        patches.append(mock.patch.object(builtins, "open", counted(real_open)))
+        for p in patches:
+            p.start()
+        try:
+            fn()
+        finally:
+            for p in patches:
+                p.stop()
+        return counts["n"]
+
+    def test_each_absent_agent(self):
+        from ranwhat import agents
+        for source in agents.adapters():
+            with self.subTest(source=source.id):
+                n = self.count(lambda: agents.discover(source))
+                self.assertLessEqual(n, 4)
+
+    def test_a_whole_run(self):
+        """check looks for them three times (its read for secrets, the
+        index, its read for actions), and once more when nothing was read
+        to say where it looked."""
+        from ranwhat import agents
+        n_agents = len(agents.adapters())
+        before = self.count(lambda: self.run_cli("check", "--json",
+                                                 "--source", "claude-code",
+                                                 *self.base_flags()))
+        every = self.count(lambda: self.run_cli("check", "--json",
+                                                *self.base_flags()))
+        self.assertLessEqual(every - before, 4 * 4 * n_agents)
+
+
+class SourcesCommand(_Cli):
+    """ranwhat sources: every agent, where it looked, what it found."""
+
+    def entries(self, *argv):
+        rc, out, err = self.run_cli("sources", "--json", *argv)
+        self.assertEqual(rc, 0, err)
+        return json.loads(out)
+
+    def test_every_agent_in_registry_order_then_the_ones_it_cannot_read(self):
+        entries = self.entries(*self.base_flags())
+        ids = [e["id"] for e in entries if e["id"] is not None]
+        self.assertEqual(ids, list(sources.ids()))
+        self.assertEqual(ids[0], "claude-code")
+        elsewhere = [(e["name"], e["status"]) for e in entries if e["id"] is None]
+        self.assertEqual(elsewhere, [("Meta Muse", "cloud only"),
+                                     ("Grok Bot", "cloud only"),
+                                     ("Amp", "cloud only"), ("Cursor", "next")])
+        for entry in entries:
+            if entry["id"] is not None:
+                self.assertEqual(entry["status"], "not found")
+                self.assertTrue(entry["locations"])
+
+    def test_a_found_agent(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, _calls(self.now))
+        codex.read_only(root, OTHER)
+        [entry] = self.entries("--source", "codex", "--path", "codex=" + root)
+        self.assertEqual((entry["status"], entry["transcripts"],
+                          entry["other_files"], entry["read_only_files"],
+                          entry["masking"]), ("found", 1, 1, 1, "mixed"))
+        self.assertEqual(entry["locations"][0]["path"], root)
+        self.assertEqual(entry["locations"][0]["how"], "--path")
+        rc, out, _ = self.run_cli("sources", "--source", "codex",
+                                  "--path", "codex=" + root)
+        text = " ".join(out.split())
+        self.assertIn("Codex (codex): found, 1 session and 1 other file", text)
+        self.assertIn("clean can mask 1 file; 1 file is read only", text)
+
+    def test_what_clean_does_with_each(self):
+        by_id = {e["id"]: e for e in self.entries(*self.base_flags())}
+        self.assertEqual(by_id["openclaw"]["masking"], "not searched")
+        self.assertEqual(by_id["claude-code"]["locations"][0],
+                         {"path": os.path.abspath(self.claude), "how": "--root",
+                          "exists": True, "found": 0})
+        rc, out, _ = self.run_cli("sources", *self.base_flags())
+        text = " ".join(out.split())
+        self.assertIn("Meta Muse:", text)
+        self.assertIn("--source muse-code", text)
+        self.assertIn("--source grok", text)
+        self.assertIn("Cursor:", text)
+        self.assertIn("clean does not search it for secrets yet", text)
+
+
+class Review(_Cli):
+    """The review's show, mask and rotate, for a finding in any agent's
+    files."""
+
+    def searched(self, *agents_and_roots):
+        paths = {"claude-code": self.claude}
+        paths.update(agents_and_roots)
+        values = {}
+        found = clean.scan_sources(sources=list(paths), root=self.claude,
+                                   paths=paths, since_days=30, known=values)
+        return found, values
+
+    def review(self, found, values, *commands):
+        out = io.StringIO()
+        with mock.patch("builtins.input", side_effect=list(commands) + ["quit"]):
+            clean.review(found.findings, found.scanned, stream=out,
+                         values=values, paths=[], stores=found.stores)
+        return out.getvalue()
+
+    def test_show_names_the_agent_and_its_files(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        path = codex.write(root, _calls(self.now))
+        found, values = self.searched(("codex", root))
+        text = self.review(found, values, "show 1")
+        self.assertIn("agent      : Codex", text)
+        self.assertIn(os.path.basename(path)[-20:], text)
+        self.assertNotIn(SECRET, text)
+
+    def test_mask_reaches_another_agents_file(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        path = codex.write(root, _calls(self.now))
+        found, values = self.searched(("codex", root))
+        text = self.review(found, values, "mask 1")
+        self.assertIn("masked in 1 file(s).", text)
+        self.assertAllMasked(_read(path).decode("utf-8"), SECRET)
+
+    def test_mask_of_a_read_only_finding_says_why_and_what_to_do(self):
+        qwen = af.AGENTS[3]
+        root = self.agent_root(qwen)
+        qwen.write(root, _calls(self.now)[:1])
+        held = qwen.read_only(root, OTHER)
+        digest = _sha(held)
+        found, values = self.searched(("qwen", root))
+        text = " ".join(self.review(found, values, "mask 1").split())
+        self.assertIn("every file that holds it is read only", text)
+        self.assertIn("remove it there", text)
+        self.assertEqual(_sha(held), digest)
+
+    def test_rotate_and_list(self):
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        codex.write(root, _calls(self.now))
+        found, values = self.searched(("codex", root))
+        text = self.review(found, values, "list", "rotate")
+        self.assertIn("Stripe", text)
+        self.assertNotIn(SECRET, text)
+
+
+
+class ReadmeNamesEveryAgent(unittest.TestCase):
+    """design 6: the README's Source / Location / Format table has a row
+    for every adapter, in registry order, and the examples point at the
+    flags that read them. (The site's table waits for its own change.)"""
+
+    def readme(self):
+        with open(os.path.join(REPO, "README.md"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_the_table_is_the_registry_in_order(self):
+        text = self.readme()
+        table = text.split("| Source | Location | Format |", 1)[1].split("\n\n", 1)[0]
+        rows = [line.split("|")[1].strip() for line in table.strip().split("\n")[1:]]
+        names = [sources.get(i).name for i in sources.ids()]
+        self.assertEqual([r.split(" (")[0] for r in rows], names)
+        self.assertEqual(rows[-1], "OpenClaw")
+
+    def test_the_examples(self):
+        text = self.readme()
+        for example in ("ranwhat watch --source codex", "ranwhat watch --path codex=",
+                        "ranwhat sources"):
+            self.assertIn(example, text)
+        self.assertNotIn("--source openclaw", text)
+        prose = " ".join(text.split())
+        self.assertIn("Meta Muse runs in Meta's cloud", prose)
+        self.assertIn("Muse Code, Meta's coding CLI, is supported", prose)
+        self.assertIn("Grok Bot keeps its history in xAI's cloud", prose)
+        self.assertIn("Grok Build, xAI's coding CLI, is supported", prose)
+        self.assertNotIn("—", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

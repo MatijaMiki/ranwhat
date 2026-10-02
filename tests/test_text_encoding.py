@@ -74,7 +74,9 @@ class EveryTextOpenNamesItsEncoding(unittest.TestCase):
     def test_package_scripts_and_tests(self):
         paths = []
         for part in ("ranwhat", "scripts", "tests"):
-            paths += sorted(glob.glob(os.path.join(REPO, part, "*.py")))
+            # every package below ranwhat too (design 5.3): ranwhat/sources
+            paths += sorted(glob.glob(os.path.join(REPO, part, "**", "*.py"),
+                                      recursive=True))
         self.assertGreater(len(paths), 20)
         found = {}
         for path in paths:

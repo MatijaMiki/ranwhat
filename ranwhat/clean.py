@@ -33,7 +33,8 @@ import string
 
 from .watch import CLAUDE_PROJECTS, _fit, discover, transcript_place
 
-from . import fixtures, term
+from . import agents, fixtures, term
+from . import sources as _registry
 
 BACKUP_ROOT = os.path.expanduser("~/.ranwhat/backups")
 REDACTION = "<ranwhat:redacted:%s>"
@@ -1863,6 +1864,17 @@ def values_in(path):
     return values, masks
 
 
+def values_in_store(source, store):
+    """values_in, for a file of an agent read through its adapter: (every
+    value the rules find in it, the fingerprint each mask in it keeps), or
+    None when it cannot be read."""
+    if not os.path.exists(store.path):
+        return None
+    values = {}
+    findings, masks = scan_store(source, store, values)
+    return {values[fp] for fp in findings}, masks
+
+
 def mask_known(text, values):
     """text with every copy of each of `values` masked as mask_for_display
     masks one, longest first. These are values found elsewhere: typed into
@@ -2637,6 +2649,13 @@ def _merge(merged, findings, only=None):
             merged[fp]["origins"] |= entry["origins"]
             merged[fp]["projects"] |= entry["projects"]
             merged[fp]["count"] += entry["count"]
+            # Which agents hold it, in which of their files, and which of
+            # those cannot be masked (scan_sources; not in scan's own).
+            for key in ("sources", "read_only"):
+                if key in entry:
+                    merged[fp].setdefault(key, set()).update(entry[key])
+            if "stores" in entry:
+                merged[fp].setdefault("stores", {}).update(entry["stores"])
         else:
             merged[fp] = entry
 
@@ -2660,16 +2679,17 @@ _SHAPE_LABELS = frozenset(name for _shape, name in _SHAPES_NAMED)
 
 
 def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
-                                 remember=None):
+                                 remember=None, least=2):
     """Count, and with apply mask, each value of `merged` in the transcripts
     of `paths` it was not found in. Each look costs what it reads, and a
     little more for asking at all, so a thousand small transcripts and ten
     thousand values stop at the budget too. `remember` as scan_file takes
-    it."""
+    it. With fewer than `least` transcripts there is none to look in: the
+    values were found in them (least=1: found in another agent's files)."""
     order = sorted((fp for fp, f in merged.items()
                     if fp in values and f["label"] not in _SHAPE_LABELS),
                    key=lambda fp: (-len(values[fp]), fp))
-    if not order or len(paths) < 2:
+    if not order or len(paths) < least:
         return
     size = 0
     for path in paths:
@@ -2708,6 +2728,315 @@ def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
                    only=present)
         if budget < 0:
             return
+
+
+# ---------------------------------------------------------------------------
+# Every agent's history (design 3.6). Claude Code is read by scan above, as
+# before; every other agent through its adapter's secret_texts, and masked
+# only where the adapter says its file can be rewritten.
+# ---------------------------------------------------------------------------
+
+class Searched(object):
+    """What scan_sources found and did."""
+
+    def __init__(self):
+        self.findings = {}          # fingerprint -> finding
+        self.counts = {}            # source id -> transcripts searched
+        self.others = {}            # source id -> other files searched
+        self.changed = []           # files masked
+        self.read_only = {}         # read-only file holding a finding -> Store
+        self.skipped = {}           # file not masked -> (source id, why)
+        self.unsearched = 0         # OpenClaw databases, not searched yet
+        self.stores = {}            # path -> Store, each adapter file searched
+        self.values = {}            # fingerprint -> value
+
+    @property
+    def scanned(self):
+        """Every file searched, all agents together."""
+        return sum(self.counts.values()) + sum(self.others.values())
+
+
+def _origin_of(text):
+    """What a secret in one SecretText was read out of, as
+    _origin_for_line answers it for a Claude Code line: the file it is
+    the content of; for a call's output, the last credential file the
+    call names, else the file grep printed in front of the secret's own
+    line (_GREP_LINE); otherwise nothing (typed, said, or unknown)."""
+    if text.attached:
+        named = _origins(json.dumps(text.attached, ensure_ascii=False))
+        return named[-1] if named else None
+    if text.call is not None:
+        named = _named_by_input(text.call)
+        return named[-1] if named else _GREP_LINE
+    return None
+
+
+def _store_finding(value, label):
+    """A new finding, as scan_file starts one, with the keys only a
+    finding from scan_sources has."""
+    return {"fingerprint": _fingerprint(value), "label": label,
+            "length": len(value), "hint": _hint(value), "files": set(),
+            "origins": set(), "projects": set(), "count": 0,
+            "sources": set(), "stores": {}, "read_only": set()}
+
+
+def _held_by(entry, source, store):
+    """Note in a finding that this store of this agent holds its value."""
+    entry["files"].add(store.path)
+    entry["sources"].add(source.id)
+    entry["stores"][store.path] = source.id
+    if store.masking == "read-only":
+        entry["read_only"].add(store.path)
+    if store.project:
+        entry["projects"].add(store.project)
+
+
+def scan_store(source, store, values):
+    """(findings, mask fingerprints) for one store of an adapter, as
+    scan_file gives them for a transcript: each value the rules find in
+    it, once, with the files it was read out of. `values`
+    ({fingerprint: value}) is given each value found. Never raises: an
+    adapter that fails part way warns, and what it gave until then is
+    kept."""
+    findings = {}
+    masks = set()
+    origin_now = [None]
+    lines_now = [None]
+
+    def collect(value, label, text, copies):
+        fp = _fingerprint(value)
+        values[fp] = value
+        entry = findings.get(fp)
+        if entry is None:
+            entry = findings[fp] = _store_finding(value, label)
+            _held_by(entry, source, store)
+        origin = origin_now[0]
+        if origin is _GREP_LINE:
+            if lines_now[0] is None or lines_now[0].text is not text:
+                lines_now[0] = _GrepLines(text)
+            origin = lines_now[0].origin(copies)
+        if origin:
+            entry["origins"].add(origin)
+        entry["count"] += 1
+
+    try:
+        for text in source.secret_texts(store):
+            origin_now[0] = _origin_of(text)
+            lines_now[0] = None
+            for _container, _key, string_ in _strings(text.node):
+                if _MASK_MARK in string_:
+                    masks.update(_MASKS.findall(string_))
+            _walk(text.node, collect)
+    except Exception as error:          # one adapter must not stop the others
+        source.warn(("secrets", store.path), "could not read %s %s (%s)"
+                    % (source.name, store.path, error))
+    return findings, masks
+
+
+# The files a search for copies reads as text. A database or a compressed
+# file is searched by its adapter only.
+_STORE_SEARCH_FORMATS = ("jsonl", "json", "text")
+
+
+def _copies_in_stores(stores, merged, values, sources_by_id):
+    """Count each value of `merged` in the files of `stores` where the
+    rules did not find it: typed into a command with nothing beside it, or
+    quoted in a reply. Each file is read once, as text, and each value
+    looked for in every form it can take there (_rewrite.encodings), in
+    the budget _copies_in_other_transcripts spends on Claude Code's.
+    Databases and compressed files are not read this way."""
+    from .sources import _rewrite
+    order = sorted((fp for fp, f in merged.items()
+                    if fp in values and f["label"] not in _SHAPE_LABELS),
+                   key=lambda fp: (-len(values[fp]), fp))
+    stores = [s for s in stores if s.format in _STORE_SEARCH_FORMATS]
+    if not order or not stores:
+        return
+    size = 0
+    for store in stores:
+        try:
+            size += os.path.getsize(store.path)
+        except OSError:
+            pass
+    budget = min(_CROSS_SEARCH_CHARS, _CROSS_SEARCH_PER_CHAR * size)
+    forms = {}
+    for store in stores:
+        content = None
+        for fp in order:
+            if store.path in merged[fp]["files"]:
+                continue
+            if content is None:
+                try:
+                    with open(store.path, "rb") as fh:
+                        content = fh.read().decode("utf-8", "surrogateescape")
+                except OSError:
+                    break
+            if fp not in forms:
+                forms[fp] = _rewrite.encodings(values[fp])
+            budget -= len(forms[fp]) * len(content) + _CROSS_LOOK
+            if budget < 0:
+                return
+            if any(form in content for form in forms[fp]):
+                entry = merged[fp]
+                for key in ("sources", "read_only"):
+                    entry.setdefault(key, set())
+                entry.setdefault("stores", {})
+                _held_by(entry, sources_by_id[store.source], store)
+                entry["count"] += 1
+
+
+def _claude_code_keys(findings):
+    """Give findings from Claude Code's own scan the keys every finding
+    has now: which agents hold it, in which files, and which of those
+    cannot be masked (none of Claude Code's)."""
+    for entry in findings.values():
+        entry.setdefault("sources", set())
+        entry.setdefault("stores", {})
+        entry.setdefault("read_only", set())
+        for path in entry["files"]:
+            if path not in entry["stores"]:
+                entry["stores"][path] = "claude-code"
+                entry["sources"].add("claude-code")
+
+
+def scan_sources(sources=None, root=None, paths=None, since_days=None,
+                 apply=False, progress=None, known=None, read=None,
+                 remember=None):
+    """Find (and with apply mask) the secrets in every requested agent's
+    history: a Searched.
+
+    Claude Code is read by scan, as before. OpenClaw is not searched yet:
+    its databases are counted in `unsearched`. Every other agent is read
+    through its adapter (scan_store), and a value found in one agent's
+    files is looked for in the others' (_copies_in_stores, and
+    _copies_in_other_transcripts for Claude Code's). A finding also says
+    which agents hold it ("sources"), in which files ("stores", {path: id})
+    and which of those are never rewritten ("read_only").
+
+    With apply each value is masked where it was found, in a file its
+    adapter can rewrite (Store.masking "rewrite"; mask()); a database, a
+    compressed file, or one written to in the last two minutes is left as
+    it is, and said so (read_only, skipped). `progress`, `known`, `read`
+    and `remember` are scan's, for every agent's files: `read` is called
+    with (path, its signature or os.stat, values, mask fingerprints)."""
+    paths = dict(paths or {})
+    root = root or paths.get("claude-code") or CLAUDE_PROJECTS
+    selected = list(_registry.ids() if sources is None else sources)
+    out = Searched()
+    values = {}
+    others = []
+    for source in agents.adapters(selected):
+        if not source.searched:
+            continue
+        _locations, stores = agents.discover(source, paths.get(source.id),
+                                             since_days)
+        if stores:                  # an agent not on this machine is not named
+            others.append((source, stores))
+    extra = sum(len(stores) for _source, stores in others)
+    done = 0
+    claude_paths = []
+    if "claude-code" in selected:
+        step = progress
+        if progress and extra:
+            def step(i, total, path):
+                progress(i, total + extra, path)
+        merged, scanned, changed = scan(root, since_days, apply=apply,
+                                        progress=step, known=values, read=read,
+                                        remember=remember)
+        _claude_code_keys(merged)
+        out.findings.update(merged)
+        out.counts["claude-code"] = done = scanned
+        out.changed += list(changed or ())
+        claude_paths = discover(root, since_days) if scanned else []
+    total = done + extra
+    by_id = {}
+    for source, stores in others:
+        by_id[source.id] = source
+        out.counts[source.id] = len(agents.transcripts(stores))
+        out.others[source.id] = len(stores) - out.counts[source.id]
+        for store in stores:
+            done += 1
+            if progress:
+                progress(done, total, store.path)
+            out.stores[store.path] = store
+            signed = agents.signature(store.path, store.format)
+            findings, masks = scan_store(source, store, values)
+            if read is not None and signed is not None:
+                read(store.path, signed,
+                     {values[fp] for fp in findings}, masks)
+            _merge(out.findings, findings)
+    if "openclaw" in selected:
+        out.unsearched = len(_registry.get("openclaw").stores(
+            _registry.get("openclaw").locations(paths.get("openclaw"))))
+
+    if out.findings and out.stores:
+        _copies_in_stores(list(out.stores.values()), out.findings, values, by_id)
+        # A value found only in another agent's files, typed or quoted in
+        # a Claude Code transcript.
+        elsewhere = {fp: f for fp, f in out.findings.items()
+                     if "claude-code" not in f["sources"]}
+        if elsewhere and claude_paths:
+            if apply and remember is not None:
+                remember([values[fp] for fp in elsewhere if fp in values])
+            _copies_in_other_transcripts(claude_paths, elsewhere, values, apply,
+                                         out.changed, remember=remember, least=1)
+            _claude_code_keys(elsewhere)
+
+    for entry in out.findings.values():
+        for path in entry["read_only"]:
+            store = out.stores.get(path)
+            if store is not None:
+                out.read_only[path] = store
+    if apply:
+        _mask_stores(out, values, by_id, remember)
+    out.values = values
+    if known is not None:
+        known.update(values)
+    return out
+
+
+def _mask_stores(out, values, by_id, remember=None):
+    """Mask, in each adapter file a finding is in, every value found there
+    that the adapter lets ranwhat rewrite, and say what was left."""
+    plan = {}
+    for fp, entry in out.findings.items():
+        for path, source_id in entry["stores"].items():
+            if source_id in by_id and fp in values:
+                plan.setdefault(path, []).append(values[fp])
+    if not plan:
+        return
+    if remember is not None:
+        remember(sorted({v for vals in plan.values() for v in vals}))
+    for path in sorted(plan):
+        store = out.stores[path]
+        if store.masking != "rewrite":
+            continue
+        why = _mask_one(by_id[store.source], store, plan[path])
+        if why is None:
+            out.changed.append(path)
+        elif why == "read-only":
+            out.read_only[path] = store
+        elif why:
+            out.skipped[path] = (store.source, why)
+
+
+# Why a file was not masked, as the report says it.
+NOT_WRITTEN = "could not be written"
+
+
+def _mask_one(source, store, values):
+    """Mask values in one adapter file: None when it changed, "" when
+    there was nothing to change, or why it was not masked (MaskResult's
+    reasons, or NOT_WRITTEN)."""
+    try:
+        result = source.mask(store, values)
+    except OSError as error:
+        source.warn(("mask", store.path), "could not mask %s (%s)"
+                    % (store.path, error.strerror or error))
+        return NOT_WRITTEN
+    if result.changed:
+        return None
+    return result.skipped or ""
 
 
 # Paths on screen. The end of a path names the file, so that is what
@@ -2777,7 +3106,8 @@ UNSEARCHED = ("OpenClaw history is not searched for secrets. Its %d "
 
 
 def render(findings, scanned, changed_files, applied, footer=True,
-           advice=True, unsearched=0, shown=None):
+           advice=True, unsearched=0, shown=None, others=None, read_only=None,
+           skipped=None, notes=None):
     """check passes footer=False and advice=False: it prints one footer for
     all sections, and its own next step, since "Run with --apply" is wrong
     there. They gate only those lines; the rotation warning and every finding
@@ -2790,7 +3120,15 @@ def render(findings, scanned, changed_files, applied, footer=True,
 
     `shown`, when given, masks each label and path before it is printed:
     a value found may sit in another finding's key name or in the path
-    another was read from (known.Matcher.mask)."""
+    another was read from (known.Matcher.mask).
+
+    `scanned` is a count of transcripts, or what scan_sources read of each
+    agent ({id: n}, Searched.counts), with `others` the other files it
+    read of each (Searched.others). Then the report names each agent it
+    read, and each finding the agents that hold it. `read_only`
+    ({path: Store}) and `skipped` ({path: why}) are the files a finding is
+    in that were not masked, and `notes` sentences to print under the
+    findings."""
     from .report import painters
     BOLD, DIM, RED, YEL, GRN, CYA = painters()
     shown = shown or _as_it_is
@@ -2800,14 +3138,26 @@ def render(findings, scanned, changed_files, applied, footer=True,
         L = ["", BOLD(_TITLE) + DIM(_TAGLINE)]
     else:
         L = ["", BOLD(_TITLE.rstrip()), DIM("  " + _TAGLINE[2:])]
-    L += [DIM(term.rule("-")), "  %d transcript(s) scanned" % scanned, ""]
+    said = agents.read_words(scanned, others) if isinstance(scanned, dict) else None
+    labelled = isinstance(scanned, dict) and any(
+        n for source, n in list(scanned.items()) + list((others or {}).items())
+        if source != "claude-code")
+    if said:
+        L += [DIM(term.rule("-"))] + term.wrap(said) + [""]
+    else:
+        count = sum(scanned.values()) if isinstance(scanned, dict) else scanned
+        L += [DIM(term.rule("-")), "  %d transcript(s) scanned" % count, ""]
 
     unread = [DIM(line) for line in term.wrap(UNSEARCHED % unsearched)] \
         if unsearched else []
+    notes = [DIM(line) for note in notes or () for line in term.wrap(note)]
     if not findings:
-        L += ["  " + GRN("No secrets found in Claude Code transcripts."
-                         if unsearched else "No secrets found.")] + unread + [""]
-        return "\n".join(L)
+        where = ("No secrets found in Claude Code transcripts." if not labelled
+                 else "No secrets found in what was read.")
+        L += ["  " + GRN(where if unsearched else "No secrets found.")] + unread
+        if notes:
+            L += [""] + notes
+        return "\n".join(L + [""])
 
     total = sum(f["count"] for f in findings.values())
     L.append("  " + RED(BOLD("%d distinct secret(s)" % len(findings)))
@@ -2832,24 +3182,104 @@ def render(findings, scanned, changed_files, applied, footer=True,
             L.append(DIM("      in         %s" % _fit_path(proj, width - 17)))
         if len(projects) > 2:
             L.append(DIM("      in         … and %d more project(s)" % (len(projects) - 2)))
+        if labelled and f.get("sources"):
+            L += [DIM(line) for line in term.wrap(
+                ", ".join(_agent_names(f["sources"])), indent=" " * 17,
+                first="      agent      ")]
+        held = [p for p in f.get("read_only") or () if p not in changed_files]
+        if held:
+            L.append(DIM(_fit("      read only  %s, not masked (below)"
+                              % _files(len(held)), width)))
     L.append("")
     if unread:
         L += unread + [""]
+    if read_only:
+        L += _read_only_lines(read_only, DIM, width) + [""]
 
     if applied:
         L.append("  " + GRN("Masked in %d file(s)." % len(changed_files)))
         L.append(DIM("  Backups: %s" % _fit_path(_home_short(BACKUP_ROOT),
                                                  width - 11)))
         L += [DIM(line) for line in _sentences(*_BACKUPS_HOLD)]
+        if skipped:
+            L += _skipped_lines(skipped, YEL, width)
     elif advice:
         L.append("  " + YEL("Dry run. Nothing was changed."))
         L += [DIM(line) for line in _sentences(
             "Run with --apply to mask them.", "Backups are written first.")]
+    if notes:
+        if L[-1]:
+            L.append("")
+        L += notes
     if footer:
         if L[-1]:
             L.append("")
         L += [DIM(term.rule("-")), DIM(term.FOOTER), ""]
     return "\n".join(L)
+
+
+def _files(n):
+    return agents.plural(n, "file")
+
+
+def _agent_names(ids):
+    """Agents' names in registry order."""
+    order = list(_registry.ids())
+    return [agents.name(i) for i in sorted(
+        ids, key=lambda i: (order.index(i) if i in order else len(order), i))]
+
+
+# What an adapter's own Store says when it gives no reason of its own: the
+# remedy is the agent's, not ranwhat's.
+_DELETE_THERE = "To remove it, delete the session in %s."
+
+
+def _read_only_lines(read_only, DIM, width):
+    """Under the findings: the files that hold one and that ranwhat never
+    rewrites, a sentence for each kind of them, agent by agent, and what
+    to do instead."""
+    from .sources.base import WHY_READ_ONLY
+    groups = {}
+    for path, store in read_only.items():
+        why = store.why_read_only or WHY_READ_ONLY.get(store.format, "")
+        if why in WHY_READ_ONLY.values():
+            why += " " + _DELETE_THERE % agents.name(store.source)
+        groups.setdefault((store.source, why), []).append(path)
+    L = [DIM(line) for line in term.wrap(
+        "Read only: ranwhat reads these files and never changes them.")]
+    for (source, why), held in sorted(groups.items()):
+        L += [DIM(line) for line in term.wrap(
+            "%s, %s: %s" % (agents.name(source), _files(len(held)), why),
+            indent="      ", first="    ")]
+    return L
+
+
+# What the report says of a file that was not masked, by why (MaskResult).
+_NOT_MASKED = {
+    "in use": "in use, not masked. Run clean --apply again once %s is "
+              "closed, or two minutes after it last wrote.",
+    "changed while reading": "changed while it was read, not masked. Run "
+                             "clean --apply again.",
+    "would alter more than the secret": "not masked: masking would have "
+                                        "changed more than the secret.",
+    NOT_WRITTEN: "could not be written, not masked.",
+}
+
+
+def _skipped_lines(skipped, YEL, width):
+    """For each reason a file was not masked: how many, and what to do.
+    `skipped` is {path: (source id, why)}."""
+    groups = {}
+    for path, (source, why) in skipped.items():
+        groups.setdefault(why, []).append(source)
+    L = []
+    for why, held in sorted(groups.items()):
+        text = _NOT_MASKED.get(why, "not masked (%s)." % why)
+        if "%s" in text:
+            text = text % " or ".join(_agent_names(set(held)))
+        L += [_painted(line, YEL) for line in term.wrap(
+            "%s %s" % (_files(len(held)), text))]
+    return L
 
 
 # ---------------------------------------------------------------------------
@@ -2923,7 +3353,7 @@ def _as_it_is(text):
 
 
 def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
-           remember=None):
+           remember=None, stores=None):
     """Interactive review of an already-completed scan. Returns the number of
     files changed. Every line fits the terminal, as in render().
 
@@ -2935,7 +3365,10 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
     label and path before it is printed, as render's does. `remember` is
     given the values of each mask before any transcript is rewritten
     (known.Index.remember), so what a mask took the place of is known
-    however the session ends."""
+    however the session ends. `stores` ({path: Store}, Searched.stores)
+    are the other agents' files the scan read: a mask reaches a finding
+    in them through each one's adapter, and one that cannot be rewritten
+    is named, with what to do instead."""
     import sys as _sys
     from .report import BOLD, DIM, RED, GRN, YEL
 
@@ -3013,7 +3446,8 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
         if cmd in ("show", "mask", "keep"):
             if cmd == "mask" and arg == "all":
                 changed_total += _mask(items, scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths, remember=remember)
+                                       values, paths=paths, remember=remember,
+                                       stores=stores)
                 items = []
                 continue
             if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
@@ -3035,16 +3469,27 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
                            + _fit_path(origin, width - 19))
                 for proj in sorted(map(shown, target.get("projects") or [])):
                     _print(DIM("      project    : %s" % _fit_path(proj, width - 19)))
-                _print(DIM("      transcripts:"))
-                for path in sorted(map(shown, target["files"])):
-                    _print(DIM("        %s" % _fit_path(path, width - 8, middle=True)))
+                held = target.get("sources") or {"claude-code"}
+                if held != {"claude-code"}:
+                    for line in term.wrap(", ".join(_agent_names(held)),
+                                          indent=" " * 19,
+                                          first="      agent      : "):
+                        _print(DIM(line))
+                _print(DIM("      transcripts:" if held == {"claude-code"}
+                           else "      files      :"))
+                read_only = target.get("read_only") or ()
+                for path in sorted(target["files"], key=shown):
+                    mark = "  (read only)" if path in read_only else ""
+                    _print(DIM("        %s%s" % (_fit_path(
+                        shown(path), width - 8 - len(mark), middle=True), mark)))
                 _print()
             elif cmd == "keep":
                 items.remove(target)
                 _print(DIM("  kept. %d left." % len(items)))
             else:
                 changed_total += _mask([target], scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths, remember=remember)
+                                       values, paths=paths, remember=remember,
+                                       stores=stores)
                 items.remove(target)
             continue
 
@@ -3053,7 +3498,7 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
 
 
 def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
-          remember=None):
+          remember=None, stores=None):
     """Re-walk only the files that hold these secrets, masking just them.
     A file may hold a copy the rules do not find there, typed with no key
     beside it, so each value goes with the walk (scan_file's extra): read
@@ -3066,13 +3511,23 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
     costs a pass over them, many share its budget.
 
     `remember` is given the values once they are read back, before the
-    first transcript is rewritten."""
+    first transcript is rewritten.
+
+    A finding in another agent's files (`stores`, {path: Store}) is masked
+    there through that agent's adapter, where it can rewrite the file. A
+    file it cannot rewrite is named with why and what to do instead, and
+    one written to in the last two minutes is left for later."""
+    stores = stores or {}
     wanted = {t["fingerprint"] for t in targets}
     everywhere = paths
-    paths = set()
+
+    def adapter_file(path, t):
+        return (t.get("stores") or {}).get(path, "claude-code") != "claude-code"
+    paths, others = set(), set()
     for t in targets:
-        paths |= set(t["files"])
-    paths = sorted(paths)
+        for path in t["files"]:
+            (others if adapter_file(path, t) else paths).add(path)
+    paths, others = sorted(paths), sorted(others)
     known = {fp: v for fp, v in (values or {}).items() if fp in wanted}
     for path in paths:
         if len(known) == len(wanted):
@@ -3080,6 +3535,14 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
         found = {}
         scan_file(path, known=found)
         known.update((fp, v) for fp, v in found.items() if fp in wanted)
+    for path in others:
+        if len(known) == len(wanted):
+            break
+        store = stores.get(path)
+        if store is not None:
+            found = {}
+            scan_store(_registry.get(store.source), store, found)
+            known.update((fp, v) for fp, v in found.items() if fp in wanted)
     if remember is not None and known:
         remember(list(known.values()))
 
@@ -3090,6 +3553,21 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
                                extra={fp: v for fp, v in known.items() if fp in here})
         if did:
             changed += 1
+    left = {}                       # path -> (source id, why it was not masked)
+    for path in others:
+        store = stores.get(path)
+        here = [known[t["fingerprint"]] for t in targets
+                if path in t["files"] and t["fingerprint"] in known]
+        if store is None or not here:
+            continue
+        if store.masking != "rewrite":
+            left[path] = (store.source, "read-only")
+            continue
+        why = _mask_one(_registry.get(store.source), store, here)
+        if why is None:
+            changed += 1
+        elif why:
+            left[path] = (store.source, why)
     if everywhere and known:
         elsewhere = []
         _copies_in_other_transcripts(
@@ -3101,6 +3579,16 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
                                                term.width() - 11)))
         for line in _sentences(*_BACKUPS_HOLD):
             _print(DIM(line))
-    else:
+    elif not left:
         _print(RED("  nothing changed."))
+    read_only = {p: stores[p] for p, (_i, why) in left.items() if why == "read-only"}
+    if read_only:
+        if not changed:
+            _print(RED("  nothing changed: every file that holds it is read only."))
+        for line in _read_only_lines(read_only, DIM, term.width()):
+            _print(line)
+    skipped = {p: v for p, v in left.items() if v[1] != "read-only"}
+    if skipped:
+        for line in _skipped_lines(skipped, _as_it_is, term.width()):
+            _print(DIM(line))
     return changed

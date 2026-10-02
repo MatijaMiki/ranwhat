@@ -109,9 +109,11 @@ class RecordedInput(unittest.TestCase):
 class SourcesWatchReads(unittest.TestCase):
 
     def test_named_from_the_registry_in_its_order(self):
-        self.assertEqual(watch.SOURCES, ("claude-code", "openclaw"))
-        ids = sources.ids()
-        self.assertEqual([i for i in ids if i in watch.SOURCES], list(watch.SOURCES))
+        """Every adapter, now that watch and clean read them all (it was
+        the two ported ones until they were wired)."""
+        self.assertEqual(watch.SOURCES, sources.ids())
+        self.assertEqual(watch.SOURCES[0], "claude-code")
+        self.assertIn("openclaw", watch.SOURCES[-2:])
         self.assertEqual(watch._SOURCE_NAMES,
                          {i: sources.get(i).name for i in watch.SOURCES})
 
