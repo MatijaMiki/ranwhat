@@ -1715,10 +1715,17 @@ class KnownValues(object):
 _EVIDENCE_RUN = re.compile(r"[^\s\"'`]+")
 _EVIDENCE_SEPARATORS = re.compile(r"[=:@/,;|&<>(){}\[\]]+")
 _EVIDENCE_EDGES = ".,;:!?()[]{}<>\u2026"
-# How many lines holding one stretch each transcript has read for it. A
-# stretch in every line (a session's id in a path) is no secret's, and a
-# secret is found in the first of the lines that hold it.
-_LINES_PER_STRETCH = 64
+# Which lines holding a stretch are read. Only the first 64 in each
+# transcript were, and a password typed in 70 calls before the .env read
+# that names it was never looked up: watch printed it whole. Now each is
+# read but where the stretch sits after the same characters as in a line
+# read for it already: a stretch in every line (a session's id) sits after
+# the same key each time, and a command typed again types it after the same
+# words. Past this many characters of lines read for one stretch, or this
+# many places looked at, no more are.
+_CONTEXT = 32
+_LINE_CHARS_PER_STRETCH = 4 * MAX_STRING
+_LOOKS_PER_STRETCH = 1 << 16
 # Each stretch looked for costs a pass over the transcripts read, so no
 # more are looked for than this many passes over a megabyte of them allow,
 # and never fewer than _STRETCHES_LEAST. The likeliest secrets go first:
@@ -1807,6 +1814,9 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
              for stretch in order]
     shown = _JOIN.join(texts)
     known = {}
+    seen = set()                    # (stretch, the characters before it)
+    spent = dict.fromkeys(order, 0)
+    looks = dict.fromkeys(order, 0)
     for path in paths:
         try:
             with open(path, "rb") as fh:
@@ -1816,14 +1826,25 @@ def known_values(texts, root=CLAUDE_PROJECTS, since_days=None):
         lines = {}                  # (start, end) of a line -> the stretches in it
         for stretch, written in forms:
             for form in written:
-                at, seen = content.find(form), 0
-                while at != -1 and seen < _LINES_PER_STRETCH:
-                    start = content.rfind(b"\n", 0, at) + 1
-                    end = content.find(b"\n", at)
-                    end = len(content) if end == -1 else end
-                    lines.setdefault((start, end), set()).add(stretch)
-                    seen += 1
-                    at = content.find(form, end)
+                at, line = content.find(form), (0, -1)
+                while (at != -1 and spent[stretch] < _LINE_CHARS_PER_STRETCH
+                       and looks[stretch] < _LOOKS_PER_STRETCH):
+                    looks[stretch] += 1
+                    if at >= line[1]:
+                        end = content.find(b"\n", at)
+                        line = (content.rfind(b"\n", 0, at) + 1,
+                                len(content) if end == -1 else end)
+                    before = (stretch, content[max(line[0], at - _CONTEXT):at])
+                    if before in seen:
+                        at = content.find(form, at + len(form))
+                        continue
+                    seen.add(before)
+                    held = lines.setdefault(line, set())
+                    if stretch not in held:
+                        held.add(stretch)
+                        spent[stretch] += line[1] - line[0]
+                    # The whole line is read for it: on to the next.
+                    at = content.find(form, line[1])
         for (start, end), held in sorted(lines.items()):
             try:
                 node = json.loads(content[start:end].decode("utf-8", "replace"))

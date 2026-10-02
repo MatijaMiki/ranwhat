@@ -364,6 +364,41 @@ class GluedToWhatIsBeforeIt(_Reports):
         self.assertIn(PW + "+x9", stretches)
 
 
+class TypedManyTimesBeforeTheRead(_Reports):
+    """watch read the first 64 lines holding a stretch, and no more. Typed
+    in 70 calls before the .env read clean finds it in, the password was
+    never looked up, and watch printed it whole. check masked it."""
+
+    def test_watch_never_prints_it(self):
+        for vary in (False, True):
+            root = _tempdir(self, "lines-")
+            rows = []
+            for k in range(70):
+                typed = SCRIPT.replace("prod ", "prod%d " % k if vary else "prod ", 1)
+                rows += [_call(k, typed % PW, _stamp(600)), _result(k, "ok", _stamp(600))]
+            rows += [_call(99, "cat .env", _stamp(600)),
+                     _result(99, "DB_PASSWORD=%s\n" % PW, _stamp(600))]
+            _write(os.path.join(root, "-Users-a-app", "sess.jsonl"), rows, 600)
+            for argv in self.reports(root):
+                with self.subTest(vary=vary, argv=argv[:2]):
+                    out = _cli(argv)
+                    self.assertNotIn(PW, out)
+                    self.assertIn(_MASKED, _shown(out))
+
+    def test_lines_that_read_alike_are_read_once(self):
+        """A stretch in every line, after the same words (a session's id),
+        is no secret's: its lines are not each decoded and asked."""
+        root = _tempdir(self, "alike-")
+        stretch = "Qz7mWx2KpL9vRt4N"
+        rows = [{"type": "user", "sessionId": stretch, "message": {"content": "line %d" % k}}
+                for k in range(3000)]
+        _write(os.path.join(root, "-Users-a-app", "sess.jsonl"), rows, 600)
+        decoded = mock.Mock(wraps=json.loads)
+        with mock.patch.object(clean.json, "loads", decoded):
+            self.assertEqual(clean.known_values(["rm -rf /srv/%s" % stretch], root=root), {})
+        self.assertLess(decoded.call_count, 10)
+
+
 class ALongHistory(_Reports):
     """The newest transcript is long, and the session that read the
     password read many keys with it: the search of other transcripts ran
