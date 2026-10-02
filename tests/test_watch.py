@@ -11,7 +11,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ranwhat import watch
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import growth  # noqa: E402
+from ranwhat import watch  # noqa: E402
+
+
+def _judged(command):
+    return watch.evaluate("Bash", {"command": command})
 
 
 def fires(command):
@@ -354,7 +361,7 @@ class RepeatedCallsAreReportedOnce(unittest.TestCase):
         self.assertEqual(len(records), 1)
 
 
-class LocalFilePipedToTheNetwork(unittest.TestCase):
+class LocalFilePipedToTheNetwork(growth.Assertions, unittest.TestCase):
     """exfil.shape's pipe pattern could never match: _executable_text split
     every command on `|` and rejoined what it kept with ` ; `, so only the
     curl -d @file shapes fired. Commands are synthetic; x.test is reserved."""
@@ -488,15 +495,12 @@ class LocalFilePipedToTheNetwork(unittest.TestCase):
             self.assertIsNotNone(self.exfil(command), command)
 
     def test_long_pipes_stay_linear(self):
-        import time
-        for command in ("cat x | " * 8000,
-                        "tar czf - . " + "| gzip " * 9000,
-                        "a=" * 32000 + " | curl x",
-                        '"|' * 32000):
-            with self.subTest(command=command[:16]):
-                t = time.perf_counter()
-                watch.evaluate("Bash", {"command": command})
-                self.assertLess(time.perf_counter() - t, 1.0)
+        for build in (lambda n: "cat x | " * n(8000),
+                      lambda n: "tar czf - . " + "| gzip " * n(9000),
+                      lambda n: "a=" * n(32000) + " | curl x",
+                      lambda n: '"|' * n(32000)):
+            with self.subTest(command=build(growth.sized(1))[:16]):
+                self.assertScalesLinearly(build, _judged)
 
 
 def _hits(command):
@@ -504,7 +508,7 @@ def _hits(command):
             for h in watch.evaluate("Bash", {"command": command})[0]]
 
 
-class ACommandSubstitutionRuns(unittest.TestCase):
+class ACommandSubstitutionRuns(growth.Assertions, unittest.TestCase):
     """The shell runs what is inside $( ) and backticks before the command
     it sits in, double quotes or not, whatever that command is. Inside the
     quoted argument of echo, printf, grep, git commit or gh, it was never
@@ -552,15 +556,14 @@ class ACommandSubstitutionRuns(unittest.TestCase):
                 self.assertEqual(_hits(command), [])
 
     def test_a_long_run_of_substitutions_stays_linear(self):
-        import time
-        for command in ('echo "' + "$(" * 30000 + '"',
-                        'echo "' + "`a`" * 20000 + '"',
-                        "echo " + "$(a)" * 15000,
-                        'echo "' + "$((((" * 12000 + '"'):
-            with self.subTest(command=command[:12]):
-                t = time.perf_counter()
-                watch.evaluate("Bash", {"command": command})
-                self.assertLess(time.perf_counter() - t, 1.0)
+        # A quoted run is one word to shlex, whose cost grows as the square
+        # of a word, so that run is half of MAX_SCAN_CHARS long, not all.
+        for build in (lambda n: 'echo "' + "$(" * n(15000) + '"',
+                      lambda n: 'echo "' + "`a`" * n(20000) + '"',
+                      lambda n: "echo " + "$(a)" * n(15000),
+                      lambda n: 'echo "' + "$((((" * n(6000) + '"'):
+            with self.subTest(command=build(growth.sized(1))[:12]):
+                self.assertScalesLinearly(build, _judged)
 
 
 class AnsiCQuotedStrings(unittest.TestCase):
@@ -589,7 +592,7 @@ class AnsiCQuotedStrings(unittest.TestCase):
                 self.assertEqual(_hits(command), [])
 
 
-class TextPipedIntoAWrappedShell(unittest.TestCase):
+class TextPipedIntoAWrappedShell(growth.Assertions, unittest.TestCase):
     """Text piped into a shell is run by it, and was judged so only when the
     shell came right after the |, or after sudo with flags alone. sudo -u
     USER bash, env sh, command sh and exec sh ran it unseen."""
@@ -622,14 +625,11 @@ class TextPipedIntoAWrappedShell(unittest.TestCase):
                 self.assertEqual(_hits(command), [])
 
     def test_a_long_run_of_options_stays_linear(self):
-        import time
-        for command in ("echo x | sudo" + " -u a" * 12000 + " cat",
-                        "echo x | env" + " A=b" * 12000 + " cat",
-                        "echo x | sudo -u " * 4000):
-            with self.subTest(command=command[:20]):
-                t = time.perf_counter()
-                watch.evaluate("Bash", {"command": command})
-                self.assertLess(time.perf_counter() - t, 1.0)
+        for build in (lambda n: "echo x | sudo" + " -u a" * n(12000) + " cat",
+                      lambda n: "echo x | env" + " A=b" * n(12000) + " cat",
+                      lambda n: "echo x | sudo -u " * n(4000)):
+            with self.subTest(command=build(growth.sized(1))[:20]):
+                self.assertScalesLinearly(build, _judged)
 
 
 class SearchingHistoryIsNotRunning(unittest.TestCase):

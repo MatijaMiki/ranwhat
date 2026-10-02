@@ -1,6 +1,9 @@
 """Speed regressions in a scanner are correctness regressions in practice:
 a first run that takes ninety seconds on one file is a first run nobody
 finishes. These pin the two fixes that took a 39MB transcript from 89s to 2s.
+
+Each is measured by how its cost grows (tests/growth.py), not against a
+number of seconds, which held here and failed on every CI runner.
 """
 import json
 import os
@@ -13,24 +16,17 @@ import time
 import unittest
 from unittest import mock
 
-from ranwhat import catalog, clean, feed, score
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# What a quadratic pattern costs here is seconds (10s to 24s on the shapes
-# below before the fix), so the budget only has to sit well under that. At
-# 50ms it failed on a loaded machine while the full suite ran, which on CI
-# is a red build for nothing. 0.5s still catches every regression these
-# exist for by a factor of twenty.
-BUDGET = 0.5
+import growth  # noqa: E402
+from ranwhat import catalog, clean, feed, score  # noqa: E402
 
 
-class Linear(unittest.TestCase):
+class Linear(growth.Assertions, unittest.TestCase):
     def test_origin_scan_does_not_go_quadratic_on_prose(self):
         """_ORIGIN rescans forward from every position on long word runs. 16k
         characters used to cost 1.7s; the literal prefilter makes it free."""
-        text = "a" * 50000
-        t = time.perf_counter()
-        clean._origins(text)
-        self.assertLess(time.perf_counter() - t, BUDGET)
+        self.assertScalesLinearly(lambda n: "a" * n(50000), clean._origins)
 
     def test_origins_still_found_when_a_marker_is_present(self):
         self.assertIn("~/.ssh/id_rsa", clean._origins("then cat ~/.ssh/id_rsa here"))
@@ -45,78 +41,73 @@ class Linear(unittest.TestCase):
         shape, 24s on the second and 17s on the base64 one. The b.env-c
         shape catches a stem and a suffix loop nested in one alternative."""
         shapes = [
-            "cat .env " + "a" * 50000,
-            "cat .env " + "a/" * 25000,
-            "x.key " + "a." * 25000,
-            "x a/" + "b.env-c" * 7000 + "/",
-            "id_rsa " + "Ab3_cD-eF9" * 5000,
-            "x " + "a\\" * 25000 + ".key",
-            "x " + "a/\\" * 20000,
-            "\\nhttp:" + "\\\\n" * 15000 + ".env",     # escaped \\ before n
-            "cat " * 12500 + "x.key",
-            " -a" * 16000 + " x.key",
-            "'a.a.a" * 8000 + ".key",
+            lambda n: "cat .env " + "a" * n(50000),
+            lambda n: "cat .env " + "a/" * n(25000),
+            lambda n: "x.key " + "a." * n(25000),
+            lambda n: "x a/" + "b.env-c" * n(7000) + "/",
+            lambda n: "id_rsa " + "Ab3_cD-eF9" * n(5000),
+            lambda n: "x " + "a\\" * n(25000) + ".key",
+            lambda n: "x " + "a/\\" * n(20000),
+            lambda n: "\\nhttp:" + "\\\\n" * n(15000) + ".env",     # escaped \\ before n
+            lambda n: "cat " * n(12500) + "x.key",
+            lambda n: " -a" * n(16000) + " x.key",
+            lambda n: "'a.a.a" * n(8000) + ".key",
         ]
-        for text in shapes:
-            with self.subTest(text=text[:24]):
-                t = time.perf_counter()
-                clean._origins(text)
-                self.assertLess(time.perf_counter() - t, BUDGET)
+        for build in shapes:
+            with self.subTest(text=build(growth.sized(1))[:24]):
+                self.assertScalesLinearly(build, clean._origins)
 
     def test_a_very_long_path_still_resolves(self):
-        text = " " + "a/" * 100000 + ".env"
-        t = time.perf_counter()
-        found = clean._origins(text)
-        self.assertLess(time.perf_counter() - t, BUDGET)
+        found = self.assertScalesLinearly(lambda n: " " + "a/" * n(100000) + ".env",
+                                          clean._origins)
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0].endswith("/.env"))
 
     def test_a_long_json_line_of_code_is_fast_and_honest(self):
-        line = 'x = d.key; cat api/.env; os.environ.get("K")\n' * 1100
-        text = json.dumps({"c": line})
-        t = time.perf_counter()
-        found = clean._origins(text)
-        self.assertLess(time.perf_counter() - t, BUDGET)
+        found = self.assertScalesLinearly(
+            lambda n: json.dumps({"c": 'x = d.key; cat api/.env; os.environ.get("K")\n'
+                                       * n(1100)}),
+            clean._origins)
         self.assertEqual(set(found), {"api/.env"})
 
 
-class OriginOfAResult(unittest.TestCase):
+class OriginOfAResult(growth.Assertions, unittest.TestCase):
     KEY = "AKIA" "4TRUE7KEYX9QZ2WB"  # synthetic, as in tests/test_origins.py
 
     def test_a_value_repeated_along_one_long_line_is_cheap(self):
         """A result whose call named no file is credited by the grep prefix
         on the secret's own line. Looking back from every copy of the value
         for the start of its line was quadratic on one long line."""
-        text = ("AWS_ACCESS_KEY_ID=%s " % self.KEY) * 20000
-        self.assertIsNone(self._origin(text))
+        self.assertIsNone(self._origin(
+            lambda n: ("AWS_ACCESS_KEY_ID=%s " % self.KEY) * n(20000)))
 
     def test_grep_prefixes_are_still_read(self):
-        text = "x.py:1:y\n" * 5000 + "api/.env:3:AWS_ACCESS_KEY_ID=%s\n" % self.KEY
-        self.assertEqual(self._origin(text), "api/.env")
+        self.assertEqual(self._origin(
+            lambda n: "x.py:1:y\n" * n(5000)
+            + "api/.env:3:AWS_ACCESS_KEY_ID=%s\n" % self.KEY), "api/.env")
 
-    def _origin(self, text):
-        """The grep origin of the one secret in text, timed."""
-        (value, _label, copies), = clean._scan(text, spans=False, where=True)[0]
-        self.assertEqual(value, self.KEY)
-        t = time.perf_counter()
-        origin = clean._GrepLines(text).origin(copies)
-        self.assertLess(time.perf_counter() - t, BUDGET)
-        return origin
+    def _origin(self, build):
+        """The grep origin of the one secret in the text build makes, timed."""
+        def found(n):
+            text = build(n)
+            (value, _label, copies), = clean._scan(text, spans=False, where=True)[0]
+            self.assertEqual(value, self.KEY)
+            return text, copies
+        return self.assertScalesLinearly(
+            found, lambda made: clean._GrepLines(made[0]).origin(made[1]))
 
     def test_a_command_full_of_shift_operators_is_linear(self):
-        command = "python3 -c 'print(1 << x)'\n" * 20000
-        t = time.perf_counter()
-        clean._without_heredocs(command)
-        self.assertLess(time.perf_counter() - t, BUDGET)
+        self.assertScalesLinearly(
+            lambda n: "python3 -c 'print(1 << x)'\n" * n(20000), clean._without_heredocs)
 
 
-class EmbeddedImages(unittest.TestCase):
+class EmbeddedImages(growth.Assertions, unittest.TestCase):
     PNG = "iVBORw0KGgoAAAANSUhEUgAA" + "A" * 300000
 
     def test_embedded_png_is_not_scanned(self):
-        t = time.perf_counter()
-        self.assertEqual(clean.find_secrets(self.PNG), [])
-        self.assertLess(time.perf_counter() - t, BUDGET)
+        found = self.assertScalesLinearly(
+            lambda n: self.PNG[:24] + "A" * n(300000), clean.find_secrets)
+        self.assertEqual(found, [])
 
     def test_image_data_cannot_produce_a_false_positive(self):
         """Random-looking base64 can contain an AKIA-shaped run by chance."""
@@ -137,12 +128,13 @@ class EmbeddedImages(unittest.TestCase):
         self.assertTrue(labels, "a live-shaped key in prose was missed")
 
 
-class FeedLookups(unittest.TestCase):
+class FeedLookups(growth.Assertions, unittest.TestCase):
     """lookup() asks providers() for the merged catalogue once per grant, and
     the merge floors every feed scope of that provider with _no_lower, in
     Python. Rebuilt on every call that was grants times feed entries: 300
     grants against a 17,000-entry feed (2.4 MB, well under feed.MAX_BYTES)
-    took 2.2s here, against 0.08s before the floor existed."""
+    took 2.2s here, against 0.08s before the floor existed. Grants and
+    entries grow together, so that product grows as their square."""
 
     ENTRIES = 17000
     GRANTS = 300
@@ -153,25 +145,27 @@ class FeedLookups(unittest.TestCase):
         patch = mock.patch.dict(os.environ, {"RANWHAT_HOME": home})
         patch.start()
         self.addCleanup(patch.stop)
+        self.addCleanup(catalog.reset_feed_cache)
+
+    def against_a_feed(self, n):
+        """A feed of n(ENTRIES) entries, read, and a profile of n(GRANTS)."""
         entry = {"label": "Fed", "authority": "write", "reversible": True,
                  "blast": "data_egress", "why": "a large test feed"}
         cat = {"aws": {"svc%d:Action%d" % (i, i): dict(entry)
-                       for i in range(self.ENTRIES)}}
+                       for i in range(n(self.ENTRIES))}}
         feed.save({"schema": feed.SCHEMA, "version": "t", "catalogue": cat,
                    "digest": feed.digest(cat)})
         catalog.reset_feed_cache()
-        self.addCleanup(catalog.reset_feed_cache)
-
-    def test_a_scan_against_a_large_feed_is_not_grants_times_entries(self):
-        profile = {"agent": "perf", "credentials": [{
-            "provider": "aws",
-            "scopes": ["svc%d:Action%d" % (i, i) for i in range(self.GRANTS)]}]}
         # Reading the cache is once per process, whatever the grants; the
         # lookups are what went quadratic.
         self.assertIsNotNone(catalog._feed_catalogue(), "the feed is not in use")
-        t = time.perf_counter()
-        result = score.scan(profile)
-        self.assertLess(time.perf_counter() - t, BUDGET)
+        return {"agent": "perf", "credentials": [{
+            "provider": "aws",
+            "scopes": ["svc%d:Action%d" % (i, i) for i in range(n(self.GRANTS))]}]}
+
+    def test_a_scan_against_a_large_feed_is_not_grants_times_entries(self):
+        result = self.assertScalesLinearly(self.against_a_feed, score.scan,
+                                           rebuild=True)
         self.assertEqual(len(result["scopes"]), self.GRANTS)
         self.assertTrue(all(r["label"] == "Fed" for r in result["scopes"]))
 
@@ -182,20 +176,22 @@ class FeedLookups(unittest.TestCase):
 # fails the test. Only the call itself is timed, not the interpreter's start
 # or building the input.
 HANG = 20
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TESTS = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(TESTS)
 MB = 1000000
 
+_PRELUDE = [
+    "import json, random, string, sys, time",
+    "sys.path.insert(0, %r)" % TESTS,
+    "import growth",
+    "from ranwhat import clean, watch",
+    "rnd = random.Random(7)",
+    "def r(alphabet, n): return ''.join(rnd.choice(alphabet) for _ in range(n))",
+]
 
-def _seconds(setup, call):
-    script = "\n".join([
-        "import json, random, string, time",
-        "from ranwhat import clean, watch",
-        "rnd = random.Random(7)",
-        "def r(alphabet, n): return ''.join(rnd.choice(alphabet) for _ in range(n))",
-        setup,
-        "t = time.perf_counter()",
-        call,
-        "print(time.perf_counter() - t)"])
+
+def _last_line(script):
+    """The last line `script` prints, run on its own interpreter."""
     try:
         run = subprocess.run([sys.executable, "-c", script], cwd=REPO,
                              capture_output=True, encoding="utf-8",
@@ -204,32 +200,68 @@ def _seconds(setup, call):
         raise AssertionError("still running after %ds" % HANG)
     if run.returncode:
         raise AssertionError(run.stderr)
-    return float(run.stdout.split()[-1])
+    return run.stdout.splitlines()[-1]
+
+
+def _seconds(setup, call, then=""):
+    """How long `call` takes after `setup`. `then`, run after the clock
+    stops, checks what it did without counting against it."""
+    return float(_last_line("\n".join(
+        _PRELUDE + [setup, "t = time.perf_counter()", call,
+                    "print(time.perf_counter() - t)", then])))
+
+
+def _growth(build, call):
+    """growth.measure() of `call` on `text`, made by the expression `build`
+    from n, on its own interpreter. The input is at most a megabyte at full
+    size. watch cuts what it judges to MAX_SCAN_CHARS, past which a longer
+    input costs it no more, so a call into watch is also measured at two
+    sizes below that cut, where everything it does grows with the input.
+    The larger is half the cut: shlex, which watch lets split a segment up
+    to the cut, builds a word by concatenation, and one word near the cut
+    grows its cost five to seven times for four times the length."""
+    script = "\n".join(_PRELUDE + [
+        "def build(n):",
+        "    return " + build,
+        "def call(text):",
+        "    return " + call,
+        "full = build(growth.sized(1))",
+        "assert len(full) <= %d" % MB,
+        "pairs = list(growth.QUARTER)",
+        "if %r and len(full) > watch.MAX_SCAN_CHARS:" % call.startswith("watch."),
+        "    cut = 0.45 * watch.MAX_SCAN_CHARS / len(full)",
+        "    pairs.append((cut, cut / growth.SCALE))",
+        "print(json.dumps(growth.measure(build, call, pairs,"
+        " inputs={1.0: full}).as_json()))",
+    ])
+    return growth.Measured.from_json(json.loads(_last_line(script)))
 
 
 class OneMegabyteOfAdversarialInput(unittest.TestCase):
     """Inputs built to make a scanner read the rest of the text again for
-    every token in it. Each must cost one pass, well under a second."""
+    every token in it. Each must cost one pass: what it costs grows with
+    the text as a linear cost does, and not as its square. Each is written
+    in n, so that n(k) is k at full size, a megabyte at most."""
 
     def assertLinear(self, cases, call="clean.find_secrets(text)"):
-        for name, expr in cases:
+        """Each case, an expression of n that makes the text, costs what a
+        linear scan does: see _growth."""
+        for name, build in cases:
             with self.subTest(case=name):
-                seconds = _seconds("text = " + expr + "\nassert len(text) <= %d" % MB,
-                                   call)
-                self.assertLess(seconds, BUDGET)
+                growth.assert_linear(self, _growth(build, call))
 
     def test_a_query_string_of_secret_named_parameters(self):
         """Each parameter whose name marks a secret took a copy of the rest
         of the value before cutting it at the next & or #: 2.5 seconds on
         a megabyte of &pwd=a, against 0.06 before the cut existed."""
         self.assertLinear([
-            ("&pwd=a", "'u=' + '&pwd=a' * 166666"),
-            ("&pwd=", "'u=' + '&pwd=' * 199999"),
-            ("&x_token=a", "'https://x/?' + '&x_token=a' * 99998"),
-            ("&token=abcdefgh", "'u=' + '&token=abcdefgh' * 66666"),
-            ("&token=x", "'v=' + '&token=x' * 124999"),
-            ("&access_token=x", "'v=' + '&access_token=x' * 66666"),
-            ("?access_token=", "'GET /cb?access_token=' + 'a' * 20 + '&refresh_token=x' * 62000"),
+            ("&pwd=a", "'u=' + '&pwd=a' * n(166666)"),
+            ("&pwd=", "'u=' + '&pwd=' * n(199999)"),
+            ("&x_token=a", "'https://x/?' + '&x_token=a' * n(99998)"),
+            ("&token=abcdefgh", "'u=' + '&token=abcdefgh' * n(66666)"),
+            ("&token=x", "'v=' + '&token=x' * n(124999)"),
+            ("&access_token=x", "'v=' + '&access_token=x' * n(66666)"),
+            ("?access_token=", "'GET /cb?access_token=' + 'a' * 20 + '&refresh_token=x' * n(62000)"),
         ])
 
     def test_a_shape_tried_again_and_again(self):
@@ -238,28 +270,28 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         run. A JWT's first part, and a private key's search for its END
         line, did the same inside one regex. Minutes, each."""
         self.assertLinear([
-            ("xoxb-xxxxxx", "('xox' 'b-xxxxxx') * 90909"),
-            ("sk-xxxxxx", "('sk' '-xxxxxx') * 111111"),
-            ("github_pat_xxxxxx", "('github_' 'pat_xxxxxx') * 58823"),
-            ("eyJ", "'eyJ' * 333333"),
-            ("eyJ and dots", "'eyJaaaaaaaaaaa.' * 66666"),
-            ("BEGIN with no END", "'-----BEGIN RSA PRIVATE" " KEY-----\\n' * 31250"),
-            ("BEGIN PRIVATE KEY-", "'-----BEGIN PRIVATE KEY-' * 43478"),
+            ("xoxb-xxxxxx", "('xox' 'b-xxxxxx') * n(90909)"),
+            ("sk-xxxxxx", "('sk' '-xxxxxx') * n(111111)"),
+            ("github_pat_xxxxxx", "('github_' 'pat_xxxxxx') * n(58823)"),
+            ("eyJ", "'eyJ' * n(333333)"),
+            ("eyJ and dots", "'eyJaaaaaaaaaaa.' * n(66666)"),
+            ("BEGIN with no END", "'-----BEGIN RSA PRIVATE" " KEY-----\\n' * n(31250)"),
+            ("BEGIN PRIVATE KEY-", "'-----BEGIN PRIVATE KEY-' * n(43478)"),
             ("BEGIN lines, one END",
-             "'-----BEGIN RSA PRIVATE" " KEY-----\\n' * 31000"
+             "'-----BEGIN RSA PRIVATE" " KEY-----\\n' * n(31000)"
              " + '-----END RSA PRIVATE KEY-----'"),
         ])
 
     DISTINCT = [
         ("AWS key IDs",
          "' '.join('AKIA' + r('ABCDEFGHIJKLMNOPQRSTUVWXYZ234567', 16)"
-         " for _ in range(47000))"),
+         " for _ in range(n(47000)))"),
         ("JSON api_key_N",
          "json.dumps({'api_key_%d' % i: r(string.ascii_letters + string.digits, 24)"
-         " for i in range(25000)})[:1000000]"),
+         " for i in range(n(25000))})[:n(1000000)]"),
         ("a password inside each URL",
          "'\\n'.join('DATABASE_URL=postgres://u:%s@h/d'"
-         " % r(string.ascii_letters + string.digits, 32) for _ in range(15800))"),
+         " % r(string.ascii_letters + string.digits, 32) for _ in range(n(15800)))"),
     ]
 
     def test_a_command_full_of_shift_operators(self):
@@ -267,10 +299,10 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         each one with none was looked for to the end of the command. watch
         strips here-documents before it cuts a command to MAX_SCAN_CHARS,
         so the whole megabyte was read once per <<."""
-        self.assertLinear([("<<EOF lines", "'<<EOF\\n' * 166666")],
+        self.assertLinear([("<<EOF lines", "'<<EOF\\n' * n(166666)")],
                           call="watch._strip_heredocs(text)")
         self.assertLinear([("1 << x in python -c",
-                            "\"python3 -c 'print(1 << x)'\\n\" * 37000")],
+                            "\"python3 -c 'print(1 << x)'\\n\" * n(37000)")],
                           call="watch.evaluate('Bash', {'command': text})")
 
     def test_one_long_command(self):
@@ -280,16 +312,16 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         a megabyte inside one quote took eleven seconds, and every segment
         went through it whatever it held."""
         self.assertLinear([
-            ("an unclosed quote", "\"'\" + 'a ' * 499999"),
-            ("escaped characters", "'\\\\a' * 500000"),
-            ("pipes", "'a | ' * 250000"),
-            ("lines", "'ls\\n' * 333333"),
-            ("deletions", "'rm -rf a ; ' * 90909"),
-            ("quoted words", "\"'a|b' | \" * 125000"),
-            ("options before a message", "'git ' + '-a b ' * 199000 + 'commit -m \"x; y\"'"),
-            ("pipes into a path", "'|' + '/a' * 499999"),
-            ("filters given files", "\"jq '.a' x | \" * 83000"),
-            ("pipes of both streams", "'cat x |& ' * 110000"),
+            ("an unclosed quote", "\"'\" + 'a ' * n(499999)"),
+            ("escaped characters", "'\\\\a' * n(500000)"),
+            ("pipes", "'a | ' * n(250000)"),
+            ("lines", "'ls\\n' * n(333333)"),
+            ("deletions", "'rm -rf a ; ' * n(90909)"),
+            ("quoted words", "\"'a|b' | \" * n(125000)"),
+            ("options before a message", "'git ' + '-a b ' * n(199000) + 'commit -m \"x; y\"'"),
+            ("pipes into a path", "'|' + '/a' * n(499999)"),
+            ("filters given files", "\"jq '.a' x | \" * n(83000)"),
+            ("pipes of both streams", "'cat x |& ' * n(110000)"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
     def test_long_runs_of_blanks(self):
@@ -299,13 +331,13 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         seventeen seconds. Blanking what a command only writes turns
         `cat .env | tee` and thirty thousand file names into such a run."""
         self.assertLinear([
-            ("one run", "'cat .env' + ' ' * 999990 + 'x'"),
-            ("tee's files", "'cat .env | tee ' + 'a ' * 499990"),
-            ("redirections", "'cat .env ' + '>a ' * 333330"),
-            ("runs before separators", "('x' + ' ' * 4999 + ';') * 199"),
+            ("one run", "'cat .env' + ' ' * n(999990) + 'x'"),
+            ("tee's files", "'cat .env | tee ' + 'a ' * n(499990)"),
+            ("redirections", "'cat .env ' + '>a ' * n(333330)"),
+            ("runs before separators", "('x' + ' ' * n(4999) + ';') * 199"),
         ], call="watch.evaluate('Bash', {'command': text})")
         self.assertLinear([("a git push across a run",
-                            "'git push' + ' ' * 999980 + ' -f'")],
+                            "'git push' + ' ' * n(999980) + ' -f'")],
                           call="watch._evidence(text, (0, len(text)))")
 
     def test_a_rule_with_a_gap(self):
@@ -314,18 +346,18 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         64,000 characters of `git push ` took three seconds, and of
         `curl -F ` as long. Two gaps, in sed's redaction test, are worse."""
         self.assertLinear([
-            ("rm -rf", "'rm -rf ' * 142857"),
-            ("git push", "'git push ' * 111111"),
-            ("curl", "'curl ' * 199999"),
-            ("curl -F", "'curl -F ' * 124999"),
-            ("rm -rf .gi", "'rm -rf .gi ' * 90909"),
-            ("rm -r -f", "'rm -r -f ' * 111111"),
-            (" -rm", "' -rm' * 249999"),
-            ("git rm", "'git rm ' * 142857"),
-            ("rm .bash_hist", "'rm .bash_hist ' * 66666"),
-            ("find beside a deletion", "'rm -rf ~/x ; ' + 'find ' * 199990"),
-            ("sed beside a read", "'cat .env ' + 'sed s/ ' * 142000"),
-            ("service accounts", "'cat x ' + 'service_account ' * 62000"),
+            ("rm -rf", "'rm -rf ' * n(142857)"),
+            ("git push", "'git push ' * n(111111)"),
+            ("curl", "'curl ' * n(199999)"),
+            ("curl -F", "'curl -F ' * n(124999)"),
+            ("rm -rf .gi", "'rm -rf .gi ' * n(90909)"),
+            ("rm -r -f", "'rm -r -f ' * n(111111)"),
+            (" -rm", "' -rm' * n(249999)"),
+            ("git rm", "'git rm ' * n(142857)"),
+            ("rm .bash_hist", "'rm .bash_hist ' * n(66666)"),
+            ("find beside a deletion", "'rm -rf ~/x ; ' + 'find ' * n(199990)"),
+            ("sed beside a read", "'cat .env ' + 'sed s/ ' * n(142000)"),
+            ("service accounts", "'cat x ' + 'service_account ' * n(62000)"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
     def test_a_deletion_aimed_at_a_long_run(self):
@@ -336,13 +368,13 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         counting and copying the whole word again: a megabyte of them did
         not finish either."""
         self.assertLinear([
-            ("stars", "'rm -rf /' + '*' * 63980 + 'x'"),
-            ("stars in a subshell", "'(rm -rf /' + '*' * 63970 + 'x)'"),
-            ("stars and dots", "'rm -rf ~/' + '*.' * 31990 + 'x'"),
-            ("closing parentheses", "'rm -rf ' + ')' * 999990"),
-            ("a substitution closed", "'x=$(rm -rf ~' + ')' * 999980"),
+            ("stars", "'rm -rf /' + '*' * n(63980) + 'x'"),
+            ("stars in a subshell", "'(rm -rf /' + '*' * n(63970) + 'x)'"),
+            ("stars and dots", "'rm -rf ~/' + '*.' * n(31990) + 'x'"),
+            ("closing parentheses", "'rm -rf ' + ')' * n(999990)"),
+            ("a substitution closed", "'x=$(rm -rf ~' + ')' * n(999980)"),
         ], call="watch.evaluate('Bash', {'command': text})")
-        self.assertLinear([("one long target", "'/' + '*' * 999990 + 'x'")],
+        self.assertLinear([("one long target", "'/' + '*' * n(999990) + 'x'")],
                           call="watch._as_absolute(text, '/Users/me')")
 
     def test_a_credential_path_with_two_runs(self):
@@ -350,8 +382,8 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         then any run and .json, so each service_account in one long word
         read on to its end: 63K took two seconds."""
         self.assertLinear([
-            ("one word", "'cat service_account.json ' + 'service_account' * 66000"),
-            ("dashes", "'cat x.json ' + 'service-account' * 66000 + ' .json'"),
+            ("one word", "'cat service_account.json ' + 'service_account' * n(66000)"),
+            ("dashes", "'cat x.json ' + 'service-account' * n(66000) + ' .json'"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
     def test_flags_that_print_the_environment(self):
@@ -360,8 +392,8 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         63,000 of them did not finish in twenty seconds. Only what fits in
         MAX_SCAN_CHARS is asked."""
         self.assertLinear([
-            ("declare -ppp", "'source .env ; declare -' + 'p' * 63000 + '1'"),
-            ("typeset -xxx", "'source .env ; typeset -' + 'x' * 63000 + '1'"),
+            ("declare -ppp", "'source .env ; declare -' + 'p' * n(63000) + '1'"),
+            ("typeset -xxx", "'source .env ; typeset -' + 'x' * n(63000) + '1'"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
     def test_a_command_full_of_credential_files(self):
@@ -370,14 +402,14 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         and whether it was handed to a program. Five thousand ssh -i keys
         in the 64K that watch judges took three seconds."""
         self.assertLinear([
-            ("identities", "'ssh ' + ' '.join('-i ~/.ssh/id_rsa%d' % i for i in range(45000))"),
-            ("env files", "'docker run ' + ' '.join('--env-file x%d/.env' % i for i in range(43000))"),
-            ("variables", "' '.join('K%d=x%d/.env' % (i, i) for i in range(53000))"),
-            ("exclusions", "'rsync ' + ' '.join('--exclude .env.%d' % i for i in range(48000))"
+            ("identities", "'ssh ' + ' '.join('-i ~/.ssh/id_rsa%d' % i for i in range(n(45000)))"),
+            ("env files", "'docker run ' + ' '.join('--env-file x%d/.env' % i for i in range(n(43000)))"),
+            ("variables", "' '.join('K%d=x%d/.env' % (i, i) for i in range(n(53000)))"),
+            ("exclusions", "'rsync ' + ' '.join('--exclude .env.%d' % i for i in range(n(48000)))"
                            " + ' src/ dst/ ; cat .env.1'"),
-            (".env run", "'cat ' + '.env' * 249999"),
-            ("a long path read back", "'F=' + 'a/' * 30000 + '.env; ' + 'cat $F ' * 100000"),
-            ("a variable read back", "'F=.env; ' + 'cat \"$F\" ' * 110000"),
+            (".env run", "'cat ' + '.env' * n(249999)"),
+            ("a long path read back", "'F=' + 'a/' * n(30000) + '.env; ' + 'cat $F ' * n(100000)"),
+            ("a variable read back", "'F=.env; ' + 'cat \"$F\" ' * n(110000)"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
     def test_a_megabyte_of_distinct_keys(self):
@@ -431,9 +463,11 @@ class ATranscriptOfDistinctKeys(unittest.TestCase):
         for name, blocks in GREP_RESULTS:
             with self.subTest(case=name):
                 setup = self.SETUP % blocks
-                finding = _seconds(setup, "[clean.find_secrets(b) for b in blocks]")
-                scanning = _seconds(setup, "clean.scan_file(path)")
-                self.assertLess(scanning, 2 * finding + BUDGET)
+                finding, scanning = growth.settle(
+                    lambda: (_seconds(setup, "[clean.find_secrets(b) for b in blocks]"),
+                             _seconds(setup, "clean.scan_file(path)")),
+                    lambda finding, scanning: scanning < 3 * finding)
+                self.assertLess(scanning, 3 * finding)
 
 
 
@@ -468,21 +502,25 @@ class EveryCopyOfASecretIsCheap(unittest.TestCase):
     def test_a_line_of_many_nodes_holding_many_values(self):
         for items in ("[0] * 470000", "['x'] * 180000"):
             with self.subTest(items=items):
-                bare = _seconds(_COPIES % (items, "''"), "clean.scan_file(path)")
-                held = _seconds(_COPIES % (items, "' '.join(pws)"),
-                                "f, _ = clean.scan_file(path)\n"
-                                "assert len(f) == 600\n"
-                                "assert sum(e['count'] == 2 for e in f.values()) > 500")
-                self.assertLess(held, 2 * bare + BUDGET)
+                bare, held = growth.settle(lambda: (
+                    _seconds(_COPIES % (items, "''"), "clean.scan_file(path)"),
+                    _seconds(_COPIES % (items, "' '.join(pws)"),
+                             "f, _ = clean.scan_file(path)",
+                             then="assert len(f) == 600\n"
+                                  "assert sum(e['count'] == 2 for e in f.values()) > 500")),
+                    lambda bare, held: held < 3 * bare)
+                self.assertLess(held, 3 * bare)
 
     def test_masking_them_is_as_cheap(self):
-        bare = _seconds(_COPIES % ("['x'] * 180000", "''"),
-                        "clean.scan_file(path, apply=True)")
-        held = _seconds(_COPIES % ("['x'] * 180000", "' '.join(pws)"),
-                        "clean.scan_file(path, apply=True)\n"
-                        "text = open(path, encoding='utf-8').read()\n"
-                        "assert not any(p in text for p in pws)")
-        self.assertLess(held, 2 * bare + BUDGET)
+        bare, held = growth.settle(lambda: (
+            _seconds(_COPIES % ("['x'] * 180000", "''"),
+                     "clean.scan_file(path, apply=True)"),
+            _seconds(_COPIES % ("['x'] * 180000", "' '.join(pws)"),
+                     "clean.scan_file(path, apply=True)",
+                     then="text = open(path, encoding='utf-8').read()\n"
+                          "assert not any(p in text for p in pws)")),
+            lambda bare, held: held < 3 * bare)
+        self.assertLess(held, 3 * bare)
 
 
 # A .env read whose one value repeats a short run, and 400 deletions whose
@@ -525,9 +563,11 @@ class EvidenceCutInsideAKnownValue(unittest.TestCase):
 
     def test_a_long_value_with_a_short_period(self):
         call = "with contextlib.redirect_stdout(io.StringIO()):\n    cli.main(argv)"
-        plain = _seconds(_CUT_EVIDENCE % "r(string.ascii_letters, 640000)", call)
-        periodic = _seconds(_CUT_EVIDENCE % "unit * 40000", call)
-        self.assertLess(periodic, 2 * plain + BUDGET)
+        plain, periodic = growth.settle(lambda: (
+            _seconds(_CUT_EVIDENCE % "r(string.ascii_letters, 640000)", call),
+            _seconds(_CUT_EVIDENCE % "unit * 40000", call)),
+            lambda plain, periodic: periodic < 2 * plain)
+        self.assertLess(periodic, 2 * plain)
 
     def test_what_shows_of_it_is_still_masked(self):
         unit = "Xk9mPq2vRt7wLz4b"
@@ -596,10 +636,11 @@ class DistinctKeysUnderARealProject(unittest.TestCase):
             with self.subTest(command=command):
                 call = ("with contextlib.redirect_stdout(io.StringIO()):\n"
                         "    cli.main([%r] + argv)" % command)
-                real = _seconds(_UNDER_A_PROJECT % ("work.replace(os.sep, '-')", 47000),
-                                call)
-                elsewhere = _seconds(_UNDER_A_PROJECT % ("'-nowhere-at-all'", 47000), call)
-                self.assertLess(real, elsewhere + BUDGET)
+                real, elsewhere = growth.settle(lambda: (
+                    _seconds(_UNDER_A_PROJECT % ("work.replace(os.sep, '-')", 47000), call),
+                    _seconds(_UNDER_A_PROJECT % ("'-nowhere-at-all'", 47000), call)),
+                    lambda real, elsewhere: real < 1.5 * elsewhere)
+                self.assertLess(real, 1.5 * elsewhere)
 
 
 # A .env of ten thousand passwords read, then thousands of deletions, in a
@@ -639,11 +680,14 @@ class CheckMasksEveryActionCheaply(unittest.TestCase):
             return _seconds(_KNOWN_AND_HITS % 3400,
                             "with contextlib.redirect_stdout(io.StringIO()):\n"
                             "    cli.main(%r + argv)" % command)
-        watch_alone = run(["watch"])
-        clean_alone = run(["clean", "--no-interactive"])
-        for command in (["check"], ["check", "--json"]):
+        watch_alone, clean_alone, check, as_json = growth.settle(
+            lambda: (run(["watch"]), run(["clean", "--no-interactive"]),
+                     run(["check"]), run(["check", "--json"])),
+            lambda watch_alone, clean_alone, check, as_json:
+                max(check, as_json) < 1.5 * (watch_alone + clean_alone))
+        for command, took in ((["check"], check), (["check", "--json"], as_json)):
             with self.subTest(command=command):
-                self.assertLess(run(command), watch_alone + clean_alone + BUDGET)
+                self.assertLess(took, 1.5 * (watch_alone + clean_alone))
 
 
 class AssignmentsTriedAtTheirSeparator(unittest.TestCase):

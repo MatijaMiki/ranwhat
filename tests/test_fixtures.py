@@ -18,13 +18,14 @@ import os
 import random
 import string
 import sys
-import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ranwhat import clean, fixtures, watch
-from ranwhat.fixtures import fixture_reason
+import growth  # noqa: E402
+from ranwhat import clean, fixtures, watch  # noqa: E402
+from ranwhat.fixtures import fixture_reason  # noqa: E402
 
 B32 = string.ascii_uppercase + "234567"
 B62 = string.ascii_letters + string.digits
@@ -433,19 +434,19 @@ class RandomKeysAreNeverFixtures(unittest.TestCase):
                     self.assertIsNone(fixture_reason(value), value)
 
 
-class StaysLinear(unittest.TestCase):
+class StaysLinear(growth.Assertions, unittest.TestCase):
+    # `count`, not the usual n, which this module names a function.
 
     def test_watch_on_a_command_full_of_fixtures(self):
-        command = ("echo AKIA1234567890ABCDEF sk_" "live_51HxAbCdEfGhIjKlMnOpQr " * 1200)[:64000]
-        t = time.perf_counter()
-        self.assertEqual(literal_hits(command), [])
-        self.assertLess(time.perf_counter() - t, 1.0)
+        self.assertEqual(self.assertScalesLinearly(
+            lambda count: ("echo AKIA1234567890ABCDEF sk_" "live_51HxAbCdEfGhIjKlMnOpQr "
+                           * count(1200))[:64000],
+            literal_hits), [])
 
     def test_clean_on_a_megabyte_of_fixtures(self):
-        text = ("AKIA1234567890ABCDEF gh" "p_" + "Ab12" * 9 + "\n") * 16000
-        t = time.perf_counter()
-        self.assertEqual(clean.find_secrets(text), [])
-        self.assertLess(time.perf_counter() - t, 3.0)
+        self.assertEqual(self.assertScalesLinearly(
+            lambda count: ("AKIA1234567890ABCDEF gh" "p_" + "Ab12" * 9 + "\n") * count(16000),
+            clean.find_secrets), [])
 
     def test_long_bodies_skip_statistics_and_stay_flagged(self):
         self.assertIsNone(fixture_reason("sk_" "live_" + "abcdefgh" * 100))

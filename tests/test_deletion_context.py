@@ -8,13 +8,15 @@ other direction: commands that must keep flagging. All values are synthetic.
 """
 import os
 import sys
-import time
 import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ranwhat import watch
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import growth  # noqa: E402
+from ranwhat import watch  # noqa: E402
 
 H, C = watch.HIGH, watch.CRITICAL
 
@@ -472,21 +474,22 @@ class OtherRulesAreUntouched(unittest.TestCase):
         self.assertNotIn("fs.destructive", rules)
 
 
-class ResolutionIsLinear(unittest.TestCase):
+def _judged(cmd):
+    return watch.evaluate("Bash", {"command": cmd, "timeout": 1})
+
+
+class ResolutionIsLinear(growth.Assertions, unittest.TestCase):
 
     def test_many_assignments(self):
         """One regex per tracked name per segment took 189s on this shape."""
-        cmd = "; ".join("V%d=/tmp/v%d" % (i, i) for i in range(3000))
-        cmd += '; rm -rf "$V1"'
-        t = time.perf_counter()
-        watch.evaluate("Bash", {"command": cmd, "timeout": 1})
-        self.assertLess(time.perf_counter() - t, 2.0)
+        self.assertScalesLinearly(
+            lambda n: "; ".join("V%d=/tmp/v%d" % (i, i) for i in range(n(3000)))
+            + '; rm -rf "$V1"', _judged)
 
     def test_many_deletions(self):
-        cmd = "SB=/tmp/x; " + " ; ".join('rm -rf "$SB"' for _ in range(3000))
-        t = time.perf_counter()
-        watch.evaluate("Bash", {"command": cmd, "timeout": 1})
-        self.assertLess(time.perf_counter() - t, 2.0)
+        self.assertScalesLinearly(
+            lambda n: "SB=/tmp/x; " + " ; ".join('rm -rf "$SB"' for _ in range(n(3000))),
+            _judged)
 
 
 class UnderTemp(unittest.TestCase):

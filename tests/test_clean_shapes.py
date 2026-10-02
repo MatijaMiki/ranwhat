@@ -13,13 +13,14 @@ import shutil
 import string
 import sys
 import tempfile
-import time
 import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ranwhat import clean, watch
+import growth  # noqa: E402
+from ranwhat import clean, watch  # noqa: E402
 from ranwhat.clean import (REDACTION, _fingerprint, _hint, _looks_computed,
                            find_secrets, mask_for_display, scan_file)
 
@@ -212,7 +213,7 @@ class AssignmentsInsideEscapedJson(unittest.TestCase):
         self.assertEqual(scan_file(path, apply=True), ({}, False))
 
 
-class AssignmentScanStaysLinear(unittest.TestCase):
+class AssignmentScanStaysLinear(growth.Assertions, unittest.TestCase):
     """A key was tried at every letter of a run, and each try read to the
     end of the run: 20,000 characters took seconds and 200,000 took
     minutes. Reading inside quoted values would have spread that to every
@@ -222,13 +223,15 @@ class AssignmentScanStaysLinear(unittest.TestCase):
     HEX = _run("0123456789abcdef", 20000)
 
     def test_long_runs(self):
-        for text in ("k=1 " + self.MIXED, json.dumps({"data": self.MIXED}),
-                     "k=1 " + self.HEX, json.dumps({"bytecode": "0x" + self.HEX}),
-                     "a=" * 10000, json.dumps({"q": "a=" * 10000})):
-            with self.subTest(text=text[:16]):
-                t = time.perf_counter()
-                list(clean._ASSIGN.finditer(text))
-                self.assertLess(time.perf_counter() - t, 0.05)
+        for build in (lambda n: "k=1 " + self.MIXED[:n(20000)],
+                      lambda n: json.dumps({"data": self.MIXED[:n(20000)]}),
+                      lambda n: "k=1 " + self.HEX[:n(20000)],
+                      lambda n: json.dumps({"bytecode": "0x" + self.HEX[:n(20000)]}),
+                      lambda n: "a=" * n(10000),
+                      lambda n: json.dumps({"q": "a=" * n(10000)})):
+            with self.subTest(text=build(growth.sized(1))[:16]):
+                self.assertScalesLinearly(
+                    build, lambda text: list(clean._ASSIGN.finditer(text)))
 
     def test_a_key_still_starts_after_digits_or_an_escape(self):
         for text, label in (("0API_TOKEN=" + AWS_SECRET, "API_TOKEN"),
@@ -1073,7 +1076,7 @@ def _grep_transcript(command, output):
     return path
 
 
-class AssignmentsInsideAValue(Leaks, unittest.TestCase):
+class AssignmentsInsideAValue(Leaks, growth.Assertions, unittest.TestCase):
     """A KEY=value inside the unquoted value of a key that is not a secret
     was never tried: grep -rn output (api/.env:3:...), a log prefix, a URL's
     query string, a header value."""
@@ -1171,25 +1174,28 @@ class AssignmentsInsideAValue(Leaks, unittest.TestCase):
         megabyte half a million times. A megabyte each."""
         one = [(PASSWORD, "DB_PASSWORD")]
         cases = [
-            ("a:" * 500000, []), ("x=" + "a:" * 499999, []),
-            ("INFO: " + "a=" * 499997, []), ("a:" * 499000 + "DB_PASSWORD=" + PASSWORD, one),
-            ("?" + "a=1&" * 249999, []), ("https://x.test/?" + "token_type=b&" * 76000, []),
-            (json.dumps({"q": "a:" * 499990}), []), ("a:" + "b" * 999990, []),
-            ("k=" + "a_b:" * 249999, []), ("key:" * 250000, []),
-            ("a:" + "key" * 333330, []), ("a:" + "a" * 999000 + "key:x", []),
+            (lambda n: "a:" * n(500000), []), (lambda n: "x=" + "a:" * n(499999), []),
+            (lambda n: "INFO: " + "a=" * n(499997), []),
+            (lambda n: "a:" * n(499000) + "DB_PASSWORD=" + PASSWORD, one),
+            (lambda n: "?" + "a=1&" * n(249999), []),
+            (lambda n: "https://x.test/?" + "token_type=b&" * n(76000), []),
+            (lambda n: json.dumps({"q": "a:" * n(499990)}), []),
+            (lambda n: "a:" + "b" * n(999990), []),
+            (lambda n: "k=" + "a_b:" * n(249999), []), (lambda n: "key:" * n(250000), []),
+            (lambda n: "a:" + "key" * n(333330), []),
+            (lambda n: "a:" + "a" * n(999000) + "key:x", []),
             # a colon, then hex: every letter used to start a URL scheme
-            ("k:" + "0123456789abcdef" * 62400, []),
+            (lambda n: "k:" + "0123456789abcdef" * n(62400), []),
             # the same password on every line, a copy of it found per line
-            ("api/.env:3:DB_PASSWORD=%s\n" % PASSWORD * 20000, one),
-            ("DB_PASSWORD=%s\n" % PASSWORD * 27000, one),
+            (lambda n: "api/.env:3:DB_PASSWORD=%s\n" % PASSWORD * n(20000), one),
+            (lambda n: "DB_PASSWORD=%s\n" % PASSWORD * n(27000), one),
         ]
-        for text, expected in cases:
+        for build, expected in cases:
+            text = build(growth.sized(1))
             with self.subTest(text=text[:16]):
                 self.assertLessEqual(len(text), 1000000)
-                t = time.perf_counter()
-                found = find_secrets(text)
-                self.assertLess(time.perf_counter() - t, 0.5)
-                self.assertEqual(found, expected)
+                self.assertEqual(self.assertScalesLinearly(build, find_secrets),
+                                 expected)
 
 
 class EveryParameterOfAQueryString(Leaks, unittest.TestCase):
