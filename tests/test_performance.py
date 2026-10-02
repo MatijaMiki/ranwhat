@@ -182,10 +182,12 @@ REPO = os.path.dirname(TESTS)
 MB = 1000000
 
 _PRELUDE = [
-    "import json, random, string, sys, time",
+    "import json, os, random, string, sys, tempfile, time",
     "sys.path.insert(0, %r)" % TESTS,
     "import growth",
     "from ranwhat import clean, watch",
+    # A mask backs the transcript up first: never into the real ~/.ranwhat.
+    "clean.BACKUP_ROOT = os.path.join(tempfile.mkdtemp(), 'backups')",
     "rnd = random.Random(7)",
     "def r(alphabet, n): return ''.join(rnd.choice(alphabet) for _ in range(n))",
 ]
