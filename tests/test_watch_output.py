@@ -279,6 +279,30 @@ class FitsTheTerminal(unittest.TestCase):
         self.assertEqual(" ".join(words), why)
 
 
+class WhoRanItIsNeverCut(unittest.TestCase):
+    """The marker for a call the user declined, or ran themselves, ended the
+    line under the title and was the first thing cut: on an 80 column
+    terminal Gemini CLI's read "(declined, did not…", and at 60 and 46 it
+    was gone, so a deletion the user refused read as one that ran."""
+
+    def test_the_marker_is_whole_at_every_width(self):
+        hit = {"rule": "fs.destructive", "severity": "critical",
+               "title": "Bulk or recursive deletion", "why": "Recursive.",
+               "evidence": "rm -rf ~/Documents/thesis"}
+        for field, value, marker in (("status", "declined", "(declined, did not run)"),
+                                     ("actor", "user", "(you ran this)")):
+            record = {"source": "gemini", "tool_name": "run_shell_command",
+                      "timestamp": DAY + "T10:00:00Z", "severity": "critical",
+                      "hits": [hit], field: value}
+            for width in (46, 60, 80):
+                with self.subTest(marker=marker, width=width), \
+                        mock.patch.dict(os.environ, {"RANWHAT_WIDTH": str(width)}):
+                    text = plain(watch.render([record], {"gemini": 1}, 30))
+                    self.assertIn(marker, text)
+                    for line in text.split("\n"):
+                        self.assertLessEqual(len(line), width, repr(line))
+
+
 class LocalTime(unittest.TestCase):
     """W5: a UTC stamp was shown with its Z dropped and never converted."""
 

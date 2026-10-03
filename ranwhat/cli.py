@@ -108,6 +108,9 @@ def _load(path):
         raise SystemExit("ranwhat: cannot read (permission denied): %s" % path)
     except ValueError as e:
         raise SystemExit("ranwhat: %s is not valid JSON (%s)" % (path, e))
+    except OSError as e:
+        # A name Windows refuses (profile?.json is EINVAL), and the rest.
+        raise SystemExit("ranwhat: cannot read %s (%s)" % (path, e.strerror or e))
 
 
 def _bundled(name):
@@ -352,10 +355,7 @@ def _launches(found, executable):
     """Whether running `found` starts this interpreter.
 
     macOS's /usr/bin/python3 is not a link but a launcher for the Command Line
-    Tools' copy, so no comparison of paths can tell; only asking it can. POSIX
-    only: on Windows, python3 on PATH may be the Store alias."""
-    if os.name == "nt":
-        return False
+    Tools' copy, so no comparison of paths can tell; only asking it can."""
     import subprocess
     probe = subprocess.run(
         [found, "-I", "-S", "-c", "import sys; sys.stdout.write(sys.executable)"],
@@ -365,24 +365,42 @@ def _launches(found, executable):
     return bool(started) and _same_file(started, executable)
 
 
-def _python_m(executable, path):
+def _python_m(executable, path, windows=None):
     """`python -m ranwhat` is running a checkout or venv, not the PyPI build.
 
     Spelled with the bare name when that name, looked up on the user's PATH,
     starts this interpreter, and with the full path otherwise. python3 is
     tried after the interpreter's own name, since python3.12 may be what ran
-    but python3 is what people type."""
+    but python3 is what people type.
+
+    On Windows neither name is run to ask, since either on PATH may be the
+    Store's alias, which opens the Store. Nor is the interpreter named by a
+    quoted first word: PowerShell reads one as a string, not a command, and
+    every step suggested after `py -m ranwhat` failed there. py, when it
+    starts this interpreter, is next, then a path that needs no quotes,
+    then uvx."""
+    if windows is None:
+        windows = os.name == "nt"
     for name in dict.fromkeys((os.path.basename(executable), "python3")):
         try:
             found = shutil.which(name, path=path)
             # abspath, not realpath: a venv's bin/python is a symlink to the
             # base interpreter, which does not have ranwhat.
-            if found and (_same_file(found, executable)
-                          or _launches(found, executable)):
+            if found and (_same_file(found, executable) or (
+                    not windows and _launches(found, executable))):
                 return "%s -m ranwhat" % name
         except Exception:
             continue          # a launcher that hangs or fails is not ours
-    return "%s -m ranwhat" % _quote(executable)
+    if not windows:
+        return "%s -m ranwhat" % _quote(executable, windows=False)
+    try:
+        found = shutil.which("py", path=path)
+        if found and _launches(found, executable):
+            return "py -m ranwhat"
+    except Exception:
+        pass
+    word = _quote(executable, windows=True)
+    return "%s -m ranwhat" % word if word == executable else "uvx ranwhat"
 
 
 def invocation():
@@ -678,16 +696,20 @@ def _check(args):
     sources = sum(counts.values())
     scanned = searched.scanned
 
-    places = None if sources or scanned else watch_mod.locations(
+    # Where watch looked, whenever it read nothing, though clean read a
+    # prompt history: without it watch's section gave the general hint,
+    # not that every session there was older than --days.
+    places = None if sources else watch_mod.locations(
         args.sources, root=args.root, state_dir=args.state_dir,
         paths=args.paths, asked=args.source)
+    nothing = places is not None and not scanned
     if args.json:
         print(_json_text({
             "days": args.days,
             "actions": records,
             "secrets": [_finding_json(f) for f in findings.values()],
         }))
-        return _said_nothing_read(places, args.days)
+        return _said_nothing_read(places if nothing else None, args.days)
 
     from .report import DIM
     # Each section once, then one tail. Printing the two standalone reports
@@ -696,8 +718,7 @@ def _check(args):
     # it goes under check's own name.
     print(watch_mod.render(records, counts, args.days, footer=False,
                            locations=places,
-                           title=_CHECK_TITLE if places is not None
-                           else watch_mod.TITLE,
+                           title=_CHECK_TITLE if nothing else watch_mod.TITLE,
                            complete=agents_mod.all_read(args.sources)
                            ).rstrip("\n"))
     if scanned:
@@ -716,7 +737,8 @@ def _check(args):
     steps = []
     if findings:
         # Bare `clean` on a terminal opens the review over these findings.
-        steps.append((["clean"] + _carried(args, "days", "root", "source", "path"),
+        steps.append((["clean"] + _carried(args, "days", "root", "state_dir",
+                                           "source", "path"),
                       "review each secret, then mask it"))
     if records:
         # Not `watch --json`: watch masks what a call shows to be a secret,
@@ -745,7 +767,7 @@ def _check(args):
             tail += term.wrap(why, indent="      ")
     tail += ["", term.rule("-"), term.FOOTER, ""]
     print("\n".join(tail))
-    return 2 if places is not None else 0
+    return 2 if nothing else 0
 
 
 # The header of check's report when it read nothing: watch's section,
@@ -999,6 +1021,10 @@ def _agent_flags(p, args):
         if getattr(args, name) is not None and source_id in paths:
             p.error("%s and --path %s= both point %s elsewhere; give one"
                     % (flag, source_id, agents_mod.name(source_id)))
+        # Expanded as --path is: --root=~/x, a quoted ~, and any ~ in cmd
+        # or PowerShell reach ranwhat as written, and read nothing.
+        if getattr(args, name):
+            setattr(args, name, os.path.expanduser(getattr(args, name)))
     args.path_ids = tuple(paths)
     args.pointed = {i: v for i, v in paths.items() if i not in agents_mod.PORTED}
     args.root = args.root or paths.get("claude-code") or watch_mod.CLAUDE_PROJECTS
@@ -1149,6 +1175,11 @@ def _sources(args):
         if entry["status"] == "found" or masking == "not searched":
             L += [DIM(line) for line in term.wrap(what, indent="    ")]
         for note in entry["notes"]:
+            # A path in a note as the location lines show it, under ~ and
+            # cut to the line: term.wrap gives a word longer than the line
+            # a line of its own, past the edge.
+            note = " ".join(watch_mod._shown_path(word, width - 4)
+                            for word in note.split())
             L += [DIM(line) for line in term.wrap(note, indent="    ")]
         L.append("")
     for status, heading in (("cloud only", "Cloud only, nothing on this "
@@ -1211,8 +1242,11 @@ def main(argv=None):
 
 def _closed_pipe(error, windows=os.name == "nt"):
     """Whether error is a write to a pipe whose reader has gone: a
-    BrokenPipeError, or on Windows an OSError with EINVAL."""
-    return isinstance(error, BrokenPipeError) or (windows and error.errno == errno.EINVAL)
+    BrokenPipeError, or on Windows an OSError with EINVAL that names no
+    file. Windows gives EINVAL too for a file name holding ? * < > |, and
+    taken for the pipe, that error ended the run with nothing said."""
+    return isinstance(error, BrokenPipeError) or (
+        windows and error.errno == errno.EINVAL and error.filename is None)
 
 
 def _quiet_stdout():

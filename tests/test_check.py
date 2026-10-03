@@ -970,6 +970,22 @@ class TheRootIsTheProjectsDirectory(_Base):
         self.assertEqual(rc, 0)
         self.assertEqual(len(json.loads(out)["secrets"]), 1)
 
+    def test_the_hint_typed_back_reads_it(self):
+        """The hint names a path in the home directory under ~, and cmd,
+        PowerShell and a quoted word hand ~ on as it is: typed back, the
+        suggested --root read a directory named ~ and found nothing."""
+        config, projects, st = self.config()
+        home = os.path.dirname(config)
+        with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home,
+                                          "RANWHAT_WIDTH": "400"}):
+            _, out, _ = self.run_cli(["check", "--root", config, "--state-dir", st])
+            word = re.search(r"--root (\S+) or set", out).group(1)
+            self.assertTrue(word.startswith("~"), word)
+            rc, out, _ = self.run_cli(["check", "--json", "--root", word,
+                                       "--state-dir", st])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(json.loads(out)["actions"]), 1)
+
     def test_the_hint_says_which_directory_each_takes(self):
         """With nothing under the path at all, the hint still tells --root
         from CLAUDE_CONFIG_DIR."""
@@ -1195,6 +1211,26 @@ class NextStepsReadWhatCheckRead(_Base):
                                                       "--no-interactive"])
         self.assertEqual(json.loads(cleaned)["findings"], doc["secrets"])
 
+    def test_clean_reads_the_openclaw_history_check_read(self):
+        """clean searches OpenClaw, and the step suggested for it left out
+        --state-dir and --path openclaw=: it reviewed ~/.openclaw instead
+        of the database the secret had just been listed from."""
+        root, _ = make_root([tool_use("ls", 1)])
+        state = make_openclaw("export " + STRIPE, int(time.time()) - 3600)
+        for point in (["--state-dir", state], ["--path", "openclaw=" + state]):
+            with self.subTest(point=point[0]):
+                argv = ["check", "--root", root] + point
+                with mock.patch.object(cli, "invocation", return_value="ranwhat"):
+                    _, out, _ = self.run_cli(argv)
+                    _, doc, _ = self.run_cli(argv + ["--json"])
+                secrets = json.loads(doc)["secrets"]
+                self.assertEqual(len(secrets), 1)
+                step = next(s for s in steps_in(out, "ranwhat")
+                            if s.split()[1] == "clean")
+                _, cleaned, _ = self.run_cli(shell_words(step)[1:] + [
+                    "--json", "--no-interactive"])
+                self.assertEqual(json.loads(cleaned)["findings"], secrets)
+
     def test_only_flags_that_differ_from_the_default_are_carried(self):
         root, st = make_root(ACTION + SECRET)
         steps, _, _ = self.run_check(root, st)
@@ -1237,10 +1273,10 @@ class NextStepsReadWhatCheckRead(_Base):
             word = words[words.index("--root") + 1]
             self.assertTrue(word.startswith("~/"), word)
             self.assertEqual(os.path.join(home, word[2:]), odd)
-        # And a real shell reads it back as the path: clean's --root is its
-        # last word, so everything after it is that one word.
+        # And a real shell reads it back as the path: in clean's step
+        # everything between --root and --state-dir is that one word.
         clean_step = next(s for s in steps if s.split()[1] == "clean")
-        word = clean_step.split(" --root ", 1)[1]
+        word = clean_step.split(" --root ", 1)[1].split(" --state-dir ", 1)[0]
         out = subprocess.run(["sh", "-c", "printf %s " + word],
                              env=dict(os.environ, HOME=home),
                              capture_output=True, text=True, timeout=30)

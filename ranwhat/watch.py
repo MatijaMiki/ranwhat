@@ -938,9 +938,10 @@ _NOT_SECRET_SUFFIXES = (".example", ".sample", ".template", ".dist",
 # before .json. The name up to the first one is taken by a lookahead and
 # matched again by reference, which cannot backtrack: as two runs around
 # the words, every service_account in one long word read on to its end,
-# and 63K of them took two seconds.
+# and 63K of them took two seconds. A path may start with a drive or a
+# variable (C:/, %USERPROFILE%/, $env:HOME/), once _slashed has read it.
 _CRED_PATH = re.compile(
-    r"(?:^|[\s\"'=(])((?:[\w./~$-]*/)?(?:\.env[\w.-]*|credentials|"
+    r"(?:^|[\s\"'=(])((?:[\w./~$%:-]*/)?(?:\.env[\w.-]*|credentials|"
     r"\.netrc|id_[a-z0-9]+(?:\.pub)?|[\w.-]*\.pem|[\w.-]*\.key|\.kube/config|"
     r"(?=(?P<account>[\w.-]*?service[-_]account))(?P=account)[\w.-]*\.json))",
     re.I)
@@ -1224,6 +1225,36 @@ def _without_writes(text):
     return "".join(chars)
 
 
+# A backslash between the parts of a Windows path: after a drive, a name
+# or a variable (%USERPROFILE%, $env:USERPROFILE, ~), and before a name.
+# Not one escaping in a POSIX shell (sed 's/\.env/', grep '\.ssh'), which
+# follows a separator or a quote.
+_WINDOWS_SEPARATOR = re.compile(r"(?<=[\w.~%$:-])\\(?=[\w.~%$-])")
+
+
+def _slashed(text):
+    """text with each backslash that separates the parts of a Windows path
+    read as /, at the same offsets. The credential rules know only /, and
+    no agent's read of C:\\Users\\u\\.ssh\\id_rsa or C:\\proj\\.env was
+    reported."""
+    return _WINDOWS_SEPARATOR.sub("/", text) if "\\" in text else text
+
+
+_DRIVE = re.compile(r"[A-Za-z]:[\\/]")
+
+
+def _credential_text(text):
+    """What cred.read judges in a shell command: what it reads, with each
+    word slashed that has no / in it, or names a drive. One with a / and
+    no drive is a POSIX script, where a backslash escapes, and
+    sed 's/config\\.env/x/' read no .env."""
+    text = _without_writes(text)
+    if "\\" not in text:
+        return text
+    return _WORD.sub(lambda m: _slashed(m.group()) if "/" not in m.group()
+                     or _DRIVE.search(m.group()) else m.group(), text)
+
+
 def _refine_read_path(text, severity, tool_input=None):
     """A path a file-reading tool opened. There is no verb to judge, since
     reading is all the tool does, so only templates and public keys are
@@ -1351,7 +1382,7 @@ RULES = [
           r"\.aws/credentials", r"\.ssh/id_[\w]+", r"\.netrc",
           r"\.config/gcloud", _Gap(r"service[-_]account", r"\.json", "\n"),
           r"security\s+find-generic-password", r"\.kube/config"],
-         paths=True, hide=_without_writes),
+         paths=True, hide=_credential_text),
 
     # clean's own rules decide what is a credential, fixtures and
     # placeholders included, so watch never flags a value clean ignores or
@@ -2006,14 +2037,15 @@ def evaluate(tool_name, tool_input, known=None):
     hits = []
     for rule in RULES:
         # (subject, what the rule judges in it, refiners). The two differ
-        # only by what rule.hide blanks, so a span in one is a span in both.
+        # only by what rule.hide blanks and by a Windows path's backslashes
+        # read as /, so a span in one is a span in both.
         if rule.scan_raw:
             subjects = [(s, s, REFINERS) for s in raw]
         else:
             seen = rule.hide(shell) if rule.hide and shell else shell
             subjects = [(shell, seen, REFINERS)]
             if rule.paths:
-                subjects.append((paths, paths, PATH_REFINERS))
+                subjects.append((paths, _slashed(paths), PATH_REFINERS))
         for subject, seen, refiners in subjects:
             if not subject:
                 continue
@@ -2485,19 +2517,28 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
     for r in records:
         hits = sorted(r["hits"], key=lambda h: -_RANK.get(h.get("severity"), -1))
         title = hits[0]["title"]
-        meta = "  ".join(p for p in (
+        where = "  ".join(p for p in (
             _local_time(r.get("timestamp")),
             _SOURCE_NAMES.get(r.get("source"), "") if labelled else "",
-            _printable(str(r.get("tool_name") or "")),
-            _RAN.get(r.get("actor")), _RAN.get(r.get("status"))) if p)
+            _printable(str(r.get("tool_name") or ""))) if p)
+        ran = "  ".join(p for p in (_RAN.get(r.get("actor")),
+                                    _RAN.get(r.get("status"))) if p)
+        meta = "  ".join(p for p in (where, ran) if p)
         paint = colour.get(r["severity"], DIM)
         if meta and len("  * %s   %s" % (title, meta)) <= width:
             L.append("  " + paint("* ") + BOLD(title) + DIM("   " + meta))
         else:
-            # Too long for one line: when and where go on the next.
+            # Too long for one line: when and where go on the next, and
+            # who ran it on its own line when they do not fit there, since
+            # a cut there read a declined deletion as one that ran.
             L.append("  " + paint("* ") + BOLD(_fit(title, width - 4)))
-            if meta:
-                L.append(DIM(_fit("      " + meta, width)))
+            if meta and len("      " + meta) <= width:
+                L.append(DIM("      " + meta))
+            else:
+                if where:
+                    L.append(DIM(_fit("      " + where, width)))
+                if ran:
+                    L.append(DIM("      " + ran))
         for i, h in enumerate(hits):
             if i:
                 label = "%s (%s)" % (h["title"], h["severity"])
@@ -2564,24 +2605,32 @@ def _openclaw_source():
         return _openclaw.OpenClawSource()
 
 
-def scan_openclaw_db(path, source="openclaw", known=None, src=None):
+def scan_openclaw_db(path, source="openclaw", known=None, src=None,
+                     cutoff=None):
     """Action Records for one OpenClaw database, with `known` masked in
     them as evaluate masks it. A call repeated in the database is one
-    record, the first, whatever its time. `src` is the adapter that reads
-    it, a fresh one by default."""
+    record, its latest copy since `cutoff` (an epoch, or None for all of
+    them). Kept as the first copy and windowed after, a call run again
+    inside the window went unreported when it had also run before it.
+    `src` is the adapter that reads it, a fresh one by default."""
     src = src or _openclaw.OpenClawSource()
     store = src.store_at(path)
-    records, seen = [], set()
+    records, seen = [], {}
     try:
         for call in src.tool_calls(store):
             hits, payload = judge(call, known)
             if not hits:
                 continue
-            key = (call.tool_name, _hash(payload))
-            if key in seen:
+            record = _record(call, hits, payload, source)
+            if not _in_window(record, cutoff):
                 continue
-            seen.add(key)
-            records.append(_record(call, hits, payload, source))
+            key = (call.tool_name, record["payload_hash"])
+            at = seen.setdefault(key, len(records))
+            if at == len(records):
+                records.append(record)
+            elif (_epoch(record["timestamp"]) or 0) > (
+                    _epoch(records[at]["timestamp"]) or 0):
+                records[at] = record
     except Exception as error:          # one database must not stop the rest
         src.stopped(store, error)
     return records
@@ -2601,8 +2650,7 @@ def scan_openclaw(state_dir=None, since_days=None, known=None, progress=None,
     for i, db in enumerate(dbs, 1):
         if progress:
             progress(done + i, total, db)
-        records.extend(r for r in scan_openclaw_db(db, known=known, src=src)
-                       if _in_window(r, cutoff))
+        records.extend(scan_openclaw_db(db, known=known, src=src, cutoff=cutoff))
     return records, len(dbs)
 
 
@@ -2667,10 +2715,13 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
 
     Returns (records, {source: how many it read}): Claude Code transcripts,
     OpenClaw databases, and each other agent's transcripts (its sessions,
-    in its own words). Zero read is not an all-clear: locations() says
-    whether there was anything to read at all. `progress` is scan_all's,
-    counting every source's transcripts together, and `known` (a
-    known.Matcher) is masked in every record.
+    in its own words). A store found to be unreadable as it is read is
+    still counted: the adapter counts it once a run, whichever pass met it
+    first, so this pass cannot tell it apart (agents.notes names it). Zero
+    read is not an all-clear: locations() says whether there was anything
+    to read at all. `progress` is scan_all's, counting every source's
+    transcripts together, and `known` (a known.Matcher) is masked in every
+    record.
 
     root and state_dir point Claude Code and OpenClaw elsewhere; `paths`,
     {source id: path}, points any source, and a root or state_dir given
