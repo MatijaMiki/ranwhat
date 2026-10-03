@@ -148,13 +148,20 @@ BACKGROUND_WHY = ("A command Droid started in the background may still be "
 _HEADER_MAX = 1 << 16
 
 # A log is read and handed to clean in pieces of at most this many bytes,
-# cut at line ends, so a log larger than clean's per-string limit is still
-# searched to its end and a background process's ever-growing output is
-# never held in memory whole.
+# so a log larger than clean's per-string limit is still searched to its
+# end and this adapter never holds a background process's ever-growing
+# output in memory whole. Each piece after the first starts _OVERLAP to
+# 2 * _OVERLAP bytes before the one before it ended, so a value up to
+# _OVERLAP bytes long lies whole in one of them: a private key block spans
+# lines, and a line with no break in it is cut inside a word. A 4096-bit
+# RSA key in PEM is about 3.2 KB.
 _CHUNK = 256 * 1024
-# Where a piece is cut, in order of preference: after its last line end;
-# else after its last carriage return (progress bars redraw a line with
-# them); else after its last space or tab. No key holds any of them.
+_OVERLAP = 32 * 1024
+# Where a piece ends, in order of preference: after the last line end in
+# its second half; else after the last carriage return there (progress
+# bars redraw a line with them); else after the last space or tab. No key
+# holds any of them. The next piece starts the same way, in the _OVERLAP
+# bytes before the last _OVERLAP bytes of the piece.
 _CUTS = ((b"\n",), (b"\r",), (b" ", b"\t"))
 
 
@@ -318,12 +325,12 @@ def _background_paths(text):
             if line.startswith(_OUTPUT)]
 
 
-def _cut(buf, size):
-    """Where to end the next piece of `buf`: after the last of the first
-    kind of _CUTS found within `size` bytes, else at `size` moved back to
-    the start of a UTF-8 character. `buf` is longer than `size`."""
+def _cut(buf, low, size):
+    """Where to cut `buf`: after the last of the first kind of _CUTS found
+    in buf[low:size], else at `size` moved back to the start of a UTF-8
+    character. `buf` is longer than `size`."""
     for marks in _CUTS:
-        cut = max(buf.rfind(m, 0, size) for m in marks) + 1
+        cut = max(buf.rfind(m, low, size) for m in marks) + 1
         if cut:
             return cut
     cut = size
@@ -822,10 +829,10 @@ class DroidSource(Source):
 
     def _log_texts(self, store):
         """A tool-output log, terminal log or background output, or a
-        prompt history that is not JSON, read in pieces of at most _CHUNK
-        bytes, each cut after a line end where the piece holds one (see
-        _cut). The pieces of each are tied to the call whose result named
-        it, when stores() found that call this run."""
+        prompt history that is not JSON, read in overlapping pieces of at
+        most _CHUNK bytes, each cut after a line end where the piece holds
+        one (see _CUTS). The pieces of each are tied to the call whose
+        result named it, when stores() found that call this run."""
         try:
             fh = open(store.path, "rb")
         except OSError as e:
@@ -844,13 +851,17 @@ class DroidSource(Source):
                     end = not block
                     buf += block
                     continue
-                cut = _cut(buf, _CHUNK) if len(buf) > _CHUNK else len(buf)
-                piece, buf = buf[:cut], buf[cut:]
+                if len(buf) > _CHUNK:
+                    cut = _cut(buf, _CHUNK // 2, _CHUNK)
+                    start = _cut(buf, cut - 2 * _OVERLAP, cut - _OVERLAP)
+                else:
+                    cut = start = len(buf)
                 if not looked:
                     call, looked = self._log_call(store), True
-                yield SecretText(piece.decode("utf-8", "surrogateescape"),
+                yield SecretText(buf[:cut].decode("utf-8", "surrogateescape"),
                                  call=call, where="line %d" % line_no)
-                line_no += piece.count(b"\n")
+                line_no += buf.count(b"\n", 0, start)
+                buf = buf[start:]
 
     def _log_call(self, store):
         """The call a terminal log, background output or tool output log

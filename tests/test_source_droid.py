@@ -18,12 +18,14 @@ watch.judge and clean.scan_sources are wired in later. Until then, judge()
 and findings() below follow design 3.5 and 3.6 to the letter, over
 watch.evaluate and clean's own _walk and _origins.
 """
+import base64
 import contextlib
 import glob
 import hashlib
 import io
 import json
 import os
+import random
 import shutil
 import stat
 import subprocess
@@ -340,6 +342,35 @@ def _tempdir(case, prefix):
     path = tempfile.mkdtemp(prefix=prefix)
     case.addCleanup(shutil.rmtree, path, True)
     return path
+
+
+def assert_covered(case, text, pieces):
+    """The pieces are in file order, each at most _CHUNK bytes, the first
+    at the start of `text` and the last at its end, and each starts at
+    least _OVERLAP bytes before the one before it ended. `text` must be
+    ASCII and no piece may occur in it twice."""
+    case.assertGreater(len(pieces), 1)
+    end = None
+    for piece in pieces:
+        case.assertLessEqual(len(piece.encode("utf-8")), droid_module._CHUNK)
+        start = text.find(piece)
+        case.assertNotEqual(start, -1)
+        if end is None:
+            case.assertEqual(start, 0)
+        else:
+            case.assertGreaterEqual(end - start, droid_module._OVERLAP)
+        end = start + len(piece)
+    case.assertEqual(end, len(text))
+
+
+def private_key():
+    """A synthetic PEM private key block, about 1.7 KB."""
+    rand = random.Random(7)
+    body = base64.b64encode(bytes(rand.randrange(256) for _ in range(1200)))
+    body = body.decode("ascii")
+    return ("-----BEGIN " "RSA PRIVATE KEY-----\n"
+            + "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
+            + "\n-----END " "RSA PRIVATE KEY-----")
 
 
 # --------------------------------------------------------------------------
@@ -1212,12 +1243,36 @@ class Secrets(DroidCase):
         log = self.write("artifacts/tool-outputs/ls-cli-toolu_01LS-90012346.log", None,
                          raw=text.encode("utf-8"))
         pieces = list(self.droid.secret_texts(self.store(log)))
-        self.assertGreater(len(pieces), 1)
-        self.assertEqual("".join(p.node for p in pieces), text)
+        assert_covered(self, text, [p.node for p in pieces])
         found = findings(self.droid, [self.store(log)])
         self.assertEqual(found[SECRET]["where"], [
             p.where for p in pieces if SECRET in p.node])
-        self.assertTrue(all(p.node.endswith("\n") for p in pieces))
+        for piece in pieces:                        # cut at line ends
+            self.assertTrue(piece.node.endswith("\n"))
+            start = text.find(piece.node)
+            self.assertEqual(piece.where,
+                             "line %d" % (text.count("\n", 0, start) + 1))
+
+    def test_a_private_key_across_a_cut_is_found_whole(self):
+        # A key block spans lines, so a cut at a line end can fall inside
+        # it: the next piece starts far enough back to hold all of it.
+        chunk = droid_module._CHUNK
+        pem = private_key()
+        head = "".join("%07d %s\n" % (i, "f" * 91)
+                       for i in range((chunk - 800) // 100))
+        text = head + pem + "\n" + head.replace("f", "g")
+        self.assertLess(len(head), chunk)
+        self.assertGreater(len(head) + len(pem), chunk)
+        log = self.terminal_log(text)
+        self.session([header()] + call_lines(
+            10, "toolu_01PEM", "Execute", {"command": "cat keys/*.pem build.log"},
+            output=execute_result(text, log)))
+        pieces = [p.node for p in self.droid.secret_texts(self.store(log))]
+        assert_covered(self, text, pieces)
+        self.assertNotIn(pem, pieces[0])            # the first cut splits it
+        found = findings(self.droid, [self.store(log)])
+        self.assertEqual(set(found), {pem})
+        self.assertEqual(found[pem]["stores"], {log})
 
     def test_typed_prompts_in_both_history_files(self):
         state = self.write("state/history.json", None, raw=history_file([
@@ -1528,8 +1583,7 @@ class Background(DroidCase):
         self._ran(background_result(bg))
         pieces = list(self.droid.secret_texts(self.store(bg)))
         self.assertGreater(len(pieces), 3)
-        self.assertEqual("".join(p.node for p in pieces), text)
-        self.assertTrue(all(len(p.node.encode("utf-8")) <= chunk for p in pieces))
+        assert_covered(self, text, [p.node for p in pieces])
         self.assertTrue(all(p.node.endswith(("\r", "\n")) for p in pieces))
         found = findings(self.droid, [self.store(bg)])
         self.assertEqual((found[SECRET]["count"], found[SECRET]["where"]),
@@ -1540,10 +1594,28 @@ class Background(DroidCase):
         with open(bg, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
         pieces = [p.node for p in self.droid.secret_texts(self.store(bg))]
-        self.assertEqual("".join(pieces), text)
+        self.assertGreater(len(pieces), 1)
+        self.assertEqual((pieces[0][0], pieces[-1][-1]), ("a", "\n"))
         self.assertEqual([len(p.encode("utf-8", "surrogateescape")) <= chunk
                           for p in pieces], [True] * len(pieces))
         self.assertFalse(any("\udcc3" in p or "\udca9" in p for p in pieces))
+
+    def test_a_key_across_a_cut_in_a_line_with_no_breaks_is_found(self):
+        # Minified JSON from curl: no line end, carriage return, space or
+        # tab anywhere, so a piece is cut at a byte, here inside the key.
+        chunk = droid_module._CHUNK
+        items = ",".join('{"id":%d,"name":"item%d"}' % (i, i) for i in range(30000))
+        lead = ("[" + items)[:chunk - 14 - len('{"stripe":"')] + '{"stripe":"'
+        text = (lead + SECRET + '"},'
+                + ",".join('{"id":%d}' % i for i in range(30000, 60000)) + "]")
+        self.assertEqual(text.index(SECRET), chunk - 14)
+        bg = self.background_output(text)
+        self._ran(background_result(bg, command="curl -s https://api.example.com/c"))
+        pieces = [p.node for p in self.droid.secret_texts(self.store(bg))]
+        assert_covered(self, text, pieces)
+        self.assertNotIn(SECRET, pieces[0])         # the first cut splits it
+        found = findings(self.droid, [self.store(bg)])
+        self.assertEqual(set(found), {SECRET})
 
 
 # --------------------------------------------------------------------------
