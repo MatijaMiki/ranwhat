@@ -710,7 +710,7 @@ class NestedPastTheStack(_Case):
         before = _sha(path)
         root = tempfile.mkdtemp(prefix="oc-claude-")
         self.addCleanup(shutil.rmtree, root, True)
-        env = dict(os.environ, PYTHONPATH=REPO)
+        env = dict(os.environ, PYTHONPATH=REPO, PYTHONIOENCODING="utf-8")
         out = {}
         for argv in (["watch", "--json"], ["check"],
                      ["clean", "--json", "--no-interactive"],
