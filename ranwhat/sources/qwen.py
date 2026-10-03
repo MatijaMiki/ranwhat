@@ -17,7 +17,8 @@ not part of the research. Edit backups (file-history/) live under
 QWEN_HOME or ~/.qwen even when the runtime folder is elsewhere.
 
 Everything is read-only except mask(). file-history/ is never rewritten:
-those are Qwen Code's own copies of files it edited, kept for /rewind. A
+those are Qwen Code's own copies of files it edited, kept for /rewind. Nor
+is a background shell's output, which may still be being written. A
 session whose writer lock is held (see in_use()) is not rewritten either:
 since v0.24 the CLI checks before every append that its transcript still
 has the inode and length it left, and stops recording the session for good
@@ -87,6 +88,16 @@ MAX_TEXT = 1000000
 FILE_HISTORY_WHY = ("Qwen Code keeps these copies of files it edited so "
                     "/rewind can restore them. The secret is in the file "
                     "itself; remove it there.")
+
+# A backgrounded shell's full output (tools/shell.ts executeBackground, and
+# a foreground shell moved to the background): written as a stream for as
+# long as the shell runs, and kept after. Nothing verified on disk says
+# when the shell has stopped, and a replaced file would no longer get the
+# rest of its output, so it is never rewritten.
+BACKGROUND_SHELLS = "background-shells"
+BACKGROUND_WHY = ("A shell Qwen Code started in the background may still be "
+                  "writing to it, so ranwhat only reads it; stop that shell, "
+                  "then delete the file.")
 
 # read_file's path key. It was absolute_path up to v0.12.x (the v0.3.x
 # legacy JSON and the first JSONL releases), file_path from v0.13.0.
@@ -460,6 +471,10 @@ class QwenSource(Source):
                                 "shell_history"):
                     for path in _glob(folder, pattern):
                         add(path, "text", role="side", unit="file")
+                for path in _glob(folder, BACKGROUND_SHELLS, "*", "shell-*.output"):
+                    add(path, "text", role="side", unit="file",
+                        session=os.path.basename(os.path.dirname(path)),
+                        masking="read-only", why_read_only=BACKGROUND_WHY)
                 # checkpoints/*.json: with checkpointing on, the history and
                 # the pending call, saved before each file-changing tool runs
                 # (storage.ts getProjectTempCheckpointsDir; /restore reads
@@ -705,7 +720,7 @@ class QwenSource(Source):
                 texts = self._legacy_texts(store)
             elif store.format == "json":
                 texts = iter([SecretText(self._load(store), where="file")])
-            elif store.masking == "read-only":
+            elif store.why_read_only == FILE_HISTORY_WHY:
                 texts = self._head_texts(store)
             else:
                 texts = self._line_texts(store)

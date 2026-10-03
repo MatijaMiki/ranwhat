@@ -318,7 +318,8 @@ class Identity(unittest.TestCase):
                          ("qwen", "Qwen Code", "session", "v0.24.7"))
         self.assertEqual(src.env, ("QWEN_RUNTIME_DIR", "QWEN_HOME"))
         self.assertTrue(src.path_means)
-        for text in (src.path_means, qwen.FILE_HISTORY_WHY):
+        for text in (src.path_means, qwen.FILE_HISTORY_WHY,
+                     qwen.BACKGROUND_WHY):
             self.assertNotIn("\u2014", text)
 
     def test_text_is_handed_over_in_pieces_clean_can_take(self):
@@ -604,6 +605,8 @@ class Discovery(_Home):
         put("tmp/%s/web_fetch_0a1b2c3d4e5f.output" % PROJECT_HASH, "out\n", 520)
         put("tmp/%s/mcp__db__query_0a1b2c3d4e5f.output" % PROJECT_HASH,
             "out\n", 530)
+        put("tmp/%s/background-shells/%s/shell-bg_0a1b2c3d.output"
+            % (PROJECT_HASH, SESSION), "out\n", 560)
         put("tmp/%s/tool-results/call_0001.txt" % PROJECT_HASH, "out\n", 600)
         put("tmp/%s/logs.json" % PROJECT_HASH, [], 700)
         put("tmp/%s/checkpoint-before-fix.json" % PROJECT_HASH, [], 800)
@@ -652,6 +655,8 @@ class Discovery(_Home):
              "text", "side", "rewrite", None),
             ("tmp/%s/mcp__db__query_0a1b2c3d4e5f.output" % PROJECT_HASH,
              "text", "side", "rewrite", None),
+            ("tmp/%s/background-shells/%s/shell-bg_0a1b2c3d.output"
+             % (PROJECT_HASH, SESSION), "text", "side", "read-only", SESSION),
             ("tmp/%s/tool-results/call_0001.txt" % PROJECT_HASH,
              "text", "side", "rewrite", None),
             ("tmp/%s/logs.json" % PROJECT_HASH, "json", "side", "rewrite", None),
@@ -1170,6 +1175,25 @@ class Masking(_Home):
         store = self.only_store(path)
         self.assertEqual((store.masking, store.why_read_only),
                          ("read-only", qwen.FILE_HISTORY_WHY))
+        self.assertEqual(findings(self.src, store), {SECRET: {None}})
+        self.assertEqual(self.src.mask(store, [SECRET]),
+                         MaskResult(path, skipped="read-only"))
+        self.assertEqual(_sha(path), digest)
+        self.assertFalse(os.path.exists(self.backups))
+
+    def test_a_background_shell_output_is_read_only(self):
+        """Qwen Code writes it as a stream for as long as the shell runs,
+        and nothing on disk that was verified says when that ends. A dev
+        server's log can be long, so all of it is read."""
+        filler = ("x" * 99 + "\n") * (qwen.MAX_TEXT // 100 + 10)
+        path = self.write(os.path.join(
+            self.qwen, "tmp", PROJECT_HASH, "background-shells", SESSION,
+            "shell-bg_0a1b2c3d.output"), filler + "API_KEY=%s\n" % SECRET)
+        digest = _sha(path)
+        store = self.only_store(path)
+        self.assertEqual((store.masking, store.why_read_only, store.session),
+                         ("read-only", qwen.BACKGROUND_WHY, SESSION))
+        self.assertEqual(list(self.src.tool_calls(store)), [])
         self.assertEqual(findings(self.src, store), {SECRET: {None}})
         self.assertEqual(self.src.mask(store, [SECRET]),
                          MaskResult(path, skipped="read-only"))

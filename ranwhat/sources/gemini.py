@@ -34,14 +34,17 @@ Four things the CLI writes that the plain schema does not say:
 - background-processes/background-<pid>.log stays open for writing as long
   as process <pid> runs, so it is in use until then (in_use).
 
-ChatReader reads that schema for any source. Qwen Code is a Gemini CLI
-fork whose v0.3.x files are the legacy JSON with message type "qwen"; its
-adapter reuses ChatReader with its own model type and tool mapping.
+ChatReader reads that schema on behalf of a source. Qwen Code is a Gemini
+CLI fork whose v0.3.x files are the legacy JSON with message type "qwen",
+but its adapter reads them with code of its own, not with ChatReader: in
+v0.3.0 resultDisplay is a string, so there are no grids to join.
 
 What is never opened: .env files, settings, OAuth and account files under
 the root, the shadow git repositories under history/, tmp/<slug>/logs/
 (format unverified), and anything else not listed in STORES. projects.json
-and .project_root are read only to name the project a folder belongs to.
+and .project_root are read only to name the project a folder belongs to,
+as are the chat headers of a slug folder when a 64-hex folder is not named
+otherwise (project_map).
 """
 
 from __future__ import annotations
@@ -166,6 +169,12 @@ _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 # .project_root holds one absolute path; nothing past this is read.
 _PROJECT_ROOT_MAX = 4096
+
+# A chat's projectHash, read from the start of the file only when a 64-hex
+# folder is not named otherwise. Inside a string the quotes are escaped, so
+# only the header's own key matches.
+_HEADER_MAX = 4096
+_HEADER_HASH = re.compile(r'"projectHash"\s*:\s*"([0-9a-f]{64})"')
 
 # Patched by tests. On Windows os.kill(pid, 0) does not test a process: it
 # terminates it.
@@ -370,9 +379,9 @@ def ansi_text(value):
     return _grid_text(value, _line_groups(value))
 
 
-def _grids(node):
-    """Every AnsiOutput grid stored under a resultDisplay key in decoded
-    JSON, in document order."""
+def _grid_holders(node):
+    """(dict, grid) for every AnsiOutput grid stored under a resultDisplay
+    key in decoded JSON, in document order."""
     stack = [node]
     while stack:
         item = stack.pop()
@@ -380,12 +389,28 @@ def _grids(node):
             children = []
             for key, value in item.items():
                 if key == GRID_KEY and is_ansi_output(value):
-                    yield value
+                    yield item, value
                 elif isinstance(value, (dict, list)):
                     children.append(value)
             stack.extend(reversed(children))
         elif isinstance(item, list):
             stack.extend(reversed([v for v in item if isinstance(v, (dict, list))]))
+
+
+def _grids(node):
+    """Every AnsiOutput grid stored under a resultDisplay key in decoded
+    JSON, in document order."""
+    for _holder, grid in _grid_holders(node):
+        yield grid
+
+
+def _shown(node):
+    """Decoded JSON with each of its grids replaced, in place, by the text
+    it shows (ansi_text), so clean reads a key the terminal cut in two
+    whole, and not the piece on each row."""
+    for holder, grid in list(_grid_holders(node)):
+        holder[GRID_KEY] = ansi_text(grid)
+    return node
 
 
 def _layout(grid, groups):
@@ -811,7 +836,9 @@ class ChatReader(object):
         to, and its resultDisplay with that call (a terminal grid as the
         text it shows); a functionResponse repeated in a later message
         comes with the call whose id it carries; everything else comes with
-        no call. Side stores come whole, with no call."""
+        no call. Side stores come whole, with no call, each terminal grid
+        as the text it shows: a checkpoint keeps the CLI's own view of the
+        history, grids included."""
         noting = self._noting(store)
         try:
             if store.format == "text":
@@ -820,7 +847,7 @@ class ChatReader(object):
                 return
             if store.role != "transcript":
                 for where, record in self.records(store, noting):
-                    yield SecretText(record, where=where)
+                    yield SecretText(_shown(record), where=where)
                 return
             session, by_id = None, {}
             for where, record in self.records(store, noting):
@@ -942,13 +969,35 @@ def _sha256(text):
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def _header_hashes(folder):
+    """The projectHash in the header of each chat directly in a project
+    folder's chats/. The header comes first in both layouts, so only the
+    start of each file is read."""
+    out = set()
+    for pattern in ("session-*.jsonl", "session-*.json"):
+        for path in glob.glob(os.path.join(glob.escape(folder), "chats", pattern)):
+            try:
+                with open(path, "rb") as fh:
+                    head = fh.read(_HEADER_MAX).decode("utf-8", "replace")
+            except OSError:
+                continue
+            match = _HEADER_HASH.search(head)
+            if match:
+                out.add(match.group(1))
+    return out
+
+
 def project_map(root, tmp, names):
     """{folder name: project root or None} for the folders in root/tmp.
 
     A slug folder: the text of its .project_root, else the path
     projects.json maps to that slug. A 64-hex folder (v0.28 and earlier):
-    the known project path whose sha256 is the folder name. The projectHash
-    in a session header is the same digest and cannot be reversed."""
+    the known project path whose sha256 is the folder name, else the
+    project of a slug folder whose chat headers carry that digest. The
+    second is needed on Windows, where the registry keeps every path in
+    lower case but the folder was named by the root in the case the CLI
+    was started with; a header's projectHash is that same digest, and
+    cannot be reversed."""
     roots = {}
     for name in names:
         value = _read_project_root(os.path.join(tmp, name, ".project_root"))
@@ -967,6 +1016,12 @@ def project_map(root, tmp, names):
             out[name] = by_hash.get(name)
         else:
             out[name] = roots.get(name) or by_slug.get(name)
+    missing = {n for n in names if out[n] is None and _HEX64.match(n)}
+    for name in names:
+        if missing and out[name] is not None and not _HEX64.match(name):
+            for digest in _header_hashes(os.path.join(tmp, name)) & missing:
+                out[digest] = out[name]
+                missing.discard(digest)
     return out
 
 
