@@ -46,7 +46,12 @@ list:
   result 'Tool call "<name>" was not executed: the response hit the
   output token limit...'; earlier versions ran them. Pi does not write its
   version into a session, so such a call is "declined" only when that
-  result is in the file.
+  result is in the file. A call Pi refused to run, whatever the message
+  stopped on, is "declined" too when its error result (or a nested
+  record's error) is one of Pi's own texts for it: the tool is not loaded,
+  the arguments fail its schema, or a tool_call hook blocked it without a
+  reason of its own (agent-loop.ts prepareToolCall). A hook's own reason,
+  as Pi's permission-gate example gives, reads like any failed run.
 
 Format versions: 3 is current. Version 2 is the same tree with the role
 "hookMessage" where 3 says "custom". Version 1 has no "version" in its
@@ -108,6 +113,14 @@ LENGTH = "length"
 NOT_EXECUTED = ('Tool call "%s" was not executed: the response hit the '
                 'output token limit')
 
+# The error results Pi writes instead of running a call it will not run
+# (see the module notes; agent-loop.ts prepareToolCall, ai validation.ts
+# validateToolArguments). Not "Operation aborted": read and write also
+# throw it part way. %s is the call's name.
+NOT_FOUND = "Tool %s not found"
+INVALID = 'Validation failed for tool "%s":'
+BLOCKED = "Tool execution was blocked"
+
 # How many nested calls Pi records for one model-issued call
 # (core/nested-tool-calls.ts NESTED_CALL_LIMITS.maxCalls); a further call is
 # not recorded at all, and the record says "complete": false.
@@ -164,6 +177,15 @@ def output_text(content):
         if texts:
             return "\n".join(texts)
     return None
+
+
+def _refused(text, name):
+    """True for the error text Pi writes instead of running a call to
+    `name` (NOT_FOUND, INVALID, BLOCKED)."""
+    if not isinstance(text, str):
+        return False
+    return text == BLOCKED or (name is not None and (
+        text == NOT_FOUND % name or text.startswith(INVALID % name)))
 
 
 def session_from_name(path):
@@ -456,7 +478,8 @@ class PiSource(Source):
         """The ToolCalls for the calls a tool made while it ran, kept on its
         result as nestedCalls.calls (see the module notes), once per record
         id. Their results are not kept; a failed one's error text is the
-        output. A record without arguments (too large for Pi to keep) is
+        output, and one Pi refused to run is "declined" (_refused). A
+        record without arguments (too large for Pi to keep) is
         yielded and counted as unreadable; one that is not an object is
         counted as unknown. A list Pi filled to its limit and marked
         incomplete is counted once per calling tool call (CAPPED): calls
@@ -490,12 +513,13 @@ class PiSource(Source):
             arguments = base.decode_input(record.get("arguments"))
             kind, known, command, paths, consumed = _classify(name, arguments)
             error = record.get("error")
+            refused = record.get("status") == "error" and _refused(error, name)
             if shared is None:
                 shared = self._base(store, entry, header, message)
             yield ToolCall(
                 self.id, store.path, name, arguments, kind=kind, known=known,
                 tool_call_id=rid, command=command, paths=paths,
-                consumed=consumed,
+                consumed=consumed, status=DECLINED if refused else None,
                 output=error if isinstance(error, str) else None, **shared)
 
     @staticmethod
@@ -575,8 +599,10 @@ class PiSource(Source):
                 call = pending.pop(cid, None) if isinstance(cid, str) else None
                 if call is not None:
                     call.output = output_text(message.get("content"))
+                    refused = message.get("isError") is True and _refused(
+                        call.output, _string(message.get("toolName")))
                     if self._not_executed(message, call.output,
-                                          cut.pop(cid, None)):
+                                          cut.pop(cid, None)) or refused:
                         call.status = DECLINED
                     done.add(cid)
                     yield call

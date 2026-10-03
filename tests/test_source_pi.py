@@ -1080,7 +1080,7 @@ class NestedCalls(PiCase):
                           "Script completed\nWall time 0.1 seconds\nOutput:\n\ndone"))
         self.assertEqual(rules(outer), [])
         # each nested call: the time, session and project of the result
-        # that holds it; its error text as output; never "declined"
+        # that holds it; its error text as output; a failed run not "declined"
         self.assertEqual(rm, ToolCall(
             "pi", rm.store, "bash", {"command": "rm -rf ~/Documents/x"},
             kind="shell", known=True, session=SID, project="/home/dev/app",
@@ -1286,6 +1286,67 @@ class Declined(PiCase):
         self.assertTrue(got["len1"].output.startswith(
             'Tool call "bash" was not executed'))
         self.assertEqual(rules(got["len1"]), [("fs.destructive", "rm -rf ~/Documents/x")])
+
+    def test_calls_pi_refused_before_running_them(self):
+        # agent-loop.ts prepareToolCall answers these without running the
+        # tool: it is not loaded, its arguments fail the tool's schema
+        # (ai validation.ts), or a tool_call hook blocked it with no reason
+        # of its own
+        lines = [header()]
+        lines += call_lines(10, "gone", "bash",
+                            {"command": "git push --force origin main"},
+                            output="Tool bash not found", is_error=True)
+        lines += call_lines(12, "bad", "bash", {"command": "rm -rf ~/"},
+                            output='Validation failed for tool "bash":\n'
+                            '  - command: must be string\n\nReceived '
+                            'arguments:\n{}', is_error=True)
+        lines += call_lines(14, "blocked", "bash", {"command": "rm -rf ~/"},
+                            output="Tool execution was blocked", is_error=True)
+        # a hook's own reason, and "Operation aborted" (read and write also
+        # throw it part way), cannot be told from a run that failed
+        lines += call_lines(16, "why", "bash", {"command": "sudo ls"},
+                            output="Blocked by user", is_error=True)
+        lines += call_lines(18, "abort", "read", {"path": "a.py"},
+                            output="Operation aborted", is_error=True)
+        # the text names another tool, is not an error, or follows output
+        lines += call_lines(20, "other", "bash", {"command": "pwd"},
+                            output="Tool read not found", is_error=True)
+        lines += call_lines(22, "fine", "bash", {"command": "id"},
+                            output="Tool execution was blocked")
+        lines += call_lines(24, "ran", "bash", {"command": "make"},
+                            output="make: Tool bash not found", is_error=True)
+        got = self.by_id(self.session(lines))
+        self.assertEqual({cid: c.status for cid, c in got.items()}, {
+            "gone": "declined", "bad": "declined", "blocked": "declined",
+            "why": None, "abort": None, "other": None, "fine": None,
+            "ran": None})
+        self.assertEqual(got["blocked"].output, "Tool execution was blocked")
+        self.assertEqual(rules(got["gone"]),
+                         [("git.destructive", "git push --force origin main")])
+
+    def test_nested_calls_pi_refused_before_running_them(self):
+        # runToolCall refuses a call a tool makes the same way, and the
+        # record keeps the text as its error
+        records = [
+            nested_record("cm1/1", "bash", {"command": "rm -rf ~/"},
+                          status="error", error="Tool execution was blocked"),
+            nested_record("cm1/2", "fetch", {"url": "x"}, status="error",
+                          error="Tool fetch not found"),
+            nested_record("cm1/3", "bash", {"command": 1}, status="error",
+                          error='Validation failed for tool "bash":\n'
+                          '  - command: must be string'),
+            nested_record("cm1/4", "bash", {"command": "false"},
+                          status="error", error="Command exited with code 1"),
+            nested_record("cm1/5", "bash", {"command": "ls"},
+                          error="Tool execution was blocked"),
+        ]
+        lines = [header()] + codemode_lines(10, "cm1", CODE, records)
+        got = self.by_id(self.session(lines))
+        self.assertEqual({cid: c.status for cid, c in got.items()}, {
+            "cm1": None, "cm1/1": "declined", "cm1/2": "declined",
+            "cm1/3": "declined", "cm1/4": None, "cm1/5": None})
+        self.assertEqual(rules(got["cm1/1"]),
+                         [("fs.destructive", "rm -rf ~/")])
 
     def test_a_declined_call_keeps_its_first_copy(self):
         # a copied entry does not undo or redo "declined"
