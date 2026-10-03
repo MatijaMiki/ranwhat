@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -1632,6 +1633,245 @@ class Window(PiCase):
                 undated_kept += 1
         self.assertEqual(sorted(kept), ["recent", "undated"])
         self.assertEqual(undated_kept, 1)
+
+
+# --------------------------------------------------------------------------
+# JSON nested deeper than Python reads it
+# --------------------------------------------------------------------------
+
+# Past what json.loads reads on Python 3.9 to 3.13. Python 3.14 guards the
+# C stack instead of the recursion limit and reads it, so there the value
+# reaches the adapter whole. Built as text: anything that builds or prints
+# a structure this deep by recursion would fail first.
+DEEP = 100000
+
+
+def _deep_list(depth=DEEP):
+    return "[" * depth + "]" * depth
+
+
+def _deep_object(depth=DEEP):
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def _with_deep(record, deep):
+    """A fixture line with each "DEEP" value in it made deep JSON text."""
+    return _dump(record).replace('"DEEP"', deep)
+
+
+def _parses(text):
+    """Whether this Python's json.loads reads text."""
+    try:
+        json.loads(text)
+    except RecursionError:
+        return False
+    return True
+
+
+class Deep(PiCase):
+    """A value nested deeper than Python reads it, wherever a session holds
+    one, stops nothing else in the store: its line is counted as unparsed
+    and its text still searched, or it is read like any other value."""
+
+    def session_around(self, odd, head=None):
+        """A session with a dangerous call before the odd lines and a
+        secret read after them."""
+        lines = [head or header()]
+        lines += call_lines(1, "before", "bash", {"command": "rm -rf ~/x"},
+                            output="ok")
+        lines += odd
+        lines += call_lines(50, "after", "bash", {"command": "cat .env"},
+                            output="STRIPE_KEY=" + SECRET)
+        return self.session(lines)
+
+    def read(self, path):
+        """({id: call}, every value clean finds) for the session, once the
+        calls around the odd lines are read in order, the first judged,
+        and the secret after them found. No deep value is compared or
+        printed here: a failing assertEqual would recurse to show it."""
+        store = self.store(path)
+        calls = list(self.pi.tool_calls(store))
+        ids = [c.tool_call_id for c in calls]
+        self.assertEqual([i for i in ids if i in ("before", "after")],
+                         ["before", "after"])
+        by_id = dict(zip(ids, calls))
+        self.assertEqual([r for r, _e in rules(by_id["before"])],
+                         ["fs.destructive"])
+        found = set()
+        for text in self.pi.secret_texts(store):
+            clean._walk(text.node, lambda value, *_rest: found.add(value))
+        self.assertIn(SECRET, found)
+        return by_id, found
+
+    def test_a_line_nested_past_the_parser_is_counted_and_the_rest_read(self):
+        line = _with_deep(entry(5, {"role": "user", "content": [
+            {"type": "text", "text": "API_TOKEN=" + TYPED}, "DEEP"],
+            "timestamp": BASE_MS}), _deep_list())
+        _calls, found = self.read(self.session_around([line]))
+        self.assertEqual(self.pi.counts["unparsed"], 0 if _parses(line) else 1)
+        self.assertIn(TYPED, found)         # unparsed, its text is searched
+
+    def test_deep_arguments_are_kept_and_the_calls_around_them_read(self):
+        as_text = '{"command":"ls","x":%s}' % _deep_object()
+        cases = (
+            ("an object", _with_deep(entry(10, assistant(
+                [tool_call("deep", "bash", {"command": "ls", "x": "DEEP"})],
+                BASE_MS)), _deep_object()), True),
+            ("a string", _dump(entry(10, assistant(
+                [tool_call("deep", "bash", as_text)], BASE_MS))),
+             _parses(as_text)),
+        )
+        for label, line, decoded in cases:
+            with self.subTest(arguments=label):
+                self.pi.reset()
+                calls, _found = self.read(self.session_around([line]))
+                if not _parses(line):
+                    self.assertNotIn("deep", list(calls))
+                    self.assertEqual(self.pi.counts["unparsed"], 1)
+                    continue
+                call = calls["deep"]
+                self.assertEqual((call.kind, call.known), ("shell", True))
+                if decoded:
+                    self.assertEqual(call.command, "ls")
+                else:                   # kept as written, as base decodes it
+                    self.assertIsNone(call.command)
+                    self.assertEqual(list(call.tool_input), ["_raw"])
+                    self.assertTrue(call.tool_input["_raw"] == as_text)
+
+    def test_a_nested_call_nested_past_the_parser_is_read_or_counted(self):
+        records = [nested_record("cm/1", "bash",
+                                 {"command": "cat .env", "x": "DEEP"}),
+                   nested_record("cm/2", "bash", {"command": "ls"},
+                                 error="DEEP"),
+                   "DEEP"]
+        lines = codemode_lines(10, "cm", "await tools.bash()", records)
+        lines[1] = _with_deep(lines[1], _deep_list())
+        calls, _found = self.read(self.session_around(lines))
+        self.assertIn("cm", list(calls))
+        if _parses(lines[1]):
+            self.assertEqual(calls["cm/1"].command, "cat .env")
+            self.assertIsNone(calls["cm/2"].output)     # an error, not text
+            self.assertEqual(self.pi.counts["unknown"], 1)  # not an object
+        else:
+            self.assertNotIn("cm/1", list(calls))
+            self.assertEqual(self.pi.counts["unparsed"], 1)
+
+    def test_a_command_the_user_ran_nested_past_the_parser(self):
+        line = _with_deep(entry(10, bash_execution("DEEP", "DEEP", BASE_MS)),
+                          _deep_list())
+        calls, _found = self.read(self.session_around([line]))
+        if _parses(line):
+            shell = calls[eid(10)]
+            self.assertEqual((shell.actor, shell.command, shell.output),
+                             ("user", None, None))
+        else:
+            self.assertNotIn(eid(10), list(calls))
+            self.assertEqual(self.pi.counts["unparsed"], 1)
+
+    def test_a_header_nested_past_the_parser_still_names_the_store(self):
+        # shallower than DEEP, to fit the 64 KiB a header is read within
+        line = _with_deep(header(x="DEEP"), _deep_list(30000))
+        self.assertLess(len(line), pi_module._HEADER_MAX)
+        path = self.session_around([], head=line)
+        parsed = _parses(line)
+        project = "/home/dev/app" if parsed else None
+        store = self.store(path)
+        self.assertEqual((store.session, store.project), (SID, project))
+        calls, _found = self.read(path)
+        self.assertEqual((calls["after"].session, calls["after"].project),
+                         (SID, project))
+        self.assertEqual(self.pi.counts["unparsed"], 0 if parsed else 1)
+
+    def test_fields_nested_past_the_parser_are_read_as_no_value(self):
+        odd = [_with_deep(line, _deep_list()) for line in (
+            entry(10, {"role": "DEEP", "content": "hi", "timestamp": BASE_MS}),
+            entry(11, assistant([tool_call("stop", "bash", {"command": "ls"})],
+                                BASE_MS, stop="DEEP")),
+            entry(12, tool_result("DEEP", "bash", "DEEP", BASE_MS)),
+            {"type": "DEEP", "id": eid(13)},
+        )]
+        calls, _found = self.read(self.session_around(odd))
+        unparsed = sum(1 for line in odd if not _parses(line))
+        self.assertEqual(self.pi.counts["unparsed"], unparsed)
+        if not unparsed:
+            self.assertIsNone(calls["stop"].status)     # it may have run
+            self.assertEqual(self.pi.counts["unknown"], 2)  # role and type
+
+    def test_masking_reaches_past_a_line_nested_past_the_parser(self):
+        line = _with_deep(entry(5, user("DEEP", BASE_MS)), _deep_list())
+        path = self.session_around([line])
+        result = self.pi.mask(self.store(path), [SECRET])
+        self.assertEqual((result.changed, result.skipped), (True, None))
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertNotIn(SECRET, text)
+        self.assertIn(_marker(SECRET), text)
+        self.assertTrue(line + "\n" in text)
+
+
+class DeepCli(unittest.TestCase):
+    """ranwhat in a process of its own, over a session holding a line and
+    a call's arguments nested past the parser: watch, check and clean
+    finish without a traceback and read what is around them."""
+
+    def test_watch_check_and_clean_read_past_deep_json(self):
+        tmp = _tempdir(self, "pi-deep-cli-")
+        home, claude = os.path.join(tmp, "home"), os.path.join(tmp, "claude")
+        os.makedirs(home)
+        os.makedirs(claude)
+        root = os.path.join(tmp, "pi")
+        path = os.path.join(root, "sessions", FOLDER, NAME)
+        os.makedirs(os.path.dirname(path))
+        deep = [_with_deep(entry(5, user("DEEP", BASE_MS)), _deep_list()),
+                _with_deep(entry(6, assistant([tool_call(
+                    "deep", "bash", {"command": "ls", "x": "DEEP"})], BASE_MS)),
+                    _deep_object())]
+        lines = [_dump(header())]
+        lines += [_dump(l) for l in call_lines(
+            1, "before", "bash", {"command": "rm -rf ~/x"}, output="ok")]
+        lines += deep
+        lines += [_dump(l) for l in call_lines(
+            50, "after", "bash", {"command": "cat .env"},
+            output="STRIPE_KEY=" + SECRET)]
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write("".join(l + "\n" for l in lines))
+        when = time.time() - 3600
+        os.utime(path, (when, when))
+        env = dict(os.environ, HOME=home, USERPROFILE=home, PYTHONPATH=REPO,
+                   RANWHAT_HOME=os.path.join(tmp, "state"), NO_COLOR="1",
+                   PYTHONIOENCODING="utf-8")
+        env.pop(ENV, None)
+        env.pop(SESSION_ENV, None)
+        flags = ["--source", "pi", "--path", "pi=" + root, "--root", claude,
+                 "--state-dir", os.path.join(tmp, "no-openclaw"),
+                 "--days", "3650"]
+
+        def run(*argv):
+            done = subprocess.run(
+                [sys.executable, "-m", "ranwhat"] + list(argv) + flags,
+                cwd=REPO, env=env, capture_output=True, encoding="utf-8",
+                stdin=subprocess.DEVNULL, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+            self.assertNotIn("Traceback", done.stderr)
+            self.assertNotIn("warning", done.stderr)
+            return done.stdout
+
+        records = json.loads(run("watch", "--json"))
+        self.assertEqual(sorted(r["tool_call_id"] for r in records),
+                         ["after", "before"])
+        for argv, key in ((["check", "--json"], "secrets"),
+                          (["clean", "--json", "--no-interactive"], "findings")):
+            [found] = json.loads(run(*argv))[key]
+            self.assertEqual((found["fingerprint"], found["origins"],
+                              found["stores"]),
+                             (clean._fingerprint(SECRET), [".env"],
+                              {path: "pi"}))
+        run("clean", "--apply", "--no-interactive")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertNotIn(SECRET, text)
+        self.assertIn(_marker(SECRET), text)
+        self.assertTrue(all(l + "\n" in text for l in deep))
 
 
 # --------------------------------------------------------------------------
