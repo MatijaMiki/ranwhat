@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
+import agents_fixtures as af  # noqa: E402
 from ranwhat import clean
 from ranwhat.clean import REDACTION, find_secrets, scan, scan_file
 
@@ -126,10 +127,9 @@ def _transcript(test, body):
     root = _tempdir(test, "clean-t-")
     d = os.path.join(root, "proj")
     os.makedirs(d)
-    path = os.path.join(d, "s.jsonl")
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"type": "user", "message": {"content": [
-            {"type": "tool_result", "content": body}]}}) + "\n")
+    path = af.write(os.path.join(d, "s.jsonl"), [json.dumps(
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": body}]}})])
     return root, path
 
 
@@ -438,11 +438,8 @@ class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):
             {"type": "tool_result", "content": text}]}}, ensure_ascii=False)
 
     def _apply(self, lines):
-        d = _tempdir(self, "bytes-")
-        path = os.path.join(d, "s.jsonl")
-        original = "".join(lines).encode("utf-8")
-        with open(path, "wb") as fh:
-            fh.write(original)
+        original = lines if isinstance(lines, bytes) else "".join(lines).encode("utf-8")
+        path = af.write(os.path.join(_tempdir(self, "bytes-"), "s.jsonl"), original)
         findings, changed = scan_file(path, apply=True)
         self.assertTrue(changed)
         (fp,) = findings
@@ -473,6 +470,128 @@ class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):
                  self._line("untouched @").replace("@", "\\udfff") + "\n"]
         original, after, mask = self._apply(lines)
         self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
+
+    def test_a_byte_that_is_not_utf8_is_kept_on_a_line_with_no_secret(self):
+        """Read as U+FFFD, it was written back as one: three bytes in
+        place of the one the file held."""
+        lines = (self._line("café notes").encode("utf-8").replace(b"\xc3\xa9", b"\xe9")
+                 + b"\n" + self._line("JWT_ACCESS_SECRET=%s" % self.SECRET).encode()
+                 + b"\n")
+        original, after, mask = self._apply(lines)
+        self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
+
+
+class ATranscriptStillBeingWritten(unittest.TestCase):
+    """A Claude Code transcript was rewritten however recently it had been
+    written to, and whatever was appended to it while it was read: a turn
+    a live session wrote in that time was in neither the masked file nor
+    its backup. It is left as it is, as every other agent's file is, and
+    the report says why."""
+
+    def setUp(self):
+        self.backups = os.path.join(_tempdir(self, "bk-"), "backups")
+        patch = mock.patch.object(clean, "BACKUP_ROOT", self.backups)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _backups(self):
+        return [f for _base, _d, files in os.walk(self.backups) for f in files]
+
+    def _masked(self, path):
+        return "ranwhat:redacted:" in _read(path)
+
+    def test_one_written_in_the_last_two_minutes_is_left_as_it_is(self):
+        root, path = _transcript(self, Masking.BODY)
+        now = af.write(os.path.join(root, "proj", "now.jsonl"), _read(path), age=0)
+        before = _read(now)
+        searched = clean.scan_sources(sources=["claude-code"], root=root, apply=True)
+        self.assertEqual(_read(now), before)
+        self.assertEqual(searched.skipped, {now: ("claude-code", "in use")})
+        self.assertEqual(searched.changed, [path])
+        self.assertEqual(len(self._backups()), 1)
+
+    def test_one_written_to_while_it_is_read_is_left_as_it_is(self):
+        root, path = _transcript(self, Masking.BODY)
+        turn = json.dumps({"type": "user", "message": {"content": "next turn"}}) + "\n"
+        backup = clean._backup
+
+        def append_after_backup(p):
+            dest = backup(p)
+            with open(p, "a", encoding="utf-8") as fh:
+                fh.write(turn)
+            return dest
+        skipped = {}
+        with mock.patch.object(clean, "_backup", append_after_backup):
+            _findings, changed = scan_file(path, apply=True, skipped=skipped)
+        self.assertFalse(changed)
+        self.assertEqual(skipped, {path: "changed while reading"})
+        self.assertTrue(_read(path).endswith(turn))
+        self.assertFalse(self._masked(path))
+        self.assertEqual(self._backups(), [])
+
+    def test_a_second_mask_in_one_run_is_not_held_back_by_the_first(self):
+        """The first mask is ranwhat's own write, not the agent's."""
+        root, path = _transcript(self, Masking.BODY)
+        fps = sorted(scan(root=root)[0])
+        for fp in fps:
+            skipped = {}
+            _findings, changed = scan_file(path, apply=True, only={fp}, skipped=skipped)
+            self.assertTrue(changed, skipped)
+        self.assertEqual(scan(root=root)[0], {})
+
+    def test_one_windows_will_not_replace_is_in_use_and_the_rest_go_on(self):
+        """os.replace refuses a file another process holds open on Windows.
+        That ended clean --apply in a traceback before any later file was
+        masked, and left a backup holding the secret though nothing was
+        masked."""
+        from ranwhat.sources import _rewrite
+        root, held = _transcript(self, Masking.BODY)
+        other = af.write(os.path.join(root, "proj", "other.jsonl"), _read(held))
+        replace = os.replace
+
+        def refuse(src, dst):
+            if dst == held:
+                raise PermissionError(13, "in use by another process")
+            return replace(src, dst)
+        with mock.patch.object(_rewrite, "_WINDOWS", True), \
+             mock.patch.object(os, "replace", refuse):
+            searched = clean.scan_sources(sources=["claude-code"], root=root,
+                                          apply=True)
+        self.assertEqual(searched.skipped, {held: ("claude-code", "in use")})
+        self.assertEqual(searched.changed, [other])
+        self.assertFalse(self._masked(held))
+        self.assertTrue(self._masked(other))
+        self.assertEqual(len(self._backups()), 1)
+        self.assertEqual(os.listdir(os.path.dirname(held)).count(
+            os.path.basename(held) + _rewrite.TMP_SUFFIX), 0)
+
+    def test_one_that_cannot_be_backed_up_is_not_written(self):
+        """A backup path past Windows' MAX_PATH raised out of clean --apply."""
+        root, path = _transcript(self, Masking.BODY)
+        err = io.StringIO()
+        with mock.patch.object(clean, "_backup",
+                               side_effect=OSError(36, "File name too long")), \
+             mock.patch("sys.stderr", err):
+            searched = clean.scan_sources(sources=["claude-code"], root=root,
+                                          apply=True)
+        self.assertEqual(searched.skipped, {path: ("claude-code", clean.NOT_WRITTEN)})
+        self.assertEqual(searched.changed, [])
+        self.assertFalse(self._masked(path))
+        self.assertIn("could not mask", err.getvalue())
+
+    def test_the_review_says_why_it_left_one(self):
+        root, path = _transcript(self, Masking.BODY)
+        os.utime(path)
+        findings, scanned, _ = scan(root=root)
+        replies = iter(("mask 1", "quit"))
+        out = io.StringIO()
+        with mock.patch("builtins.input", lambda prompt="": next(replies)), \
+             mock.patch.dict(os.environ, {"RANWHAT_WIDTH": "80"}):
+            changed = clean.review(findings, scanned, stream=out)
+        self.assertEqual(changed, 0)
+        self.assertFalse(self._masked(path))
+        self.assertIn("1 file in use, not masked. Run clean --apply again once "
+                      "Claude Code is closed,", " ".join(out.getvalue().split()))
 
 
 class InteractiveReview(unittest.TestCase):
@@ -551,10 +670,7 @@ class EveryCopyIsMasked(unittest.TestCase):
                  {"type": "assistant", "message": {"content": [
                      {"type": "text", "text": "Logged in with %s." % self.PASSWORD}]}}]
         d = _tempdir(self, "copies-")
-        path = os.path.join(d, "s.jsonl")
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write("".join(json.dumps(line) + "\n" for line in lines))
-        return path
+        return af.write(os.path.join(d, "s.jsonl"), [json.dumps(line) for line in lines])
 
     def _copies(self, path, value):
         text = _read(path)
@@ -616,9 +732,7 @@ class CopiesInOtherTranscripts(unittest.TestCase):
                                          "content": text}]}}
 
     def _write(self, path, lines):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write("".join(json.dumps(line) + "\n" for line in lines))
+        af.write(path, [json.dumps(line) for line in lines])
 
     def _root(self):
         """The session that read it, another that typed it, a subagent of
@@ -681,8 +795,7 @@ class CopiesInOtherTranscripts(unittest.TestCase):
         other transcripts, so those never use up the reading they had."""
         root = self._root()
         content = _read(self.read) + json.dumps(self._call("z", "psql -W %s" % self.PASSWORD))
-        with open(self.read, "w", encoding="utf-8") as fh:
-            fh.write(content + "\n")
+        af.write(self.read, content + "\n")
         longer = {clean._fingerprint(v): v for v in
                   ("Zx8Qm4" "Lp9Vb2Rt7Kc3WnZx8Qm4Lp9Vb2Rt7Kc3Wn%d" % i for i in range(5))}
         with mock.patch.object(clean, "_COPY_SEARCH_CHARS", 4 * len(content)):
@@ -838,11 +951,7 @@ class OneLineNestedPastTheStack(unittest.TestCase):
 
     def _transcript(self, root=None):
         d = os.path.join(root or _tempdir(self, "deep-"), "-tmp-deep")
-        os.makedirs(d)
-        path = os.path.join(d, "s.jsonl")
-        with open(path, "w", encoding="utf-8", newline="") as fh:
-            fh.writelines(self._lines())
-        return path
+        return af.write(os.path.join(d, "s.jsonl"), "".join(self._lines()))
 
     def test_a_line_nested_past_the_stack_is_skipped_and_the_rest_read(self):
         findings, changed = scan_file(self._transcript())

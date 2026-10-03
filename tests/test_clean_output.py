@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
+import agents_fixtures as af  # noqa: E402
 from ranwhat import clean, term
 
 ANSI = re.compile(r"\033\[[0-9;]*m")
@@ -239,12 +240,10 @@ class ReviewFitsTheTerminal(_Width):
         patch.start()
         self.addCleanup(patch.stop)
         for width in self.WIDTHS:
-            path = os.path.join(root, "s%s.jsonl" % width)
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"message": {"content": [{
+            path = af.write(os.path.join(root, "s%s.jsonl" % width), [json.dumps(
+                {"message": {"content": [{
                     "type": "tool_result",
-                    "content": "AWS_ACCESS_KEY_ID=AKIA" "4TRUE7KEYX9QZ2WB\n"}]}})
-                    + "\n")
+                    "content": "AWS_ACCESS_KEY_ID=AKIA" "4TRUE7KEYX9QZ2WB\n"}]}})])
             findings, _changed = clean.scan_file(path)
             text = _review(findings, ["mask 1"], width)
             self.assertFits(text, width)

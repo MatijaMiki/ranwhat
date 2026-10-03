@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import string
+import time
 
 from .watch import CLAUDE_PROJECTS, _fit, discover, transcript_place
 
@@ -2301,7 +2302,7 @@ def _dumped(obj, line):
 
 
 def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
-              remember=None):
+              remember=None, skipped=None):
     """Find (and optionally mask) secrets in one transcript.
 
     Returns (findings, changed). Each finding is a dict describing one
@@ -2322,6 +2323,10 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
     when it could not be read. `remember`, with apply, is called with the
     values about to be masked before the transcript is rewritten (for
     known.Index.remember).
+
+    With apply the transcript is replaced as an agent's file is
+    (_replace): not when it was written to in the last two minutes, or
+    while it was read. `skipped`, a dict, is then given why, by path.
     """
     findings = {}
     rewritten = []
@@ -2370,12 +2375,20 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
     # UTF-8 whatever the locale says: Windows would otherwise decode as
     # cp1252 and write the mojibake back. newline="" hands each line over
     # with its own ending, so a rewrite keeps \r\n where it found \r\n.
+    # A byte that is not UTF-8 is read as U+FFFD, as values_in reads it,
+    # and a line the mask leaves alone is written back as it was (raw).
     lines = []
+    raw = {}                    # line number -> as read, where it was not UTF-8
     texts, owners = [], []      # each string long enough to hold a value, its line
     try:
-        with open(path, "r", encoding="utf-8", errors="replace",
+        st = os.stat(path)
+        with open(path, "r", encoding="utf-8", errors="surrogateescape",
                   newline="") as fh:
             for line in fh:
+                if _LONE_SURROGATE.search(line):
+                    raw[len(lines)] = line
+                    line = line.encode("utf-8", "surrogateescape").decode(
+                        "utf-8", "replace")
                 lines.append(line)
                 stripped = line.strip()
                 if not stripped:
@@ -2480,23 +2493,23 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
         known.update(values)
 
     if apply and changed:
-        if remember is not None:
-            remember([v for fp, v in values.items() if only is None or fp in only])
-        _backup(path)
-        tmp = path + ".ranwhat-tmp"
-        try:
-            _write_like(path, tmp, rewritten)
-            # Refuse to install a file we cannot read back. Only the lines
-            # written anew are asked: one kept as it was read may never
-            # have been JSON, or be deeper than json reads.
-            with open(tmp, encoding="utf-8", newline="") as fh:
-                for line, was in zip(fh, lines):
-                    if line != was:
-                        json.loads(line)
-            os.replace(tmp, path)
-        finally:
-            if os.path.lexists(tmp):
-                os.unlink(tmp)
+        # Refuse to install a file we cannot read back. Only the lines
+        # written anew are asked: one kept as it was read may never have
+        # been JSON, or be deeper than json reads.
+        for new, was in zip(rewritten, lines):
+            if new is not was:
+                json.loads(new)
+        why = _in_use(path, st)
+        if why is None:
+            if remember is not None:
+                remember([v for fp, v in values.items() if only is None or fp in only])
+            why = _replace(path, st, "".join(
+                raw.get(i, new) if new is lines[i] else new
+                for i, new in enumerate(rewritten)))
+        if why is not None:
+            changed = False
+            if skipped is not None:
+                skipped[path] = why
 
     return findings, changed
 
@@ -2555,27 +2568,49 @@ _CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
            | getattr(os, "O_BINARY", 0))
 
 
-def _write_like(original, tmp, lines):
-    """Write the rewritten transcript with the original's permissions.
+# Transcripts this run masked, by real path: the (size, mtime) each was
+# left with. One still so was last written by ranwhat, not by its agent,
+# and a second mask of it is not held back for two minutes.
+_MASKED_HERE = {}
 
-    open(tmp, "w") took the umask default, so a 0600 transcript came back
-    0644 after masking: the one command meant to reduce exposure widened it.
-    The file is created 0600 and only then given the original's mode, so it
-    is never readable by anyone the original was not. A stale tmp from an
-    interrupted run is removed first rather than written through.
 
-    Lines are written exactly as given, endings included. Windows has no
-    mode bits to carry, only a read-only flag, which would leave a tmp that
-    could not be removed if the replace failed; there the new file takes
-    its directory's permissions."""
-    mode = os.stat(original).st_mode & 0o777
-    if os.path.lexists(tmp):
-        os.unlink(tmp)
-    fd = os.open(tmp, _CREATE, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-        fh.writelines(lines)
-        if os.name != "nt":
-            os.fchmod(fh.fileno(), mode)
+def _in_use(path, st):
+    """_rewrite.IN_USE when something but ranwhat wrote to the transcript,
+    as stat'ed in st before it was read, in the last QUIET_SECONDS: a live
+    session appending to it would go on writing to the file it replaced,
+    as _rewrite says of every agent's. Otherwise None."""
+    from .sources import _rewrite
+    if _MASKED_HERE.get(os.path.realpath(path)) == (st.st_size, st.st_mtime_ns):
+        return None
+    if time.time() - st.st_mtime < _rewrite.QUIET_SECONDS:
+        return _rewrite.IN_USE
+    return None
+
+
+def _replace(path, st, text):
+    """Install text as the transcript at path, backed up first, with
+    _rewrite._install: refused when it changed since it was read (st),
+    and on Windows when another process holds it open. None when it was
+    replaced, otherwise why not, with no backup kept: nothing was masked,
+    and a backup is one more copy of the secret."""
+    from .sources import _rewrite
+    try:
+        backup = _backup(path)
+        try:
+            why = _rewrite._install(path, st, text.encode("utf-8", "surrogateescape"))
+        except BaseException:
+            _rewrite._discard(backup)
+            raise
+    except OSError as error:
+        _registry.get("claude-code").warn(("mask", path), "could not mask %s (%s)"
+                                          % (path, error.strerror or error))
+        return NOT_WRITTEN
+    if why:
+        _rewrite._discard(backup)
+        return why
+    after = os.stat(path)
+    _MASKED_HERE[os.path.realpath(path)] = (after.st_size, after.st_mtime_ns)
+    return None
 
 
 def _backup_dest(root, stamp, path):
@@ -2620,7 +2655,7 @@ def _backup(path):
 
 
 def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
-         known=None, copies=True, read=None, remember=None):
+         known=None, copies=True, read=None, remember=None, skipped=None):
     """Scan every transcript. Returns (merged_findings, files_scanned, files_changed).
 
     `progress` is called with (index, total, path) before each file. A large
@@ -2636,6 +2671,8 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
     transcript read whole: check's index takes them (known.Index.take)
     rather than read each transcript a second time. `remember`, with
     apply, is given each value before a transcript loses it to a mask.
+    `skipped`, with apply, is given why each transcript left as it was
+    was not masked (scan_file).
     """
     merged, scanned, changed_files = {}, 0, []
     values = {}
@@ -2654,13 +2691,13 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
                 def took(found, masks, path=path, st=st):
                     read(path, st, found, masks)
         findings, changed = scan_file(path, apply=apply, known=values, read=took,
-                                      remember=remember)
+                                      remember=remember, skipped=skipped)
         if changed:
             changed_files.append(path)
         _merge(merged, findings)
     if copies and merged:
         _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
-                                     remember=remember)
+                                     remember=remember, skipped=skipped)
     if known is not None:
         known.update(values)
     return merged, scanned, changed_files
@@ -2705,13 +2742,14 @@ _SHAPE_LABELS = frozenset(name for _shape, name in _SHAPES_NAMED)
 
 
 def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
-                                 remember=None, least=2):
+                                 remember=None, least=2, skipped=None):
     """Count, and with apply mask, each value of `merged` in the transcripts
     of `paths` it was not found in. Each look costs what it reads, and a
     little more for asking at all, so a thousand small transcripts and ten
-    thousand values stop at the budget too. `remember` as scan_file takes
-    it. With fewer than `least` transcripts there is none to look in: the
-    values were found in them (least=1: found in another agent's files)."""
+    thousand values stop at the budget too. `remember` and `skipped` as
+    scan_file takes them. With fewer than `least` transcripts there is
+    none to look in: the values were found in them (least=1: found in
+    another agent's files)."""
     order = sorted((fp for fp, f in merged.items()
                     if fp in values and f["label"] not in _SHAPE_LABELS),
                    key=lambda fp: (-len(values[fp]), fp))
@@ -2747,7 +2785,8 @@ def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
                 present[fp] = values[fp]
         if present:
             findings, changed = scan_file(path, apply=apply, only=set(present),
-                                          extra=present, remember=remember)
+                                          extra=present, remember=remember,
+                                          skipped=skipped)
             if changed and path not in changed_files:
                 changed_files.append(path)
             _merge(merged, {fp: f for fp, f in findings.items() if f["count"]},
@@ -2958,6 +2997,7 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     extra = sum(len(stores) for _source, stores in others)
     done = 0
     claude_paths = []
+    held = {}                       # transcript not masked -> why
     if "claude-code" in selected:
         step = progress
         if progress and extra:
@@ -2965,7 +3005,7 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                 progress(i, total + extra, path)
         merged, scanned, changed = scan(root, since_days, apply=apply,
                                         progress=step, known=values, read=read,
-                                        remember=remember)
+                                        remember=remember, skipped=held)
         _claude_code_keys(merged)
         out.findings.update(merged)
         out.counts["claude-code"] = done = scanned
@@ -2999,8 +3039,10 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
             if apply and remember is not None:
                 remember([values[fp] for fp in elsewhere if fp in values])
             _copies_in_other_transcripts(claude_paths, elsewhere, values, apply,
-                                         out.changed, remember=remember, least=1)
+                                         out.changed, remember=remember, least=1,
+                                         skipped=held)
             _claude_code_keys(elsewhere)
+    out.skipped.update((path, ("claude-code", why)) for path, why in held.items())
 
     for entry in out.findings.values():
         for path in entry["read_only"]:
@@ -3552,10 +3594,12 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
         remember(list(known.values()))
 
     changed = 0
+    held = {}                       # transcript -> why it was not masked
     for path in paths:
         here = {t["fingerprint"] for t in targets if path in t["files"]}
         found, did = scan_file(path, apply=True, only=wanted,
-                               extra={fp: v for fp, v in known.items() if fp in here})
+                               extra={fp: v for fp, v in known.items() if fp in here},
+                               skipped=held)
         if did:
             changed += 1
     left = {}                       # path -> (source id, why it was not masked)
@@ -3576,8 +3620,10 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
     if everywhere and known:
         elsewhere = []
         _copies_in_other_transcripts(
-            everywhere, {t["fingerprint"]: t for t in targets}, known, True, elsewhere)
+            everywhere, {t["fingerprint"]: t for t in targets}, known, True, elsewhere,
+            skipped=held)
         changed += len(set(elsewhere) - set(paths))
+    left.update((path, ("claude-code", why)) for path, why in held.items())
     if changed:
         _print(GRN("  masked in %d file(s)." % changed))
         _print(DIM("  Backups: %s" % _fit_path(_home_short(BACKUP_ROOT),
