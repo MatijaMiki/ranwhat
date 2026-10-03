@@ -1263,12 +1263,12 @@ class DeepNesting(GeminiCase):
                     self.assertEqual(self.src.unreadable, {"did not parse": 3})
                     self.assertEqual(err.count("warning:"), 3)
 
-    def test_a_terminal_grid_beside_a_value_nested_past_the_stack(self):
+    def test_a_terminal_grid_beside_a_value_nested_past_the_stack_is_masked_or_refused(self):
         """A key cut across a grid's rows is masked by writing its line out
-        again and checking it. Where that overflows the stack the file is
-        refused, unchanged; a line too deep to parse at all is masked as
-        raw text, as any line that does not parse. The next file is masked
-        either way."""
+        again. Where that overflows the stack the file is refused,
+        unchanged; a line too deep to parse at all, or to walk once read,
+        is masked as raw text, as any line that does not parse. The next
+        file is masked either way."""
         for depth in DEPTHS:
             with self.subTest(depth=depth):
                 record = shell("c1", "cat .env", output=untrusted(LINE),
@@ -1280,14 +1280,17 @@ class DeepNesting(GeminiCase):
                 path = self.write("tmp/proj/chats/session-deep.jsonl", lines)
                 digest = _sha(path)
                 result = self.src.mask(self.store(path), [LONG])
-                if parses(lines[1]):
+                # Where writing it out overflows depends on how much of the C
+                # stack is in use, not on the depth alone: either outcome
+                # holds, never a secret left in a file that changed.
+                if result.changed:
+                    with open(path, "rb") as fh:
+                        self.assertNotIn(LONG.encode("utf-8"), fh.read())
+                else:
+                    self.assertTrue(parses(lines[1]), result)
                     self.assertEqual(result,
                                      MaskResult(path, skipped=_rewrite.ALTERED))
                     self.assertEqual(_sha(path), digest)
-                else:
-                    self.assertTrue(result.changed, result)
-                    with open(path, "rb") as fh:
-                        self.assertNotIn(LONG.encode("utf-8"), fh.read())
                 self.assertTrue(self.src.mask(self.store(plain), [LONG]).changed)
 
 
