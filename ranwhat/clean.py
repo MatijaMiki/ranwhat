@@ -3129,14 +3129,17 @@ def _mask_stores(out, values, by_id, remember=None):
             out.skipped[path] = (store.source, why)
 
 
-# Why a file was not masked, as the report says it.
+# Why a file was not masked, as the report says it. HELD_OPEN is "in use"
+# by the agent's own word (Source.in_use, a lock), not by the file's age:
+# waiting two minutes after its last write does nothing for it.
 NOT_WRITTEN = "could not be written"
+HELD_OPEN = "held open"
 
 
 def _mask_one(source, store, values):
     """Mask values in one adapter file: None when it changed, "" when
     there was nothing to change, or why it was not masked (MaskResult's
-    reasons, or NOT_WRITTEN)."""
+    reasons, NOT_WRITTEN or HELD_OPEN)."""
     try:
         result = source.mask(store, values)
     except OSError as error:
@@ -3145,6 +3148,8 @@ def _mask_one(source, store, values):
         return NOT_WRITTEN
     if result.changed:
         return None
+    if result.skipped == "in use" and source.in_use(store):
+        return HELD_OPEN
     return result.skipped or ""
 
 
@@ -3288,13 +3293,14 @@ def render(findings, scanned, changed_files, applied, footer=True,
                               % _files(len(held)), width)))
     L.append("")
     if read_only:
-        L += _read_only_lines(read_only, DIM, width) + [""]
+        L += _read_only_lines(read_only, DIM, width, shown) + [""]
 
     if applied:
         L.append("  " + GRN("Masked in %d file(s)." % len(changed_files)))
-        L.append(DIM("  Backups: %s" % _fit_path(_home_short(_backup_root()),
-                                                 width - 11)))
-        L += [DIM(line) for line in _sentences(*_BACKUPS_HOLD)]
+        if changed_files:
+            L.append(DIM("  Backups: %s" % _fit_path(_home_short(_backup_root()),
+                                                     width - 11)))
+            L += [DIM(line) for line in _sentences(*_BACKUPS_HOLD)]
         if skipped:
             L += _skipped_lines(skipped, YEL, width)
     elif advice:
@@ -3328,10 +3334,12 @@ def _agent_names(ids):
 _DELETE_THERE = "To remove it, delete the session in %s."
 
 
-def _read_only_lines(read_only, DIM, width):
+def _read_only_lines(read_only, DIM, width, shown=None):
     """Under the findings: the files that hold one and that ranwhat never
     rewrites, a sentence for each kind of them, agent by agent, and what
-    to do instead."""
+    to do instead, and each file by name, through `shown` as render's
+    paths are: which to remove was in --json and the review only."""
+    shown = shown or _as_it_is
     from .sources.base import WHY_READ_ONLY
     groups = {}
     for path, store in read_only.items():
@@ -3345,6 +3353,8 @@ def _read_only_lines(read_only, DIM, width):
         L += [DIM(line) for line in term.wrap(
             "%s, %s: %s" % (agents.name(source), _files(len(held)), why),
             indent="      ", first="    ")]
+        L += [DIM("      " + _fit_path(shown(_home_short(path)), width - 6))
+              for path in sorted(held)]
     return L
 
 
@@ -3357,6 +3367,8 @@ _NOT_MASKED = {
     "would alter more than the secret": "not masked: masking would have "
                                         "changed more than the secret.",
     NOT_WRITTEN: "could not be written, not masked.",
+    HELD_OPEN: "held open by %s, not masked. Run clean --apply again once "
+               "it lets go; a lock left by a crash clears when it next starts.",
 }
 
 
@@ -3539,10 +3551,11 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
 
         if cmd in ("show", "mask", "keep"):
             if cmd == "mask" and arg == "all":
-                changed_total += _mask(items, scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths, remember=remember,
-                                       stores=stores)
-                items = []
+                did, later = _mask(items, scanned, _print, GRN, RED, DIM,
+                                   values, paths=paths, remember=remember,
+                                   stores=stores, shown=shown)
+                changed_total += did
+                items = [t for t in items if t["files"] & later]
                 continue
             if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
                 _print(RED("  need a number from 1 to %d" % len(items)))
@@ -3581,10 +3594,12 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
                 items.remove(target)
                 _print(DIM("  kept. %d left." % len(items)))
             else:
-                changed_total += _mask([target], scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths, remember=remember,
-                                       stores=stores)
-                items.remove(target)
+                did, later = _mask([target], scanned, _print, GRN, RED, DIM,
+                                   values, paths=paths, remember=remember,
+                                   stores=stores, shown=shown)
+                changed_total += did
+                if not later:           # one left in use stays, to mask again
+                    items.remove(target)
             continue
 
         _print(RED("  unknown command: %s" % _fit(cmd, width - 33))
@@ -3592,7 +3607,7 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
 
 
 def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
-          remember=None, stores=None):
+          remember=None, stores=None, shown=None):
     """Re-walk only the files that hold these secrets, masking just them.
     A file may hold a copy the rules do not find there, typed with no key
     beside it, so each value goes with the walk (scan_file's extra): read
@@ -3610,7 +3625,11 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
     A finding in another agent's files (`stores`, {path: Store}) is masked
     there through that agent's adapter, where it can rewrite the file. A
     file it cannot rewrite is named with why and what to do instead, and
-    one written to in the last two minutes is left for later."""
+    one written to in the last two minutes is left for later. What its
+    adapter says to do once a file is masked (mask_note) is said too, as
+    clean --apply says it.
+
+    Returns (files masked, files left that a later mask may reach)."""
     stores = stores or {}
     wanted = {t["fingerprint"] for t in targets}
     everywhere = paths
@@ -3650,6 +3669,7 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
         if did:
             changed += 1
     left = {}                       # path -> (source id, why it was not masked)
+    noted = set()                   # agents whose files were masked
     for path in others:
         store = stores.get(path)
         here = [known[t["fingerprint"]] for t in targets
@@ -3662,6 +3682,7 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
         why = _mask_one(_registry.get(store.source), store, here)
         if why is None:
             changed += 1
+            noted.add(store.source)
         elif why:
             left[path] = (store.source, why)
     if everywhere and known:
@@ -3677,16 +3698,21 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
                                                term.width() - 11)))
         for line in _sentences(*_BACKUPS_HOLD):
             _print(DIM(line))
-    elif not left:
+        from .cli import _sentence
+        for source in _registry.sources():
+            if source.id in noted and getattr(source, "mask_note", ""):
+                for line in term.wrap(_sentence(source.mask_note)):
+                    _print(DIM(line))
+    elif left and all(why == "read-only" for _i, why in left.values()):
+        _print(RED("  nothing changed: every file that holds it is read only."))
+    else:
         _print(RED("  nothing changed."))
     read_only = {p: stores[p] for p, (_i, why) in left.items() if why == "read-only"}
     if read_only:
-        if not changed:
-            _print(RED("  nothing changed: every file that holds it is read only."))
-        for line in _read_only_lines(read_only, DIM, term.width()):
+        for line in _read_only_lines(read_only, DIM, term.width(), shown):
             _print(line)
     skipped = {p: v for p, v in left.items() if v[1] != "read-only"}
     if skipped:
         for line in _skipped_lines(skipped, _as_it_is, term.width()):
             _print(DIM(line))
-    return changed
+    return changed, set(skipped)

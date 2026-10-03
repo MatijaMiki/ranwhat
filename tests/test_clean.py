@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -680,6 +681,93 @@ class InteractiveReview(unittest.TestCase):
     def test_masks_add_up_across_commands(self):
         _path, changed, _out = self._review("mask 1", "mask 1", "quit")
         self.assertEqual(changed, 2)
+
+
+class ReviewingAnotherAgentsFiles(unittest.TestCase):
+    """What the review says when it masks a finding in another agent's
+    files, and what it keeps for later. Every value is synthetic, in a
+    home that holds no agent's own history."""
+
+    TOKEN = "gh" "p_" "Zq8Lm3Np5Rt7Vx9Bc2Df4Gh6Jk1Wy0Ea3Su"
+    PASSWORD = "Vq7Lx2Rk9Tz4Wm8Pn3"
+
+    def setUp(self):
+        from ranwhat.sources import _paths
+        self.home = _tempdir(self, "review-agents-")
+        self.backups = os.path.join(self.home, "backups")
+        for patch in (mock.patch.dict(os.environ, {"HOME": self.home,
+                                                   "USERPROFILE": self.home,
+                                                   "NO_COLOR": "1",
+                                                   "RANWHAT_WIDTH": "80"}),
+                      mock.patch.object(_paths, "home", return_value=self.home),
+                      mock.patch.object(clean, "BACKUP_ROOT", self.backups)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        for name in af.AGENT_ENV:
+            os.environ.pop(name, None)          # restored by patch.dict
+
+    def _review(self, agent, root, *commands):
+        searched = clean.scan_sources(sources=[agent.id], paths={agent.id: root})
+        replies = iter(commands + ("list", "quit"))
+        out = io.StringIO()
+        with mock.patch("builtins.input", lambda prompt="": next(replies)):
+            clean.review(searched.findings, searched.scanned, stream=out,
+                         values=searched.values, stores=searched.stores)
+        return " ".join(out.getvalue().split())
+
+    def _codex(self, age):
+        codex = af.AGENTS[0]
+        root = codex.root(self.home)
+        rollout = codex.write(root, [("c1", "shell", "cat .env",
+                                      "GITHUB_TOKEN=%s\n" % self.TOKEN, time.time() - age)],
+                              age=age)
+        return codex, root, rollout
+
+    def test_a_file_in_use_beside_a_read_only_one_is_not_called_read_only(self):
+        codex, root, _rollout = self._codex(10)
+        codex.read_only(root, self.TOKEN)
+        out = self._review(codex, root, "mask 1")
+        self.assertNotIn("every file that holds it is read only", out)
+        self.assertIn("nothing changed.", out)
+        self.assertIn("1 file in use, not masked.", out)
+
+    def test_a_finding_left_in_use_stays_in_the_list(self):
+        codex, root, _rollout = self._codex(10)
+        out = self._review(codex, root, "mask 1")
+        self.assertIn("in use, not masked", out)
+        self.assertIn("1 GitHub personal access token",
+                      out.split("in use, not masked")[1])
+
+    def test_one_held_by_a_codex_lock_says_so(self):
+        """A rollout a Codex thread holds was said to be in use until two
+        minutes after it was last written, though it was a day old: the
+        lock lasts as long as Codex holds the thread, or, left by a crash,
+        until Codex next starts."""
+        from ranwhat.sources import codex as codex_source
+        codex, root, rollout = self._codex(86400)
+        thread = af._uuid("codex", ord("a"))
+        af.write(os.path.join(root, codex_source.LOCK_DIR, thread + ".lock"), "")
+        searched = clean.scan_sources(sources=["codex"], paths={"codex": root},
+                                      apply=True)
+        self.assertEqual(searched.skipped, {rollout: ("codex", clean.HELD_OPEN)})
+        text = " ".join(clean.render(searched.findings, searched.counts,
+                                     searched.changed, True, others=searched.others,
+                                     skipped=searched.skipped).split())
+        self.assertIn("1 file held open by Codex, not masked.", text)
+        self.assertNotIn("two minutes", text)
+
+    def test_masking_says_what_the_agent_may_do_next(self):
+        """The note an agent's adapter gives after a mask (that an open
+        Gemini CLI may write the value back) was printed by clean --apply
+        and never by the review."""
+        gemini = af.AGENTS[1]
+        root = gemini.root(self.home)
+        gemini.write(root, [("g1", "shell", "cat .env",
+                             "GITHUB_TOKEN=%s\n" % self.TOKEN, time.time() - 3600)])
+        out = self._review(gemini, root, "mask 1")
+        self.assertIn("masked in 1 file(s).", out)
+        self.assertIn("If Gemini CLI is open in this project, close it first", out)
+        self.assertNotIn(self.TOKEN, out)
 
 
 class EveryCopyIsMasked(unittest.TestCase):
