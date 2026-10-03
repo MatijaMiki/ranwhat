@@ -356,11 +356,12 @@ npm install --ignore-scripts             <span class="c-mut">no install scripts 
       <div class="term" style="margin-top:22px">
         <div class="term-body"><pre>ls -lt ~/.claude/projects | head      <span class="c-mut">the projects used most recently</span>
 ls -ld ~/.claude                      <span class="c-mut">who else can read it</span>
-uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in Claude Code transcripts; changes nothing</span></pre></div>
+uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in your agents' transcripts; changes nothing</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        <span class="icode">ranwhat clean</span> reads session transcripts from
-        the last 30 days by default (<span class="icode">--days N</span>).
+        <span class="icode">ranwhat clean</span> reads Claude Code's session
+        transcripts, and every other agent's history, from the last 30 days
+        by default (<span class="icode">--days N</span>).
         When the transcript names the file a credential was read out of, clean
         names it too. It reads subagent transcripts as well, but not
         <span class="icode">tool-results/</span> or
@@ -386,8 +387,8 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in Claude 
         <button class="copy" data-copy="#run-check">Copy</button>
       </div>
       <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
-        One read-only pass: the risky actions in your Claude Code history,
-        and the credentials left in its transcripts. Every
+        One read-only pass: the risky actions in the history of Claude Code
+        and eleven other coding agents, and the credentials left in it. Every
         <span class="icode">ranwhat</span> command on this page also runs as
         <span class="icode">uvx ranwhat &hellip;</span> without installing
         anything.
@@ -498,7 +499,7 @@ aws iam update-access-key --access-key-id &lt;old-key-id&gt; --status Inactive
 aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        For credentials in Claude Code transcripts,
+        For credentials in your agents' transcripts,
         <a href="/clean">ranwhat clean</a> opens a review session after its
         report.
         <span class="icode">rotate</span> lists what to rotate, grouped by
@@ -571,7 +572,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
       </p>
       <div class="rows">
         <div class="row"><span class="k">Covers</span>
-          <span class="v"><span class="icode">watch</span>: risky actions in Claude Code history. <span class="icode">clean</span>: credentials in Claude Code transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries.</span></div>
+          <span class="v"><span class="icode">watch</span>: risky actions in the history of Claude Code and eleven other coding agents. <span class="icode">clean</span>: credentials in their transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries.</span></div>
         <div class="row"><span class="k">Does not</span>
           <span class="v">Block anything while the agent works: Claude Code's permission rules, hooks and sandbox do that. It does not scan MCP servers or skills for malicious content. It flags a WebFetch call only when a secret-shaped value is in it, and does not flag a setup command that fetches its payload at run time.</span></div>
         <div class="row"><span class="k">Network</span>

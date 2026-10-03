@@ -1,7 +1,8 @@
 # ranwhat
 
 **A flight recorder for AI agents, and a scanner for the authority they hold.**
-AI coding agent security for Claude Code, run on your own machine.
+AI coding agent security for Claude Code and eleven other coding agents, run
+on your own machine.
 No account, no telemetry, no dependencies.
 
 Website and docs: https://ranwhat.com
@@ -108,7 +109,9 @@ machine is skipped.
 Meta Muse runs in Meta's cloud and keeps nothing on your machine, so there
 is nothing to read; Muse Code, Meta's coding CLI, is supported.
 Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
-machine; Grok Build, xAI's coding CLI, is supported.
+machine; Grok Build, xAI's coding CLI, is supported. The current Amp keeps
+its threads on ampcode.com. Cursor is next, once its format is checked
+against a primary source.
 
 Nine rules: credential access, secret-shaped strings in tool calls, package
 publishing, cloud resource changes, financial API calls, log tampering,
