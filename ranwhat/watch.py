@@ -1240,9 +1240,19 @@ def _slashed(text):
     return _WINDOWS_SEPARATOR.sub("/", text) if "\\" in text else text
 
 
+_DRIVE = re.compile(r"[A-Za-z]:[\\/]")
+
+
 def _credential_text(text):
-    """What cred.read judges in a shell command: what it reads, slashed."""
-    return _slashed(_without_writes(text))
+    """What cred.read judges in a shell command: what it reads, with each
+    word slashed that has no / in it, or names a drive. One with a / and
+    no drive is a POSIX script, where a backslash escapes, and
+    sed 's/config\\.env/x/' read no .env."""
+    text = _without_writes(text)
+    if "\\" not in text:
+        return text
+    return _WORD.sub(lambda m: _slashed(m.group()) if "/" not in m.group()
+                     or _DRIVE.search(m.group()) else m.group(), text)
 
 
 def _refine_read_path(text, severity, tool_input=None):

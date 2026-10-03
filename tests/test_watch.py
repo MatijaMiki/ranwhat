@@ -381,6 +381,22 @@ class CredentialAccessIsJudgedByPathAndCommand(unittest.TestCase):
                     r"sed -i 's/\.env$//' list.txt"):
             self.assertIsNone(self.sev(cmd), cmd)
 
+    def test_a_backslash_in_a_posix_script_is_not_a_windows_path(self):
+        """A backslash after a name escapes a dot in sed, awk and perl, and
+        read as a Windows separator it made config\\.env a read of
+        config/.env: sed -i 's/config\\.env/app.env/' Makefile was a critical
+        credential read."""
+        for cmd in (r"sed -i 's/config\.env/app.env/' Makefile",
+                    r"awk '/app\.env/' notes.txt",
+                    r"perl -ne 'print if /config\.env/' notes.txt",
+                    r"vim -c '%s/x\.env/y/g' README.md"):
+            self.assertIsNone(self.sev(cmd), cmd)
+        for cmd in (r"Get-Content backend\.env",
+                    r'type "C:\Program Files\app\.env"',
+                    r"cd C:/proj && type backend\.env",
+                    r"type C:/Users/u\.ssh\id_rsa"):
+            self.assertEqual(self.sev(cmd), watch.CRITICAL, cmd)
+
 
 class RepeatedCallsAreReportedOnce(unittest.TestCase):
 
