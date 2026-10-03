@@ -91,10 +91,16 @@ LOCK_DIR = "thread-writer-locks"
 # are (their calls are still reported).
 COPY_MARKER_SINCE = (0, 152, 0)
 
-# function_call names whose arguments carry a shell command, and the key
-# that carries it. shell (rust-v0.50 to 0.80) carries an argv.
-SHELL_FUNCTIONS = {"exec_command": "cmd", "shell": "command",
-                   "shell_command": "command"}
+# function_call names whose arguments carry a shell command, and the keys
+# that may carry it, the first one present. shell (rust-v0.50 to 0.80)
+# carries an argv; the TypeScript CLI's shell named it cmd as often.
+SHELL_FUNCTIONS = {"exec_command": ("cmd",), "shell": ("command", "cmd"),
+                   "shell_command": ("command",)}
+
+# An argv of two words, the first one of these, is a patch Codex applies
+# itself and never runs in a shell (apply-patch lib.rs
+# maybe_parse_apply_patch).
+APPLY_PATCH_COMMANDS = ("apply_patch", "applypatch")
 
 # The SQLite home's files, the one table each is read from, and its columns.
 DATABASES = (("thread_history_1.sqlite", "thread_items", ("item_json",)),
@@ -257,6 +263,14 @@ def _script(command):
     if isinstance(command, (list, tuple)) and command and isinstance(command[-1], str):
         return command[-1]
     return command if isinstance(command, str) else None
+
+
+def _patch_of(argv):
+    """The patch in ["apply_patch", PATCH], or None for any other argv."""
+    if (isinstance(argv, (list, tuple)) and len(argv) == 2
+            and argv[0] in APPLY_PATCH_COMMANDS and isinstance(argv[1], str)):
+        return argv[1]
+    return None
 
 
 def _tomllib():
@@ -767,9 +781,13 @@ class CodexSource(Source):
             name = _str(item.get("name"))
             args = base.decode_input(item.get("arguments"))
             if name in SHELL_FUNCTIONS:
-                key = SHELL_FUNCTIONS[name]
+                keys = SHELL_FUNCTIONS[name]
+                key = next((k for k in keys if k in args), keys[0])
                 if name == "shell":
                     value = args.get(key)
+                    patch = _patch_of(value)
+                    if patch is not None:
+                        return self._patched(thread, args, key, patch, common)
                     command = (_shell.argv_to_command(value)
                                if isinstance(value, (list, tuple, str)) else "")
                 else:
@@ -798,6 +816,9 @@ class CodexSource(Source):
         if kind_of == "local_shell_call":
             action = item.get("action")
             action = action if isinstance(action, dict) else {}
+            patch = _patch_of(action.get("command"))
+            if patch is not None:
+                return self._patched(thread, action, "command", patch, common)
             command = _shell.argv_to_command(action.get("command"))
             return ToolCall(self.id, thread.store.path, "local_shell_call",
                             action, kind="shell", known=True,
@@ -809,6 +830,14 @@ class CodexSource(Source):
                             {k: v for k, v in item.items() if k != "type"},
                             kind="fetch", known=True, **common)
         return None
+
+    def _patched(self, thread, args, key, patch, common):
+        """A shell call whose argv hands a patch to apply_patch: the edit it
+        is, as apply_patch's own calls are, its other arguments kept."""
+        tool_input = {k: v for k, v in args.items() if k != key}
+        tool_input["input"] = patch
+        return ToolCall(self.id, thread.store.path, "apply_patch", tool_input,
+                        kind="write", known=True, **common)
 
     @staticmethod
     def _display(item):

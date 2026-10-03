@@ -1010,6 +1010,66 @@ class ToolCalls(_Case):
                          (TS_ID, "rm -rf ~/Documents/x", None, mtime, ""))
         self.assertEqual(rules(call), ["fs.destructive"])
 
+    def test_a_patch_handed_to_apply_patch_as_an_argv_is_a_file_edit(self):
+        """Codex applies ["apply_patch", PATCH] (or "applypatch") itself and
+        never runs it in a shell (apply-patch lib.rs maybe_parse_apply_patch),
+        so what the patch adds to a file is no command. Any other argv,
+        three words long, still is one."""
+        added = ["load_dotenv('.env')", "      - run: npm publish",
+                 "git push --force origin main", "history -c",
+                 "cat ~/.ssh/id_rsa"]
+        patch = ("*** Begin Patch\n*** Update File: app/settings.py\n@@\n"
+                 + "".join("+" + text + "\n" for text in added)
+                 + "*** End Patch\n")
+        t = "2026-10-01T12:00:%02d.000Z"
+        lines = [line(t % 0, "session_meta", meta()),
+                 line(t % 1, "response_item", fcall(
+                     "shell", {"command": ["apply_patch", patch],
+                               "workdir": "/home/dev/app"}, "c1")),
+                 line(t % 2, "response_item", fcall(
+                     "shell", {"command": ["applypatch", patch]}, "c2")),
+                 line(t % 3, "response_item", {
+                     "type": "local_shell_call", "call_id": "c3",
+                     "status": "completed",
+                     "action": {"type": "exec",
+                                "command": ["apply_patch", patch],
+                                "working_directory": "/home/dev/app"}}),
+                 line(t % 4, "response_item", fcall(
+                     "shell", {"cmd": ["apply_patch", patch]}, "c4")),
+                 line(t % 5, "response_item", fcall(
+                     "shell", {"command": ["apply_patch", patch, "x"]}, "c5"))]
+        _path, calls = self._calls(lines)
+        for cid in ("c1", "c2", "c3", "c4"):
+            call = calls[cid]
+            self.assertEqual((call.tool_name, call.kind, call.known,
+                              call.command, call.tool_input["input"]),
+                             ("apply_patch", "write", True, None, patch), cid)
+            self.assertEqual(rules(call), [], cid)
+        self.assertEqual(calls["c1"].tool_input["workdir"], "/home/dev/app")
+        self.assertEqual(calls["c5"].kind, "shell")
+        self.assertIn("cred.read", rules(calls["c5"]))
+
+    def test_a_typescript_shell_call_names_its_command_cmd(self):
+        """The TypeScript CLI ran {"cmd": [...]} as readily as {"command":
+        [...]}, an argv or a bare string (codex-cli parsers.ts
+        parseToolCallArguments)."""
+        doc = json.loads(typescript_doc())
+        doc["items"] += [
+            fcall("shell", {"cmd": ["bash", "-lc", "rm -rf ~/Documents/x"]},
+                  "call_t2"),
+            fcall("shell", {"cmd": ["cat", ".env"]}, "call_t3"),
+            fcall("shell", {"cmd": "rm -rf ~/Documents/y"}, "call_t4")]
+        path = self.write("sessions/rollout-2025-04-20-" + TS_ID + ".json",
+                          _j(doc))
+        calls = {c.tool_call_id: c for c in self.calls(path)}
+        self.assertEqual(
+            [(calls[c].command, calls[c].consumed, rules(calls[c]))
+             for c in ("call_t2", "call_t3", "call_t4")],
+            [("rm -rf ~/Documents/x", frozenset(["cmd"]), ["fs.destructive"]),
+             ("cat .env", frozenset(["cmd"]), ["cred.read"]),
+             ("rm -rf ~/Documents/y", frozenset(["cmd"]), ["fs.destructive"])])
+        self.assertEqual(rules(calls["call_t1"]), ["fs.destructive"])
+
     def test_side_stores_have_no_calls(self):
         path = self.write("history.jsonl", [history_line("rm -rf ~")])
         self.assertEqual(self.calls(path), [])
