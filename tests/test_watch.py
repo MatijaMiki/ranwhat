@@ -347,6 +347,40 @@ class CredentialAccessIsJudgedByPathAndCommand(unittest.TestCase):
         for cmd in ("cat .env", "cat api/.env", "cat ~/.aws/credentials"):
             self.assertEqual(self.sev(cmd), watch.CRITICAL, cmd)
 
+    def test_a_windows_path_is_judged_as_its_slashed_spelling(self):
+        """The rules knew only / between the parts of a path, so on Windows
+        no agent's read of C:\\Users\\u\\.ssh\\id_rsa or C:\\proj\\.env was
+        reported, by a read tool or by type and Get-Content."""
+        def read(path):
+            hits, _ = watch.judge(ToolCall("gemini", "s", "read_file",
+                                           {"file_path": path}, kind="read",
+                                           known=True, paths=(path,),
+                                           consumed=("file_path",)))
+            return hits
+
+        for path in (r"C:\Users\u\.ssh\id_rsa", r"C:\Users\u\.aws\credentials",
+                     r"C:\proj\.env", r"C:\proj\.env.local",
+                     r"C:\Users\u\.kube\config", r"..\.env",
+                     r"\\server\share\.ssh\id_ed25519"):
+            with self.subTest(path=path):
+                hits = read(path)
+                self.assertEqual([(h["rule"], h["severity"]) for h in hits],
+                                 [("cred.read", watch.CRITICAL)])
+                self.assertIn(path, hits[0]["evidence"])
+        for cmd in (r"type C:\Users\u\.ssh\id_rsa",
+                    r"Get-Content $env:USERPROFILE\.aws\credentials",
+                    r"type %USERPROFILE%\.ssh\id_rsa", r"cat C:\proj\.env",
+                    r"Get-Content ~\.kube\config"):
+            self.assertEqual(self.sev(cmd), watch.CRITICAL, cmd)
+        # What a Windows spelling holds is still judged as it is written
+        # with slashes: a template, a public key, a key handed to ssh.
+        for path in (r"C:\proj\.env.example", r"C:\Users\u\.ssh\id_rsa.pub"):
+            self.assertEqual(read(path), [], path)
+        for cmd in (r"type C:\proj\.env.example",
+                    r"ssh -i C:\Users\u\.ssh\id_rsa host",
+                    r"sed -i 's/\.env$//' list.txt"):
+            self.assertIsNone(self.sev(cmd), cmd)
+
 
 class RepeatedCallsAreReportedOnce(unittest.TestCase):
 
@@ -368,6 +402,34 @@ class RepeatedCallsAreReportedOnce(unittest.TestCase):
         records, scanned = watch.scan_all(root=root)
         self.assertEqual(scanned, 2)
         self.assertEqual(len(records), 1)
+
+    def test_a_recent_openclaw_call_outlives_an_older_copy(self):
+        """OpenClaw's copies of one call were made one record, the first,
+        before the --days window was applied: the window then dropped the
+        old copy, the recent run went with it, and watch said every call
+        was read and none tripped a rule."""
+        import sqlite3
+        import tempfile
+        import time
+        state = tempfile.mkdtemp(prefix="oc-window-")
+        self.addCleanup(shutil.rmtree, state, True)
+        path = os.path.join(state, "agents", "a1", "agent", "openclaw-agent.sqlite")
+        os.makedirs(os.path.dirname(path))
+        body = json.dumps({"content": [{"type": "tool_use", "name": "bash",
+                                        "input": {"command": "rm -rf ~/Documents/work"}}]})
+        now = int(time.time())
+        conn = sqlite3.connect(path)
+        conn.execute('CREATE TABLE log (id TEXT, body TEXT, "createdAt" INTEGER)')
+        for i, epoch in enumerate((now - 60 * 86400, now - 7200, now - 3600)):
+            conn.execute("INSERT INTO log VALUES (?, ?, ?)", (str(i), body, epoch * 1000))
+        conn.commit()
+        conn.close()
+        latest = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600))
+        for days in (30, 90, None):
+            with self.subTest(days=days):
+                records, read = watch.scan_openclaw(state, since_days=days)
+                self.assertEqual(read, 1)
+                self.assertEqual([r["timestamp"] for r in records], [latest])
 
 
 class LocalFilePipedToTheNetwork(growth.Assertions, unittest.TestCase):

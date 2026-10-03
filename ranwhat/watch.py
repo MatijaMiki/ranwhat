@@ -938,9 +938,10 @@ _NOT_SECRET_SUFFIXES = (".example", ".sample", ".template", ".dist",
 # before .json. The name up to the first one is taken by a lookahead and
 # matched again by reference, which cannot backtrack: as two runs around
 # the words, every service_account in one long word read on to its end,
-# and 63K of them took two seconds.
+# and 63K of them took two seconds. A path may start with a drive or a
+# variable (C:/, %USERPROFILE%/, $env:HOME/), once _slashed has read it.
 _CRED_PATH = re.compile(
-    r"(?:^|[\s\"'=(])((?:[\w./~$-]*/)?(?:\.env[\w.-]*|credentials|"
+    r"(?:^|[\s\"'=(])((?:[\w./~$%:-]*/)?(?:\.env[\w.-]*|credentials|"
     r"\.netrc|id_[a-z0-9]+(?:\.pub)?|[\w.-]*\.pem|[\w.-]*\.key|\.kube/config|"
     r"(?=(?P<account>[\w.-]*?service[-_]account))(?P=account)[\w.-]*\.json))",
     re.I)
@@ -1224,6 +1225,26 @@ def _without_writes(text):
     return "".join(chars)
 
 
+# A backslash between the parts of a Windows path: after a drive, a name
+# or a variable (%USERPROFILE%, $env:USERPROFILE, ~), and before a name.
+# Not one escaping in a POSIX shell (sed 's/\.env/', grep '\.ssh'), which
+# follows a separator or a quote.
+_WINDOWS_SEPARATOR = re.compile(r"(?<=[\w.~%$:-])\\(?=[\w.~%$-])")
+
+
+def _slashed(text):
+    """text with each backslash that separates the parts of a Windows path
+    read as /, at the same offsets. The credential rules know only /, and
+    no agent's read of C:\\Users\\u\\.ssh\\id_rsa or C:\\proj\\.env was
+    reported."""
+    return _WINDOWS_SEPARATOR.sub("/", text) if "\\" in text else text
+
+
+def _credential_text(text):
+    """What cred.read judges in a shell command: what it reads, slashed."""
+    return _slashed(_without_writes(text))
+
+
 def _refine_read_path(text, severity, tool_input=None):
     """A path a file-reading tool opened. There is no verb to judge, since
     reading is all the tool does, so only templates and public keys are
@@ -1351,7 +1372,7 @@ RULES = [
           r"\.aws/credentials", r"\.ssh/id_[\w]+", r"\.netrc",
           r"\.config/gcloud", _Gap(r"service[-_]account", r"\.json", "\n"),
           r"security\s+find-generic-password", r"\.kube/config"],
-         paths=True, hide=_without_writes),
+         paths=True, hide=_credential_text),
 
     # clean's own rules decide what is a credential, fixtures and
     # placeholders included, so watch never flags a value clean ignores or
@@ -2006,14 +2027,15 @@ def evaluate(tool_name, tool_input, known=None):
     hits = []
     for rule in RULES:
         # (subject, what the rule judges in it, refiners). The two differ
-        # only by what rule.hide blanks, so a span in one is a span in both.
+        # only by what rule.hide blanks and by a Windows path's backslashes
+        # read as /, so a span in one is a span in both.
         if rule.scan_raw:
             subjects = [(s, s, REFINERS) for s in raw]
         else:
             seen = rule.hide(shell) if rule.hide and shell else shell
             subjects = [(shell, seen, REFINERS)]
             if rule.paths:
-                subjects.append((paths, paths, PATH_REFINERS))
+                subjects.append((paths, _slashed(paths), PATH_REFINERS))
         for subject, seen, refiners in subjects:
             if not subject:
                 continue
@@ -2564,24 +2586,32 @@ def _openclaw_source():
         return _openclaw.OpenClawSource()
 
 
-def scan_openclaw_db(path, source="openclaw", known=None, src=None):
+def scan_openclaw_db(path, source="openclaw", known=None, src=None,
+                     cutoff=None):
     """Action Records for one OpenClaw database, with `known` masked in
     them as evaluate masks it. A call repeated in the database is one
-    record, the first, whatever its time. `src` is the adapter that reads
-    it, a fresh one by default."""
+    record, its latest copy since `cutoff` (an epoch, or None for all of
+    them). Kept as the first copy and windowed after, a call run again
+    inside the window went unreported when it had also run before it.
+    `src` is the adapter that reads it, a fresh one by default."""
     src = src or _openclaw.OpenClawSource()
     store = src.store_at(path)
-    records, seen = [], set()
+    records, seen = [], {}
     try:
         for call in src.tool_calls(store):
             hits, payload = judge(call, known)
             if not hits:
                 continue
-            key = (call.tool_name, _hash(payload))
-            if key in seen:
+            record = _record(call, hits, payload, source)
+            if not _in_window(record, cutoff):
                 continue
-            seen.add(key)
-            records.append(_record(call, hits, payload, source))
+            key = (call.tool_name, record["payload_hash"])
+            at = seen.setdefault(key, len(records))
+            if at == len(records):
+                records.append(record)
+            elif (_epoch(record["timestamp"]) or 0) > (
+                    _epoch(records[at]["timestamp"]) or 0):
+                records[at] = record
     except Exception as error:          # one database must not stop the rest
         src.stopped(store, error)
     return records
@@ -2601,8 +2631,7 @@ def scan_openclaw(state_dir=None, since_days=None, known=None, progress=None,
     for i, db in enumerate(dbs, 1):
         if progress:
             progress(done + i, total, db)
-        records.extend(r for r in scan_openclaw_db(db, known=known, src=src)
-                       if _in_window(r, cutoff))
+        records.extend(scan_openclaw_db(db, known=known, src=src, cutoff=cutoff))
     return records, len(dbs)
 
 
