@@ -1157,6 +1157,11 @@ def _sources(args):
         if entry["status"] == "found" or masking == "not searched":
             L += [DIM(line) for line in term.wrap(what, indent="    ")]
         for note in entry["notes"]:
+            # A path in a note as the location lines show it, under ~ and
+            # cut to the line: term.wrap gives a word longer than the line
+            # a line of its own, past the edge.
+            note = " ".join(watch_mod._shown_path(word, width - 4)
+                            for word in note.split())
             L += [DIM(line) for line in term.wrap(note, indent="    ")]
         L.append("")
     for status, heading in (("cloud only", "Cloud only, nothing on this "

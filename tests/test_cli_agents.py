@@ -1052,6 +1052,22 @@ class SourcesCommand(_Cli):
                 self.assertEqual(entry["status"], "not found")
                 self.assertTrue(entry["locations"])
 
+    def test_a_path_an_agent_notes_is_cut_to_fit(self):
+        """Codex's note names the path it was pointed at whole, and a word
+        longer than the line was given a line of its own past the edge,
+        under a location line already cut to fit."""
+        parts = ("some", "rather", "long", "directory", "name", "codex-home-file")
+        af.write(os.path.join(self.home, *parts), "not a folder\n")
+        for width in WIDTHS:
+            with self.subTest(width=width), \
+                    mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                rc, out, err = self.run_cli("sources", "--source", "codex",
+                                            "--path", "codex=~/" + "/".join(parts))
+                self.assertEqual(rc, 0, err)
+                self.assertIn("so Codex does not use it", " ".join(out.split()))
+                self.assertIn("codex-home-file", out)
+                self.assertFits(out, int(width))
+
     def test_a_found_agent(self):
         codex = af.AGENTS[0]
         root = self.agent_root(codex)
