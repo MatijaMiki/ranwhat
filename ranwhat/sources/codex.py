@@ -461,7 +461,10 @@ class CodexSource(Source):
             if len(data) > CONFIG_MAX:
                 return None, config
             value = toml.loads(data.decode("utf-8")).get("sqlite_home")
-        except (OSError, ValueError, UnicodeDecodeError, AttributeError):
+        except (OSError, ValueError, UnicodeDecodeError, AttributeError,
+                RecursionError):
+            # RecursionError: tomllib recurses once per level of nesting,
+            # and a few hundred levels end it.
             return None, config
         if not isinstance(value, str):
             return None, config
@@ -883,8 +886,10 @@ class CodexSource(Source):
         recorded) and ("output", call_id, text) for every call in the store,
         in file order. inherited: the line is a copy of an ancestor's
         history. recorded: a command the user ran, read from the message
-        that records it. A record whose shape is not what the spec says is
-        counted and skipped; the rest of the file is still read."""
+        that records it. A record whose shape is not what the spec says, or
+        that is nested deeper than the stack can follow (a command's argv
+        made into text), is counted and skipped; the rest of the file is
+        still read."""
         thread = _Thread(store)
         counting = self._first(store.path, "records")
         for where, obj, _text in self._records(store):
@@ -892,7 +897,8 @@ class CodexSource(Source):
                 continue
             try:
                 events = self._line_events(where, obj, thread, counting)
-            except (AttributeError, KeyError, TypeError, ValueError):
+            except (AttributeError, KeyError, TypeError, ValueError,
+                    RecursionError):
                 if counting:
                     self.count("unreadable_calls")
                 continue
@@ -1039,7 +1045,10 @@ class CodexSource(Source):
             body = json.dumps([call.tool_name, call.actor, call.tool_input],
                               sort_keys=True, default=str)
         except (TypeError, ValueError, RecursionError):
-            body = repr((call.tool_name, call.actor, call.tool_input))
+            # As watch._payload: repr gave up wherever json.dumps did, and
+            # stopped the file. These calls share one fingerprint, so a
+            # replayed copy of any of them counts as seen.
+            body = "unhashable"
         return hashlib.sha256(body.encode("utf-8", "surrogatepass")).digest()
 
     # -- secrets ------------------------------------------------------------
@@ -1148,8 +1157,10 @@ class CodexSource(Source):
                 obj = _without_encrypted(obj)
             try:
                 found = self._line_texts(where, obj, thread, calls)
-            except (AttributeError, KeyError, TypeError, ValueError):
-                # Not the shape the spec says: still searched, as it is.
+            except (AttributeError, KeyError, TypeError, ValueError,
+                    RecursionError):
+                # Not the shape the spec says, or nested past the stack:
+                # still searched, as it is (clean walks it with its own).
                 found = [SecretText(obj, where=where)]
             for item in found:
                 yield item

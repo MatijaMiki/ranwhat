@@ -1514,6 +1514,107 @@ class Damaged(_Case):
 
 
 # --------------------------------------------------------------------------
+# JSON nested deeper than Python's stack
+# --------------------------------------------------------------------------
+
+# Too deep for json.loads on Python 3.9. Python 3.14 parses it, and then
+# repr, == and a dict's json.dumps give up on it.
+DEEP = 100000
+
+
+def deep_list():
+    return "[" * DEEP + "]" * DEEP
+
+
+def deep_object():
+    return '{"a":' * DEEP + "1" + "}" * DEEP
+
+
+def raw_line(typ, payload):
+    """An envelope line around payload, which is JSON text already."""
+    return ('{"timestamp":"2026-10-01T12:00:06.000Z","type":"%s","payload":%s}'
+            % (typ, payload))
+
+
+class Deep(_Case):
+
+    def read_with(self, odd):
+        """The spec's rollout with the odd lines before its call: (calls by
+        id or name, what found_secrets finds, what was said on stderr)."""
+        lines = legacy_lines(SECRET)
+        path = self.write(ROLLOUT, lines[:2] + odd + lines[2:])
+        calls, err = self.quiet(self.calls, path)
+        texts, err2 = self.quiet(self.texts, path)
+        found = sorted((v, o) for v, o, _w in found_secrets(texts))
+        return {c.tool_call_id or c.tool_name: c for c in calls}, found, err + err2
+
+    def assert_each_read_or_counted(self, calls, odd):
+        """Each odd line is a call, or counted: one Python parses what the
+        other cannot."""
+        self.assertEqual(len(calls) - 1 + self.src.counts["unparsed"]
+                         + self.src.counts["unreadable_calls"], len(odd))
+
+    def test_a_command_nested_past_the_stack_is_skipped_and_the_rest_read(self):
+        odd = [
+            raw_line("response_item",
+                     '{"type":"local_shell_call","call_id":"c2","action":'
+                     '{"command":["bash","-lc",%s]}}' % deep_list()),
+            raw_line("event_msg",
+                     '{"type":"item_completed","item":{"type":"CommandExecution",'
+                     '"id":"c3","source":"user_shell","command":["bash",%s],'
+                     '"aggregated_output":"TOKEN=%s"}}' % (deep_list(), SHELL_SECRET)),
+            line("2026-10-01T12:00:06.500Z", "response_item", fcall(
+                "shell", '{"command":["bash",%s]}' % deep_list(), "c1")),
+        ]
+        calls, found, err = self.read_with(odd)
+        self.assertEqual(err, "")
+        self.assertEqual(calls["call_0001"].command, "cat .env")
+        self.assert_each_read_or_counted(calls, odd)
+        self.assertEqual(found, sorted([(SECRET, ".env"), (SHELL_SECRET, None)]))
+
+    def test_a_call_with_no_id_nested_past_the_stack_is_still_reported(self):
+        odd = [
+            raw_line("response_item",
+                     '{"type":"web_search_call","status":"completed","action":%s}'
+                     % deep_object()),
+            line("2026-10-01T12:00:06.500Z", "response_item",
+                 {"type": "function_call", "name": "lookup",
+                  "arguments": deep_object()}),
+        ]
+        calls, found, err = self.read_with(odd)
+        self.assertEqual(err, "")
+        self.assertEqual(calls["call_0001"].command, "cat .env")
+        self.assert_each_read_or_counted(calls, odd)
+        self.assertEqual(self.src.counts["unreadable_calls"], 0)
+        self.assertEqual(found, [(SECRET, ".env")])
+
+    def test_a_database_cell_nested_past_the_stack_is_kept_and_the_rest_read(self):
+        path = os.path.join(self.root, "thread_history_1.sqlite")
+        os.makedirs(self.root)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE thread_items (item_json TEXT)")
+        conn.executemany("INSERT INTO thread_items VALUES (?)", [
+            (deep_object(),), (deep_list(),),
+            (_j(fout("call_0001", "API_KEY=" + SECRET)),)])
+        conn.commit()
+        conn.close()
+        texts, err = self.quiet(self.texts, path)
+        self.assertEqual((len(texts), err), (3, ""))
+        self.assertEqual([(v, w) for v, _o, w in found_secrets(texts)],
+                         [(SECRET, "thread_items row 3, item_json")])
+
+    @unittest.skipUnless(codex._tomllib(), "tomllib is Python 3.11+")
+    def test_a_config_toml_nested_past_the_stack_sets_nothing(self):
+        self.write("config.toml", 'sqlite_home = "db"\nx = %s\n' % deep_list())
+        path = self.write(ROLLOUT, legacy_lines(SECRET))
+        locs, err = self.quiet(self.src.locations)
+        self.assertEqual(err, "")
+        self.assertEqual([(l.path, l.how, l.found) for l in locs],
+                         [(self.root, "env CODEX_HOME", 1)])
+        self.assertEqual([c.command for c in self.calls(path)], ["cat .env"])
+
+
+# --------------------------------------------------------------------------
 # 13, 14. In use; the window
 # --------------------------------------------------------------------------
 
