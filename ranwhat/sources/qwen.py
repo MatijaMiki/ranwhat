@@ -244,6 +244,7 @@ def _pid_alive_windows(pid):
     try:
         out = subprocess.run(
             ["tasklist", "/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"],
+            executable=_paths.system32("tasklist"),
             capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return True
@@ -260,7 +261,9 @@ def _hostname():
     if hasattr(os, "uname"):
         return os.uname().nodename or None
     try:
-        out = subprocess.run(["hostname"], capture_output=True, timeout=10)
+        out = subprocess.run(["hostname"],
+                             executable=_paths.system32("hostname"),
+                             capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
     if out.returncode != 0:

@@ -972,15 +972,6 @@ def project_map(root, tmp, names):
 
 # -- in use -------------------------------------------------------------------
 
-def _tasklist():
-    system = os.environ.get("SystemRoot") or os.environ.get("SYSTEMROOT")
-    if system:
-        exe = os.path.join(system, "System32", "tasklist.exe")
-        if os.path.isfile(exe):
-            return exe
-    return "tasklist"
-
-
 def _pid_alive(pid):
     """Whether a process with this id is running. Not knowing counts as
     running: that only makes clean more careful."""
@@ -990,7 +981,8 @@ def _pid_alive(pid):
         # tasklist, never os.kill: on Windows that terminates the process.
         try:
             done = subprocess.run(
-                [_tasklist(), "/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"],
+                ["tasklist", "/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"],
+                executable=_paths.system32("tasklist"),
                 capture_output=True, timeout=10,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, subprocess.SubprocessError):

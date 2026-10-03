@@ -1,16 +1,18 @@
 """Decompressing zstd, with no dependency.
 
 Python 3.14 has compression.zstd in the standard library. Before that the
-`zstd` command is used when one is on PATH. Without either, decompress()
+`zstd` command is used when one is on PATH, in a folder named in full: never
+one in the current directory (_paths.program). Without either, decompress()
 returns None, and the adapter counts the store as unreadable and says why:
 "needs Python 3.14 or the zstd command". Nothing here compresses anything.
 """
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import threading
+
+from . import _paths
 
 try:                                            # Python 3.14+
     from compression import zstd as _stdlib     # type: ignore
@@ -30,7 +32,7 @@ NEEDS = "needs Python 3.14 or the zstd command"
 
 
 def _command():
-    return shutil.which("zstd")
+    return _paths.program("zstd")
 
 
 def available():

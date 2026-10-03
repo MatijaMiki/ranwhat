@@ -1,11 +1,12 @@
 """Where agents keep things, worked out without touching the disk.
 
-Every function here except home() is pure: it takes an environment mapping,
-a home directory and a platform name, and returns strings. Joins use
-ntpath for "win32" and posixpath otherwise, so a test on a Mac can assert a
-Windows path exactly, backslashes and all.
+Every function here except home(), program() and system32() is pure: it
+takes an environment mapping, a home directory and a platform name, and
+returns strings. Joins use ntpath for "win32" and posixpath otherwise, so a
+test on a Mac can assert a Windows path exactly, backslashes and all.
 
 home() is the one function tests patch to move every adapter at once.
+program() and system32() say where an external program is run from.
 """
 
 from __future__ import annotations
@@ -19,6 +20,36 @@ import sys
 def home():
     """The user's home directory: USERPROFILE on Windows, HOME elsewhere."""
     return os.path.expanduser("~")
+
+
+def program(name):
+    """The full path of the program `name`, or None when there is none.
+
+    Only absolute PATH entries are searched, with every PATHEXT suffix on
+    Windows. Windows, and shutil.which there, look in the current directory
+    first, and an empty or relative PATH entry names it anywhere, so a
+    zstd.bat in a cloned repository would have run as the user."""
+    suffixes = [""]
+    if os.name == "nt":
+        pathext = os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD"
+        suffixes = [s for s in pathext.split(";") if s]
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if not os.path.isabs(folder):
+            continue
+        for suffix in suffixes:
+            path = os.path.join(folder, name + suffix)
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+    return None
+
+
+def system32(name):
+    """%SystemRoot%\\System32\\<name>.exe, where Windows keeps tasklist and
+    hostname. Run by this full path, a missing one is an OSError the caller
+    already handles; run by a bare name, Windows would look in the current
+    directory first."""
+    root = os.environ.get("SystemRoot") or "C:\\Windows"
+    return ntpath.join(root, "System32", name + ".exe")
 
 
 def platform_name(platform=None):
