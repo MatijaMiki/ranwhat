@@ -464,6 +464,16 @@ class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):
         original, after, mask = self._apply(lines)
         self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
 
+    def test_half_an_emoji_is_written_back_as_the_escape_it_was_read_as(self):
+        """Node writes a string cut inside an emoji with the half it kept
+        as an escape, \\ud83d. json reads that as a lone surrogate, which
+        UTF-8 cannot write, and clean --apply ended in a traceback."""
+        lines = [self._line("JWT_ACCESS_SECRET=%s café, cut @" % self.SECRET)
+                 .replace("@", "\\ud83d") + "\n",
+                 self._line("untouched @").replace("@", "\\udfff") + "\n"]
+        original, after, mask = self._apply(lines)
+        self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
+
 
 class InteractiveReview(unittest.TestCase):
     """`ranwhat clean` on a terminal with findings and no --apply lands in

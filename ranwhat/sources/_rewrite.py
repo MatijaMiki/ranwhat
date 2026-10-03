@@ -435,8 +435,11 @@ def _same_but_masked(old, new, raw, byte_arrays, before=None):
     try:
         if before is None:
             before = _decode(old)
+        # Read before either is walked, so a line too deep to walk that
+        # the mask left unreadable is still refused.
+        after = None if new is None else _decode(new)
         before = _expand(before)
-        after = before if new is None else _expand(_decode(new))
+        after = before if new is None else _expand(after)
         return after == _mask(before, raw, byte_arrays)
     except ValueError:
         return False

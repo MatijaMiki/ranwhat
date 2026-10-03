@@ -2281,15 +2281,23 @@ def _origin_for_line(obj, last_call, call_origins):
     return _GREP_LINE
 
 
+# Half an emoji, from a string Node cut inside one, is written as an escape
+# (\ud83d) that json reads as a lone surrogate, which UTF-8 cannot write.
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
 def _dumped(obj, line):
     """obj written back as the line it was read from, with that line's
     ending, or None when it is nested too deep for json.dumps to write:
     3.14's json reads far deeper than it writes. That line is kept as it
-    was read, as one json cannot read is, and the rest masked."""
+    was read, as one json cannot read is, and the rest masked. A lone
+    surrogate is written as the escape it was read as."""
     try:
-        return json.dumps(obj, ensure_ascii=False) + line[len(line.rstrip("\r\n")):]
+        text = json.dumps(obj, ensure_ascii=False)
     except RecursionError:
         return None
+    text = _LONE_SURROGATE.sub(lambda m: "\\u%04x" % ord(m.group()), text)
+    return text + line[len(line.rstrip("\r\n")):]
 
 
 def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,

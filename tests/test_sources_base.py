@@ -1447,6 +1447,21 @@ class Rewrite(unittest.TestCase):
                 self.assertTrue(self._read(path) == doc, "the document changed")
                 self.assertEqual(self._backups(), [])
 
+    def test_a_line_too_deep_to_walk_is_still_refused_when_the_mask_breaks_it(self):
+        """A line too deep for the check to walk is not compared, but it is
+        still read: a value ending in a backslash, masked where an escaped
+        quote follows its copy, left the line unreadable and was installed.
+        600 levels: both Pythons' json read it, and neither walks it."""
+        value = "Qm7vX2pL9sK4" "\\"
+        doc = ('{"key":%s}\n{"t":"Qm7vX2pL9sK4\\"tail","d":%s}\n' % (
+            json.dumps(value), '{"a":' * 600 + "1" + "}" * 600)).encode("utf-8")
+        path = self._write("deep.jsonl", doc)
+        result = _rewrite.rewrite_file(path, [value], "jsonl")
+        self.assertEqual((result.changed, result.skipped),
+                         (False, _rewrite.ALTERED))
+        self.assertTrue(self._read(path) == doc, "the file changed")
+        self.assertEqual(self._backups(), [])
+
     # -- one pass, as replacing each form in turn did ---------------------
 
     # Characters that overlap each other's forms (quotes, backslashes, a
