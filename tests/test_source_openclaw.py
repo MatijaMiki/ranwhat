@@ -575,15 +575,18 @@ class StateDirAsOpenClawReadsIt(_Case):
     def test_a_tilde_in_the_variable_or_the_flag(self):
         self.state = os.path.join(self.home, "oc")
         path = self.rm_rf()
-        with mock.patch.dict(os.environ, {"OPENCLAW_STATE_DIR": "~/oc"}):
+        # expanduser("~/oc") keeps the "/" on Windows; join after "~".
+        given = os.path.join("~", "oc")
+        with mock.patch.dict(os.environ, {"OPENCLAW_STATE_DIR": given}):
             self.assertEqual(watch.openclaw_state_dir(), self.state)
             self.assertEqual(watch.openclaw_databases(), [path])
             self.assertEqual(self.watched(), ["fs.destructive"])
             self.assertEqual(self.found(), 1)
         os.environ.pop("OPENCLAW_STATE_DIR")
-        self.assertEqual(watch.openclaw_databases("~/oc"), [path])
-        self.assertEqual(self.watched("--state-dir=~/oc"), ["fs.destructive"])
-        self.assertEqual(self.found("--state-dir=~/oc"), 1)
+        self.assertEqual(watch.openclaw_databases(given), [path])
+        self.assertEqual(self.watched("--state-dir=" + given),
+                         ["fs.destructive"])
+        self.assertEqual(self.found("--state-dir=" + given), 1)
 
     def test_an_empty_variable_reads_the_default(self):
         self.rm_rf()
