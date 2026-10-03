@@ -599,6 +599,65 @@ class SideFiles(CopilotCase):
         for path in (outside, wrong_ext, in_prose, missing):
             self.assertNotIn(path, spy.paths)
 
+    def test_a_path_outside_the_temp_or_session_folder_is_never_looked_up(self):
+        # A result's text is what a command or a fetched page printed, and
+        # on Windows looking up a network share it names (\\host\share)
+        # sends the user's credentials to that host. Copilot saves outputs
+        # in the OS temp folder, or with a session file system in
+        # session-state/temp, so a path anywhere else is not looked up.
+        body = ("API_KEY=" + SECRET).encode()
+        in_temp = self.saved("1790000000020-copilot-tool-output-t.txt", body)
+        in_sessions = os.path.join(self.root, "session-state", "temp",
+                                   "1790000000021-copilot-tool-output-s.txt")
+        os.makedirs(os.path.dirname(in_sessions))
+        with open(in_sessions, "wb") as fh:
+            fh.write(body)
+        outside = os.path.join(self.tmp, "elsewhere",
+                               "1790000000022-copilot-tool-output-o.txt")
+        os.makedirs(os.path.dirname(outside))
+        with open(outside, "wb") as fh:
+            fh.write(body)
+        name = "1774637043987-copilot-tool-output-tk7puw.txt"
+        log = Log().start()
+        for n, path in enumerate([in_temp, in_sessions, outside,
+                                  "//evil.example/share/" + name,
+                                  "\\\\evil.example\\share\\" + name,
+                                  "\\\\?\\UNC\\evil.example\\share\\" + name]):
+            log.call("call_%d" % n, "bash", {"command": "ls"},
+                     large_output(path))
+        self.write(log)
+        looked = []
+
+        def spy(real):
+            def look(path, *args, **kwargs):
+                looked.append(str(path))
+                return real(path, *args, **kwargs)
+            return look
+        with mock.patch.object(tempfile, "tempdir", self.out), \
+                mock.patch("os.stat", spy(os.stat)), \
+                mock.patch("os.lstat", spy(os.lstat)):
+            stores = self.stores()
+        self.assertEqual({s.path for s in stores if s.role == "side"},
+                         {in_temp, in_sessions})
+        self.assertEqual([p for p in looked
+                          if "evil.example" in p or p == outside], [])
+
+    def test_the_sessions_are_still_listed_when_no_temp_folder_is_usable(self):
+        # tempfile raises when it finds no folder it can write to. A saved
+        # output cannot then be checked, but the session is still read.
+        side = self.saved("1790000000030-copilot-tool-output-u.txt",
+                          ("API_KEY=" + SECRET).encode())
+        quiet = self.write(Log().start().call("call_0", "bash",
+                                              {"command": "ls"}, "ok"),
+                           sid="11111111-2222-4333-8444-555555555555")
+        named = self.write(Log().start().call("call_1", "bash",
+                                              {"command": "ls"},
+                                              large_output(side)))
+        error = FileNotFoundError("No usable temporary directory found")
+        with mock.patch.object(tempfile, "gettempdir", side_effect=error):
+            stores = self.stores()
+        self.assertEqual(sorted(s.path for s in stores), sorted([quiet, named]))
+
     def test_the_saved_path_runs_to_the_end_of_its_line(self):
         win = ("C:\\Users\\Jo Doe\\AppData\\Local\\Temp\\"
                "1774637043987-copilot-tool-output-tk7puw.txt")
