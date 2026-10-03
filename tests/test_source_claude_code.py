@@ -29,7 +29,7 @@ sys.path.insert(0, TESTS)
 
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import clean, cli, sources, watch  # noqa: E402
-from ranwhat.sources import _paths  # noqa: E402
+from ranwhat.sources import _paths, claude_code  # noqa: E402
 from ranwhat.sources.base import MaskResult, SecretText, Store  # noqa: E402
 from ranwhat.sources.claude_code import ClaudeCodeSource  # noqa: E402
 
@@ -54,6 +54,17 @@ def tool_use(command, call_id="toolu_01", stamp="2026-10-01T12:00:00.000Z",
 def tool_result(call_id, text):
     return {"type": "user", "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": call_id, "content": text}]}}
+
+
+def _run_cli(*argv):
+    """(exit code, stdout, stderr) of one command, run in this process."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            rc = cli.main(list(argv))
+        except SystemExit as exit:
+            rc = exit.code
+    return rc, out.getvalue(), err.getvalue()
 
 
 class _Case(unittest.TestCase):
@@ -195,6 +206,49 @@ class Discovery(_Case):
         self.assertEqual(self.stores(), [])
         [loc] = self.src.locations()
         self.assertEqual((loc.exists, loc.found), (False, 0))
+
+    def test_a_transcript_gone_since_it_was_listed_is_passed_over(self):
+        # Claude Code removes old ones as it runs
+        path = self.write(SLUG + "/s.jsonl", [tool_use("ls")])
+        gone = os.path.join(self.root, SLUG, "gone.jsonl")
+        with mock.patch.object(claude_code, "transcripts",
+                               return_value=[gone, path]):
+            self.assertEqual(watch.discover(self.root), [path])
+            self.assertEqual(watch.discover(self.root, since_days=30), [path])
+
+    def test_a_link_to_nothing_stops_no_command(self):
+        self.write(SLUG + "/s.jsonl", [tool_use("rm -rf ~/Documents/x")])
+        try:
+            os.symlink(os.path.join(self.home, "gone.jsonl"),
+                       os.path.join(self.root, SLUG, "dead.jsonl"))
+        except (OSError, NotImplementedError):
+            self.skipTest("no symbolic links here")
+        for argv in (["watch", "--json"], ["check"],
+                     ["clean", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                rc, out, err = _run_cli(*(argv + ["--source", "claude-code",
+                                                  "--root", self.root]))
+                self.assertEqual(rc, 0, err)
+        self.assertEqual([h["rule"] for r in json.loads(_run_cli(
+            "watch", "--json", "--root", self.root)[1]) for h in r["hits"]],
+            ["fs.destructive"])
+
+    def test_a_tilde_in_the_root(self):
+        # zsh and Windows pass "--root=~/x" on as typed; --path expands it
+        path = self.write(SLUG + "/s.jsonl", [tool_use("rm -rf ~/Documents/x")])
+        given = os.path.join("~", ".claude", "projects")
+        self.assertEqual(watch.discover(given), [path])
+        rc, out, err = _run_cli("watch", "--json", "--source", "claude-code",
+                                "--root=" + given)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(len(json.loads(out)), 1)
+
+    def test_brackets_in_the_root(self):
+        self.root = os.path.join(self.home, "work [old]", "projects")
+        path = self.write(SLUG + "/s.jsonl", [tool_use("ls")])
+        self.assertEqual(watch.discover(self.root), [path])
+        [loc] = self.src.locations(override=self.root)
+        self.assertEqual(loc.found, 1)
 
     def test_locations_count_what_is_there(self):
         self.write(SLUG + "/a.jsonl", [tool_use("ls")])
