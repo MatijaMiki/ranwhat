@@ -246,12 +246,14 @@ class NoNetworkModule(unittest.TestCase):
     def test_reading_every_adapter_imports_none(self):
         tmp = tempfile.mkdtemp(prefix="port-net-")
         self.addCleanup(shutil.rmtree, tmp, True)
+        # Windows allows no ? in a file name.
         code = ("import sys, sqlite3, os\n"
                 "sys.path.insert(0, sys.argv[1])\n"
                 "import ranwhat.sources as s\n"
                 "from ranwhat.sources import _sqlite\n"
                 "d = sys.argv[2]\n"
-                "path = os.path.join(d, 'a ?#%.db')\n"
+                "path = os.path.join(d, 'a #%.db' if os.name == 'nt' "
+                "else 'a ?#%.db')\n"
                 "sqlite3.connect(path).execute('CREATE TABLE t (x)').connection.close()\n"
                 "with _sqlite.readonly(path) as conn:\n"
                 "    assert _sqlite.tables(conn) == ['t']\n"
