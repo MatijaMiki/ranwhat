@@ -392,6 +392,94 @@ class Paths(unittest.TestCase):
             _Toy().default_paths({}, "/nowhere", "darwin")
 
 
+class Programs(unittest.TestCase):
+    """zstd, tasklist and hostname are run by full path. Windows, and
+    shutil.which there, look for a bare name in the current directory
+    first, and an empty or relative PATH entry names it anywhere: a zstd.bat
+    in a cloned repository ran as the user."""
+
+    PATHEXT = ".COM;.EXE;.BAT;.CMD"
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="srcbase-repo-")
+        self.bin = tempfile.mkdtemp(prefix="srcbase-bin-")
+        os.makedirs(os.path.join(self.repo, "tools"))
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.repo)
+
+    def plant(self, folder, name):
+        """A program that leaves RAN in the current directory."""
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("@echo ran> RAN\r\n" if WINDOWS
+                     else "#!/bin/sh\ntouch RAN\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def env(self, *path):
+        return mock.patch.dict(os.environ, {"PATH": os.pathsep.join(path),
+                                            "PATHEXT": self.PATHEXT})
+
+    def test_the_current_directory_and_relative_entries_are_not_searched(self):
+        name = "zstd.BAT" if WINDOWS else "zstd"
+        self.plant(self.repo, name)
+        self.plant(os.path.join(self.repo, "tools"), name)
+        with self.env("", ".", "tools", self.bin):
+            self.assertIsNone(_paths.program("zstd"))
+            found = self.plant(self.bin, name)
+            self.assertEqual(_paths.program("zstd"), found)
+
+    def test_on_windows_every_pathext_suffix_is_tried(self):
+        self.plant(self.repo, "zstd.BAT")
+        with self.env("", ".", self.bin), mock.patch.object(os, "name", "nt"):
+            self.assertIsNone(_paths.program("zstd"))
+            found = self.plant(self.bin, "zstd.CMD")
+            self.assertEqual(_paths.program("zstd"), found)
+
+    def test_a_zstd_in_the_current_directory_never_runs(self):
+        self.plant(self.repo, "zstd.BAT" if WINDOWS else "zstd")
+        with self.env("", "."), mock.patch.object(_zstd, "_stdlib", None):
+            self.assertFalse(_zstd.available())
+            self.assertIsNone(_zstd.decompress(b"(compressed session)"))
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "RAN")))
+
+    def test_system32_is_where_windows_keeps_its_own_tools(self):
+        with mock.patch.dict(os.environ, {"SystemRoot": "D:\\Win"}):
+            self.assertEqual(_paths.system32("tasklist"),
+                             "D:\\Win\\System32\\tasklist.exe")
+        env = {k: v for k, v in os.environ.items()
+               if k.upper() != "SYSTEMROOT"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(_paths.system32("hostname"),
+                             "C:\\Windows\\System32\\hostname.exe")
+
+    def test_every_adapter_runs_tasklist_and_hostname_from_system32(self):
+        from ranwhat.sources import copilot_cli, gemini, muse_code, qwen
+        calls = [("tasklist", copilot_cli._pid_alive),
+                 ("tasklist", gemini._pid_alive),
+                 ("tasklist", muse_code._pid_alive_windows),
+                 ("tasklist", qwen._pid_alive_windows),
+                 ("hostname", lambda pid: qwen._hostname())]
+        done = subprocess.CompletedProcess([], 0, b'"x.exe","4242"\r\n', b"")
+        uname = getattr(os, "uname", None)
+        with mock.patch.object(subprocess, "run", return_value=done) as run, \
+                mock.patch.object(os, "name", "nt"), \
+                mock.patch.object(gemini, "_WINDOWS", True), \
+                mock.patch.dict(os.environ, {"SystemRoot": "C:\\Windows"}):
+            if uname:
+                del os.uname
+            try:
+                for name, call in calls:
+                    with self.subTest(call=call):
+                        run.reset_mock()
+                        call(4242)
+                        self.assertEqual(run.call_args[1].get("executable"),
+                                         "C:\\Windows\\System32\\%s.exe" % name)
+            finally:
+                if uname:
+                    os.uname = uname
+
+
 # --------------------------------------------------------------------------
 # _lines.iter_json_lines
 # --------------------------------------------------------------------------
@@ -761,6 +849,90 @@ class Sqlite(unittest.TestCase):
         self.assertEqual([r["id"] for r in rows], ["p0", "p1", "p2", "p3"])
         self.assertEqual(self._listing(folder), before)
 
+    def test_an_empty_database_keeps_the_wal_beside_it(self):
+        """SQLite deletes a -wal it finds beside an empty database, even on
+        a read-only connection. Nothing can be read from either, so the
+        empty file is opened immutable=1, which never looks for a -wal."""
+        for keep in (("-shm",), ()):
+            with self.subTest(keep=keep):
+                folder = tempfile.mkdtemp(dir=self.root)
+                path = os.path.join(folder, "agent.sqlite")
+                open(path, "wb").close()
+                with open(path + "-wal", "wb") as fh:
+                    fh.write(b"\x37\x7f\x06\x82" + b"\x00" * 60)
+                for suffix in keep:
+                    with open(path + suffix, "wb") as fh:
+                        fh.write(b"\x00" * 32768)
+                before = self._listing(folder)
+                with _sqlite.readonly(path) as conn:
+                    self.assertEqual(_sqlite.tables(conn), [])
+                self.assertEqual(self._listing(folder), before)
+
+    def test_a_one_byte_database_keeps_the_wal_beside_it(self):
+        """SQLite's POSIX VFS counts a file of one byte as empty (macOS
+        writes an "S" into an empty database on a FAT drive), and deleted
+        the -wal beside it all the same."""
+        folder = tempfile.mkdtemp(dir=self.root)
+        path = os.path.join(folder, "agent.sqlite")
+        with open(path, "wb") as fh:
+            fh.write(b"S")
+        with open(path + "-wal", "wb") as fh:
+            fh.write(b"\x37\x7f\x06\x82" + b"\x00" * 60)
+        before = self._listing(folder)
+        with _sqlite.readonly(path):
+            pass
+        self.assertEqual(self._listing(folder), before)
+
+    def test_a_wal_beside_a_database_not_in_wal_mode_makes_no_shm(self):
+        """SQLite opens any -wal it finds, whatever the header says, and
+        made a -shm beside a database in rollback mode. It is read from a
+        copy, as a WAL database with no -shm is."""
+        folder = tempfile.mkdtemp(dir=self.root)
+        path = os.path.join(folder, "agent.db")
+        self._db(path).close()
+        with open(path + "-wal", "wb") as fh:
+            fh.write(b"\x37\x7f\x06\x82" + b"\x00" * 60)
+        before = self._listing(folder)
+        with _sqlite.readonly(path) as conn:
+            rows = list(_sqlite.iter_rows(conn, "part", ["id"]))
+        self.assertEqual([r["id"] for r in rows], ["p0", "p1", "p2"])
+        self.assertEqual(self._listing(folder), before)
+
+    def test_a_name_that_cannot_go_in_a_uri_is_read_from_a_copy(self):
+        """A name that is not UTF-8 (a Latin-1 folder on Linux, a lone
+        surrogate on Windows) cannot be percent-encoded. The URI was built
+        outside the guard that falls back to the copy, so the error ended
+        the read."""
+        path = os.path.join(self.root, "agent-\udcff.sqlite")
+        self.assertEqual(_sqlite.open_readonly(path), (None, None))
+        plain = os.path.join(self.root, "plain.sqlite")
+        self._db(plain).close()
+        try:
+            os.rename(plain, path)
+        except (OSError, UnicodeError):
+            self.skipTest("this file system refuses the name")
+        with _sqlite.readonly(path) as conn:
+            self.assertEqual(len(list(_sqlite.iter_rows(conn, "part", ["id"]))), 3)
+
+    def test_ctrl_c_while_copying_leaves_no_copy(self):
+        """Only an error removed the temp copy: Ctrl-C while an agent's
+        database was being copied left all or part of it in the temp
+        folder."""
+        path = os.path.join(self.root, "locked.db")
+        self._db(path).close()
+        real = shutil.copy2
+
+        def interrupted(src, dst):
+            real(src, dst)
+            raise KeyboardInterrupt
+
+        with mock.patch.object(_sqlite.sqlite3, "connect", side_effect=
+                               sqlite3.OperationalError("database is locked")), \
+                mock.patch.object(_sqlite.shutil, "copy2", side_effect=interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                _sqlite.open_readonly(path)
+        self.assertEqual(_ranwhat_temp_dirs() - self.before, set())
+
     def test_text_that_is_not_utf8_is_read_as_it_is(self):
         """A TEXT cell whose bytes are not UTF-8 (a JS writer's string cut
         between the halves of a surrogate pair) made Python's sqlite3 raise
@@ -863,7 +1035,7 @@ class Zstd(unittest.TestCase):
         self.assertEqual(_zstd.available(), _zstd._stdlib is not None
                          or _zstd._command() is not None)
         with mock.patch.object(_zstd, "_stdlib", None), \
-                mock.patch.object(_zstd.shutil, "which", return_value=None):
+                mock.patch.object(_paths, "program", return_value=None):
             self.assertFalse(_zstd.available())
             self.assertIsNone(_zstd.decompress(b"anything"))
 

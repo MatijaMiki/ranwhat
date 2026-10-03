@@ -259,6 +259,7 @@ def _pid_alive(pid):
         try:
             out = subprocess.run(
                 ["tasklist", "/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"],
+                executable=_paths.system32("tasklist"),
                 capture_output=True, timeout=10)
         except (OSError, subprocess.SubprocessError):
             return True

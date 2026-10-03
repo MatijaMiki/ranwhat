@@ -86,10 +86,13 @@ def _connect(uri):
 
 
 def _wal_state(path):
-    """For a database in WAL mode (byte 18 or 19 of its header is 2):
-    "no wal" when its -wal is not there, "no shm" when its -wal is but its
-    -shm is not. None when it has both, is not in WAL mode, or cannot be
-    read here.
+    """"empty" for a file of no bytes, or of one, which SQLite's POSIX VFS
+    counts as none: SQLite deletes a -wal it finds beside one, even on a
+    read-only connection. "no shm" when a -wal is there but its -shm is
+    not, whatever the header says: SQLite opens any -wal it finds, and
+    makes the -shm. For a database in WAL mode (byte 18 or 19 of its header
+    is 2), "no wal" when its -wal is not there. None otherwise, or when it
+    cannot be read here.
 
     An agent's SQLite removes both on a clean close. Opened mode=ro then,
     stock SQLite makes them in the agent's folder (a file the agent may not
@@ -100,22 +103,23 @@ def _wal_state(path):
             head = fh.read(20)
     except OSError:
         return None
+    if len(head) < 2:
+        return "empty"
+    wal = os.path.exists(path + "-wal")
+    if wal and not os.path.exists(path + "-shm"):
+        return "no shm"
     if len(head) < 20 or not head.startswith(SQLITE_MAGIC):
         return None
     if 2 not in (head[18], head[19]):
         return None
-    if not os.path.exists(path + "-wal"):
-        return "no wal"
-    if not os.path.exists(path + "-shm"):
-        return "no shm"
-    return None
+    return None if wal else "no wal"
 
 
-def _probe(uri):
-    """A connection to uri that has read the schema, or None."""
+def _probe(path, immutable):
+    """A read-only connection to path that has read the schema, or None."""
     conn = None
     try:
-        conn = _connect(uri)
+        conn = _connect(_uri(path, immutable=immutable))
         conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
         return conn
     except (sqlite3.Error, ValueError):
@@ -132,17 +136,19 @@ def open_readonly(path):
     Moved from watch._open_readonly. Nothing is ever made beside the
     database: one in WAL mode with no -wal holds all it has in itself, and
     is opened immutable=1 as well, so SQLite neither looks for nor makes a
-    -wal or a -shm. When the read-only open fails (the agent holds a lock,
-    or a WAL database whose -shm cannot be made), or a -wal has no -shm
-    beside it, the database, -wal and -shm are copied to a fresh ranwhat-*
-    temp directory and the copy is opened instead, mode=rw, as ranwhat's
-    own file: SQLite makes the copy's -shm there. tmpdir is that directory,
-    and the caller removes it (close() does). A connection to a file that
-    is not a database is still returned, as before: SQLite only notices on
-    the first query, and the caller's warning names the reason."""
+    -wal or a -shm. So is an empty file, which holds nothing to read and
+    beside which SQLite would delete a -wal. When the read-only open fails
+    (the agent holds a lock, or a WAL database whose -shm cannot be made),
+    or a -wal has no -shm beside it, the database, -wal and -shm are copied
+    to a fresh ranwhat-* temp directory and the copy is opened instead,
+    mode=rw, as ranwhat's own file: SQLite makes the copy's -shm there.
+    tmpdir is that directory, and the caller removes it (close() does). A
+    connection to a file that is not a database is still returned, as
+    before: SQLite only notices on the first query, and the caller's
+    warning names the reason."""
     state = _wal_state(path)
     if state != "no shm":
-        conn = _probe(_uri(path, immutable=state == "no wal"))
+        conn = _probe(path, state in ("no wal", "empty"))
         if conn is not None:
             return conn, None
     tmp = tempfile.mkdtemp(prefix="ranwhat-")
@@ -158,6 +164,10 @@ def open_readonly(path):
         # did not remove it. Nothing is left behind now.
         shutil.rmtree(tmp, ignore_errors=True)
         return None, None
+    except BaseException:
+        # Ctrl-C mid-copy: all or part of the agent's database is in tmp.
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
 
 
 def close(conn, tmpdir):
