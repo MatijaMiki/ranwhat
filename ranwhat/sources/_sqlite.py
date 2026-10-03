@@ -136,14 +136,15 @@ def open_readonly(path):
     database: one in WAL mode with no -wal holds all it has in itself, and
     is opened immutable=1 as well, so SQLite neither looks for nor makes a
     -wal or a -shm. So is an empty file, which holds nothing to read and
-    beside which SQLite would delete a -wal. When the read-only open fails (the agent holds a lock,
-    or a WAL database whose -shm cannot be made), or a -wal has no -shm
-    beside it, the database, -wal and -shm are copied to a fresh ranwhat-*
-    temp directory and the copy is opened instead, mode=rw, as ranwhat's
-    own file: SQLite makes the copy's -shm there. tmpdir is that directory,
-    and the caller removes it (close() does). A connection to a file that
-    is not a database is still returned, as before: SQLite only notices on
-    the first query, and the caller's warning names the reason."""
+    beside which SQLite would delete a -wal. When the read-only open fails
+    (the agent holds a lock, or a WAL database whose -shm cannot be made),
+    or a -wal has no -shm beside it, the database, -wal and -shm are copied
+    to a fresh ranwhat-* temp directory and the copy is opened instead,
+    mode=rw, as ranwhat's own file: SQLite makes the copy's -shm there.
+    tmpdir is that directory, and the caller removes it (close() does). A
+    connection to a file that is not a database is still returned, as
+    before: SQLite only notices on the first query, and the caller's
+    warning names the reason."""
     state = _wal_state(path)
     if state != "no shm":
         conn = _probe(path, state in ("no wal", "empty"))
@@ -162,6 +163,10 @@ def open_readonly(path):
         # did not remove it. Nothing is left behind now.
         shutil.rmtree(tmp, ignore_errors=True)
         return None, None
+    except BaseException:
+        # Ctrl-C mid-copy: all or part of the agent's database is in tmp.
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
 
 
 def close(conn, tmpdir):

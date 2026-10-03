@@ -884,6 +884,25 @@ class Sqlite(unittest.TestCase):
         with _sqlite.readonly(path) as conn:
             self.assertEqual(len(list(_sqlite.iter_rows(conn, "part", ["id"]))), 3)
 
+    def test_ctrl_c_while_copying_leaves_no_copy(self):
+        """Only an error removed the temp copy: Ctrl-C while an agent's
+        database was being copied left all or part of it in the temp
+        folder."""
+        path = os.path.join(self.root, "locked.db")
+        self._db(path).close()
+        real = shutil.copy2
+
+        def interrupted(src, dst):
+            real(src, dst)
+            raise KeyboardInterrupt
+
+        with mock.patch.object(_sqlite.sqlite3, "connect", side_effect=
+                               sqlite3.OperationalError("database is locked")), \
+                mock.patch.object(_sqlite.shutil, "copy2", side_effect=interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                _sqlite.open_readonly(path)
+        self.assertEqual(_ranwhat_temp_dirs() - self.before, set())
+
     def test_text_that_is_not_utf8_is_read_as_it_is(self):
         """A TEXT cell whose bytes are not UTF-8 (a JS writer's string cut
         between the halves of a surrogate pair) made Python's sqlite3 raise
