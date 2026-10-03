@@ -1,7 +1,10 @@
 # ranwhat
 
 **A flight recorder for AI agents, and a scanner for the authority they hold.**
-Reads locally. Transmits nothing. No dependencies.
+AI coding agent security for Claude Code, run on your own machine.
+No account, no telemetry, no dependencies.
+
+Website and docs: https://ranwhat.com
 
 Your coding agent has your shell, your keys and your repo. `ranwhat` reads
 what it actually ran and surfaces the handful of irreversible actions worth
@@ -11,46 +14,81 @@ knowing about.
 $ ranwhat watch --days 90
 
   ranwhat watch  · local agent flight recorder
-  --------------------------------------------------------------
+  ----------------------------------------------------------------------------
   Read Claude Code: 4 transcripts, last 90 days
 
-  1 critical  3 high
+  2 critical  2 high
 
-  * Credential material accessed          18:13  Bash
+  * Credential material accessed   2026-09-30 18:13:00  Bash
       cat ~/.ssh/id_rsa
-      -> Whatever it read is now in a model context you do not control.
+      -> The agent read a file whose only purpose is to hold secrets. Whatever
+         it read is now in a model context you do not control.
 
-  * Bulk or recursive deletion            14:42  Bash
-      mv '@/components/'*.tsx src/components/ ; rm -rf '@'
-      -> Recursive deletion. Recoverable only if something else was
-         backing it up.
+  * Bulk or recursive deletion   2026-09-28 14:42:00  Bash
+      …rm -rf '@'
+      -> Recursive deletion. Recoverable only if something else was backing it
+         up.
 
-  --------------------------------------------------------------
+  * Package or release published   2026-09-21 11:05:00  Bash
+      npm publish
+      -> Something was pushed to a registry other people may install from.
+         Supply-chain reach, and usually irreversible.
+
+  * Destructive git operation   2026-09-15 17:30:00  Bash
+      git push --force origin main
+      -> History rewriting or branch deletion. This is the class of action
+         that destroys the record of what else happened.
+
+  ----------------------------------------------------------------------------
   Read locally. Nothing was transmitted.
 ```
 
+Claude Code deletes the transcript of a session you have not used for longer
+than
+[`cleanupPeriodDays`](https://code.claude.com/docs/en/settings-reference#cleanupperioddays),
+30 days by default. So `--days 90` finds more if you raised it, if a session
+you resumed within that period has older actions in it, or for sessions
+started or last continued in Claude Desktop or Cowork, which Claude Code
+v2.1.248 and later
+[keep at any age by default](https://code.claude.com/docs/en/claude-directory#cleaned-up-automatically).
+
 ## Install
 
+Run it once, without installing anything:
+
 ```bash
-uvx ranwhat watch --days 30
+uvx ranwhat check
 ```
 
 Or put it on your path:
 
 ```bash
 pipx install ranwhat
+pip install ranwhat
 ```
+
+Then `ranwhat demo` shows an authority scan on a bundled example.
 
 Python 3.9+. No dependencies, and nothing is built on your machine.
 
-## Two tools
+## Commands
 
-### `ranwhat watch`: what your agents did
+### `ranwhat check`: everything worth knowing, in one read-only pass
 
-Reads transcripts your agents already wrote to disk. No wrapper, no proxy,
-nothing in your critical path. Every agent below is read by default, each
-from where it keeps its history (the variable in brackets moves it, as it
-moves the agent itself); one that is not on your machine is skipped.
+Runs watch and clean together and changes nothing.
+
+On a terminal, check, watch and clean keep one status line on stderr while
+they read, counting transcripts through each pass: `indexing secrets`
+(`(first run)` the first time), `checking actions`, `looking for secrets`.
+Nothing is written there when stderr is not a terminal, or with `--json`.
+
+### `ranwhat watch`: audit what Claude Code and your other agents ran
+
+Reads what Claude Code and your other coding agents already wrote to disk.
+No wrapper, no proxy, nothing in your critical path. Every agent below is
+read by default, each from where it keeps its history (the variable in
+brackets moves it, as it moves the agent itself); one that is not on your
+machine is skipped.
 
 | Source | Location | Format |
 |---|---|---|
@@ -65,17 +103,18 @@ moves the agent itself); one that is not on your machine is skipped.
 | Kimi CLI | `~/.kimi/sessions/<folder>/<session>/wire.jsonl` and `context*.jsonl` (`$KIMI_SHARE_DIR`) | JSONL |
 | Pi | `~/.pi/agent/sessions/--<cwd>--/*.jsonl` (`$PI_CODING_AGENT_DIR`) | JSONL |
 | Muse Code | `~/.local/share/muse/sessions/YYYY/MM/DD/<session>/session.jsonl` (`$XDG_DATA_HOME/muse`) | JSONL |
-| OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/*.sqlite` | SQLite, read only |
+| OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite` | SQLite, read only |
 
 Meta Muse runs in Meta's cloud and keeps nothing on your machine, so there
 is nothing to read; Muse Code, Meta's coding CLI, is supported.
 Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
 machine; Grok Build, xAI's coding CLI, is supported.
 
-Nine rules: credential access, secret literals in commands, package
-publishing, cloud destruction, financial API calls, log tampering, destructive
-git, recursive deletion, exfiltration-shaped pipes. Each agent's tool calls
-are judged by the same rules; every action says which agent ran it.
+Nine rules: credential access, secret-shaped strings in tool calls, package
+publishing, cloud resource changes, financial API calls, log tampering,
+destructive git, recursive deletion, and local files uploaded with curl.
+Each agent's tool calls are judged by the same rules; every action says
+which agent ran it.
 
 ```bash
 ranwhat watch --days 30
@@ -88,41 +127,11 @@ ranwhat sources                             # every agent, where it looked, what
 `--root` and `--state-dir` still work, as the names of
 `--path claude-code=` and `--path openclaw=`.
 
-### `ranwhat scan`: what they're allowed to do next
-
-Reads the credentials an agent holds, read-only, and scores the three things
-that determine exposure.
-
-| Axis | Question |
-|---|---|
-| Authority | What is it allowed to do? |
-| Observability | Can you reconstruct a named past action? |
-| Reversibility | Can a wrong action be undone? |
-
-Observability vetoes the overall verdict. An agent that cannot reconstruct its
-own tool calls is indistinguishable from the worst case.
-
-```bash
-ranwhat demo                                # see it on a worked example
-ranwhat scan profile.json --html report.html
-ranwhat live --github "$GH_TOKEN"           # read-only introspection
-ranwhat scan profile.json --pull-usage --stripe "$STRIPE_KEY"
-```
-
-Capability catalogues for Google, GitHub, GitLab, Microsoft 365, Slack, Discord, Stripe, Shopify, HubSpot, Atlassian, Sentry and AWS.
-Unrecognised
-scopes are classified by action verb and flagged unclassified, never assumed
-safe.
-
-A fine-grained GitHub token or a restricted Stripe key comes back from `live`
-as a finding, not a score: neither provider lists its permissions through its
-API. Copy them into a profile as that credential's `scopes` and `scan` it.
-
-### `ranwhat clean`: secrets sitting in your transcripts
+### `ranwhat clean`: find secrets in Claude Code and other agents' transcripts
 
 When an agent runs `cat .env`, the **output** is written into the transcript:
 your database password, your JWT secret, your provider tokens, in plaintext,
-in a file that is never rotated and gets read again by agents later.
+in a file Claude Code keeps for 30 days by default.
 
 ```bash
 ranwhat clean               # report, then open a review session
@@ -148,12 +157,12 @@ ranwhat> keep 3         leave it alone
 ranwhat> rotate         what to rotate, grouped by provider
 ```
 
-Each finding says where it came from, the file it was read out of and the
-project that file belongs to, because a 64-character string is useless
-without knowing which `.env` it escaped:
+Each finding says which project it was found in and, when the transcript
+names it, the file it was read out of, because a 64-character string is
+useless without knowing which `.env` it escaped:
 
 ```
-* AWS access key ID   AKI…WB  20 chars  seen 8x
+* Stripe live secret key   sk_…dc  32 chars  seen 8x
       read from api/.env
       in         /Users/you/Desktop/app
 ```
@@ -169,6 +178,13 @@ ordinary config are left alone, and so are published documentation examples
 (AWS's `AKIAIOSFODNN7EXAMPLE`) and obvious test fixtures such as
 `AKIA1234567890ABCDEF`. Backups go to `~/.ranwhat/backups`, and the
 rewritten file is parsed back before it replaces the original.
+
+A password typed into a command, with no key beside it, is found where the
+command takes it: `mysql -pPASSWORD` (and mysqldump, mysqladmin, mariadb),
+`sshpass -p`, `redis-cli -a`, `docker login -p`, `curl -u user:password`,
+`--password`, and the same places in sqlcmd, mongosh, ldapsearch, htpasswd,
+keytool, `ConvertTo-SecureString -AsPlainText` and smbclient. A variable
+there, such as `-p$MYSQL_PWD`, is left alone.
 
 ### The secrets index
 
@@ -200,6 +216,48 @@ what is around it, and where it is glued into a command `check` or `watch`
 shows, if it is no longer than 64 characters. Glued into anything else, it
 is not. So keep the index unless you are starting over.
 
+### `ranwhat scan`: score what an agent's credentials can do
+
+Reads the credentials an agent holds, read-only, and scores the three things
+that determine exposure.
+
+| Axis | Question |
+|---|---|
+| Authority | What is it allowed to do? |
+| Observability | Can you reconstruct a named past action? |
+| Reversibility | Can a wrong action be undone? |
+
+Observability vetoes the overall verdict. An agent that cannot reconstruct its
+own tool calls is indistinguishable from the worst case.
+
+```bash
+ranwhat demo                                # see it on a worked example
+ranwhat scan profile.json --html report.html
+
+read -rs RANWHAT_GITHUB_TOKEN                # paste it: not echoed, not saved to history
+export RANWHAT_GITHUB_TOKEN
+ranwhat live                                # read-only introspection
+
+read -rs RANWHAT_STRIPE_TOKEN
+export RANWHAT_STRIPE_TOKEN
+ranwhat scan profile.json --pull-usage
+```
+
+Capability catalogues for Google, GitHub, GitLab, Microsoft 365, Slack, Discord, Stripe, Shopify, HubSpot, Atlassian, Sentry and AWS.
+Unrecognised
+scopes are classified by action verb and flagged unclassified, never assumed
+safe.
+
+A fine-grained GitHub token or a restricted Stripe key comes back from `live`
+as a finding, not a score: neither provider lists its permissions through its
+API. Copy them into a profile as that credential's `scopes` and `scan` it.
+
+### `ranwhat update`: refresh the capability catalogue
+
+`ranwhat update` refreshes the capability catalogue from ranwhat's feed. It
+needs a Plus subscription, which is not available yet, and sends only the
+subscription token.
+
 ## Precision is the feature
 
 A watcher that cries wolf gets muted in a day, and a muted watcher records
@@ -220,10 +278,14 @@ recurses into it. And severity follows the **target**, not the verb:
 `rm -rf /tmp/x` is silent, `rm -rf ~/Documents` is high, `rm -rf /` is
 critical.
 
-Every row above came from running the tool against a real machine and finding
-it wrong. On that machine the first build reported 15 findings; 3 were false
-positives and 11 were true deletions of build directories that nobody would
-want to read. It reports 4 now, and all four are real.
+The grep, Python, heredoc and build rows came from running the tool on real
+history and finding it wrong; the others came from probing a released build.
+The first watch build flagged 6 findings, and 3 were false positives: a grep
+for `rm -rf`, the same string inside a Python one-liner, and a heredoc being
+written to a file. A later release reported 15 findings on one machine's
+90-day history, and 11 were true deletions of build and temp directories that
+nobody would want to read. Once deletions were ranked by target, the same
+history gave 4, and all four were real.
 
 ## Handling credentials
 
@@ -232,26 +294,45 @@ readable by every user on the machine through the process table, and is written
 to your shell history.
 
 ```bash
-export RANWHAT_STRIPE_TOKEN="rk_live_..."
+read -rs RANWHAT_STRIPE_TOKEN       # paste it: not echoed, not saved to history
+export RANWHAT_STRIPE_TOKEN
 ranwhat scan profile.json --pull-usage
 ```
 
-`export` it first, because `VAR=x ranwhat ...` on one line still puts the value in
-that shell's own command line. `--stripe env:MY_VAR` and `--stripe -` (read one
+Read it in and `export` it first, because `VAR=x ranwhat ...` on one line still
+puts the value in that shell's own command line, and a typed `export VAR=x`
+puts it in your shell history. `--stripe env:MY_VAR` and `--stripe -` (read one
 line from stdin) also work. Passing a token as a flag value still works and
 prints a warning saying why it shouldn't.
 
 Reports are written mode `600` and never through a symlink: a report maps an
 agent's entire authority surface, which is useful to somebody other than you.
 
-## Nothing leaves the machine
+## What goes online
 
-Not a policy but an architecture:
+No account needed. live and --pull-usage ask only the provider that issued
+each token, and update only fetches the catalogue. Everything else reads
+locally and sends nothing.
 
-- Credentials are held in memory for one call and never written down
+- Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own subscription token, and only with `update --save-token` (mode 0600).
 - Live introspection talks only to the credential's own issuer
 - Scans never exercise a permission and never need a write-scoped token
 - No runtime dependencies, so there is nothing to audit before you point this at your keys
+
+## What it does not read yet
+
+- The large tool outputs Claude Code stores in `<session>/tool-results/`
+- `~/.claude/history.jsonl`
+- Events OpenClaw stores compressed (`event_zstd`), and the cold
+  transcript archives in `agents/<agentId>/sessions/cold/` under its
+  state directory, which
+  [its database layout](https://docs.openclaw.ai/reference/database-schemas/layout)
+  says also hold history
+
+When `CLAUDE_CONFIG_DIR` is set, transcripts are read from
+`$CLAUDE_CONFIG_DIR/projects`, and `--root PATH` reads any other directory. A
+run that reads nothing says that nothing was checked, rather than that nothing
+was found.
 
 ## Say what you don't know
 
@@ -265,8 +346,8 @@ makes the report contradict itself:
 | Unverified | No evidence at all, and scopes are not assumed safe |
 
 Usage pulls: AWS IAM service-last-accessed, Stripe events, Google Admin SDK,
-GitHub org audit log. Slack has no usable API below Enterprise Grid and says
-so rather than returning an empty set.
+GitHub org audit log. Slack has no usage pull, so Slack usage is only ever
+self-attested or unverified.
 
 ## Status
 
@@ -277,8 +358,12 @@ evidence retention are not built yet.
 python3 -m unittest discover -s tests -v
 ```
 
-102 tests, written as invariants rather than expected output. Most of them
+The suite is written as invariants rather than expected output. Most tests
 exist because something on this page was once wrong.
+
+Links: [Website](https://ranwhat.com) ·
+[Changelog](https://github.com/MatijaMiki/ranwhat/commits/main) ·
+[Issues](https://github.com/MatijaMiki/ranwhat/issues)
 
 ## Licence
 

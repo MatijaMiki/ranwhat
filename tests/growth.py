@@ -11,11 +11,16 @@ test fails past LIMIT, between the two. A ceiling in seconds remains, far
 above any of these cases, for one so slow that its growth no longer
 matters.
 
-Each size is timed up to TRIES times and its best time kept, with every
-cache in ranwhat emptied first and the garbage collector off, as timeit
-does. The tries stop as soon as the best times are in proportion, so a
-linear case usually costs one run at each size, and only a case that a
-busy machine slowed is measured again. A quadratic one never gets there.
+Each size is timed up to TRIES times, with every cache in ranwhat emptied
+first and the garbage collector off, as timeit does. A try times the sizes
+back to back, so a slow spell on a shared runner tends to slow both of
+them: the growth read is the smaller of the growth between the best times
+and the growth within the most even try. On a macOS runner the best times
+alone once read 8.1 for a case that grows 4.0 here, because the small size
+had one quiet moment and the large size none. The tries stop as soon as the
+growth is in proportion, so a linear case usually costs one run at each
+size, and only a case that a busy machine slowed is measured again. A
+quadratic one never gets there: it grows about sixteen times in every try.
 
 Where a test compares two costs at one size instead (this one costs no
 more than that one), settle() gives it the same best-of-TRIES, so that a
@@ -37,7 +42,7 @@ import time
 
 SCALE = 4          # the larger size over the smaller
 LIMIT = 8          # a linear cost grows SCALE times, a quadratic SCALE ** 2
-TRIES = 3
+TRIES = 5
 CEILING = 10.0     # seconds at the larger size, whatever the growth
 # A time under this is mostly noise, and is read as this much: a case too
 # fast to measure cannot fail on its growth.
@@ -83,26 +88,43 @@ def growth(large, small):
     return large / max(small, FLOOR)
 
 
-def in_proportion(best, pairs):
-    return all(growth(best[a], best[b]) < LIMIT for a, b in pairs)
+def least_growth(best, runs, large, small):
+    """The growth from small to large: between the best times, or within the
+    try whose two times are most in proportion, whichever is less."""
+    least = growth(best[large], best[small])
+    for run in runs:
+        if large in run and small in run:
+            least = min(least, growth(run[large], run[small]))
+    return least
+
+
+def in_proportion(best, pairs, runs=()):
+    return all(least_growth(best, runs, a, b) < LIMIT for a, b in pairs)
 
 
 class Measured:
     """The best seconds at each scale, the pairs of scales to compare, and
     what the call returned at the largest scale."""
 
-    def __init__(self, best, pairs, result=None):
+    def __init__(self, best, pairs, result=None, runs=()):
         self.best = best
         self.pairs = [tuple(p) for p in pairs]
         self.result = result
+        # one {scale: seconds} per try, its scales timed back to back
+        self.runs = [dict(r) for r in runs]
+
+    def growth(self, large, small):
+        return least_growth(self.best, self.runs, large, small)
 
     def as_json(self):
         return {"best": [[s, t] for s, t in self.best.items()],
-                "pairs": [list(p) for p in self.pairs]}
+                "pairs": [list(p) for p in self.pairs],
+                "runs": [[[s, t] for s, t in r.items()] for r in self.runs]}
 
     @classmethod
     def from_json(cls, doc):
-        return cls({s: t for s, t in doc["best"]}, doc["pairs"])
+        return cls({s: t for s, t in doc["best"]}, doc["pairs"],
+                   runs=[{s: t for s, t in r} for r in doc.get("runs", [])])
 
 
 def measure(build, call, pairs=QUARTER, rebuild=False, inputs=None):
@@ -125,18 +147,22 @@ def measure(build, call, pairs=QUARTER, rebuild=False, inputs=None):
     # here, on an input too small to time, and timed for no one.
     call(build(sized(scales[0] / SCALE)))
     best = dict.fromkeys(scales, float("inf"))
+    runs = []
     result, spent = None, 0.0
     for _ in range(TRIES):
+        run = {}
         for scale in scales:
             took, out = seconds(call, arg(scale))
+            run[scale] = took
             best[scale] = min(best[scale], took)
             spent += took
             if scale == scales[-1]:
                 result = out
-        if (in_proportion(best, pairs) or best[scales[-1]] >= CEILING
+        runs.append(run)
+        if (in_proportion(best, pairs, runs) or best[scales[-1]] >= CEILING
                 or spent >= CEILING):
             break
-    return Measured(best, pairs, result)
+    return Measured(best, pairs, result, runs)
 
 
 def assert_linear(test, measured, what=""):
@@ -144,7 +170,7 @@ def assert_linear(test, measured, what=""):
     than CEILING at its larger size."""
     best = measured.best
     for large, small in measured.pairs:
-        times = growth(best[large], best[small])
+        times = measured.growth(large, small)
         said = ("%s%.3fs, against %.3fs at %g of the size: %.1f times, where "
                 "a linear cost grows %d times and a quadratic one %d"
                 % (what + ": " if what else "", best[large], best[small],
@@ -199,7 +225,10 @@ def measure_apart(build, call, env=None, hang=HANG):
     that defines call(input), and build(n) makes each input here, once per
     size, in JSON (the root of a file tree, usually). What call returns
     must be JSON too. Returns the Measured, its result what call returned
-    at full size, and the input at full size."""
+    at full size, and the input at full size. The Measured carries each
+    try's runs back from the child too, so its growth is read as
+    measure()'s is: a slow spell over one size is not a quadratic here
+    either."""
     scales = sorted({s for pair in QUARTER for s in pair}, reverse=True)
     inputs = [(scale, build(sized(scale))) for scale in scales]
     first = build(sized(scales[-1] / SCALE))

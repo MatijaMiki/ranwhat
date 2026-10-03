@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Install ranwhat</title>
-<meta name="description" content="uvx ranwhat, and nothing else. Python 3.9 or newer, no dependencies, no account, and nothing built on your machine.">
+<title>Install ranwhat: run it with uvx, pipx or pip on Python 3.9+</title>
+<meta name="description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account. Start with ranwhat check, then read what it found.">
 <link rel="canonical" href="https://ranwhat.com/install">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -17,19 +17,23 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/install">
-<meta property="og:title" content="Install ranwhat">
-<meta property="og:description" content="uvx ranwhat, and nothing else. Python 3.9 or newer, no dependencies, no account, and nothing built on your machine.">
+<meta property="og:title" content="Install ranwhat: run it with uvx, pipx or pip on Python 3.9+">
+<meta property="og:description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account. Start with ranwhat check, then read what it found.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="Install ranwhat">
-<meta name="twitter:description" content="uvx ranwhat, and nothing else. Python 3.9 or newer, no dependencies, no account, and nothing built on your machine.">
+<meta name="twitter:title" content="Install ranwhat: run it with uvx, pipx or pip on Python 3.9+">
+<meta name="twitter:description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account. Start with ranwhat check, then read what it found.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Install","item":"https://ranwhat.com/install"}]}</script>
 </head>
 <body>
 <header>
@@ -44,29 +48,107 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
-<section class="mark-1"  >
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Install</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Install</p>
+    <h1>Install ranwhat</h1>
+    <p class="lede">
+      Python 3.9 or newer. No dependencies, no account, and nothing built on
+      your machine. Current version 0.4.0.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
   <div class="shell band split">
-    <div class="marginal">Install</div>
+    <div class="marginal">01 / Run once</div>
     <div>
-      <h2>Thirty seconds, no signup.</h2>
+      <h2>Try it without installing anything.</h2>
       <p class="lede">
-        Python 3.9 or newer. No dependencies. Point it at your own machine and
-        see what the last month looked like.
+        Start with <span class="icode">check</span>: it reads what your agents
+        ran and what they left on disk, and changes nothing.
       </p>
       <div class="cmd" style="max-width:640px">
         <span class="dollar">$</span>
-        <span id="install-text">uvx ranwhat watch --days 30</span>
-        <button class="copy" data-copy="#install-text">Copy</button>
+        <span id="run-check">uvx ranwhat check</span>
+        <button class="copy" data-copy="#run-check">Copy</button>
       </div>
-      <p style="margin-top:18px;font-size:14px;color:var(--muted)">
-        Prefer it on your path? <span class="icode">pipx install ranwhat</span>
-        or <span class="icode">pip install ranwhat</span>.<br>
-        Python 3.9 or newer, no dependencies, and nothing to build locally.
+      <div class="cmd" style="max-width:640px;margin-top:10px">
+        <span class="dollar">$</span>
+        <span id="run-demo">uvx ranwhat demo</span>
+        <button class="copy" data-copy="#run-demo">Copy</button>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">demo</span> runs an authority scan on a bundled
+        example.
+        <a href="https://docs.astral.sh/uv/guides/tools/">uvx runs a tool
+        without installing it</a>, and <span class="icode">uvx ranwhat@latest check</span>
+        asks for the newest release. <span class="icode">pipx run ranwhat check</span>
+        works the same way.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Keep it</div>
+    <div>
+      <h2>Or put it on your path.</h2>
+      <div class="term">
+        <div class="term-body"><pre>pipx install ranwhat
+uv tool install ranwhat     <span class="c-mut">upgrade with: uv tool upgrade ranwhat</span>
+pip install ranwhat</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Then <span class="icode">ranwhat check</span>, which runs two commands
+        together: <a href="/watch">ranwhat watch</a> for what your agents ran,
+        and <a href="/clean">ranwhat clean</a> for secrets in Claude Code
+        transcripts. <a href="/scan">ranwhat scan</a> is separate, and scores
+        what their credentials allow. A bare <span class="icode">ranwhat</span>
+        lists every command.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Files</div>
+    <div>
+      <h2>What it reads, and what it writes.</h2>
+      <div class="rows">
+        <div class="row"><span class="k">Claude Code</span>
+          <span class="v">Reads <span class="icode">~/.claude/projects/*/*.jsonl</span> and the subagent transcripts beside them, the last 30 days by default (<span class="icode">--days N</span>). If <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead, and <span class="icode">--root PATH</span> points it at any other directory. <a href="/guides/claude-code-history">Where Claude Code keeps its history</a> covers what else is in that directory. The <a href="/watch">watch page</a> lists every agent ranwhat reads.</span></div>
+        <div class="row"><span class="k">Writes</span>
+          <span class="v">None of your files, unless you ask. <span class="icode">clean</span> masks secrets only on <span class="icode">--apply</span> or <span class="icode">mask</span>, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">--html</span> writes the report you name, mode 600. <span class="icode">check</span> and <span class="icode">watch</span> keep an index of the secrets <span class="icode">clean</span> finds in <span class="icode">~/.ranwhat/known</span> (<span class="icode">$RANWHAT_HOME/known</span> when that is set), so they can hide every one in what they print: salted fingerprints, never a secret, readable by you alone. <span class="icode">update</span> caches the catalogue under <span class="icode">~/.ranwhat/feed</span>, and stores its token at <span class="icode">~/.ranwhat/token</span> (0600) only with <span class="icode">--save-token</span>.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Network</div>
+    <div>
+      <h2>What goes online.</h2>
+      <p class="lede">
+        No account needed. live and --pull-usage ask only the provider that
+        issued each token, and update only fetches the catalogue. Everything
+        else reads locally and sends nothing.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        It runs on Linux and macOS. Windows is untested.
       </p>
     </div>
   </div>
@@ -80,12 +162,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -93,7 +175,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -102,13 +184,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -116,7 +211,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>

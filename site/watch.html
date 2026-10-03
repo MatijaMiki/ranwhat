@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ranwhat watch: what your agents actually ran</title>
-<meta name="description" content="Nine rules that surface credential reads, destructive commands and exfiltration-shaped pipes from what Claude Code and OpenClaw already wrote to disk.">
+<title>ranwhat watch: audit what Claude Code already ran</title>
+<meta name="description" content="Nine rules over what Claude Code already wrote to disk: credential reads, rm -rf, force pushes, npm publish, terraform destroy and more.">
 <link rel="canonical" href="https://ranwhat.com/watch">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -17,19 +17,23 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/watch">
-<meta property="og:title" content="ranwhat watch: what your agents actually ran">
-<meta property="og:description" content="Nine rules that surface credential reads, destructive commands and exfiltration-shaped pipes from what Claude Code and OpenClaw already wrote to disk.">
+<meta property="og:title" content="ranwhat watch: audit what Claude Code already ran">
+<meta property="og:description" content="Nine rules over what Claude Code already wrote to disk: credential reads, rm -rf, force pushes, npm publish, terraform destroy and more.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="ranwhat watch: what your agents actually ran">
-<meta name="twitter:description" content="Nine rules that surface credential reads, destructive commands and exfiltration-shaped pipes from what Claude Code and OpenClaw already wrote to disk.">
+<meta name="twitter:title" content="ranwhat watch: audit what Claude Code already ran">
+<meta name="twitter:description" content="Nine rules over what Claude Code already wrote to disk: credential reads, rm -rf, force pushes, npm publish, terraform destroy and more.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Watch","item":"https://ranwhat.com/watch"}]}</script>
 </head>
 <body>
 <header>
@@ -44,11 +48,36 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Watch</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">ranwhat watch</p>
+    <h1>See the risky commands Claude Code already ran.</h1>
+    <p class="lede">
+      ranwhat watch reads the transcripts Claude Code has already written to
+      disk and reports the nine kinds of action worth a second look. It
+      changes nothing.
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-text">ranwhat watch --days 30</span>
+        <button class="copy" data-copy="#cmd-text">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+  </div>
+</section>
+
 <section class="mark-1"  >
   <div class="shell band split">
     <div class="marginal">01 / Detection</div>
@@ -60,36 +89,36 @@
         It raises the ones you'd want to know about either way.
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Rule</th><th>Severity</th><th>Why it's on the list</th></tr></thead>
         <tbody>
           <tr><td><strong>Credential access</strong><br><code>.env · ~/.aws/credentials · id_rsa</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>Read a file whose only purpose is holding secrets. The contents are now in a context you don't control.</td></tr>
-          <tr><td><strong>Secret literal in a command</strong><br><code>sk_live_… · ghp_… · AKIA…</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>A live key appeared verbatim. Even if the command was benign, it's in shell history now.</td></tr>
-          <tr><td><strong>Package published</strong><br><code>npm publish · twine upload</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>Something reached a registry other people install from. Supply-chain reach, usually irreversible.</td></tr>
-          <tr><td><strong>Cloud resource destroyed</strong><br><code>terraform destroy · kubectl delete</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>A write or delete against live infrastructure.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">Read a file whose only purpose is holding secrets. The contents are now in a context you don't control, and in the transcript too: <a href="/clean">find and mask them with ranwhat clean</a>. Then <a href="/guides/claude-code-env-secrets">block the next read</a>.</td></tr>
+          <tr><td><strong>Secret-shaped string in a tool call</strong><br><code>sk_live_… · ghp_… · AKIA…</code></td>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">A credential-shaped value appeared verbatim in a tool call. Even if the call was benign, the value is now in the transcript.</td></tr>
+          <tr><td><strong>Package or release published</strong><br><code>npm publish · twine upload · docker push</code></td>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">Something reached a registry other people install from. Supply-chain reach, usually irreversible.</td></tr>
+          <tr><td><strong>Cloud resource destroyed or modified</strong><br><code>terraform destroy · kubectl delete · aws iam attach-…</code></td>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">A write or delete against live infrastructure, including IAM changes, <span class="icode">terraform apply -auto-approve</span> and <span class="icode">DROP TABLE</span>.</td></tr>
           <tr><td><strong>Financial API called</strong><br><code>stripe charges · refunds</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>Every one of these moves real money.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">With a live key, each of these moves real money.</td></tr>
           <tr><td><strong>Log or history tampering</strong><br><code>history -c · cloudtrail stop</code></td>
-              <td><span class="chip crit">Critical</span></td>
-              <td>An action whose effect is removing the record of other actions.</td></tr>
+              <td data-label="Severity"><span class="chip crit">Critical</span></td>
+              <td data-label="Why it's on the list">An action whose effect is removing the record of other actions.</td></tr>
           <tr><td><strong>Destructive git</strong><br><code>push --force · reset --hard</code></td>
-              <td><span class="chip high">High</span></td>
-              <td>History rewriting. The class of action that destroys the record of what else happened.</td></tr>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list">History rewriting. The class of action that destroys the record of what else happened.</td></tr>
           <tr><td><strong>Recursive deletion</strong><br><code>rm -rf · find -delete</code></td>
-              <td><span class="chip high">High</span></td>
-              <td>Recoverable only if something else was backing it up.</td></tr>
-          <tr><td><strong>Exfiltration-shaped pipe</strong><br><code>tar … | curl</code></td>
-              <td><span class="chip high">High</span></td>
-              <td>File contents sent outbound in one command. That shape, whatever the intent.</td></tr>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list"><a href="/guides/claude-code-deleted-files">Recoverable only if something else was backing it up</a>. Severity follows the target: <span class="icode">rm -rf build</span> is not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical.</td></tr>
+          <tr><td><strong>Local file sent to the network</strong><br><code>curl -d @file · curl -F file=@…</code></td>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list">File contents sent outbound in one command. That shape, whatever the intent.</td></tr>
         </tbody>
       </table>
       </div>
@@ -103,8 +132,8 @@
       <h2>A watcher that cries wolf gets muted in a day.</h2>
       <p class="lede">
         So three things that <em>look</em> dangerous are not treated as actions.
-        Each of these was a real false positive on real history, found by pointing
-        the first version at a live machine.
+        The first watch build, run on a real machine's history, flagged 6
+        findings, and these were the 3 false positives among them.
       </p>
       <div class="grid3">
         <div class="cell">
@@ -122,11 +151,11 @@
       </div>
       <div class="rows" style="margin-top:34px">
         <div class="row"><span class="k">On real history</span>
-          <span class="v"><strong>15 findings before these rules, 4 after.</strong> Three were false positives; eleven were true deletions of build and temp directories that nobody would want to read.</span></div>
+          <span class="v"><strong>A later release reported 15 findings on one machine's 90-day history.</strong> Eleven were true deletions of build and temp directories that nobody would want to read, so deletions are now ranked by target. After that change the same history gave 4, and all four were real.</span></div>
         <div class="row"><span class="k">Evidence</span>
-          <span class="v">Every finding carries surrounding context. <span class="icode">rm -rf</span> on its own tells you nothing. The target is the point.</span></div>
+          <span class="v">Every finding carries surrounding context. <span class="icode">rm -rf</span> on its own tells you nothing. The target is the point. A secret in it is masked: every value <a href="/clean">clean</a> finds anywhere in your history, known by an index of salted fingerprints in <span class="icode">~/.ranwhat/known</span>.</span></div>
         <div class="row"><span class="k">Test suite</span>
-          <span class="v">102 tests, written as invariants rather than expected output.</span></div>
+          <span class="v">Written as invariants rather than expected output.</span></div>
       </div>
     </div>
   </div>
@@ -141,33 +170,58 @@
         agent already wrote to disk.
       </p>
       <div class="scroll">
-      <table>
-        <thead><tr><th>Agent</th><th>Location</th><th>Format</th><th>Status</th></tr></thead>
+      <table class="stack">
+        <thead><tr><th>Agent</th><th>Location</th><th>Format</th></tr></thead>
         <tbody>
           <tr><td><strong>Claude Code</strong></td>
-              <td><code>~/.claude/projects/*/*.jsonl</code></td>
-              <td>JSONL transcripts</td>
-              <td><span class="chip ok">Shipped</span></td></tr>
+              <td data-label="Location"><code>~/.claude/projects/*/*.jsonl</code>, and each session's <code>subagents/</code></td>
+              <td data-label="Format">JSONL transcripts</td></tr>
           <tr><td><strong>OpenClaw</strong></td>
-              <td><code>$OPENCLAW_STATE_DIR/agents/*/…</code></td>
-              <td>SQLite, schema discovered at runtime</td>
-              <td><span class="chip ok">Shipped</span></td></tr>
-          <tr><td><strong>Codex</strong></td><td class="mono" style="color:var(--faint)">n/a</td>
-              <td>Native OpenTelemetry</td>
-              <td><span class="chip info">Next</span></td></tr>
-          <tr><td><strong>OTLP receiver</strong></td><td class="mono" style="color:var(--faint)">localhost</td>
-              <td>Any agent emitting GenAI spans</td>
-              <td><span class="chip info">Next</span></td></tr>
+              <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code> (default <code>~/.openclaw</code>, or <code>--state-dir</code>)</td>
+              <td data-label="Format">SQLite, tool calls found by shape; compressed events and <a href="https://docs.openclaw.ai/reference/database-schemas/layout">cold archives</a> not read yet</td></tr>
         </tbody>
       </table>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        OpenClaw's transcript schema isn't published beyond “append-only,
-        tree-structured”. Rather than pin table names that break on the next
-        release, the adapter discovers the schema at runtime and recognises tool
-        calls by shape. The database is opened read-only, since it belongs to a
-        running agent, and falls back to a copy if that agent holds a WAL lock.
+        When <span class="icode">CLAUDE_CONFIG_DIR</span> is set, transcripts
+        are read from <span class="icode">$CLAUDE_CONFIG_DIR/projects</span>
+        instead, and <span class="icode">--root PATH</span> reads any other
+        directory.
       </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Not read yet: the large tool outputs Claude Code stores in
+        <span class="icode">&lt;session&gt;/tool-results/</span>, and
+        <span class="icode">~/.claude/history.jsonl</span>.
+        <a href="/guides/claude-code-history">Where Claude Code keeps your
+        history</a> lists the files a session leaves behind.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Output</div>
+    <div>
+      <h2>Machine-readable, and one command for both halves.</h2>
+      <p class="lede">
+        <span class="icode">ranwhat watch --json</span> prints one record per
+        flagged call.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Record</span>
+          <span class="v"><span class="icode">source</span>, <span class="icode">session</span>, <span class="icode">project</span>, <span class="icode">timestamp</span>, <span class="icode">tool_name</span>, <span class="icode">tool_call_id</span>, <span class="icode">payload_hash</span>, <span class="icode">severity</span>, and every rule the call tripped, each with its evidence.</span></div>
+        <div class="row"><span class="k">Once each</span>
+          <span class="v">A call replayed by a resumed session is reported once, not once per transcript that carries it.</span></div>
+        <div class="row"><span class="k">Both halves</span>
+          <span class="v"><span class="icode">ranwhat check</span> runs watch and <a href="/clean">clean</a> in one pass, and changes nothing.</span></div>
+      </div>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides/claude-code-audit-log">Claude Code audit log<span>these records as a log, and a hook or OpenTelemetry from now on</span></a></li>
+        <li><a href="/guides/claude-code-deleted-files">Claude Code deleted my files<span>filtering for deletions, and what rewind cannot restore</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the full checklist</span></a></li>
+      </ul>
     </div>
   </div>
 </section>
@@ -180,12 +234,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -193,7 +247,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -202,13 +256,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -216,7 +283,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>

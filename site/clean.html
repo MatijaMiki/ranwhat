@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ranwhat clean: secrets sitting in your agent transcripts</title>
-<meta name="description" content="Your agent ran cat .env and the output is still on disk. Find those secrets in agent transcripts, learn what to rotate, and mask them safely.">
+<title>ranwhat clean: find secrets in Claude Code transcripts</title>
+<meta name="description" content="Your agent ran cat .env and the value is still in ~/.claude/projects. Find secrets in Claude Code transcripts, see what to rotate, and mask them safely.">
 <link rel="canonical" href="https://ranwhat.com/clean">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -17,19 +17,23 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/clean">
-<meta property="og:title" content="ranwhat clean: secrets sitting in your agent transcripts">
-<meta property="og:description" content="Your agent ran cat .env and the output is still on disk. Find those secrets in agent transcripts, learn what to rotate, and mask them safely.">
+<meta property="og:title" content="ranwhat clean: find secrets in Claude Code transcripts">
+<meta property="og:description" content="Your agent ran cat .env and the value is still in ~/.claude/projects. Find secrets in Claude Code transcripts, see what to rotate, and mask them safely.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="ranwhat clean: secrets sitting in your agent transcripts">
-<meta name="twitter:description" content="Your agent ran cat .env and the output is still on disk. Find those secrets in agent transcripts, learn what to rotate, and mask them safely.">
+<meta name="twitter:title" content="ranwhat clean: find secrets in Claude Code transcripts">
+<meta name="twitter:description" content="Your agent ran cat .env and the value is still in ~/.claude/projects. Find secrets in Claude Code transcripts, see what to rotate, and mask them safely.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Clean","item":"https://ranwhat.com/clean"}]}</script>
 </head>
 <body>
 <header>
@@ -44,11 +48,16 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Clean</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">ranwhat clean</p>
@@ -56,8 +65,9 @@
     <p class="lede">
       When an agent runs <span class="icode">cat .env</span>, the result is written
       into its transcript in plaintext: your database password, your signing
-      secrets, your provider tokens, sitting in files that are never rotated and
-      get read again by agents later.
+      secrets, your provider tokens, sitting in
+      <a href="/guides/claude-code-history">files Claude Code keeps for 30
+      days by default</a>.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -80,6 +90,13 @@
         and already sat in a model context you do not control.
       </p>
       <p style="color:var(--muted);font-size:15px">
+        <a href="https://code.claude.com/docs/en/claude-directory#plaintext-storage">Claude
+        Code's own documentation</a> says it directly: &ldquo;If a tool reads a
+        <span class="icode">.env</span> file or a command prints a credential,
+        that value is written to
+        <span class="icode">projects/&lt;project&gt;/&lt;session&gt;.jsonl</span>.&rdquo;
+      </p>
+      <p style="color:var(--muted);font-size:15px">
         So the report leads with what to rotate and where, and treats masking as the
         secondary act. A tool that printed “cleaned: 47 secrets” and left you feeling
         safer would be actively harmful.
@@ -93,9 +110,9 @@
 model context you do not control. Masking them here stops
 them leaking again. It does not make them safe.</span>
 
-<span class="c-crit">*</span> <span class="c-b">AWS access key ID</span>        <span class="c-mut">AKI…AA   20 chars, seen 8x</span>
-<span class="c-crit">*</span> <span class="c-b">DATABASE_URL</span>             <span class="c-mut">pos…pp   42 chars, seen 8x</span>
-<span class="c-crit">*</span> <span class="c-b">PUSHER_APP_SECRET</span>        <span class="c-mut">b99…0a   64 chars, seen 2x</span>
+<span class="c-crit">*</span> <span class="c-b">Stripe live secret key</span>   <span class="c-mut">sk_…dc  32 chars  seen 8x</span>
+<span class="c-crit">*</span> <span class="c-b">DATABASE_URL</span>             <span class="c-mut">pos…pp  42 chars  seen 8x</span>
+<span class="c-crit">*</span> <span class="c-b">PUSHER_APP_SECRET</span>        <span class="c-mut">b99…0a  64 chars  seen 2x</span>
 
 <span class="c-warn">Dry run. Nothing was changed.</span></pre></div>
       </div>
@@ -125,6 +142,11 @@ them leaking again. It does not make them safe.</span>
         console, Stripe’s API keys page or BotFather, rather than leaving you to work
         out where a 64-character string came from.
       </p>
+      <div class="term" style="margin-top:22px">
+        <div class="term-body"><pre>ranwhat clean                   <span class="c-mut">report, then open the review</span>
+ranwhat clean --no-interactive  <span class="c-mut">report and exit</span>
+ranwhat clean --apply           <span class="c-mut">mask everything, backups first</span></pre></div>
+      </div>
     </div>
   </div>
 </section>
@@ -139,15 +161,15 @@ them leaking again. It does not make them safe.</span>
         secrets and roughly two thirds were not credentials at all.
       </p>
       <div class="scroll">
-      <table>
+      <table class="stack">
         <thead><tr><th>Reported</th><th>What it actually is</th></tr></thead>
         <tbody>
-          <tr><td><code>process.env.DB_PASSWORD</code></td><td>a reference to a secret, not its value</td></tr>
-          <tr><td><code>crypto.randomBytes(32)</code></td><td>a call that produces one</td></tr>
-          <tr><td><code>[A-Z]{20}</code></td><td>a regex that matches one</td></tr>
-          <tr><td><code>${env}-session-id</code></td><td>a template literal</td></tr>
-          <tr><td><code>/Users/you/project</code></td><td>a path assigned to PWD</td></tr>
-          <tr><td><code>your-api-key-here</code></td><td>a placeholder</td></tr>
+          <tr><td><code>process.env.DB_PASSWORD</code></td><td data-label="What it actually is">a reference to a secret, not its value</td></tr>
+          <tr><td><code>crypto.randomBytes(32)</code></td><td data-label="What it actually is">a call that produces one</td></tr>
+          <tr><td><code>[A-Z]{20}</code></td><td data-label="What it actually is">a regex that matches one</td></tr>
+          <tr><td><code>${env}-session-id</code></td><td data-label="What it actually is">a template literal</td></tr>
+          <tr><td><code>os.environ['JWT_SECRET']</code></td><td data-label="What it actually is">a Python environment read</td></tr>
+          <tr><td><code>/Users/you/project</code></td><td data-label="What it actually is">a path assigned to PWD</td></tr>
         </tbody>
       </table>
       </div>
@@ -161,10 +183,36 @@ them leaking again. It does not make them safe.</span>
         <div class="row"><span class="k">Measured</span>
           <span class="v"><strong>15 of 18 false positives before, 0 after</strong>, with all eight genuine credentials still found.</span></div>
         <div class="row"><span class="k">Safety</span>
-          <span class="v">Reports by default. <span class="icode">--apply</span> writes a timestamped backup first, then parses the rewritten file back before replacing the original.</span></div>
+          <span class="v">Reports by default. <span class="icode">--apply</span> writes a timestamped backup to <span class="icode">~/.ranwhat/backups</span> first, then parses the rewritten file back before replacing the original.</span></div>
         <div class="row"><span class="k">Scope</span>
           <span class="v">Masking one finding rewrites only that value, not every other secret in the same file.</span></div>
+        <div class="row"><span class="k">Reads</span>
+          <span class="v"><a href="/guides/claude-code-history">Claude Code transcripts</a>, <span class="icode">~/.claude/projects/*/*.jsonl</span> and the transcripts subagents write beside them, or the same under <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> when that is set, for the last 30 days by default (<span class="icode">--days N</span>). Not the large tool outputs in <span class="icode">tool-results/</span> yet.</span></div>
+        <div class="row"><span class="k">Recognises</span>
+          <span class="v">Stripe <span class="icode">sk_live_</span> and <span class="icode">rk_live_</span> keys, <span class="icode">sk-</span> style OpenAI and Anthropic keys, GitHub <span class="icode">ghp_</span>, <span class="icode">gho_</span>, <span class="icode">ghu_</span>, <span class="icode">ghs_</span>, <span class="icode">ghr_</span> and <span class="icode">github_pat_</span> tokens, Slack <span class="icode">xox</span> tokens, AWS <span class="icode">AKIA</span> and <span class="icode">ASIA</span> key IDs, Twilio SIDs, SendGrid keys, PEM private keys and JWTs, passwords inside connection strings, passwords typed where a command takes one (<span class="icode">mysql -pPASSWORD</span>, <span class="icode">sshpass -p</span>, <span class="icode">redis-cli -a</span>, <span class="icode">docker login -p</span>, <span class="icode">curl -u user:password</span>, <span class="icode">--password</span> and the like), and <span class="icode">KEY=value</span> pairs whose key names a secret.</span></div>
+        <div class="row"><span class="k">Index</span>
+          <span class="v"><span class="icode">check</span> and <span class="icode">watch</span> hide every secret <span class="icode">clean</span> finds, anywhere in your history whatever <span class="icode">--days</span> says, in what they print. They know them by an index in <span class="icode">~/.ranwhat/known</span> that holds salted fingerprints, never a secret, and read a transcript again only when it changes.</span></div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Next</div>
+    <div>
+      <h2>Then see how it got there.</h2>
+      <p class="lede">
+        <span class="icode">clean</span> finds the values. <a href="/watch">ranwhat watch</a> finds the
+        calls that read credential files in the first place, and
+        <span class="icode">ranwhat check</span> runs both in one read-only pass.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Rotate first: <a href="/guides/ai-coding-agent-security#leaks">what to
+        do when a secret has already leaked</a>. To stop the next read,
+        <a href="/guides/claude-code-env-secrets">keep Claude Code out of your
+        .env file with deny rules and the sandbox</a>.
+      </p>
     </div>
   </div>
 </section>
@@ -177,12 +225,12 @@ them leaking again. It does not make them safe.</span>
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -190,7 +238,7 @@ them leaking again. It does not make them safe.</span>
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -199,13 +247,26 @@ them leaking again. It does not make them safe.</span>
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -213,7 +274,7 @@ them leaking again. It does not make them safe.</span>
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>

@@ -7,7 +7,6 @@
 <meta name="description" content="That page does not exist.">
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="light dark">
-<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
 <link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
 <link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
@@ -16,7 +15,9 @@
 <meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
 </head>
 <body>
 <header>
@@ -31,26 +32,28 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
-<section class="mark-1">
-  <div class="shell band split">
-    <div class="marginal">404</div>
-    <div>
-      <h2>Nothing ran here.</h2>
-      <p class="lede">
-        That page does not exist, or it moved when the site did. The commands
-        are one click away.
-      </p>
-      <p style="margin-top:18px;font-size:15px">
-        <a href="/">Home</a> &middot; <a href="/watch">watch</a> &middot;
-        <a href="/clean">clean</a> &middot; <a href="/scan">scan</a> &middot;
-        <a href="/install">Install</a>
-      </p>
-    </div>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">404</p>
+    <h1>Nothing ran here.</h1>
+    <p class="lede">
+      That page does not exist, or it moved when the site did. The commands
+      are one click away.
+    </p>
+    <p style="margin-top:18px;font-size:15px">
+      <a href="/">Home</a> &middot; <a href="/watch">watch</a> &middot;
+      <a href="/clean">clean</a> &middot; <a href="/scan">scan</a> &middot;
+      <a href="/install">Install</a> &middot; <a href="/faq">FAQ</a>
+    </p>
   </div>
 </section>
 </main>
@@ -62,12 +65,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -75,7 +78,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -84,13 +87,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -98,7 +114,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>

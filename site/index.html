@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ranwhat: find out what your AI agents actually did</title>
-<meta name="description" content="See what your AI coding agents actually ran, find credentials left in transcripts, and score the authority they hold. Free, local, transmits nothing.">
+<title>ranwhat: AI coding agent security for Claude Code</title>
+<meta name="description" content="Open-source AI coding agent security: see what Claude Code ran, find secrets left in its transcripts, and score what agent tokens can do.">
 <link rel="canonical" href="https://ranwhat.com/">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -17,20 +17,23 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/">
-<meta property="og:title" content="ranwhat: find out what your AI agents actually did">
-<meta property="og:description" content="See what your AI coding agents actually ran, find credentials left in transcripts, and score the authority they hold. Free, local, transmits nothing.">
+<meta property="og:title" content="ranwhat: AI coding agent security for Claude Code">
+<meta property="og:description" content="Open-source AI coding agent security: see what Claude Code ran, find secrets left in its transcripts, and score what agent tokens can do.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="ranwhat: find out what your AI agents actually did">
-<meta name="twitter:description" content="See what your AI coding agents actually ran, find credentials left in transcripts, and score the authority they hold. Free, local, transmits nothing.">
+<meta name="twitter:title" content="ranwhat: AI coding agent security for Claude Code">
+<meta name="twitter:description" content="Open-source AI coding agent security: see what Claude Code ran, find secrets left in its transcripts, and score what agent tokens can do.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://ranwhat.com/#org","name":"ranwhat","url":"https://ranwhat.com/","logo":"https://ranwhat.com/og-c85b8f42.png","sameAs":["https://github.com/MatijaMiki/ranwhat","https://pypi.org/project/ranwhat/","https://x.com/ranwhatcom"],"founder":{"@type":"Person","name":"Matija Mikulinec"}},{"@type":"SoftwareApplication","name":"ranwhat","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","url":"https://ranwhat.com/","downloadUrl":"https://pypi.org/project/ranwhat/","license":"https://opensource.org/licenses/MIT","description":"A local flight recorder for AI coding agents. Reads what agents actually ran, surfaces credential reads, destructive commands and leaked secrets, and never transmits anything.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Person","name":"cenner"}}]}</script>
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://ranwhat.com/#website","name":"ranwhat","url":"https://ranwhat.com/","publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"Organization","@id":"https://ranwhat.com/#org","name":"ranwhat","url":"https://ranwhat.com/","logo":{"@type":"ImageObject","url":"https://ranwhat.com/icon-512.png","width":512,"height":512},"sameAs":["https://github.com/MatijaMiki/ranwhat","https://pypi.org/project/ranwhat/","https://x.com/ranwhatcom"],"founder":{"@id":"https://ranwhat.com/about#matija","@type":"Person","name":"Matija Mikulinec"}},{"@type":"SoftwareApplication","@id":"https://ranwhat.com/#app","name":"ranwhat","applicationCategory":"DeveloperApplication","applicationSubCategory":"Security","operatingSystem":"macOS, Linux","url":"https://ranwhat.com/","installUrl":"https://ranwhat.com/install","downloadUrl":"https://pypi.org/project/ranwhat/","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"description":"ranwhat is an open-source command-line tool for AI coding agent security. It reads the transcripts Claude Code writes to disk, reports the risky actions in them, finds credentials left in those transcripts, and scores the authority of an agent's credentials.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@id":"https://ranwhat.com/#org"},"publisher":{"@id":"https://ranwhat.com/#org"}},{"@type":"SoftwareSourceCode","codeRepository":"https://github.com/MatijaMiki/ranwhat","programmingLanguage":"Python","license":"https://opensource.org/licenses/MIT","targetProduct":{"@id":"https://ranwhat.com/#app"}}]}</script>
 </head>
 <body>
 <header>
@@ -45,6 +48,10 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
@@ -55,11 +62,11 @@
     <p class="eyebrow">Flight recorder for AI agents</p>
     <div class="hero-grid">
       <div>
-        <h1>Find out what your agents actually did.</h1>
+        <h1>Find out what your AI agents actually did.</h1>
         <p class="lede">
-          Your coding agent has your shell, your keys and your repo. ranwhat
-          reads what it ran, surfaces the handful of actions worth knowing about,
-          and never sends a byte anywhere.
+          Claude Code has your shell, your keys and your repo. ranwhat reads
+          what it ran, surfaces the handful of actions worth knowing about, and
+          does it on your own machine.
         </p>
         <div class="cmdrow">
           <div class="cmd">
@@ -67,27 +74,33 @@
             <span id="cmd-text">ranwhat watch --days 30</span>
             <button class="copy" data-copy="#cmd-text">Copy</button>
           </div>
-          <a class="ghost" href="#install" style="padding:11px 15px">Install</a>
+          <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
         </div>
       </div>
 
       <div class="term" aria-label="Example ranwhat output">
-        <div class="term-bar"><span>ranwhat watch</span><span style="margin-left:auto">4 sources · 30 days</span></div>
-        <div class="term-body"><pre><span class="c-crit c-b">1 critical</span>  <span class="c-warn c-b">4 high</span>
+        <div class="term-bar"><span>ranwhat watch</span><span style="margin-left:auto">1 transcript · 30 days</span></div>
+        <div class="term-body"><pre><span class="c-crit c-b">2 critical</span>  <span class="c-warn c-b">1 high</span>
 
-<span class="c-crit">*</span> <span class="c-b">Credential material accessed</span>   <span class="c-mut">18:13  Bash</span>
-    <span class="c-mut">cat ~/.ssh/id_rsa</span>
-    <span class="c-mut">-> Whatever it read is now in a model
-       context you do not control.</span>
+<span class="c-crit">*</span> <span class="c-b">Credential material accessed</span><span class="c-mut">   2026-09-30 18:13:00  Bash</span>
+<span class="c-mut">    cat ~/.ssh/id_rsa
+    -> The agent read a file whose only purpose is to hold
+       secrets. Whatever it read is now in a model context
+       you do not control.</span>
 
-<span class="c-warn">*</span> <span class="c-b">Bulk or recursive deletion</span>      <span class="c-mut">15:13  Bash</span>
-    <span class="c-mut">rm -rf .frames ; printf 'node_mod…</span>
+<span class="c-warn">*</span> <span class="c-b">Bulk or recursive deletion</span><span class="c-mut">   2026-09-30 15:13:00  Bash</span>
+<span class="c-mut">    rm -rf .frames
+    -> Recursive deletion. Recoverable only if something
+       else was backing it up.</span>
 
-<span class="c-warn">*</span> <span class="c-b">Package published</span>               <span class="c-mut">14:58  Bash</span>
-    <span class="c-mut">npm publish --access public</span>
+<span class="c-crit">*</span> <span class="c-b">Package or release published</span><span class="c-mut">   2026-09-30 14:58:00  Bash</span>
+<span class="c-mut">    npm publish --access public
+    -> Something was pushed to a registry other people may
+       install from. Supply-chain reach, and usually
+       irreversible.</span>
 
-<span class="c-mut">────────────────────────────────────────</span>
-<span class="c-mut">Read locally. Nothing was transmitted.</span></pre></div>
+<span class="c-mut">------------------------------------------------------------
+Read locally. Nothing was transmitted.</span></pre></div>
       </div>
     </div>
   </div>
@@ -98,26 +111,35 @@
     <div>
       <h2>What it did, what leaked, what it may do next.</h2>
       <p class="lede">
-        Each one runs locally and reports before it changes anything.
+        ranwhat is an open-source command-line tool for
+        <a href="/guides/ai-coding-agent-security">AI coding agent
+        security</a>. It reads what Claude Code has already written to disk.
+        Only clean changes your files, and only when you ask it to.
       </p>
-      <div class="grid3">
+      <div class="grid2">
+        <div class="cell">
+          <h3 class="mono" style="font-size:13.5px">ranwhat check</h3>
+          <p>Runs watch and clean in one read-only pass: what your agents ran,
+             and what they left on disk. It never changes anything.</p>
+          <p class="more"><a href="/install">Start with ranwhat check →</a></p>
+        </div>
         <div class="cell">
           <h3 class="mono" style="font-size:13.5px">ranwhat watch</h3>
           <p>Reads what your agents already ran and raises the handful of
              irreversible actions worth knowing about.</p>
-          <p class="more"><a href="/watch">What it finds →</a></p>
+          <p class="more"><a href="/watch">What ranwhat watch finds →</a></p>
         </div>
         <div class="cell">
           <h3 class="mono" style="font-size:13.5px">ranwhat clean</h3>
-          <p>Finds credentials sitting in plaintext in your agent transcripts,
-             tells you what to rotate, and masks them.</p>
-          <p class="more"><a href="/clean">How it works →</a></p>
+          <p>Finds credentials sitting in plaintext in Claude Code transcripts,
+             tells you what to rotate, and masks them when you ask.</p>
+          <p class="more"><a href="/clean">How ranwhat clean handles secrets →</a></p>
         </div>
         <div class="cell">
           <h3 class="mono" style="font-size:13.5px">ranwhat scan</h3>
           <p>Scores the authority your agent's credentials carry, and which
              permissions it has never once used.</p>
-          <p class="more"><a href="/scan">The three axes →</a></p>
+          <p class="more"><a href="/scan">How ranwhat scan scores authority →</a></p>
         </div>
       </div>
     </div>
@@ -134,14 +156,15 @@
       </p>
       <div class="cmd" style="max-width:640px">
         <span class="dollar">$</span>
-        <span id="install-text">uvx ranwhat watch --days 30</span>
+        <span id="install-text">uvx ranwhat check</span>
         <button class="copy" data-copy="#install-text">Copy</button>
       </div>
       <p style="margin-top:18px;font-size:14px;color:var(--muted)">
         Prefer it on your path? <span class="icode">pipx install ranwhat</span>
         or <span class="icode">pip install ranwhat</span>.<br>
-        Python 3.9 or newer, no dependencies, and nothing to build locally.
+        Nothing to build locally.
       </p>
+      <p class="more" style="margin-top:14px"><a href="/install">Install options, and what it writes to disk →</a></p>
     </div>
   </div>
 </section>
@@ -151,14 +174,42 @@
   <div class="shell band split">
     <div class="marginal">03 / Questions</div>
     <div>
-      <h2>The ones worth answering up front.</h2>
-      <div class="faqs"><div class="faq"><h3>Does it send anything anywhere?</h3><p>No. The watcher reads transcripts your agents already wrote to disk and prints to your terminal. The scanner talks only to the credential's own issuer when you ask it to introspect a token. There is no telemetry, no account and no server.</p></div><div class="faq"><h3>Does it need my credentials?</h3><p>The watcher needs none at all. Point it at your machine and it works. The authority scanner can introspect tokens read-only, but it never exercises a permission and never needs a write-scoped credential. Pass tokens through the environment rather than the command line, because anything in argv is readable by every user on the machine.</p></div><div class="faq"><h3>Which agents does it read?</h3><p>Claude Code and OpenClaw today. Codex and an OTLP receiver are next, which will cover anything emitting OpenTelemetry GenAI spans. It reads files the agent already wrote, so there is no wrapper, no proxy and nothing in your critical path.</p></div><div class="faq"><h3>Will it slow my agent down?</h3><p>No. It runs after the fact against files on disk. Your agent never knows it exists.</p></div><div class="faq"><h3>Is it safe to run clean --apply?</h3><p>It reports by default and changes nothing until you ask. When you do, it writes a timestamped backup first, then parses the rewritten file back before replacing the original, so a transcript is never left corrupted. Ordinary config, templates and placeholders are left alone.</p></div><div class="faq"><h3>If I mask a secret, is it safe now?</h3><p>No, and the tool says so. The value was already written to disk in plaintext and already sat in a model context you do not control. Masking stops it leaking a second time. Rotating it is the actual fix, which is why the report leads with what to rotate and where.</p></div><div class="faq"><h3>How is this different from scanning my agent's config?</h3><p>Tools that scan agent components look for known-bad content in what is installed: MCP servers, skills, configuration. ranwhat looks at what your agent actually did with the access it has, and what it is still allowed to do next time.</p></div><div class="faq"><h3>What does it cost?</h3><p>Nothing on your own machine, forever, and the code is MIT licensed with no dependencies. Paid tiers exist for collecting records across machines and for evidence retention. We never charge per finding, because a tool paid by the alert has a reason to cry wolf.</p></div><div class="faq"><h3>Does it work on Linux and Windows?</h3><p>Linux yes. Windows is untested. It is pure Python with no platform-specific calls, so it will probably work, but nobody has verified it. Tell us if you do.</p></div></div>
+      <h2>Before you run it.</h2>
+      <div class="faqs">
+        <div class="faq"><h3>Does it send anything anywhere?</h3><p>Not unless you ask it to. <span class="icode">check</span>, <span class="icode">watch</span>, <span class="icode">clean</span>, <span class="icode">scan</span> and <span class="icode">demo</span> read files on disk and print to your terminal. <span class="icode">live</span> and <span class="icode">--pull-usage</span> ask only the provider that issued each token. <span class="icode">update</span> fetches the capability catalogue for Plus subscribers and sends only the subscription token. There is no telemetry and no account.</p></div>
+        <div class="faq"><h3>Does it read everything Claude Code writes?</h3><p>Not yet. It reads the session transcripts, <span class="icode">~/.claude/projects/*/*.jsonl</span>, and the transcripts their subagents write, for the last 30 days by default. The large tool outputs Claude Code stores in separate files, and <span class="icode">~/.claude/history.jsonl</span>, are not read yet. If <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead, and <span class="icode">--root PATH</span> points it at any other directory. A run that reads nothing says that nothing was checked, rather than that nothing was found. The <a href="/guides/claude-code-history">Claude Code history guide</a> lists what each of those files holds and how long it stays.</p></div>
+        <div class="faq"><h3>If I mask a secret, is it safe now?</h3><p>No, and the tool says so. The value was already written to disk in plaintext and already sat in a model context you do not control. Masking stops it leaking a second time. Rotating it is the actual fix, which is why the report leads with what to rotate and where.</p></div>
+        <div class="faq"><h3>What does it cost?</h3><p>Nothing on your own machine, forever, and the code is MIT licensed with no dependencies. Paid tiers, being built now, are for collecting records across machines and for evidence retention. We never charge per finding, because a tool paid by the alert has a reason to cry wolf.</p></div>
+      </div>
+      <p class="more" style="margin-top:18px"><a href="/faq">All questions about ranwhat →</a></p>
     </div>
   </div>
 </section>
-<section class="mark-4">
+<section class="mark-4" id="guides">
   <div class="shell band split">
-    <div class="marginal">04 / Follow</div>
+    <div class="marginal">04 / Guides</div>
+    <div>
+      <h2>Guides for the agent on your machine.</h2>
+      <p class="lede">
+        Where Claude Code keeps what it saw, how to keep your secrets out of
+        it, and what to do when something has already gone wrong. Each one is
+        checked against the vendors' documentation and lists its sources.
+      </p>
+      <ul class="follow">
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security checklist<span>fourteen steps, in order</span></a></li>
+        <li><a href="/guides/claude-code-history">Where Claude Code keeps your history<span>~/.claude/projects, 30 days by default</span></a></li>
+        <li><a href="/guides/claude-code-env-secrets">How to stop Claude Code reading your .env file<span>deny rules and the sandbox</span></a></li>
+        <li><a href="/guides/claude-code-audit-log">Claude Code audit log<span>every tool call it already made</span></a></li>
+        <li><a href="/guides/claude-code-deleted-files">Claude Code deleted my files<span>what rewind cannot restore</span></a></li>
+        <li><a href="/guides/ai-agent-token-scopes">AI agent token scopes<span>check them, then cut them</span></a></li>
+      </ul>
+      <p class="more" style="margin-top:18px"><a href="/guides">All guides →</a></p>
+    </div>
+  </div>
+</section>
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Follow</div>
     <div>
       <h2>Built in the open.</h2>
       <p class="lede">
@@ -184,12 +235,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -197,7 +248,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -206,12 +257,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -219,7 +284,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ranwhat scan: the authority your agents hold</title>
-<meta name="description" content="Score an agent's authority, observability and reversibility from the credentials it holds. A catalogue of 104 scopes across twelve providers.">
+<title>ranwhat scan: score the permissions your AI agents hold</title>
+<meta name="description" content="Score the authority, observability and reversibility of the credentials an AI agent holds, read-only. 104 scopes across twelve providers, unused grants flagged.">
 <link rel="canonical" href="https://ranwhat.com/scan">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -17,19 +17,23 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/scan">
-<meta property="og:title" content="ranwhat scan: the authority your agents hold">
-<meta property="og:description" content="Score an agent's authority, observability and reversibility from the credentials it holds. A catalogue of 104 scopes across twelve providers.">
+<meta property="og:title" content="ranwhat scan: score the permissions your AI agents hold">
+<meta property="og:description" content="Score the authority, observability and reversibility of the credentials an AI agent holds, read-only. 104 scopes across twelve providers, unused grants flagged.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="ranwhat scan: the authority your agents hold">
-<meta name="twitter:description" content="Score an agent's authority, observability and reversibility from the credentials it holds. A catalogue of 104 scopes across twelve providers.">
+<meta name="twitter:title" content="ranwhat scan: score the permissions your AI agents hold">
+<meta name="twitter:description" content="Score the authority, observability and reversibility of the credentials an AI agent holds, read-only. 104 scopes across twelve providers, unused grants flagged.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Scan","item":"https://ranwhat.com/scan"}]}</script>
 </head>
 <body>
 <header>
@@ -44,21 +48,47 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Scan</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">ranwhat scan</p>
+    <h1>Score the authority your agent's credentials carry.</h1>
+    <p class="lede">
+      ranwhat scan reads the credentials an agent holds, read-only, and scores
+      authority (what it may do), observability (whether a past action can be
+      reconstructed) and reversibility (whether a wrong action can be undone).
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-text">ranwhat demo</span>
+        <button class="copy" data-copy="#cmd-text">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+  </div>
+</section>
+
 <section class="mark-1"  >
   <div class="shell band split">
     <div class="marginal">01 / Authority</div>
     <div>
-      <h2>And what it's allowed to do next time.</h2>
+      <h2>What it's allowed to do next time.</h2>
       <p class="lede">
-        The watcher tells you what happened. The scanner tells you what could.
-        It reads the credentials your agent holds, read-only, and scores the
-        three things that actually determine your exposure.
+        The watcher tells you <a href="/watch">what the agent already ran</a>.
+        The scanner tells you what it could do next, from the credentials it
+        holds, scored on the three things that determine your exposure.
       </p>
+      <p class="fnote" style="margin:0 0 14px;max-width:none">From <span class="icode">ranwhat demo</span>, the bundled support-copilot example.</p>
       <div class="scores">
         <div class="score"><div class="lab">Authority</div>
           <div class="n">19<small>/100 · F</small></div>
@@ -81,11 +111,99 @@
           <span class="v">Usage is <span class="chip ok">verified</span> <span class="chip info">self-attested</span> or <span class="chip crit">unverified</span> per provider, never silently assumed clean.</span></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        Catalogued capability semantics for Google, GitHub, GitLab, Microsoft 365, Slack, Discord, Stripe, Shopify, HubSpot, Atlassian, Sentry and AWS.
+        Catalogued capability semantics for 104 scopes across twelve providers:
+        Google, GitHub, GitLab, Microsoft 365, Slack, Discord, Stripe, Shopify,
+        HubSpot, Atlassian, Sentry and AWS.
         Unrecognised scopes are classified by action verb and flagged as
         unclassified, never assumed safe.
       </p>
       <p class="more" style="margin-top:14px"><a href="/example-report">See a full report, as the CLI writes it &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Commands</div>
+    <div>
+      <h2>An example first, then your own credentials.</h2>
+      <p class="lede">
+        A profile is a JSON file naming the agent, each credential, the scopes
+        it was granted and the controls around it, in the shape of the bundled
+        example. <span class="icode">live</span> builds one by asking each
+        provider instead.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>ranwhat demo                                  <span class="c-mut">the bundled example, no setup</span>
+ranwhat scan profile.json --html report.html  <span class="c-mut">score a profile, write a report</span>
+read -rs RANWHAT_GITHUB_TOKEN                 <span class="c-mut">paste it: not echoed, not saved to history</span>
+export RANWHAT_GITHUB_TOKEN
+ranwhat live                                  <span class="c-mut">ask each provider, read-only</span>
+ranwhat scan profile.json --pull-usage        <span class="c-mut">which grants were used</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Pass tokens in the environment as
+        <span class="icode">RANWHAT_&lt;PROVIDER&gt;_TOKEN</span>. A token passed
+        as a flag still works, but prints a warning: argv is visible to every
+        user on the machine through the process table.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Once you know what an agent can do,
+        <a href="/guides/ai-coding-agent-security#tokens">scope the tokens it
+        holds</a> down to what it uses.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Axes</div>
+    <div>
+      <h2>Three questions, and one of them can veto.</h2>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Axis</th><th>Question</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Authority</strong></td><td>What is it allowed to do?</td></tr>
+          <tr><td><strong>Observability</strong></td><td>Can you reconstruct a named past action?</td></tr>
+          <tr><td><strong>Reversibility</strong></td><td>Can a wrong action be undone?</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Observability vetoes the overall verdict. An agent that cannot
+        reconstruct its own tool calls is indistinguishable from the worst case.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Evidence</div>
+    <div>
+      <h2>Which grants were used, and how anyone knows.</h2>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>State</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip ok">Verified</span></td><td>Pulled from the provider's own audit trail</td></tr>
+          <tr><td><span class="chip info">Self-attested</span></td><td>Declared in the profile, not independently pulled</td></tr>
+          <tr><td><span class="chip crit">Unverified</span></td><td>No evidence at all, and the scopes are not assumed safe</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Introspection</span>
+          <span class="v">Google through tokeninfo, GitHub through the scopes header on an authenticated call, Slack through <span class="icode">auth.test</span>, and Stripe by key prefix, where an <span class="icode">sk_</span> key is treated as unrestricted. A token that comes back with no scope list, such as an <span class="icode">rk_</span> restricted key or a fine-grained GitHub token, is left out of the scores and reported as a high finding, so it is never counted as harmless: declare its scopes in a profile and use <span class="icode">scan</span> instead.</span></div>
+        <div class="row"><span class="k">By hand</span>
+          <span class="v">To check a token's scopes yourself, provider by provider: <a href="/guides/ai-agent-token-scopes">AI agent token scopes</a>.</span></div>
+        <div class="row"><span class="k">Usage pulls</span>
+          <span class="v">Read-only, over the last 90 days by default (<span class="icode">--window-days</span>): AWS IAM service last accessed, the GitHub organisation audit log (<span class="icode">--github-org</span>), Stripe events, and Google Admin SDK reports. There is no Slack pull, so Slack usage is self-attested or unverified.</span></div>
+        <div class="row"><span class="k">Where tokens go</span>
+          <span class="v">Each token goes only to the provider that issued it.</span></div>
+      </div>
     </div>
   </div>
 </section>
@@ -98,12 +216,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -111,7 +229,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -120,13 +238,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -134,7 +265,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>
