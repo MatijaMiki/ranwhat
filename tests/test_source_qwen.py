@@ -1409,6 +1409,113 @@ class Unparsable(_Home):
         self.assertEqual(self.calls(weird), [])
 
 
+# Python 3.9's json stops near 1,000 levels; 3.14's parses past 100,000,
+# far deeper than anything recursive in Python can then walk.
+DEPTHS = (5000, 50000, 100000)
+STAMP = "2026-09-30T10:00:05.000Z"
+
+
+def deep(depth):
+    """JSON text an object `depth` levels deep, built as a string: building
+    it as an object would take the recursion it is there to test."""
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def parses(text):
+    """Whether this Python's json can read `text`."""
+    try:
+        json.loads(text)
+    except RecursionError:
+        return False
+    return True
+
+
+def _values(nodes):
+    """Every value clean finds in these nodes."""
+    found = set()
+    for node in nodes:
+        clean._walk(node, lambda value, *_: found.add(value))
+    return found
+
+
+class DeepNesting(_Home):
+    """JSON nested deeper than the stack is read where this Python can read
+    it, and is otherwise what a line or file that does not parse is. It
+    never stops the rest of its file, the other files, or the run."""
+
+    def read_all(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            stores = self.src.stores(self.src.locations())
+            calls = [c for s in stores for c in self.src.tool_calls(s)]
+            nodes = [t.node for s in stores for t in self.src.secret_texts(s)]
+        return calls, nodes, err.getvalue()
+
+    def test_a_line_nested_past_the_stack_is_skipped_and_the_rest_read(self):
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.src.reset()
+                answer = tool_result(5, STAMP, "c2", "run_shell_command",
+                                     "API_KEY=" + SIDE)
+                answer["message"]["parts"][0]["functionResponse"]["response"][
+                    "env"] = "@DEEP@"
+                answer["toolCallResult"]["resultDisplay"] = "@DEEP@"
+                odd = [deep(depth), "[" * depth + "]" * depth] + [
+                    json.dumps(r, separators=(",", ":")).replace(
+                        '"@DEEP@"', deep(depth)) for r in (
+                        assistant(4, STAMP, ("c2", "run_shell_command",
+                                             {"command": "ls", "env": "@DEEP@"})),
+                        answer)]
+                text = "".join(json.dumps(r) + "\n" for r in sample(SECRET))
+                path = self.chat(text + "".join(line + "\n" for line in odd) + json.dumps(
+                    assistant(6, STAMP, ("c3", "write_file", deep(depth)))) + "\n")
+                read = [parses(line) for line in odd]
+                # Counted on each pass; this is watch's.
+                self.assertEqual([c.tool_call_id for c in self.calls(path)],
+                                 ["call_0001"] + ["c2"] * read[2] + ["c3"])
+                self.assertEqual(self.src.counts["unparsed"], read.count(False))
+                self.assertEqual(self.src.counts["unknown"], sum(read[:2]))
+                _calls, nodes, err = self.read_all()
+                found = _values(nodes)
+                self.assertIn(SECRET, found)
+                self.assertEqual(SIDE in found, read[3])
+                self.assertEqual(err, "")
+                before = _read(path)
+                result = self.src.mask(self.only_store(path), [SECRET])
+                if result.changed:
+                    self.assertNotIn(SECRET.encode("utf-8"), _read(path))
+                else:
+                    self.assertEqual(_read(path), before)
+
+    def test_a_whole_file_or_lock_nested_past_the_stack(self):
+        """A legacy session, a side file or a writer lock: what one that
+        does not parse is. The lock then holds its session as in use."""
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.src.reset()
+                good = self.chat(sample(SECRET))
+                text = deep(depth)
+                folder = os.path.join(self.qwen, "tmp", PROJECT_HASH)
+                for rel in (("chats", "session-old.json"), ("logs.json",),
+                            ("checkpoint-x.json",)):
+                    self.write(os.path.join(folder, *rel), text)
+                lock = self.write(os.path.join(self.qwen, "tmp",
+                                               "session-writer-locks",
+                                               SESSION + ".lock"), text, age=200)
+                calls, nodes, err = self.read_all()
+                self.assertEqual([c.tool_call_id for c in calls], ["call_0001"])
+                self.assertIn(SECRET, _values(nodes))
+                self.assertTrue(self.src.in_use(self.only_store(good)))
+                if parses(text):
+                    # A legacy session of no shape it knows; side files whole.
+                    self.assertEqual((self.src.counts["unknown"],
+                                      self.src.unreadable, err), (1, {}, ""))
+                else:
+                    self.assertEqual(self.src.unreadable, {"not JSON": 3})
+                    self.assertEqual(err.count("warning:"), 3)
+                os.remove(lock)
+
+
 # --------------------------------------------------------------------------
 # The v0.3.x layout
 # --------------------------------------------------------------------------

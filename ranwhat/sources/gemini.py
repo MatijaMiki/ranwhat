@@ -537,19 +537,20 @@ def _remasked(node, text, dump, plan):
 
     The document is written out again with `dump`, so this is done only
     where dumping it unchanged gives back exactly the bytes on disk. Then
-    nothing outside the grids' token texts can move, which is checked too."""
+    nothing outside the grids' token texts can move, which is checked too.
+    A document nested too deep to write out or compare is refused as well:
+    Python 3.14 parses far deeper than it can do either."""
     try:
-        same = dump(node) == text
-    except (ValueError, UnicodeError):
-        same = False
-    if not same:
-        return None
-    for grid in _grids(node):
-        if _mask_grid(grid, plan) is None:
+        if dump(node) != text:
             return None
-    new = dump(node)
-    if (_blank_grid_texts(json.loads(new)) != _blank_grid_texts(json.loads(text))
-            or _value_in_grids(node, plan)):
+        for grid in _grids(node):
+            if _mask_grid(grid, plan) is None:
+                return None
+        new = dump(node)
+        if (_blank_grid_texts(json.loads(new)) != _blank_grid_texts(json.loads(text))
+                or _value_in_grids(node, plan)):
+            return None
+    except (ValueError, UnicodeError, RecursionError):
         return None
     return new
 

@@ -1149,6 +1149,148 @@ class Unparsable(GeminiCase):
         self.assertEqual((calls, err), ([], ""))
 
 
+# Python 3.9's json stops near 1,000 levels. 3.14's parses past 100,000
+# (on a 16 MB stack), and then comparing the value overflows the stack near
+# 42,000 levels and writing it out near 62,000.
+DEPTHS = (5000, 50000, 100000)
+
+
+def deep(depth):
+    """JSON text an object `depth` levels deep, built as a string: building
+    it as an object would take the recursion it is there to test."""
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def parses(text):
+    """Whether this Python's json can read `text`."""
+    try:
+        json.loads(text)
+    except RecursionError:
+        return False
+    return True
+
+
+def _values(nodes):
+    """Every value clean finds in these nodes."""
+    found = set()
+    for node in nodes:
+        clean._walk(node, lambda value, *_: found.add(value))
+    return found
+
+
+class DeepNesting(GeminiCase):
+    """JSON nested deeper than the stack is read where this Python can read
+    it, and is otherwise what a line or file that does not parse is. It
+    never stops the rest of its file, the other files, or the run."""
+
+    def deep_lines(self, records, depth):
+        """Each record as a chat line, with "@DEEP@" made deep(depth)."""
+        return [_dump(r).replace('"@DEEP@"', deep(depth)) for r in records]
+
+    def read_all(self):
+        err = io.StringIO()
+        calls, nodes = [], []
+        with contextlib.redirect_stderr(err):
+            for store in self.stores():
+                calls += list(self.src.tool_calls(store))
+                nodes += [t.node for t in self.src.secret_texts(store)]
+        return calls, nodes, err.getvalue()
+
+    def test_a_line_nested_past_the_stack_is_skipped_and_the_rest_read(self):
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.src.reset()
+                odd = [deep(depth), "[" * depth + "]" * depth]
+                lines = spec_lines()
+                self.write("tmp/proj/chats/" + FIXTURE_NAME,
+                           lines[:3] + odd + lines[3:])
+                calls, nodes, err = self.read_all()
+                self.assertEqual([c.tool_call_id for c in calls], [CALL_ID])
+                self.assertIn(KEY, _values(nodes))
+                self.assertEqual(err, "")
+                unparsed = sum(not parses(line) for line in odd)
+                self.assertEqual(self.src.counts["unparsed"], unparsed)
+                self.assertEqual(self.src.counts["unknown"], 2 - unparsed)
+
+    def test_a_call_with_input_or_output_nested_past_the_stack(self):
+        """Read like any other call where its line parses; skipped and
+        counted where it does not. Input held as a JSON string always
+        parses as a line, and is kept as its text where it is too deep."""
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.src.reset()
+                given = tool_call("c2", "run_shell_command",
+                                  {"command": "cat .env", "env": "@DEEP@"},
+                                  output="API_KEY=" + KEY2)
+                shown = shell("c3", "ls", output="@DEEP@", display="@DEEP@")
+                lines = self.deep_lines([
+                    header(),
+                    model("m1", [shell("c1", "cat .env", output="API_KEY=" + KEY)]),
+                    model("m2", [given]), model("m3", [shown]),
+                    model("m4", [tool_call("c4", "write_file", deep(depth),
+                                           output="ok")])], depth)
+                path = self.write("tmp/proj/chats/session-a.jsonl", lines)
+                calls, nodes, err = self.read_all()
+                read = [parses(line) for line in lines]
+                self.assertEqual([c.tool_call_id for c in calls],
+                                 [i for i, ok in zip(("c1", "c2", "c3", "c4"),
+                                                     read[1:]) if ok])
+                self.assertEqual([c.store for c in calls], [path] * len(calls))
+                found = _values(nodes)
+                self.assertIn(KEY, found)
+                self.assertEqual(KEY2 in found, read[2])
+                self.assertEqual(self.src.counts["unparsed"], read.count(False))
+                self.assertEqual(err, "")
+
+    def test_a_whole_file_nested_past_the_stack_and_the_rest_read(self):
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.src.reset()
+                self.fixture()
+                text = deep(depth)
+                for rel in ("tmp/proj/chats/session-old.json", "tmp/proj/logs.json",
+                            "tmp/proj/checkpoint-x.json", "projects.json"):
+                    self.write(rel, text=text)
+                calls, nodes, err = self.read_all()
+                self.assertEqual([(c.tool_call_id, c.project) for c in calls],
+                                 [(CALL_ID, PROJECT)])
+                self.assertIn(KEY, _values(nodes))
+                if parses(text):
+                    # A legacy session of no shape it knows; side files whole.
+                    self.assertEqual((self.src.counts["unknown"],
+                                      self.src.unreadable, err), (1, {}, ""))
+                else:
+                    self.assertEqual(self.src.unreadable, {"did not parse": 3})
+                    self.assertEqual(err.count("warning:"), 3)
+
+    def test_a_terminal_grid_beside_a_value_nested_past_the_stack(self):
+        """A key cut across a grid's rows is masked by writing its line out
+        again and checking it. Where that overflows the stack the file is
+        refused, unchanged; a line too deep to parse at all is masked as
+        raw text, as any line that does not parse. The next file is masked
+        either way."""
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                record = shell("c1", "cat .env", output=untrusted(LINE),
+                               display=grid([LINE]))
+                plain = self.session("session-plain.jsonl",
+                                     [model("m1", [dict(record)])])
+                record["description"] = "@DEEP@"
+                lines = self.deep_lines([header(), model("m1", [record])], depth)
+                path = self.write("tmp/proj/chats/session-deep.jsonl", lines)
+                digest = _sha(path)
+                result = self.src.mask(self.store(path), [LONG])
+                if parses(lines[1]):
+                    self.assertEqual(result,
+                                     MaskResult(path, skipped=_rewrite.ALTERED))
+                    self.assertEqual(_sha(path), digest)
+                else:
+                    self.assertTrue(result.changed, result)
+                    with open(path, "rb") as fh:
+                        self.assertNotIn(LONG.encode("utf-8"), fh.read())
+                self.assertTrue(self.src.mask(self.store(plain), [LONG]).changed)
+
+
 # --------------------------------------------------------------------------
 # 14: the --days window
 # --------------------------------------------------------------------------
