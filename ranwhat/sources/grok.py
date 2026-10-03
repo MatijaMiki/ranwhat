@@ -102,6 +102,9 @@ MCP = "mcp"
 METHODS = ("session/update", "_x.ai/session/update")
 CALL_UPDATES = ("tool_call", "tool_call_update")
 XAI_TOOL = "x.ai/tool"
+# Written when a background command exits, with the task id its
+# BackgroundTaskStarted gave (notification_bridge.rs).
+TASK_COMPLETED = "task_completed"
 
 # A command the user typed with `!` (bash mode) is written as its own
 # tool_call: toolCallId "bash-mode-<uuid>", _meta {"bash_mode": true}, and
@@ -378,7 +381,7 @@ class _Pending(object):
     """One call being assembled from its updates.jsonl lines."""
     __slots__ = ("id", "started", "name", "xai_kind", "canon", "raw_input",
                  "timestamp", "session", "out_dir", "out_path", "primary",
-                 "content", "fallback", "bash_mode", "backgrounded")
+                 "content", "fallback", "bash_mode", "backgrounded", "task")
 
     def __init__(self, call_id):
         self.id = call_id
@@ -396,6 +399,7 @@ class _Pending(object):
         self.fallback = None        # FileContent.content, tool_output_for_prompt
         self.bash_mode = call_id.startswith(BASH_MODE_ID_PREFIX)
         self.backgrounded = False   # the output says it moved to the background
+        self.task = None            # BackgroundTaskStarted.task_id
 
     def start(self, envelope, params, update):
         """The step-1 `tool_call` line: name, time and session come from it
@@ -443,6 +447,7 @@ class _Pending(object):
         if (out.get("signal") == "backgrounded"
                 or out.get("type") == "BackgroundTaskStarted"):
             self.backgrounded = True
+            self.task = _text(out.get("task_id")) or self.task
         self.out_dir = _text(out.get("current_dir")) or self.out_dir
         found = _dict(out.get("FileContent"))
         self.out_path = _text(found.get("absolute_path")) or self.out_path
@@ -500,7 +505,7 @@ class GrokBuildSource(Source):
         key = store.path
         if key in self._warned:
             return
-        self.unreadable_store(reason)
+        self.unreadable_store(reason, store.path)
         self.warn(key, "cannot read Grok Build %s %s (%s)"
                   % (os.path.basename(store.path), store.path, reason))
 
@@ -591,8 +596,8 @@ class GrokBuildSource(Source):
 
     def _assemble(self, store):
         """({call id: ToolCall} in the order the calls began, the ids of the
-        calls that ran in the background); empty for a store that does not
-        hold calls."""
+        calls that ran in the background and are not recorded as finished);
+        empty for a store that does not hold calls."""
         base_name = os.path.basename(store.path)
         if base_name == UPDATES:
             return self._updates(store)
@@ -616,11 +621,14 @@ class GrokBuildSource(Source):
 
     def _updates(self, store):
         local = {"unparsed": 0, "unknown": 0, "unreadable_calls": 0}
-        pending = {}
+        pending, finished = {}, set()
         for _line_no, obj in self._json_lines(store, local):
             update, params = _update(obj)
             if update is None:
                 local["unknown"] += 1
+                continue
+            if update.get("sessionUpdate") == TASK_COMPLETED:
+                finished.add(_text(_dict(update.get("task_snapshot")).get("task_id")))
                 continue
             if update.get("sessionUpdate") not in CALL_UPDATES:
                 continue            # messages, plans, xAI extras: clean only
@@ -652,6 +660,8 @@ class GrokBuildSource(Source):
                 actor="user" if state.bash_mode else "agent",
                 not_after=None if state.timestamp else self._not_after(store),
                 output=state.output(), **fields)
+            if (state.task or call_id) in finished:
+                continue            # its command has exited
             if (state.backgrounded or state.name in MONITOR_NAMES
                     or (fields["kind"] == "shell" and _starts_in_background(raw))):
                 background.add(call_id)
@@ -748,10 +758,10 @@ class GrokBuildSource(Source):
 
     def in_use(self, store):
         """A terminal log of a command that ran in the background (a monitor,
-        or a shell call started or moved there): the command may still be
-        writing to it, and Grok Build told the model to read its output
-        there, so it is not replaced. Every other store: the default rule
-        (QUIET_SECONDS) only."""
+        or a shell call started or moved there and not recorded as finished):
+        the command may still be writing to it, and Grok Build told the
+        model to read its output there, so it is not replaced. Every other
+        store: the default rule (QUIET_SECONDS) only."""
         if not self._is_terminal_log(store.path):
             return False
         call_id, monitor = _log_call_id(store.path)

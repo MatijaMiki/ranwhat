@@ -1338,11 +1338,15 @@ class SourceContract(unittest.TestCase):
         self.assertEqual(calls[1].tool_input, {"q": 1})
         self.assertEqual(toy.counts["unknown"], 1)
         self.assertEqual(toy.counts["unparsed"], 1)
-        toy.unreadable_store("compressed, needs Python 3.14 or the zstd command")
+        toy.unreadable_store("compressed, needs Python 3.14 or the zstd command",
+                             "/x/b.jsonl")
         self.assertEqual(toy.counts["unreadable_stores"], 1)
+        # The store is named, so a report counts only the others as read.
+        self.assertEqual(toy.read_of(["/x/a.jsonl", "/x/b.jsonl"]), 1)
         toy.reset()
         self.assertEqual(set(toy.counts.values()), {0})
         self.assertEqual(toy.unreadable, {})
+        self.assertEqual(toy.read_of(["/x/a.jsonl", "/x/b.jsonl"]), 2)
 
     def test_an_unreadable_store_warns_once_and_yields_nothing(self):
         toy = _Toy()

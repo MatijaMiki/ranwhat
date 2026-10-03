@@ -144,20 +144,22 @@ class OneBadFileDoesNotStopTheScan(unittest.TestCase):
         import contextlib
         import io
         err = io.StringIO()
+        unread = {}
         with contextlib.redirect_stderr(err):
-            records, scanned = watch.scan_openclaw(state_dir=root)
+            records, read = watch.scan_openclaw(state_dir=root, unread=unread)
         self.assertIn("warning: cannot read", err.getvalue())
         # In ranwhat's words: what SQLite says of an error can quote a cell.
         self.assertIn("not a readable SQLite database", err.getvalue())
-        return records, scanned
+        return records, read, unread["openclaw"]
 
     def test_corrupt_database_is_skipped_not_fatal(self):
         """sqlite3.connect is lazy, so a non-database only fails on first
         query -- which used to happen outside any handler."""
         root = self._state_dir("this is not a database")
-        records, scanned = self._scan(root)
+        records, read, unread = self._scan(root)
         self.assertEqual(records, [])
-        self.assertEqual(scanned, 1)
+        # Found, and counted as not read rather than as read.
+        self.assertEqual((read, unread), (0, 1))
 
     def test_good_database_beside_a_corrupt_one_still_reports(self):
         import json
@@ -170,8 +172,8 @@ class OneBadFileDoesNotStopTheScan(unittest.TestCase):
             {"name": "bash", "input": {"command": "rm -rf ~/gone"}}),))
         conn.commit()
         conn.close()
-        records, scanned = self._scan(root)
-        self.assertEqual(scanned, 2)
+        records, read, unread = self._scan(root)
+        self.assertEqual((read, unread), (1, 1))
         self.assertEqual(len(records), 1, "the readable database must still report")
 
 

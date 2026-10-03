@@ -680,10 +680,12 @@ def _check(args):
             known=known, read=index.take)
         findings = searched.findings
         everywhere = _known(args, step, index)
+        unread = {}
         records, counts = watch_mod.scan_sources_counted(
             sources=args.sources, root=args.root,
             state_dir=args.state_dir, since_days=args.days,
-            progress=step(_ACTIONS), known=everywhere, paths=args.paths)
+            progress=step(_ACTIONS), known=everywhere, paths=args.paths,
+            unread=unread)
         _mask_known(records, known)
         # Then every value clean finds anywhere, in all that is printed:
         # each action's evidence was masked as it was read, and this masks
@@ -693,8 +695,10 @@ def _check(args):
             findings = _masked_strings(findings, everywhere.mask)
     finally:
         bar.clear()
-    sources = sum(counts.values())
-    scanned = searched.scanned
+    # What each half found to read, read or not: one that could read
+    # nothing it found says why in its notes, not that nothing was there.
+    sources = sum(counts.values()) + sum(unread.values())
+    scanned = searched.found
 
     # Where watch looked, whenever it read nothing, though clean read a
     # prompt history: without it watch's section gave the general hint,
@@ -719,8 +723,8 @@ def _check(args):
     print(watch_mod.render(records, counts, args.days, footer=False,
                            locations=places,
                            title=_CHECK_TITLE if nothing else watch_mod.TITLE,
-                           complete=agents_mod.all_read(args.sources)
-                           ).rstrip("\n"))
+                           complete=agents_mod.all_read(args.sources),
+                           unread=sum(unread.values())).rstrip("\n"))
     if scanned:
         print(clean_mod.render(findings, searched.counts, [], False, footer=False,
                                advice=False, others=searched.others,
@@ -1381,9 +1385,9 @@ def _main(argv=None):
             bar.clear()
         findings, scanned, changed = (searched.findings, searched.scanned,
                                       searched.changed)
-        # Zero read is not "No secrets found": it is a wrong --root, a
+        # Zero found is not "No secrets found": it is a wrong --root, a
         # fresh machine, or history kept somewhere else.
-        places = None if scanned else watch_mod.locations(
+        places = None if searched.found else watch_mod.locations(
             args.sources, root=args.root, state_dir=args.state_dir,
             paths=args.paths, asked=args.source)
         # Every value found is masked in what clean prints, as check masks
@@ -1426,15 +1430,16 @@ def _main(argv=None):
         bar, step = _progress_line(args)
         try:
             everywhere = _known(args, step)
+            unread = {}
             records, counts = watch_mod.scan_sources_counted(
                 sources=sources, root=args.root, state_dir=args.state_dir,
                 since_days=args.days, progress=step(_ACTIONS), known=everywhere,
-                paths=args.paths)
+                paths=args.paths, unread=unread)
             if everywhere:
                 records = _masked_strings(records, everywhere.mask)
         finally:
             bar.clear()
-        n = sum(counts.values())
+        n = sum(counts.values()) + sum(unread.values())
         places = None if n else watch_mod.locations(
             sources, root=args.root, state_dir=args.state_dir, paths=args.paths,
             asked=args.source)
@@ -1443,7 +1448,8 @@ def _main(argv=None):
             return _said_nothing_read(places, args.days)
         print(watch_mod.render(records, counts, args.days, locations=places,
                                notes=_notes(args),
-                               complete=agents_mod.all_read(args.sources)))
+                               complete=agents_mod.all_read(args.sources),
+                               unread=sum(unread.values())))
         return 2 if places is not None else 0
 
     if args.command == "demo":

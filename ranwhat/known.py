@@ -477,16 +477,16 @@ class Index(object):
         self.values, self.files = values, files
         self._migrated = version != VERSION
 
-    def take(self, path, st, values, fingerprints):
+    def take(self, path, st, values, fingerprints, whole=True):
         """What clean found reading the transcript at path: the values the
         rules find there and the fingerprint each mask in it keeps, as
         clean.values_in returns them. st is its os.stat from before it was
         read, or for another agent's file its agents.signature. update
         keeps this in place of a read of its own while the transcript is
         still that size and that age: one written to since is read again,
-        so nothing it gained in the meantime is missed. values None: clean
-        could not read it whole, and what update knew of it is kept, as of
-        one it cannot read itself, and it is read again next run."""
+        so nothing it gained in the meantime is missed. whole False: clean
+        could not read it whole, and update keeps what it knew of it beside
+        these, and reads it again next run."""
         if not hasattr(st, "st_mode"):          # a signature, not a stat
             size, mtime = st
         elif stat.S_ISREG(st.st_mode):
@@ -497,8 +497,7 @@ class Index(object):
             real = os.path.realpath(path)
         except OSError:
             return
-        self._taken[real] = (size, mtime, None if values is None
-                             else (set(values), set(fingerprints)))
+        self._taken[real] = (size, mtime, (set(values), set(fingerprints), whole))
 
     def _adapter_files(self):
         """{resolved path: (size, mtime_ns, path, (source, store))} for
@@ -554,16 +553,21 @@ class Index(object):
                 found[real] = got
         read = {}
         for real, got in found.items():
-            if got is None:
-                continue                # not read whole: what it held is kept
-            values, fingerprints = got
+            values, fingerprints = got[:2]
             held = set()
             for value in values:
                 head, n, full, mask = self._hashes.entry(value)
                 self.values[full] = (head, n, mask)
                 held.add(full)
             masks = {self._hashes.of_mask(fp) for fp in fingerprints}
-            read[real] = (now[real][0], now[real][1], held, masks)
+            if got[2:] == (False,):
+                # Not read whole (clean._read_store): what it held is kept
+                # too, under a size no file has, so it is read again.
+                _size, _mtime, kept, kept_masks = self.files.get(
+                    real, (None, None, frozenset(), frozenset()))
+                read[real] = (-1, -1, held | kept, masks | kept_masks)
+            else:
+                read[real] = (now[real][0], now[real][1], held, masks)
         # A mask keeps the fingerprint of the value it took the place of,
         # so a transcript holding one still holds that value for anything
         # that may show a copy the mask did not reach.

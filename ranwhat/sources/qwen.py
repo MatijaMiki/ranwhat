@@ -560,7 +560,7 @@ class QwenSource(Source):
     def _unreadable(self, store, reason, detail):
         """Warn once per store and count it once per run."""
         if store.path not in self._warned:
-            self.unreadable_store(reason)
+            self.unreadable_store(reason, store.path)
         self.warn(store.path, "cannot read %s (%s)" % (store.path, detail))
 
     def _failed(self, store, error):

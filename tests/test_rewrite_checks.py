@@ -34,6 +34,9 @@ PASSWORD = "pw" '"' "\\" "ä" "&<>" " " "Tq9" "vX2r"
 # 600 levels: both Pythons' json read it, and neither walks it. 2000: 3.9's
 # json cannot read it, 3.14's can.
 DEPTHS = (600, 2000)
+# 3.9 compares JSON in fewer levels than it opens it: from about 330 to 490
+# levels of objects, JSON in a string can be opened and not compared.
+OPENED_NOT_COMPARED = range(100, 1001, 15)
 
 
 def _marker(value):
@@ -118,6 +121,28 @@ class TooDeep(unittest.TestCase):
                 self._refused('{"out":"KEY=%s"}\n{"b":%s,"d":%s}\n'
                               % (SECRET, spaced, _nest(depth)), [SECRET],
                               byte_arrays=True)
+
+    def test_a_string_holding_json_deep_enough_to_open_but_not_to_compare_is_masked(self):
+        """Such a string was opened, then could not be compared, and the
+        file was refused with the key left in it. It is compared as text."""
+        for depth in OPENED_NOT_COMPARED:
+            with self.subTest(depth=depth):
+                doc = '{"out":%s,"s":"KEY=%s"}\n' % (json.dumps(_nest(depth)), SECRET)
+                path = self._write(doc)
+                result = _rewrite.rewrite_file(path, [SECRET], "jsonl")
+                self.assertEqual((result.changed, result.skipped), (True, None))
+                self.assertTrue(self._read(path) == doc.replace(
+                    SECRET, _marker(SECRET)), "a byte other than the secret changed")
+
+    def test_a_key_deleted_beside_json_deep_enough_to_open_but_not_to_compare_is_noticed(self):
+        """Only that string is compared as text: in the JSON of another,
+        a key the mask deletes is still noticed."""
+        value = 'abc","b":"def-' "Qw7Zr"
+        for depth in OPENED_NOT_COMPARED:
+            with self.subTest(depth=depth):
+                self._refused('{"out":%s,"args":%s}\n' % (
+                    json.dumps(_nest(depth)),
+                    json.dumps('{"a":"abc","b":"def-Qw7Zr"}')), [value])
 
     def test_a_line_too_deep_to_walk_is_masked_when_only_its_strings_change(self):
         """Checked without walking it, a deep line whose strings (and, for

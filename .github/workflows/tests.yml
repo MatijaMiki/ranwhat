@@ -14,9 +14,9 @@ jobs:
   unit:
     name: Python ${{ matrix.python }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    # Windows is untested, and the site says so. It runs so that stops being
-    # a guess, but does not fail the build until it has passed once.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    # Windows fails the build like any other runner. Until it had passed once
+    # it was continue-on-error, and a run read green while sixteen tests
+    # failed there.
     strategy:
       fail-fast: false
       matrix:

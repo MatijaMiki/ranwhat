@@ -265,16 +265,25 @@ class Source(object):
         """Start a run: zero the counters and forget earlier warnings."""
         self.counts = dict.fromkeys(COUNTERS, 0)
         self.unreadable = {}        # reason -> number of stores
+        self.unread = set()         # the path of each store counted there
         self._warned = set()
 
     def count(self, counter, n=1):
         self.counts[counter] = self.counts.get(counter, 0) + n
 
-    def unreadable_store(self, reason):
-        """A store that could not be read, and the one-line reason the
-        report gives ("compressed, needs Python 3.14 or the zstd command")."""
+    def unreadable_store(self, reason, path):
+        """A store that could not be read, at `path` (the Store's own, so a
+        report can leave it out of what it read), and the one-line reason
+        the report gives ("compressed, needs Python 3.14 or the zstd
+        command")."""
         self.count("unreadable_stores")
         self.unreadable[reason] = self.unreadable.get(reason, 0) + 1
+        self.unread.add(path)
+
+    def read_of(self, paths):
+        """How many of these stores' paths this run read: those no pass of
+        it, this one or an earlier, counted as a file not read."""
+        return sum(1 for path in paths if path not in self.unread)
 
     def warn(self, key, message):
         """Print a warning on stderr once per key per run."""
@@ -290,7 +299,7 @@ class Source(object):
         can quote what it was reading."""
         key = ("stopped", store.path)
         if key not in self._warned:
-            self.unreadable_store(STOPPED % type(error).__name__)
+            self.unreadable_store(STOPPED % type(error).__name__, store.path)
         self.warn(key, "stopped reading %s %s part way (%s)"
                   % (self.name or self.id, store.path, type(error).__name__))
 

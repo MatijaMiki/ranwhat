@@ -309,7 +309,7 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         root, path = _transcript(self, Masking.BODY)
         os.chmod(path, 0o600)
         scan(root=root, apply=True)
-        self.assertIn("ranwhat:redacted:", open(path, encoding="utf-8").read())
+        self.assertIn("ranwhat:redacted:", _read(path))
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
     @unittest.skipIf(os.name == "nt", "Windows has no owner-only mode bits")
@@ -339,7 +339,7 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         fps = sorted(findings)
         scan_file(path, apply=True, only={fps[0]})
         scan_file(path, apply=True, only={fps[1]})
-        texts = [open(b, encoding="utf-8").read() for b in self._backups()]
+        texts = [_read(b) for b in self._backups()]
         self.assertEqual(len(texts), 2)
         self.assertTrue(any("sup3rS3cretPw" in t and "8f3a9c2e" in t for t in texts),
                         "no backup still holds the fully unmasked original")
@@ -366,7 +366,7 @@ class MaskingDoesNotWidenExposure(unittest.TestCase):
         first = [b for b in self._backups()
                  if os.path.relpath(b, self.root).split(os.sep)[0]
                  == "20260927-120000-000000"]
-        text = open(first[0], encoding="utf-8").read()
+        text = _read(first[0])
         self.assertTrue("sup3rS3cretPw" in text and "8f3a9c2e" in text,
                         "the first backup is not the unmasked original")
 
@@ -667,14 +667,14 @@ class InteractiveReview(unittest.TestCase):
         self.assertEqual(changed, 1)
         self.assertIn("masked in 1 file(s).", out)
         self.assertIn("They still hold every masked value.", out)
-        self.assertEqual(open(path, encoding="utf-8").read().count(
+        self.assertEqual(_read(path).count(
             "ranwhat:redacted:"), 1)
 
     def test_mask_all_finishes_and_counts_the_file(self):
         path, changed, out = self._review("mask all", "quit")
         self.assertEqual(changed, 1)
         self.assertIn("masked in 1 file(s).", out)
-        text = open(path, encoding="utf-8").read()
+        text = _read(path)
         self.assertNotIn("sup3rS3cretPw", text)
         self.assertNotIn("8f3a9c2e1b7d4f6a0c5e8b2d7f1a4c9e", text)
 

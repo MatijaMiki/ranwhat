@@ -385,7 +385,8 @@ class CopilotCliSource(Source):
             key = os.path.normcase(os.path.join(folder, name))
             if key not in self._legacy_seen:
                 self._legacy_seen.add(key)
-                self.unreadable_store(self.legacy_reason)
+                self.unreadable_store(self.legacy_reason,
+                                      os.path.join(folder, name))
 
     @staticmethod
     def _head_project(path):
@@ -458,7 +459,7 @@ class CopilotCliSource(Source):
 
     def _cannot_read(self, store, reason, detail):
         if store.path not in self._warned:
-            self.unreadable_store(reason)
+            self.unreadable_store(reason, store.path)
         self.warn(store.path, "cannot read %s (%s)" % (store.path, detail))
 
     def _call(self, store, name, arguments, mcp, call_id, stamp, project,

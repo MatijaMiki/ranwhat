@@ -2207,7 +2207,8 @@ def _in_window(record, cutoff):
     return when is None or when >= cutoff
 
 
-def scan_all(root=None, since_days=None, limit=None, progress=None, known=None):
+def scan_all(root=None, since_days=None, limit=None, progress=None, known=None,
+             unread=None):
     """Scan every transcript, reporting each distinct action once.
 
     The same tool call appears in more than one transcript -- resumed
@@ -2223,6 +2224,11 @@ def scan_all(root=None, since_days=None, limit=None, progress=None, known=None):
     seconds, and a run that shows nothing for that long looks hung.
 
     `known`, a known.Matcher, is masked in each record as evaluate masks it.
+
+    Returns (records, how many transcripts it read): one this run counted
+    as a file not read (agents.notes names it) is not among them. `unread`,
+    a dict, is then given under "claude-code" how many it went through
+    that were, so a caller can tell none read from none there.
     """
     records, scanned, seen = [], 0, set()
     cutoff = _cutoff(since_days)
@@ -2244,7 +2250,10 @@ def scan_all(root=None, since_days=None, limit=None, progress=None, known=None):
             seen.add(key)
             records.append(record)
     records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
-    return records, scanned
+    read = _claude_source().read_of(paths[:scanned])
+    if unread is not None:
+        unread["claude-code"] = scanned - read
+    return records, read
 
 
 _RANK = {MEDIUM: 0, HIGH: 1, CRITICAL: 2}
@@ -2440,7 +2449,7 @@ TITLE = ("  ranwhat watch  ", "· local agent flight recorder")
 
 
 def render(records, scanned, days, footer=True, locations=None, notes=None,
-           title=TITLE, complete=True):
+           title=TITLE, complete=True, unread=0):
     """`footer=False` is for check, which prints one footer for all sections.
     It gates only the closing rule and footer line, never a finding.
 
@@ -2461,6 +2470,11 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
 
     `notes` are sentences printed under the records: what an agent's
     history held that could not be read (notes()).
+
+    `unread` is how many files the scan found and could not read
+    (scan_sources_counted's). With some, a scan that read nothing is not
+    one that found nothing: its notes say why, under "Nothing flagged",
+    which `complete` keeps from being said of everything.
 
     A record with several hits is headed by its most severe one, and each
     hit's evidence and why print under that hit's own title: a deletion
@@ -2485,7 +2499,7 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
         L = ["", BOLD(name.rstrip()), DIM("  " + tagline[2:])]
     L += [DIM(term.rule("-"))] + head + [""]
     notes = [DIM(line) for note in notes or () for line in term.wrap(note)]
-    if not records and not scanned:
+    if not records and not scanned and not unread:
         L += _nothing_read(days, locations, width)
         return "\n".join(L)
     if not records:
@@ -2637,12 +2651,14 @@ def scan_openclaw_db(path, source="openclaw", known=None, src=None,
 
 
 def scan_openclaw(state_dir=None, since_days=None, known=None, progress=None,
-                  done=0, total=None, dbs=None):
+                  done=0, total=None, dbs=None, unread=None):
     """Every database is read whatever its mtime: a live agent's recent
     rows can sit in its -wal file while the database itself looks old.
     With since_days, each action is kept by its own time, as in scan_all.
     `progress` is called with (done + i, total, path) before the i-th.
-    `dbs` are the databases, when the caller has listed them already."""
+    `dbs` are the databases, when the caller has listed them already.
+    Returns (records, how many databases it read), and fills `unread`,
+    as scan_all does."""
     records, cutoff = [], _cutoff(since_days)
     dbs = openclaw_databases(state_dir) if dbs is None else dbs
     total = done + len(dbs) if total is None else total
@@ -2651,7 +2667,10 @@ def scan_openclaw(state_dir=None, since_days=None, known=None, progress=None,
         if progress:
             progress(done + i, total, db)
         records.extend(scan_openclaw_db(db, known=known, src=src, cutoff=cutoff))
-    return records, len(dbs)
+    read = src.read_of(dbs)
+    if unread is not None:
+        unread["openclaw"] = len(dbs) - read
+    return records, read
 
 
 # The sources watch reads: every adapter in the registry, in its order,
@@ -2710,14 +2729,16 @@ def scan_source(source, stores, since_days=None, known=None, progress=None,
 
 def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
                          since_days=None, progress=None, known=None,
-                         paths=None):
+                         paths=None, unread=None):
     """Scan every requested local agent source into one record stream.
 
     Returns (records, {source: how many it read}): Claude Code transcripts,
     OpenClaw databases, and each other agent's transcripts (its sessions,
-    in its own words). A store found to be unreadable as it is read is
-    still counted: the adapter counts it once a run, whichever pass met it
-    first, so this pass cannot tell it apart (agents.notes names it). Zero
+    in its own words). A store this run counted as a file not read, in this
+    pass or an earlier one, is not among them (agents.notes names it), and
+    `unread`, a dict, is given how many of each agent's there were, so a
+    caller can tell a scan that could read none of what it found from one
+    that found nothing. Zero
     read is not an all-clear: locations() says whether there was anything
     to read at all. `progress` is scan_all's, counting every source's
     transcripts together, and `known` (a known.Matcher) is masked in every
@@ -2730,6 +2751,7 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
     root = root or paths.get("claude-code")
     state_dir = state_dir or paths.get("openclaw")
     records, counts = [], {}
+    unread = {} if unread is None else unread
     # Only the agents with transcripts to read are counted: one that is
     # not on this machine is not named in the report.
     others = []
@@ -2749,19 +2771,22 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
             def step(i, total, path):
                 progress(i, total + extra, path)
         recs, counts["claude-code"] = scan_all(root=root, since_days=since_days,
-                                               progress=step, known=known)
+                                               progress=step, known=known,
+                                               unread=unread)
         records += recs
-        done = counts["claude-code"]
+        done = counts["claude-code"] + unread.get("claude-code", 0)
     for source, stores in others:
         records += scan_source(source, stores, since_days, known, progress,
                                done, done + extra)
-        counts[source.id] = len(stores)
+        counts[source.id] = source.read_of(store.path for store in stores)
+        unread[source.id] = len(stores) - counts[source.id]
         done += len(stores)
         extra -= len(stores)
     if "openclaw" in sources:
         recs, counts["openclaw"] = scan_openclaw(
             state_dir=state_dir, since_days=since_days, known=known,
-            progress=progress, done=done, total=done + extra, dbs=databases)
+            progress=progress, done=done, total=done + extra, dbs=databases,
+            unread=unread)
         records += recs
     records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
     return records, counts

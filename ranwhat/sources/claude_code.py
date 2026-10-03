@@ -165,7 +165,7 @@ class ClaudeCodeSource(Source):
         one is None: an object there could not be told apart from another."""
         project, session = place(store.path)
         for entry, block in tool_uses(store.path,
-                                      lambda e: self._unopened(store, e)):
+                                      lambda e: self.unopened(store, e)):
             tool = block.get("name", "?")
             if not isinstance(tool, str):
                 tool = "?"
@@ -175,15 +175,16 @@ class ClaudeCodeSource(Source):
                            timestamp=stamp if isinstance(stamp, str) else None,
                            tool_call_id=block.get("id"))
 
-    def _unopened(self, store, error):
+    def unopened(self, store, error):
         """A transcript that cannot be opened: counted once a run as a file
-        not read, and warned about once. One deleted since it was listed (as
-        Claude Code deletes old ones) has nothing left to read."""
+        not read, and warned about once, whether watch or clean (which
+        reads transcripts itself) met it. One deleted since it was listed
+        (as Claude Code deletes old ones) has nothing left to read."""
         if isinstance(error, FileNotFoundError):
             return
         reason = error.strerror or type(error).__name__
         if ("open", store.path) not in self._warned:
-            self.unreadable_store(reason)
+            self.unreadable_store(reason, store.path)
         self.warn(("open", store.path), "could not read Claude Code "
                   "transcript %s (%s)" % (store.path, reason))
 

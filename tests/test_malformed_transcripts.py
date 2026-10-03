@@ -219,6 +219,8 @@ class APipeClosedEarly(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     child.kill()
                     raise AssertionError("still running after %ds" % HANG)
+                finally:
+                    child.stderr.close()
                 self.assertNotIn("Traceback", err)
                 self.assertNotIn("BrokenPipeError", err)
 

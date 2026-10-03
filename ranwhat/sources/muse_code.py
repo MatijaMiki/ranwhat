@@ -513,7 +513,7 @@ class MuseCodeSource(Source):
     def _bad_store(self, store, reason):
         if store.path not in self._bad:
             self._bad.add(store.path)
-            self.unreadable_store(reason)
+            self.unreadable_store(reason, store.path)
         self.warn(store.path, "could not read Muse Code %s %s (%s)"
                   % (store.unit, store.path, reason))
 

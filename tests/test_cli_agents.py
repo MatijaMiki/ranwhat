@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -35,7 +36,7 @@ sys.path.insert(0, TESTS)
 
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 import agents_fixtures as af  # noqa: E402
-from ranwhat import clean, cli, sources, term  # noqa: E402
+from ranwhat import agents, clean, cli, sources, term  # noqa: E402
 from ranwhat.sources import _paths, _rewrite  # noqa: E402
 
 
@@ -787,6 +788,50 @@ class Reports(_Cli):
                     self.assertNotIn("error:", err)
                     self.assertFits(out, int(width))
                     self.assertNotIn("—", out + err)
+
+
+class WhatWasNotReadIsNotCountedRead(_Cli):
+    """A store found unreadable was counted among those read: "Read Codex:
+    2 sessions" above "1 Codex file was not read". The adapter counted it
+    once a run and never said which store it was."""
+
+    def test_every_report_counts_only_what_it_read(self):
+        """No report says a file was not read and counts it as read. Every
+        reader of actions notes the garbage store, so watch, and check's
+        watch section (its first header), read one. A reader of secrets
+        that searches a line that is not JSON as text (Kimi CLI's) read
+        both, and notes neither."""
+        for agent in af.AGENTS:
+            root = self.agent_root(agent)
+            agent.write(root, _calls(self.now)[:1])
+            agent.garbage(root)
+            name = sources.get(agent.id).name
+            for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+                with self.subTest(agent=agent.id, argv=argv):
+                    rc, out, err = self.run_cli(*(argv + self.only(agent, root)))
+                    said = " ".join(out.split())
+                    self.assertEqual(rc, 0, err)
+                    noted = "1 %s file was not read" % name in said
+                    if argv[0] != "clean":
+                        self.assertTrue(noted, said)
+                    read = int(re.search(r"Read %s: (\d+)" % re.escape(name),
+                                         said).group(1))
+                    self.assertEqual(read, 1 if noted else 2, said)
+
+    def test_with_nothing_read_the_report_says_why(self):
+        """Only the unreadable store: not "no transcripts found"."""
+        agent = af.AGENTS[0]
+        root = self.agent_root(agent)
+        agent.garbage(root)
+        name = sources.get(agent.id).name
+        for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_cli(*(argv + self.only(agent, root)))
+                said = " ".join(out.split())
+                self.assertEqual(rc, 0, err)
+                self.assertNotIn("nothing was checked", said)
+                self.assertNotIn("Read %s" % name, said)
+                self.assertIn("1 %s file was not read" % name, said)
 
 
 class AllReadOnlyWhenItWas(_Cli):

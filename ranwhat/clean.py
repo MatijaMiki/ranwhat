@@ -1869,13 +1869,13 @@ def values_in(path):
 
 def values_in_store(source, store):
     """values_in, for a file of an agent read through its adapter: (every
-    value the rules find in it, the fingerprint each mask in it keeps), or
-    None when it cannot be read whole (_read_store)."""
+    value the rules find in it, the fingerprint each mask in it keeps,
+    whether it was read whole: _read_store), or None when it is gone."""
     if not os.path.exists(store.path):
         return None
     values = {}
     findings, masks, whole = _read_store(source, store, values)
-    return ({values[fp] for fp in findings}, masks) if whole else None
+    return {values[fp] for fp in findings}, masks, whole
 
 
 def mask_known(text, values):
@@ -2415,7 +2415,9 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
                     rewritten.append(written)
                 else:
                     rewritten.append(line)
-    except OSError:
+    except OSError as error:
+        claude = _registry.get("claude-code")
+        claude.unopened(claude.store_at(path), error)
         return {}, False
     if read is not None:
         read(set(values.values()), masks)
@@ -2682,8 +2684,12 @@ def _backup(path):
 
 
 def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
-         known=None, copies=True, read=None, remember=None, skipped=None):
-    """Scan every transcript. Returns (merged_findings, files_scanned, files_changed).
+         known=None, copies=True, read=None, remember=None, skipped=None,
+         unread=None):
+    """Scan every transcript. Returns (merged_findings, files_read, files_changed):
+    a transcript this run counted as a file not read (agents.notes names it)
+    is not among those read, and `unread`, a dict, is given under
+    "claude-code" how many there were.
 
     `progress` is called with (index, total, path) before each file. A large
     history takes a couple of minutes, and a run that prints nothing for that
@@ -2727,7 +2733,10 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
                                      remember=remember, skipped=skipped)
     if known is not None:
         known.update(values)
-    return merged, scanned, changed_files
+    files_read = _registry.get("claude-code").read_of(paths)
+    if unread is not None:
+        unread["claude-code"] = len(paths) - files_read
+    return merged, files_read, changed_files
 
 
 def _merge(merged, findings, only=None):
@@ -2835,6 +2844,7 @@ class Searched(object):
         self.findings = {}          # fingerprint -> finding
         self.counts = {}            # source id -> transcripts searched
         self.others = {}            # source id -> other files searched
+        self.unread = {}            # source id -> files found, not read
         self.changed = []           # files masked
         self.read_only = {}         # read-only file holding a finding -> Store
         self.skipped = {}           # file not masked -> (source id, why)
@@ -2845,6 +2855,12 @@ class Searched(object):
     def scanned(self):
         """Every file searched, all agents together."""
         return sum(self.counts.values()) + sum(self.others.values())
+
+    @property
+    def found(self):
+        """Every file there was to search, read or not: none means there
+        was nothing to read, not that nothing could be."""
+        return self.scanned + sum(self.unread.values())
 
 
 def _origin_of(text):
@@ -2952,13 +2968,14 @@ def _holding(texts, values):
 def _read_store(source, store, values):
     """scan_store, and whether the store was read whole: not when it
     cannot be opened, or its adapter counted it as a file not read
-    (Source.unreadable_store, Source.stopped). What the index knew of one
-    that was not is kept, and it is read again next run: indexed as
-    holding what was read of it, its passwords were printed whole until
-    it next changed."""
-    before = source.counts.get("unreadable_stores", 0)
+    (Source.unreadable_store, Source.stopped) in this pass or an earlier
+    one of the run. The index keeps what was read of one that was not
+    beside what it knew of it, and reads it again next run. Indexed as
+    holding only what was read, its passwords were printed whole until it
+    next changed; dropped, so were those of one an adapter searched only
+    as text, or stops on at the same place each time."""
     findings, masks = scan_store(source, store, values)
-    whole = source.counts.get("unreadable_stores", 0) == before
+    whole = store.path not in source.unread
     try:
         with open(store.path, "rb"):
             pass
@@ -3069,8 +3086,8 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     compressed file, or one written to in the last two minutes is left as
     it is, and said so (read_only, skipped). `progress`, `known`, `read`
     and `remember` are scan's, for every agent's files: `read` is called
-    with (path, its signature or os.stat, values, mask fingerprints), the
-    last two None for a file of another agent not read whole."""
+    with (path, its signature or os.stat, values, mask fingerprints), and
+    for a file of another agent whether it was read whole (_read_store)."""
     paths = dict(paths or {})
     root = root or paths.get("claude-code") or CLAUDE_PROJECTS
     selected = list(_registry.ids() if sources is None else sources)
@@ -3093,18 +3110,18 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                 progress(i, total + extra, path)
         merged, scanned, changed = scan(root, since_days, apply=apply,
                                         progress=step, known=values, read=read,
-                                        remember=remember, skipped=held)
+                                        remember=remember, skipped=held,
+                                        unread=out.unread)
         _claude_code_keys(merged)
         out.findings.update(merged)
-        out.counts["claude-code"] = done = scanned
+        out.counts["claude-code"] = scanned
+        done = scanned + out.unread.get("claude-code", 0)
         out.changed += list(changed or ())
         claude_paths = discover(root, since_days) if scanned else []
     total = done + extra
     by_id = {}
     for source, stores in others:
         by_id[source.id] = source
-        out.counts[source.id] = len(agents.transcripts(stores))
-        out.others[source.id] = len(stores) - out.counts[source.id]
         for store in stores:
             done += 1
             if progress:
@@ -3113,10 +3130,16 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
             signed = agents.signature(store.path, store.format)
             findings, masks, whole = _read_store(source, store, values)
             if read is not None and signed is not None:
-                read(store.path, signed,
-                     {values[fp] for fp in findings} if whole else None,
-                     masks if whole else None)
+                read(store.path, signed, {values[fp] for fp in findings}, masks,
+                     whole)
             _merge(out.findings, findings)
+        # Counted once read: a store found unreadable is not one read.
+        out.counts[source.id] = source.read_of(
+            s.path for s in agents.transcripts(stores))
+        out.others[source.id] = source.read_of(
+            s.path for s in stores if s.role != "transcript")
+        out.unread[source.id] = (len(stores) - out.counts[source.id]
+                                 - out.others[source.id])
 
     if out.findings and out.stores:
         _copies_in_stores(list(out.stores.values()), out.findings, values, by_id)

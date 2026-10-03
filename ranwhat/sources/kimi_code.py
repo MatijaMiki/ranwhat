@@ -607,7 +607,7 @@ class KimiCodeSource(Source):
         key = ("unreadable", _key(store.path))
         if key in self._warned:
             return
-        self.unreadable_store(reason)
+        self.unreadable_store(reason, store.path)
         self.warn(key, "could not read Kimi Code %s %s (%s)"
                   % (store.unit if store.role == "transcript" else "file",
                      store.path, reason))
