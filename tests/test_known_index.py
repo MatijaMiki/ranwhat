@@ -939,6 +939,67 @@ class CheckReadsEachTranscriptOnce(_Index):
         self.assertNeverShown(root, PW2)
 
 
+@unittest.skipIf(os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+                 "mode 000 keeps the owner out only off Windows, and not root")
+class AStoreThatCouldNotBeReadIsReadAgain(_Index):
+    """An agent's file that could not be read was indexed as holding no
+    secrets, under its size and time. Made readable again, unchanged, it
+    was never read again: watch printed a password clean finds in it
+    whole, on every run, wherever a command typed it."""
+
+    def setUp(self):
+        _Index.setUp(self)
+        import agents_fixtures as af
+        home = _tempdir(self, "known-agents-home-")
+        for patch in (mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}),
+                      mock.patch("ranwhat.sources._paths.home", return_value=home)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        for name in af.AGENT_ENV:
+            os.environ.pop(name, None)          # restored by patch.dict
+        self.codex = af.AGENTS[0]
+        self.codex_root = self.codex.root(home)
+        self.rollout = self.codex.write(self.codex_root, [
+            ("c1", "shell", "cat .env", "DB_PASSWORD=%s\n" % PW, time.time() - 3000)])
+        self.addCleanup(os.chmod, self.rollout, 0o600)
+
+    def test_by_watch_or_by_check(self):
+        for first in ("watch", "check"):
+            with self.subTest(first=first):
+                self.state = _tempdir(self, "known-oc-")
+                root, project = self.root()
+                _write(os.path.join(project, "sessB.jsonl"), _typed(2, PW, 600), 600)
+                where = ["--root", root, "--state-dir", self.state,
+                         "--path", "codex=" + self.codex_root]
+                os.chmod(self.rollout, 0)
+                _run([first, "--json"] + where)
+                os.chmod(self.rollout, 0o600)
+                _rc, out, err = _run(["watch", "--json"] + where)
+                self.assertNotIn(PW, out + err)
+                self.assertIn(clean.DISPLAY_MASK % clean._hint(PW), _shown(out))
+
+    def test_one_read_part_way_keeps_what_the_index_knew_of_it(self):
+        from ranwhat import agents, sources
+        source = sources.get("codex")
+        (store,) = [s for s in agents.discover(source, self.codex_root)[1]
+                    if s.path == self.rollout]
+        self.assertEqual(clean.values_in_store(source, store), ({PW}, set()))
+        real = type(source).secret_texts
+
+        def stops(self_, store_):
+            for text in real(self_, store_):
+                yield text
+                raise ValueError("a format it does not know")
+        with mock.patch.object(type(source), "secret_texts", stops), \
+             mock.patch("sys.stderr", io.StringIO()):
+            source.reset()
+            self.assertIsNone(clean.values_in_store(source, store))
+        os.chmod(self.rollout, 0)
+        source.reset()
+        with mock.patch("sys.stderr", io.StringIO()):
+            self.assertIsNone(clean.values_in_store(source, store))
+
+
 class TheIndexKeepsAShortTag(_Index):
     """The index kept a keyed hash of each value's first six characters,
     with the key beside it: whoever reads the two could find those six on

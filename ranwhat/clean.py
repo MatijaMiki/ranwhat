@@ -1868,12 +1868,12 @@ def values_in(path):
 def values_in_store(source, store):
     """values_in, for a file of an agent read through its adapter: (every
     value the rules find in it, the fingerprint each mask in it keeps), or
-    None when it cannot be read."""
+    None when it cannot be read whole (_read_store)."""
     if not os.path.exists(store.path):
         return None
     values = {}
-    findings, masks = scan_store(source, store, values)
-    return {values[fp] for fp in findings}, masks
+    findings, masks, whole = _read_store(source, store, values)
+    return ({values[fp] for fp in findings}, masks) if whole else None
 
 
 def mask_known(text, values):
@@ -2896,6 +2896,24 @@ def scan_store(source, store, values):
     return findings, masks
 
 
+def _read_store(source, store, values):
+    """scan_store, and whether the store was read whole: not when it
+    cannot be opened, or its adapter counted it as a file not read
+    (Source.unreadable_store, Source.stopped). What the index knew of one
+    that was not is kept, and it is read again next run: indexed as
+    holding what was read of it, its passwords were printed whole until
+    it next changed."""
+    before = source.counts.get("unreadable_stores", 0)
+    findings, masks = scan_store(source, store, values)
+    whole = source.counts.get("unreadable_stores", 0) == before
+    try:
+        with open(store.path, "rb"):
+            pass
+    except OSError:
+        whole = False
+    return findings, masks, whole
+
+
 # The files a search for copies reads as text. A database or a compressed
 # file is searched by its adapter only.
 _STORE_SEARCH_FORMATS = ("jsonl", "json", "text")
@@ -2982,7 +3000,8 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     compressed file, or one written to in the last two minutes is left as
     it is, and said so (read_only, skipped). `progress`, `known`, `read`
     and `remember` are scan's, for every agent's files: `read` is called
-    with (path, its signature or os.stat, values, mask fingerprints)."""
+    with (path, its signature or os.stat, values, mask fingerprints), the
+    last two None for a file of another agent not read whole."""
     paths = dict(paths or {})
     root = root or paths.get("claude-code") or CLAUDE_PROJECTS
     selected = list(_registry.ids() if sources is None else sources)
@@ -3023,10 +3042,11 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                 progress(done, total, store.path)
             out.stores[store.path] = store
             signed = agents.signature(store.path, store.format)
-            findings, masks = scan_store(source, store, values)
+            findings, masks, whole = _read_store(source, store, values)
             if read is not None and signed is not None:
                 read(store.path, signed,
-                     {values[fp] for fp in findings}, masks)
+                     {values[fp] for fp in findings} if whole else None,
+                     masks if whole else None)
             _merge(out.findings, findings)
 
     if out.findings and out.stores:

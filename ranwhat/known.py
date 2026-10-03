@@ -484,7 +484,9 @@ class Index(object):
         read, or for another agent's file its agents.signature. update
         keeps this in place of a read of its own while the transcript is
         still that size and that age: one written to since is read again,
-        so nothing it gained in the meantime is missed."""
+        so nothing it gained in the meantime is missed. values None: clean
+        could not read it whole, and what update knew of it is kept, as of
+        one it cannot read itself, and it is read again next run."""
         if not hasattr(st, "st_mode"):          # a signature, not a stat
             size, mtime = st
         elif stat.S_ISREG(st.st_mode):
@@ -495,7 +497,8 @@ class Index(object):
             real = os.path.realpath(path)
         except OSError:
             return
-        self._taken[real] = (size, mtime, set(values), set(fingerprints))
+        self._taken[real] = (size, mtime, None if values is None
+                             else (set(values), set(fingerprints)))
 
     def _adapter_files(self):
         """{resolved path: (size, mtime_ns, path, (source, store))} for
@@ -537,7 +540,7 @@ class Index(object):
         for real in stale:
             taken = self._taken.get(real)
             if taken is not None and taken[:2] == now[real][:2]:
-                found[real] = taken[2:]
+                found[real] = taken[2]
         self._taken.clear()
         unread = [real for real in stale if real not in found]
         for i, real in enumerate(unread, 1):
@@ -550,7 +553,10 @@ class Index(object):
             if got is not None:         # unreadable now: what it held is kept
                 found[real] = got
         read = {}
-        for real, (values, fingerprints) in found.items():
+        for real, got in found.items():
+            if got is None:
+                continue                # not read whole: what it held is kept
+            values, fingerprints = got
             held = set()
             for value in values:
                 head, n, full, mask = self._hashes.entry(value)
