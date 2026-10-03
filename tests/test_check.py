@@ -970,6 +970,22 @@ class TheRootIsTheProjectsDirectory(_Base):
         self.assertEqual(rc, 0)
         self.assertEqual(len(json.loads(out)["secrets"]), 1)
 
+    def test_the_hint_typed_back_reads_it(self):
+        """The hint names a path in the home directory under ~, and cmd,
+        PowerShell and a quoted word hand ~ on as it is: typed back, the
+        suggested --root read a directory named ~ and found nothing."""
+        config, projects, st = self.config()
+        home = os.path.dirname(config)
+        with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home,
+                                          "RANWHAT_WIDTH": "400"}):
+            _, out, _ = self.run_cli(["check", "--root", config, "--state-dir", st])
+            word = re.search(r"--root (\S+) or set", out).group(1)
+            self.assertTrue(word.startswith("~"), word)
+            rc, out, _ = self.run_cli(["check", "--json", "--root", word,
+                                       "--state-dir", st])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(json.loads(out)["actions"]), 1)
+
     def test_the_hint_says_which_directory_each_takes(self):
         """With nothing under the path at all, the hint still tells --root
         from CLAUDE_CONFIG_DIR."""
