@@ -683,10 +683,9 @@ class InteractiveReview(unittest.TestCase):
         self.assertEqual(changed, 2)
 
 
-class ReviewingAnotherAgentsFiles(unittest.TestCase):
-    """What the review says when it masks a finding in another agent's
-    files, and what it keeps for later. Every value is synthetic, in a
-    home that holds no agent's own history."""
+class _AgentsHome(unittest.TestCase):
+    """A home that holds no agent's own history, with backups beside it.
+    Every value is synthetic."""
 
     TOKEN = "gh" "p_" "Zq8Lm3Np5Rt7Vx9Bc2Df4Gh6Jk1Wy0Ea3Su"
     PASSWORD = "Vq7Lx2Rk9Tz4Wm8Pn3"
@@ -705,6 +704,11 @@ class ReviewingAnotherAgentsFiles(unittest.TestCase):
             self.addCleanup(patch.stop)
         for name in af.AGENT_ENV:
             os.environ.pop(name, None)          # restored by patch.dict
+
+
+class ReviewingAnotherAgentsFiles(_AgentsHome):
+    """What the review says when it masks a finding in another agent's
+    files, and what it keeps for later."""
 
     def _review(self, agent, root, *commands):
         searched = clean.scan_sources(sources=[agent.id], paths={agent.id: root})
@@ -768,6 +772,71 @@ class ReviewingAnotherAgentsFiles(unittest.TestCase):
         self.assertIn("masked in 1 file(s).", out)
         self.assertIn("If Gemini CLI is open in this project, close it first", out)
         self.assertNotIn(self.TOKEN, out)
+
+
+class CopiesInAnotherAgentsFiles(_AgentsHome):
+    """A value is counted and masked in an agent's file wherever it is,
+    as in a Claude Code transcript."""
+
+    def _claude(self, rows):
+        root = os.path.join(self.home, "claude")
+        af.write(os.path.join(root, "-tmp-app", "s.jsonl"), [json.dumps(r) for r in rows])
+        return root
+
+    def test_seen_as_often_in_a_rollout_as_in_a_transcript(self):
+        """The same two calls, a .env read and the password echoed, were
+        seen 2x in a Claude Code transcript and 1x in a Codex rollout."""
+        calls = [("c1", "shell", "cat api/.env", "DB_PASSWORD=%s\n" % self.PASSWORD,
+                  time.time() - 3000),
+                 ("c2", "shell", "echo %s > y" % self.PASSWORD, "", time.time() - 2990)]
+        codex = af.AGENTS[0]
+        root = codex.root(self.home)
+        codex.write(root, calls)
+        claude = self._claude([
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": cid, "name": "Bash",
+                 "input": {"command": command}}]}} for cid, _k, command, _o, _w in calls]
+            + [{"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "c1",
+                 "content": calls[0][3]}]}}])
+        counts = []
+        for source, paths in (("claude-code", {"claude-code": claude}),
+                              ("codex", {"codex": root})):
+            searched = clean.scan_sources(sources=[source], paths=paths)
+            (finding,) = searched.findings.values()
+            counts.append(finding["count"])
+        self.assertEqual(counts, [2, 2])
+
+    def test_one_in_a_grok_byte_list_is_found_and_masked(self):
+        """Grok Build keeps a command's whole output only as a list of its
+        bytes, and as text just its last lines. A value found in another
+        agent's files was looked for there only as text."""
+        import test_source_grok as gk
+        grok = af.AGENTS[4]
+        root = grok.root(self.home)
+        path = grok.write(root, [("g1", "shell", "./build.sh", "", time.time() - 3000)])
+        with open(path, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh]
+        output = "%s\n%s" % (self.PASSWORD, "built\n" * 20)
+        rows[-1]["params"]["update"].update(
+            rawOutput=gk.bash_output(output, "./build.sh", prompt=False),
+            content=gk.text_content("built\n" * 10))
+        af.write(path, [gk.line(r) for r in rows])
+        with open(path, encoding="utf-8") as fh:
+            self.assertNotIn(self.PASSWORD, fh.read())
+        claude = self._claude([{"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": "DB_PASSWORD=%s\n" % self.PASSWORD}]}}])
+        searched = clean.scan_sources(sources=["claude-code", "grok"],
+                                      paths={"claude-code": claude, "grok": root},
+                                      apply=True)
+        (finding,) = searched.findings.values()
+        self.assertEqual(sorted(finding["sources"]), ["claude-code", "grok"])
+        self.assertIn(path, searched.changed)
+        with open(path, encoding="utf-8") as fh:
+            masked = [json.loads(line) for line in fh][-1]
+        held = bytes(masked["params"]["update"]["rawOutput"]["output"])
+        self.assertNotIn(self.PASSWORD.encode(), held)
+        self.assertIn(b"ranwhat:redacted:", held)
 
 
 class EveryCopyIsMasked(unittest.TestCase):

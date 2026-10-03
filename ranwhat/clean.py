@@ -2888,9 +2888,14 @@ def scan_store(source, store, values):
     it, once, with the files it was read out of. `values`
     ({fingerprint: value}) is given each value found. Never raises: an
     adapter that fails part way warns, and what it gave until then is
-    kept."""
+    kept.
+
+    A value found is counted in every string of the store that holds it,
+    whether or not the rules find it there, as scan_file counts one in a
+    transcript: the same history was seen fewer times in a rollout."""
     findings = {}
     masks = set()
+    strings = []
     origin_now = [None]
     lines_now = [None]
 
@@ -2915,12 +2920,33 @@ def scan_store(source, store, values):
             origin_now[0] = _origin_of(text)
             lines_now[0] = None
             for _container, _key, string_ in _strings(text.node):
+                strings.append(string_)
                 if _MASK_MARK in string_:
                     masks.update(_MASKS.findall(string_))
             _walk(text.node, collect)
     except Exception as error:          # one adapter must not stop the others
         source.stopped(store, error)
+    for fp, n in _holding(strings, {fp: values[fp] for fp in findings}).items():
+        findings[fp]["count"] = max(findings[fp]["count"], n)
     return findings, masks
+
+
+def _holding(texts, values):
+    """{fingerprint: how many of `texts` hold its value}, for `values`
+    ({fingerprint: value}), every value looked for in one pass over them
+    (_rewrite._Forms): asked one at a time, a rollout of 2,700 keys was
+    read 2,700 times."""
+    from .sources import _rewrite
+    if not texts or not values:
+        return {}
+    forms = _rewrite._Forms.raw([(v, fp) for fp, v in values.items()])
+    every = _Strings(texts)
+    held = set()
+    for start, fid in forms.occurrences(every.joined):
+        k = bisect.bisect_right(every.starts, start) - 1
+        if start + len(forms.forms[fid]) <= every.starts[k] + len(every.texts[k]):
+            held.add((fid, k))
+    return collections.Counter(forms.entries[fid][0][1] for fid, _k in held)
 
 
 def _read_store(source, store, values):
@@ -2950,9 +2976,10 @@ def _copies_in_stores(stores, merged, values, sources_by_id):
     """Count each value of `merged` in the files of `stores` where the
     rules did not find it: typed into a command with nothing beside it, or
     quoted in a reply. Each file is read once, as text, and each value
-    looked for in every form it can take there (_rewrite.encodings), in
-    the budget _copies_in_other_transcripts spends on Claude Code's.
-    Databases and compressed files are not read this way."""
+    looked for in every form it can take there (_rewrite.encodings, and
+    for an agent that keeps text as lists of bytes, Grok Build, that
+    list), in the budget _copies_in_other_transcripts spends on Claude
+    Code's. Databases and compressed files are not read this way."""
     from .sources import _rewrite
     order = sorted((fp for fp, f in merged.items()
                     if fp in values and f["label"] not in _SHAPE_LABELS),
@@ -2970,6 +2997,7 @@ def _copies_in_stores(stores, merged, values, sources_by_id):
     forms = {}
     for store in stores:
         content = None
+        listed = sources_by_id[store.source].byte_arrays
         for fp in order:
             if store.path in merged[fp]["files"]:
                 continue
@@ -2981,16 +3009,30 @@ def _copies_in_stores(stores, merged, values, sources_by_id):
                     break
             if fp not in forms:
                 forms[fp] = _rewrite.encodings(values[fp])
-            budget -= len(forms[fp]) * len(content) + _CROSS_LOOK
+            budget -= (len(forms[fp]) + listed) * len(content) + _CROSS_LOOK
             if budget < 0:
                 return
-            if any(form in content for form in forms[fp]):
+            if (any(form in content for form in forms[fp])
+                    or listed and _in_byte_list(content, values[fp])):
                 entry = merged[fp]
                 for key in ("sources", "read_only"):
                     entry.setdefault(key, set())
                 entry.setdefault("stores", {})
                 _held_by(entry, sources_by_id[store.source], store)
                 entry["count"] += 1
+
+
+def _in_byte_list(content, value):
+    """True when content holds value's UTF-8 bytes as whole items of a
+    JSON list of integers, as _rewrite masks them there."""
+    from .sources import _rewrite
+    items = _rewrite._byte_list(value)
+    at = content.find(items)
+    while at != -1:
+        if _rewrite._between_items(content, at, at + len(items)):
+            return True
+        at = content.find(items, at + 1)
+    return False
 
 
 def _claude_code_keys(findings):
