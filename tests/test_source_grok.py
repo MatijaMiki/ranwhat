@@ -1265,14 +1265,29 @@ class SideCopies(_Home):
         monitor = [envelope(1790000120, tool_call("m1", "monitor", {
             "command": "tail -f app.log", "description": "watch"}, kind="monitor"), "em")]
         done = shell_lines("fg", "cat .env", 1790000130)
-        folder = self.session(updates=started_bg + moved + monitor + done, extra={
+
+        def moved_by_grok(call_id, t, summary):
+            # a foreground run moved by Ctrl+G or by running past its wait
+            # (bash/mod.rs): the input says foreground, only the output
+            # says it moved
+            return shell_lines(call_id, "npm start", t)[:2] + [
+                envelope(t + 1, finished(call_id, {
+                    "type": "BackgroundTaskStarted", "task_id": call_id,
+                    "task_type": "bash", "output_file": "terminal/%s.log" % call_id,
+                    "status": "running", "command": "npm start", "summary": summary,
+                    "retrieval_hint": ""}, text_content(summary)), "e-%s-3" % call_id)]
+        ctrl_g = moved_by_grok("bg3", 1790000140, "User moved command \"npm start\" "
+                               "to background. Process is still running.")
+        waited = moved_by_grok("bg4", 1790000150, "npm start is still running")
+        folder = self.session(updates=started_bg + moved + monitor + done + ctrl_g
+                              + waited, extra={
             "terminal/%s.log" % name: self.LOG
-            for name in ("bg1", "bg2", "monitor-m1", "fg")})
+            for name in ("bg1", "bg2", "bg3", "bg4", "monitor-m1", "fg")})
         results = {}
-        for name in ("bg1", "bg2", "monitor-m1", "fg"):
+        for name in ("bg1", "bg2", "bg3", "bg4", "monitor-m1", "fg"):
             store = self.store(folder, os.path.join("terminal", name + ".log"))
             results[name] = self.src.mask(store, [SECRET])
-        for name in ("bg1", "bg2", "monitor-m1"):
+        for name in ("bg1", "bg2", "bg3", "bg4", "monitor-m1"):
             self.assertEqual(results[name].skipped, "in use", name)
             self.assertEqual(_read(os.path.join(folder, "terminal", name + ".log")),
                              self.LOG.encode("utf-8"))

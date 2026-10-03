@@ -372,7 +372,7 @@ class _Pending(object):
         self.content = None         # the text of content[]
         self.fallback = None        # FileContent.content, tool_output_for_prompt
         self.bash_mode = call_id.startswith(BASH_MODE_ID_PREFIX)
-        self.backgrounded = False   # rawOutput.signal "backgrounded"
+        self.backgrounded = False   # the output says it moved to the background
 
     def start(self, envelope, params, update):
         """The step-1 `tool_call` line: name, time and session come from it
@@ -415,7 +415,10 @@ class _Pending(object):
         out = update.get("rawOutput")
         if not isinstance(out, dict):
             return
-        if out.get("signal") == "backgrounded":
+        # A foreground run moved there by Ctrl+G or by running past its wait
+        # ends in BackgroundTaskStarted (bash/mod.rs), its input unchanged.
+        if (out.get("signal") == "backgrounded"
+                or out.get("type") == "BackgroundTaskStarted"):
             self.backgrounded = True
         self.out_dir = _text(out.get("current_dir")) or self.out_dir
         found = _dict(out.get("FileContent"))
