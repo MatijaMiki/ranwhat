@@ -88,8 +88,9 @@ def _connect(uri):
 def _wal_state(path):
     """For a database in WAL mode (byte 18 or 19 of its header is 2):
     "no wal" when its -wal is not there, "no shm" when its -wal is but its
-    -shm is not. None when it has both, is not in WAL mode, or cannot be
-    read here.
+    -shm is not. "empty" for a file with no bytes: SQLite deletes a -wal it
+    finds beside one, even on a read-only connection. None when it has
+    both, is not in WAL mode, or cannot be read here.
 
     An agent's SQLite removes both on a clean close. Opened mode=ro then,
     stock SQLite makes them in the agent's folder (a file the agent may not
@@ -100,6 +101,8 @@ def _wal_state(path):
             head = fh.read(20)
     except OSError:
         return None
+    if not head:
+        return "empty"
     if len(head) < 20 or not head.startswith(SQLITE_MAGIC):
         return None
     if 2 not in (head[18], head[19]):
@@ -132,7 +135,8 @@ def open_readonly(path):
     Moved from watch._open_readonly. Nothing is ever made beside the
     database: one in WAL mode with no -wal holds all it has in itself, and
     is opened immutable=1 as well, so SQLite neither looks for nor makes a
-    -wal or a -shm. When the read-only open fails (the agent holds a lock,
+    -wal or a -shm. So is an empty file, which holds nothing to read and
+    beside which SQLite would delete a -wal. When the read-only open fails (the agent holds a lock,
     or a WAL database whose -shm cannot be made), or a -wal has no -shm
     beside it, the database, -wal and -shm are copied to a fresh ranwhat-*
     temp directory and the copy is opened instead, mode=rw, as ranwhat's
@@ -142,7 +146,7 @@ def open_readonly(path):
     the first query, and the caller's warning names the reason."""
     state = _wal_state(path)
     if state != "no shm":
-        conn = _probe(_uri(path, immutable=state == "no wal"))
+        conn = _probe(_uri(path, immutable=state in ("no wal", "empty")))
         if conn is not None:
             return conn, None
     tmp = tempfile.mkdtemp(prefix="ranwhat-")

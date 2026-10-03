@@ -849,6 +849,25 @@ class Sqlite(unittest.TestCase):
         self.assertEqual([r["id"] for r in rows], ["p0", "p1", "p2", "p3"])
         self.assertEqual(self._listing(folder), before)
 
+    def test_an_empty_database_keeps_the_wal_beside_it(self):
+        """SQLite deletes a -wal it finds beside an empty database, even on
+        a read-only connection. Nothing can be read from either, so the
+        empty file is opened immutable=1, which never looks for a -wal."""
+        for keep in (("-shm",), ()):
+            with self.subTest(keep=keep):
+                folder = tempfile.mkdtemp(dir=self.root)
+                path = os.path.join(folder, "agent.sqlite")
+                open(path, "wb").close()
+                with open(path + "-wal", "wb") as fh:
+                    fh.write(b"\x37\x7f\x06\x82" + b"\x00" * 60)
+                for suffix in keep:
+                    with open(path + suffix, "wb") as fh:
+                        fh.write(b"\x00" * 32768)
+                before = self._listing(folder)
+                with _sqlite.readonly(path) as conn:
+                    self.assertEqual(_sqlite.tables(conn), [])
+                self.assertEqual(self._listing(folder), before)
+
     def test_text_that_is_not_utf8_is_read_as_it_is(self):
         """A TEXT cell whose bytes are not UTF-8 (a JS writer's string cut
         between the halves of a surrogate pair) made Python's sqlite3 raise
