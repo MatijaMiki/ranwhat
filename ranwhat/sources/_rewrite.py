@@ -553,12 +553,23 @@ def _install(path, st0, data):
         if (st1.st_size != st0.st_size or st1.st_mtime_ns != st0.st_mtime_ns
                 or (st0.st_ino and st1.st_ino != st0.st_ino)):
             return CHANGED
+        # Windows will not replace a file with the read-only attribute,
+        # which its stat gives as no write bits, and running clean again
+        # would never change that. So the attribute is lifted for the
+        # replace and put back on the file there after it, as a POSIX file
+        # keeps its mode.
+        read_only = _WINDOWS and not st0.st_mode & stat.S_IWRITE
+        if read_only:
+            os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
         try:
             os.replace(tmp, path)
         except PermissionError:
             if _WINDOWS:
                 return IN_USE
             raise
+        finally:
+            if read_only:
+                os.chmod(path, stat.S_IREAD)
         return None
     finally:
         if os.path.lexists(tmp):

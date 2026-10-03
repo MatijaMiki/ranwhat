@@ -4,7 +4,8 @@ replaces a file, where the check used to give up and accept the change.
 A line nested deeper than Python can read or walk was taken for one that
 does not parse, and anything the mask did to it was installed: a line left
 unreadable on 3.9, a key deleted on 3.14, a copy of the value left behind
-on both.
+on both. And on Windows a file with the read-only attribute was reported
+as in use, which running clean again never changes.
 
 Everything runs in temp directories with synthetic secrets, written as
 adjacent literals.
@@ -12,6 +13,7 @@ adjacent literals.
 import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -23,6 +25,7 @@ sys.path.insert(0, os.path.dirname(TESTS))
 
 from ranwhat import clean  # noqa: E402
 from ranwhat.sources import _rewrite  # noqa: E402
+from ranwhat.sources.base import MaskResult  # noqa: E402
 
 SECRET = "sk_" "live_" "Zq8vR2mT6yLp4WcN0sXe7HbJ"
 # A quote, a backslash, non-ASCII and Go's escapes: every encoding differs.
@@ -138,6 +141,58 @@ class TooDeep(unittest.TestCase):
                     self.assertEqual((result.changed, result.skipped), (True, None))
                     self.assertTrue(self._read(path) == expected,
                                     "a byte other than the secret changed")
+
+
+class WindowsReadOnly(unittest.TestCase):
+    """Windows' stat reports the read-only attribute as a mode with no
+    write bits, and MoveFileEx will not replace such a file. Both are
+    simulated here, so this runs everywhere."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="rw-checks-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        p = mock.patch.object(clean, "BACKUP_ROOT", os.path.join(self.dir, "bk"))
+        p.start()
+        self.addCleanup(p.stop)
+        self.path = os.path.join(self.dir, "ro.jsonl")
+        self.doc = ('{"out":"KEY=%s"}\n' % SECRET).encode("ascii")
+        with open(self.path, "wb") as fh:
+            fh.write(self.doc)
+        when = time.time() - 3600
+        os.utime(self.path, (when, when))
+        os.chmod(self.path, stat.S_IREAD)
+        self.addCleanup(os.chmod, self.path, stat.S_IREAD | stat.S_IWRITE)
+
+    def _read(self):
+        with open(self.path, "rb") as fh:
+            return fh.read()
+
+    def _writable(self):
+        return bool(os.stat(self.path).st_mode & stat.S_IWRITE)
+
+    def test_a_read_only_file_is_masked_and_left_read_only(self):
+        real = os.replace
+
+        def move_file_ex(src, dst):
+            if not os.stat(dst).st_mode & stat.S_IWRITE:
+                raise PermissionError(13, "Access is denied")
+            real(src, dst)
+        with mock.patch.object(_rewrite, "_WINDOWS", True), \
+                mock.patch.object(_rewrite.os, "replace", side_effect=move_file_ex):
+            result = _rewrite.rewrite_file(self.path, [SECRET], "jsonl")
+        self.assertEqual((result.changed, result.skipped), (True, None))
+        self.assertEqual(self._read(), self.doc.replace(
+            SECRET.encode("ascii"), _marker(SECRET).encode("ascii")))
+        self.assertFalse(self._writable(), "the file is no longer read-only")
+
+    def test_a_read_only_file_held_open_is_in_use_and_stays_read_only(self):
+        with mock.patch.object(_rewrite, "_WINDOWS", True), \
+                mock.patch.object(_rewrite.os, "replace",
+                                  side_effect=PermissionError(13, "in use")):
+            result = _rewrite.rewrite_file(self.path, [SECRET], "jsonl")
+        self.assertEqual(result, MaskResult(self.path, skipped=_rewrite.IN_USE))
+        self.assertEqual(self._read(), self.doc)
+        self.assertFalse(self._writable(), "the file is no longer read-only")
 
 
 if __name__ == "__main__":
