@@ -21,7 +21,7 @@ Agents read: Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, Grok
 
 `check` and `watch` hide every secret `clean` finds, anywhere in the history whatever `--days` says, in what they print. They keep an index for that in `~/.ranwhat/known/` (`$RANWHAT_HOME/known/` when set): salted fingerprints, never a secret, readable by you alone.
 
-Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`, and `~/.claude/history.jsonl`.
+Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`, `~/.claude/history.jsonl`, and the events OpenClaw stores compressed and its cold transcript archives. Compressed Codex sessions (`.jsonl.zst`) are read on Python 3.14, or with the `zstd` command on the PATH.
 
 ## Docs
 
