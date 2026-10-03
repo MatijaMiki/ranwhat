@@ -533,6 +533,30 @@ class Discovery(PiCase):
         self.assertEqual((found[0].session, found[0].project),
                          ("6a1d3b9f-0000-4000-8000-000000000001", "/home/dev/other"))
 
+    def test_the_session_dir_variable_may_name_the_agent_folder(self):
+        # Pi then writes new sessions flat in the agent folder; the folder
+        # is looked at once, for both
+        older = self.session(SPEC_LINES, age=500)
+        sid = "6a1d3b9f-0000-4000-8000-000000000001"
+        newer = self.write("2026-10-01T10-00-00-000Z_%s.jsonl" % sid,
+                           [header(sid=sid)], age=100)
+        moved = _tempdir(self, "pi-moved-")
+        in_moved = self.write("2026-10-01T10-00-00-000Z_%s.jsonl" % sid,
+                              [header(sid=sid)], root=moved)
+        for agent, flat, how, found in (
+                (None, self.root, "default", [newer, older]),
+                (None, "~/.pi/agent", "default", [newer, older]),
+                (moved, moved + os.sep, "env " + ENV, [in_moved])):
+            with self.subTest(flat=flat):
+                os.environ.pop(ENV, None)
+                if agent:
+                    os.environ[ENV] = agent
+                os.environ[SESSION_ENV] = flat
+                locs = self.pi.locations()
+                self.assertEqual([(l.how, l.found) for l in locs],
+                                 [(how, len(found))])
+                self.assertEqual([s.path for s in self.pi.stores(locs)], found)
+
     def test_sessions_are_found_newest_first_and_nothing_else_is(self):
         a = self.session(SPEC_LINES, age=500)
         b = self.session([header(sid="11111111-aaaa-4aaa-8aaa-000000000001",

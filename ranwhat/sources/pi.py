@@ -63,7 +63,8 @@ getAgentDir; the same under the home directory on Windows, not checked
 there). PI_CODING_AGENT_SESSION_DIR (also --session-dir and the sessionDir
 setting, which are not read here) puts new sessions flat in another folder,
 <dir>/<timestamp>_<sessionId>.jsonl, with no per-cwd folder (main.ts,
-SessionManager.create). The variable is not in the design's spec; it is
+SessionManager.create), even when <dir> is the agent folder itself, which
+is then read both ways. The variable is not in the design's spec; it is
 read because it is the agent's own override and its layout is verified.
 
 Not read: anything in the agent folder outside sessions/ (auth.json,
@@ -251,6 +252,17 @@ def _read_header(path):
     return None
 
 
+def _is_session_dir(path):
+    """True when PI_CODING_AGENT_SESSION_DIR names `path` now, compared the
+    way Source.locations compares paths."""
+    flat = _string(os.environ.get(SESSION_ENV))
+    if not flat:
+        return False
+    flat = _expand(flat, _paths.home(), _paths.platform_name())
+    flat = os.path.abspath(os.path.expanduser(flat))
+    return os.path.normcase(flat) == os.path.normcase(path)
+
+
 def _entries(folder):
     try:
         return list(os.scandir(folder))
@@ -356,11 +368,17 @@ class PiSource(Source):
     @staticmethod
     def session_folders(location):
         """The folders whose *.jsonl files are sessions: the folder itself
-        for PI_CODING_AGENT_SESSION_DIR, else each folder in its sessions/
-        (an agent folder, from the default, PI_CODING_AGENT_DIR or --path)."""
+        for PI_CODING_AGENT_SESSION_DIR, and each folder in its sessions/
+        for an agent folder (from the default, PI_CODING_AGENT_DIR or
+        --path). The variable may name the agent folder itself, which
+        Source.locations keeps once, as the agent folder; so the variable
+        is read again here."""
         if location.how == "env " + SESSION_ENV:
             return [location.path]
-        return _folders(os.path.join(location.path, SESSIONS))
+        folders = _folders(os.path.join(location.path, SESSIONS))
+        if _is_session_dir(location.path):
+            folders.append(location.path)
+        return folders
 
     def stores(self, locations, since_days=None):
         found, seen = [], set()
