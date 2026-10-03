@@ -370,9 +370,9 @@ def ansi_text(value):
     return _grid_text(value, _line_groups(value))
 
 
-def _grids(node):
-    """Every AnsiOutput grid stored under a resultDisplay key in decoded
-    JSON, in document order."""
+def _grid_holders(node):
+    """(dict, grid) for every AnsiOutput grid stored under a resultDisplay
+    key in decoded JSON, in document order."""
     stack = [node]
     while stack:
         item = stack.pop()
@@ -380,12 +380,28 @@ def _grids(node):
             children = []
             for key, value in item.items():
                 if key == GRID_KEY and is_ansi_output(value):
-                    yield value
+                    yield item, value
                 elif isinstance(value, (dict, list)):
                     children.append(value)
             stack.extend(reversed(children))
         elif isinstance(item, list):
             stack.extend(reversed([v for v in item if isinstance(v, (dict, list))]))
+
+
+def _grids(node):
+    """Every AnsiOutput grid stored under a resultDisplay key in decoded
+    JSON, in document order."""
+    for _holder, grid in _grid_holders(node):
+        yield grid
+
+
+def _shown(node):
+    """Decoded JSON with each of its grids replaced, in place, by the text
+    it shows (ansi_text), so clean reads a key the terminal cut in two
+    whole, and not the piece on each row."""
+    for holder, grid in list(_grid_holders(node)):
+        holder[GRID_KEY] = ansi_text(grid)
+    return node
 
 
 def _layout(grid, groups):
@@ -811,7 +827,9 @@ class ChatReader(object):
         to, and its resultDisplay with that call (a terminal grid as the
         text it shows); a functionResponse repeated in a later message
         comes with the call whose id it carries; everything else comes with
-        no call. Side stores come whole, with no call."""
+        no call. Side stores come whole, with no call, each terminal grid
+        as the text it shows: a checkpoint keeps the CLI's own view of the
+        history, grids included."""
         noting = self._noting(store)
         try:
             if store.format == "text":
@@ -820,7 +838,7 @@ class ChatReader(object):
                 return
             if store.role != "transcript":
                 for where, record in self.records(store, noting):
-                    yield SecretText(record, where=where)
+                    yield SecretText(_shown(record), where=where)
                 return
             session, by_id = None, {}
             for where, record in self.records(store, noting):

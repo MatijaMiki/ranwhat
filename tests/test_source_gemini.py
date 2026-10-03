@@ -1665,6 +1665,32 @@ class TerminalGrids(GeminiCase):
         self.assertEqual(after.decode("utf-8"),
                          json.dumps(doc, indent=2, ensure_ascii=False))
 
+    def test_a_key_cut_at_the_edge_of_the_terminal_in_a_checkpoint(self):
+        """A checkpoint keeps the CLI's own view of the history, shell grids
+        included, and the model's copy of the output may be gone."""
+        rows = grid([LINE])
+        doc = {"history": [{"type": "user", "text": "show env", "id": 1},
+                           {"type": "tool_group", "id": 2, "tools": [
+                               {"callId": "c1", "name": "Shell",
+                                "resultDisplay": rows, "status": "Success"}]}],
+               "clientHistory": [{"role": "user", "parts": [{"text": "show env"}]}],
+               "toolCall": {"name": "write_file",
+                            "args": {"file_path": "a.txt", "content": "x"}},
+               "commitHash": "abc", "messageId": "p1"}
+        path = self.write(
+            "tmp/proj/checkpoints/2026-01-01T00_00_00_000Z-a.txt-write_file.json",
+            text=json.dumps(doc, indent=2, ensure_ascii=False))
+        found = _findings(self.src, [self.store(path)])
+        self.assertEqual(set(found), {LONG})
+        self.assertEqual(found[LONG]["count"], 1)
+        _before, result, after = self.masked(path, [LONG])
+        self.assertTrue(result.changed, result)
+        rows[0][0]["text"] = "STRIPE_SECRET_KEY=" + _marker(LONG)
+        rows[1][0]["text"] = ""
+        self.assertEqual(after.decode("utf-8"),
+                         json.dumps(doc, indent=2, ensure_ascii=False))
+        self.assertEqual(_findings(self.src, [self.store(path)]), {})
+
     def test_a_line_the_cli_would_not_have_written_is_refused(self):
         """Written back, it would not be the same bytes (here, escapes
         JSON.stringify never writes), so nothing is changed, not even the
