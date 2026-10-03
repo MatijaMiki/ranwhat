@@ -34,14 +34,17 @@ Four things the CLI writes that the plain schema does not say:
 - background-processes/background-<pid>.log stays open for writing as long
   as process <pid> runs, so it is in use until then (in_use).
 
-ChatReader reads that schema for any source. Qwen Code is a Gemini CLI
-fork whose v0.3.x files are the legacy JSON with message type "qwen"; its
-adapter reuses ChatReader with its own model type and tool mapping.
+ChatReader reads that schema on behalf of a source. Qwen Code is a Gemini
+CLI fork whose v0.3.x files are the legacy JSON with message type "qwen",
+but its adapter reads them with code of its own, not with ChatReader: in
+v0.3.0 resultDisplay is a string, so there are no grids to join.
 
 What is never opened: .env files, settings, OAuth and account files under
 the root, the shadow git repositories under history/, tmp/<slug>/logs/
 (format unverified), and anything else not listed in STORES. projects.json
-and .project_root are read only to name the project a folder belongs to.
+and .project_root are read only to name the project a folder belongs to,
+as are the chat headers of a slug folder when a 64-hex folder is not named
+otherwise (project_map).
 """
 
 from __future__ import annotations
