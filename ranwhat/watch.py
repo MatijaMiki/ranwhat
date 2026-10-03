@@ -2705,10 +2705,13 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
 
     Returns (records, {source: how many it read}): Claude Code transcripts,
     OpenClaw databases, and each other agent's transcripts (its sessions,
-    in its own words). Zero read is not an all-clear: locations() says
-    whether there was anything to read at all. `progress` is scan_all's,
-    counting every source's transcripts together, and `known` (a
-    known.Matcher) is masked in every record.
+    in its own words). A store found to be unreadable as it is read is
+    still counted: the adapter counts it once a run, whichever pass met it
+    first, so this pass cannot tell it apart (agents.notes names it). Zero
+    read is not an all-clear: locations() says whether there was anything
+    to read at all. `progress` is scan_all's, counting every source's
+    transcripts together, and `known` (a known.Matcher) is masked in every
+    record.
 
     root and state_dir point Claude Code and OpenClaw elsewhere; `paths`,
     {source id: path}, points any source, and a root or state_dir given
