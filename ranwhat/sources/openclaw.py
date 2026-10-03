@@ -35,7 +35,7 @@ from .base import SecretText, Source, Store, ToolCall, newest_first
 ENV = "OPENCLAW_STATE_DIR"
 
 # Resolved once, at import, as watch resolved it.
-STATE_DEFAULT = os.path.expanduser("~/.openclaw")
+STATE_DEFAULT = os.path.join(os.path.expanduser("~"), ".openclaw")
 
 
 def state_dir():

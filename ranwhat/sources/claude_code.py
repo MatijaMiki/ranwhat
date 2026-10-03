@@ -28,9 +28,11 @@ def projects_dir():
     """Where Claude Code keeps its transcripts. CLAUDE_CONFIG_DIR is Claude
     Code's own override for ~/.claude, and projects/ sits inside it
     wherever it is. Read when asked, like OPENCLAW_STATE_DIR: reading only
-    ~/.claude/projects found nothing on such a machine, and said all clear."""
-    base = os.environ.get(ENV) or "~/.claude"
-    return os.path.join(os.path.expanduser(base), "projects")
+    ~/.claude/projects found nothing on such a machine, and said all clear.
+    Absolute and joined by os.path, as locations() gives it: on Windows,
+    "~/.claude" was C:\\Users\\u/.claude."""
+    base = os.environ.get(ENV) or os.path.join("~", ".claude")
+    return os.path.abspath(os.path.join(os.path.expanduser(base), "projects"))
 
 
 def transcripts(root):

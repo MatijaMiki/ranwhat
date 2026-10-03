@@ -36,7 +36,7 @@ from .watch import CLAUDE_PROJECTS, _fit, discover, transcript_place
 from . import agents, fixtures, term
 from . import sources as _registry
 
-BACKUP_ROOT = os.path.expanduser("~/.ranwhat/backups")
+BACKUP_ROOT = os.path.join(os.path.expanduser("~"), ".ranwhat", "backups")
 REDACTION = "<ranwhat:redacted:%s>"
 
 # Key names that make the value beside them a secret. A name is read word by

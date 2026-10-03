@@ -15,7 +15,9 @@ import glob
 import hashlib
 import io
 import json
+import ntpath
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -222,6 +224,45 @@ class Registry(unittest.TestCase):
             self.assertIsInstance(source, Source)
             for field in ("id", "name", "unit", "path_means"):
                 self.assertTrue(getattr(source, field), (source.id, field))
+
+    def test_every_default_path_on_windows_is_a_windows_path(self):
+        # A "/" joined in reads on Windows, but it is not the path the
+        # report names or compares with: C:\Users\u/.claude\projects.
+        windows = {"USERPROFILE": "C:\\Users\\u",
+                   "APPDATA": "C:\\Users\\u\\AppData\\Roaming",
+                   "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"}
+        for source in sources.sources():
+            set_ = dict(windows, **{v: "D:\\set\\" + v for v in source.env})
+            for env in (windows, set_):
+                pairs = source.default_paths(env, "C:\\Users\\u", "win32")
+                self.assertTrue(pairs, source.id)
+                for path, how in pairs:
+                    self.assertNotIn("/", path, (source.id, how))
+                    self.assertTrue(ntpath.isabs(path), (source.id, path))
+
+    def test_claude_codes_projects_directory_on_windows(self):
+        # What watch reads by default, worked out by ntpath as Windows does.
+        from ranwhat.sources import claude_code
+        fake_os = mock.Mock(path=ntpath, environ={})
+        with mock.patch.dict(os.environ, {"USERPROFILE": "C:\\Users\\u"}), \
+                mock.patch.object(claude_code, "os", fake_os):
+            self.assertEqual(claude_code.projects_dir(),
+                             "C:\\Users\\u\\.claude\\projects")
+            for value in ("D:\\claude", "D:/claude"):
+                fake_os.environ = {"CLAUDE_CONFIG_DIR": value}
+                self.assertEqual(claude_code.projects_dir(),
+                                 "D:\\claude\\projects")
+
+    def test_no_path_is_expanded_from_a_slash_after_the_tilde(self):
+        # expanduser("~/.x") keeps the "/" on Windows; join after "~".
+        tilde = re.compile(r"""expanduser\(\s*["']~[/\\]""")
+        found = []
+        for path in glob.glob(os.path.join(REPO, "ranwhat", "**", "*.py"),
+                              recursive=True):
+            with open(path, encoding="utf-8") as fh:
+                found += ["%s:%d" % (os.path.relpath(path, REPO), n)
+                          for n, line in enumerate(fh, 1) if tilde.search(line)]
+        self.assertEqual(found, [])
 
     def test_register_get_and_unregister(self):
         before = sources.ids()
