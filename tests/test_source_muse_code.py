@@ -1432,6 +1432,146 @@ class Damaged(MuseCase):
         self.assertEqual(self.muse.counts["unreadable_stores"], 1)
 
 
+# --------------------------------------------------------------------------
+# JSON nested deeper than Python's stack
+# --------------------------------------------------------------------------
+
+# Past Python's recursion limit. Python 3.9's parser gives up on both; 3.14's
+# guards the C stack instead and reads them, so what reads the value next
+# must not recurse either.
+DEPTHS = [(depth, shape) for depth in (1500, 100000) for shape in ("list", "dict")]
+
+
+def deep(depth, shape):
+    """JSON text nested `depth` levels, built as text: building it as a
+    value would need the recursion under test."""
+    if shape == "list":
+        return "[" * depth + "]" * depth
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def parses(text):
+    try:
+        json.loads(text)
+    except RecursionError:
+        return False
+    return True
+
+
+class DeepNesting(MuseCase):
+    """A line, a frame child or a value nested past the stack never stops
+    the store: the calls and keys around it are still read."""
+
+    GOOD = "rm -rf ~/Documents/a"
+
+    def _fresh(self):
+        shutil.rmtree(os.path.join(self.data, "sessions"), True)
+        self.muse.reset()
+
+    def _write(self, lines):
+        """A session log of these lines (objects, or JSON text as it is),
+        then the good call and its key."""
+        lines = lines + call_lines(50, "good", "bash", {"command": self.GOOD},
+                                   output="API_KEY=" + SECRET)
+        return self.session(None, raw="".join(
+            (l if isinstance(l, str) else _dump(l)) + "\n" for l in lines).encode("utf-8"))
+
+    def _read(self, path):
+        """{call id: call} of one log, each call judged as watch judges it.
+        Nothing may escape and nothing is warned about, and the good call
+        and its key are still found."""
+        store = self.store(path)
+        found = set()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            calls = {c.tool_call_id: c for c in self.muse.tool_calls(store)}
+            for call in calls.values():
+                judge(call)
+            for text in self.muse.secret_texts(store):
+                clean._walk(text.node, lambda value, *_: found.add(value))
+        self.assertEqual(err.getvalue(), "")
+        self.assertTrue(judge(calls["good"])[0])
+        self.assertIn(SECRET, found)
+        return calls
+
+    def test_a_line_or_frame_child_nested_past_the_stack_is_counted_and_the_rest_read(self):
+        for depth, shape in DEPTHS:
+            text = deep(depth, shape)
+            for site, line in (("line", text), ("frame child", frame(1, [text]))):
+                with self.subTest(depth=depth, shape=shape, site=site):
+                    self._fresh()
+                    calls = self._read(self._write([metadata(), line]))
+                    self.assertEqual(sorted(calls), ["good"])
+                    # unparsed where the parser gives up, else a record that
+                    # is not an envelope
+                    counts = self.muse.counts
+                    self.assertEqual(counts["unparsed"], 0 if parses(text) else 1)
+                    self.assertEqual(counts["unparsed"] + counts["unknown"], 1)
+
+    def test_a_value_nested_past_the_stack_leaves_the_other_calls(self):
+        odd = tool_call("odd", "bash", {"command": "ls"})
+        sites = {   # the lines, and when the odd call is read
+            "result text": ([committed(2, [odd]), results(3, [("odd", "@DEEP@")])],
+                            "always"),
+            "recorded_at": ([committed(2, [odd], recorded_at="@DEEP@")], "if it parses"),
+            "tool_calls": ([run(2, {"kind": muse_code.CALLS, "tool_calls": "@DEEP@"})],
+                           "never"),
+            "event": ([run(2, "@DEEP@")], "never"),
+            "payload": ([envelope(2, muse_code.SESSION, "@DEEP@")], "never"),
+            "metadata record": ([envelope(2, muse_code.METADATA,
+                                          {"kind": "metadata", "record": "@DEEP@"})],
+                                "never"),
+        }
+        for depth, shape in DEPTHS:
+            text = deep(depth, shape)
+            for site, (lines, when) in sites.items():
+                with self.subTest(depth=depth, shape=shape, site=site):
+                    self._fresh()
+                    lines = [_dump(l).replace('"@DEEP@"', text) for l in lines]
+                    calls = self._read(self._write([metadata()] + lines))
+                    readable = parses(lines[-1])
+                    self.assertEqual("odd" in calls, {"always": True, "never": False,
+                                                      "if it parses": readable}[when])
+                    self.assertEqual(self.muse.counts["unparsed"], 0 if readable else 1)
+
+    def test_arguments_nested_past_the_stack_are_kept_as_written(self):
+        for depth, shape in DEPTHS:
+            text = deep(depth, shape)
+            for raw in (text, '{"command":"rm -rf ~/Documents/b","x":%s}' % text):
+                lines = call_lines(2, "odd", "bash", raw, output="ok")
+                for site, wrapped in (("line", lines), ("frame", [frame(1, lines)])):
+                    with self.subTest(depth=depth, shape=shape, whole=raw is text,
+                                      site=site):
+                        self._fresh()
+                        calls = self._read(self._write([metadata()] + wrapped))
+                        self.assertEqual(sorted(calls), ["good", "odd"])
+                        self.assertEqual(calls["odd"].output, "ok")
+                        if not parses(raw):
+                            self.assertEqual(calls["odd"].tool_input, {"_raw": raw})
+
+    def test_a_first_line_nested_past_the_stack_still_gives_the_project(self):
+        for depth, shape in DEPTHS:
+            with self.subTest(depth=depth, shape=shape):
+                self._fresh()
+                path = self._write([deep(depth, shape), metadata()])
+                self.assertEqual(self.store(path).project, "/home/dev/app")
+                self._read(path)
+
+    def test_masking_beside_a_line_nested_past_the_stack_never_raises(self):
+        for depth, shape in DEPTHS:
+            with self.subTest(depth=depth, shape=shape):
+                self._fresh()
+                text = deep(depth, shape)
+                store = self.store(self._write([metadata(), text]))
+                result = self.muse.mask(store, [SECRET])
+                self.assertIsInstance(result, MaskResult)
+                with open(store.path, "rb") as fh:
+                    data = fh.read()
+                self.assertIn(b"\n" + text.encode("utf-8") + b"\n", data)
+                if result.changed:
+                    self.assertNotIn(SECRET.encode("utf-8"), data)
+
+
 class Window(MuseCase):
 
     def test_an_old_call_in_a_new_file_and_an_undated_one(self):

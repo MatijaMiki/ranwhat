@@ -1688,6 +1688,158 @@ class Unparsed(_Home):
 
 
 # --------------------------------------------------------------------------
+# JSON nested deeper than Python's stack
+# --------------------------------------------------------------------------
+
+# Past Python's recursion limit. Python 3.9's parser gives up on both; 3.14's
+# guards the C stack instead and reads them, so what reads the value next
+# must not recurse either.
+DEPTHS = [(depth, shape) for depth in (1500, 100000) for shape in ("list", "dict")]
+
+
+def deep(depth, shape):
+    """JSON text nested `depth` levels, built as text: building it as a
+    value would need the recursion under test."""
+    if shape == "list":
+        return "[" * depth + "]" * depth
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def holding(obj, text):
+    """One line: obj with its "@DEEP@" string replaced by the JSON `text`."""
+    return line(obj).replace('"@DEEP@"', text)
+
+
+def parses(text):
+    try:
+        json.loads(text)
+    except RecursionError:
+        return False
+    return True
+
+
+class DeepNesting(_Home):
+    """A line, or a value in one, nested past the stack never stops the
+    store: the calls and keys around it are still read."""
+
+    GOOD = "rm -rf ~/Documents/a"
+
+    def _fresh(self):
+        shutil.rmtree(os.path.join(self.root, "sessions"), True)
+        self.src.reset()
+
+    def _good(self):
+        return shell_lines("good", self.GOOD, 1790000100, output=OUTPUT)
+
+    def _read(self, folder, name="updates.jsonl"):
+        """{call id: call} of one store, each call judged as watch judges
+        it. Nothing may escape and nothing is warned about, and the good
+        call and its key are still found."""
+        store = self.store(folder, name)
+        found = set()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            calls = {c.tool_call_id: c for c in self.src.tool_calls(store)}
+            for call in calls.values():
+                judge(call)
+            for text in self.src.secret_texts(store):
+                clean._walk(text.node, lambda value, *_: found.add(value))
+        self.assertEqual(err.getvalue(), "")
+        self.assertTrue(judge(calls["good"])[0])
+        self.assertIn(SECRET, found)
+        return calls
+
+    def test_a_line_nested_past_the_stack_is_counted_and_the_rest_read(self):
+        for depth, shape in DEPTHS:
+            with self.subTest(depth=depth, shape=shape):
+                self._fresh()
+                text = deep(depth, shape)
+                calls = self._read(self.session(updates=[text] + self._good()))
+                self.assertEqual(sorted(calls), ["good"])
+                # unparsed where the parser gives up, else a line of no known shape
+                self.assertEqual(self.src.counts["unparsed"], 0 if parses(text) else 1)
+                self.assertEqual(self.src.counts["unparsed"] + self.src.counts["unknown"], 1)
+
+    def test_a_value_nested_past_the_stack_leaves_its_call_and_the_others(self):
+        t = 1790000000
+        sites = {
+            "rawInput": {"sessionUpdate": "tool_call_update", "toolCallId": "odd",
+                         "rawInput": {"command": "ls", "x": "@DEEP@"}},
+            "x.ai/tool input": {"sessionUpdate": "tool_call_update", "toolCallId": "odd",
+                                "_meta": {XAI: xai_tool("run_terminal_cmd", "execute",
+                                                        {"command": "ls", "x": "@DEEP@"})}},
+            "Bash byte array": finished("odd", {"type": "Bash", "output": "@DEEP@"}),
+            "content": finished("odd", content="@DEEP@"),
+            "rawOutput": finished("odd", "@DEEP@"),
+            "_meta": {"sessionUpdate": "tool_call_update", "toolCallId": "odd",
+                      "_meta": "@DEEP@"},
+        }
+        first = envelope(t, tool_call("odd", "run_terminal_cmd", {"command": "ls"},
+                                      kind="execute"), "e-odd-1", t * 1000)
+        for depth, shape in DEPTHS:
+            for site, update in sites.items():
+                with self.subTest(depth=depth, shape=shape, site=site):
+                    self._fresh()
+                    odd = holding(envelope(t + 1, update, "e-odd-2"), deep(depth, shape))
+                    calls = self._read(self.session(updates=[first, odd] + self._good()))
+                    self.assertEqual(sorted(calls), ["good", "odd"])
+                    self.assertEqual(self.src.counts["unparsed"], 0 if parses(odd) else 1)
+
+    def test_arguments_nested_past_the_stack_are_kept_as_written(self):
+        t = 1790000000
+        for depth, shape in DEPTHS:
+            text = deep(depth, shape)
+            for raw in (text, '{"command":"rm -rf ~/Documents/b","x":%s}' % text):
+                with self.subTest(depth=depth, shape=shape, whole=raw is text):
+                    self._fresh()
+                    folder = self.session(updates=[envelope(
+                        t, tool_call("odd", "run_terminal_cmd", raw, kind="execute"),
+                        "e-odd-1", t * 1000)] + self._good())
+                    calls = self._read(folder)
+                    self.assertEqual(sorted(calls), ["good", "odd"])
+                    if not parses(raw):
+                        self.assertEqual(calls["odd"].tool_input, {"_raw": raw})
+                    os.remove(os.path.join(folder, "updates.jsonl"))
+                    self.session(chat=[
+                        {"type": "assistant", "content": "", "tool_calls": [
+                            {"id": "odd", "name": "run_terminal_cmd", "arguments": raw},
+                            {"id": "good", "name": "run_terminal_cmd",
+                             "arguments": json.dumps({"command": self.GOOD})}]},
+                        {"type": "tool_result", "tool_call_id": "good",
+                         "content": OUTPUT}])
+                    calls = self._read(folder, "chat_history.jsonl")
+                    self.assertEqual(sorted(calls), ["good", "odd"])
+
+    def test_a_summary_nested_past_the_stack_is_not_json_and_the_session_still_read(self):
+        for depth, shape in DEPTHS:
+            with self.subTest(depth=depth, shape=shape):
+                self._fresh()
+                text = deep(depth, shape)
+                folder = self.session(updates=self._good(), summary=text)
+                store = self.store(folder)
+                self.assertEqual((store.session, store.project), (SID, None))
+                self._read(folder)
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    texts = list(self.src.secret_texts(self.store(folder, "summary.json")))
+                self.assertEqual(len(texts), 1 if parses(text) else 0)
+                self.assertEqual(err.getvalue().count("(not JSON)"), 0 if texts else 1)
+
+    def test_masking_beside_a_line_nested_past_the_stack_never_raises(self):
+        for depth, shape in DEPTHS:
+            with self.subTest(depth=depth, shape=shape):
+                self._fresh()
+                text = deep(depth, shape)
+                store = self.store(self.session(updates=[text] + self._good()))
+                result = self.src.mask(store, [SECRET])
+                self.assertIsInstance(result, MaskResult)
+                data = _read(store.path)
+                self.assertTrue(data.startswith(text.encode("utf-8") + b"\n"))
+                if result.changed:
+                    self.assertNotIn(SECRET.encode("utf-8"), data)
+
+
+# --------------------------------------------------------------------------
 # 5.2 (14): the --days window
 # --------------------------------------------------------------------------
 
