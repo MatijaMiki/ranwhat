@@ -615,6 +615,29 @@ class Reports(_Cli):
                 for name in ("Codex", "Gemini", "Copilot", "Droid", "Muse"):
                     self.assertNotIn(name, text)
 
+    def test_checks_watch_half_says_why_when_only_clean_read(self):
+        """With a prompt history in the window and every session older,
+        check's watch half said only "No transcripts found" and the general
+        hint, while watch said how many older ones there were and that a
+        larger --days reads them."""
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        old = 60 * 86400
+        codex.write(root, [("c1", "shell", "rm -rf ~/Documents/a", "ok",
+                            self.now - old)], age=old)
+        af.write(os.path.join(root, "history.jsonl"),
+                 [af.cx.history_line("hello", ts=int(self.now))])
+        argv = ["--source", "codex", "--path", "codex=" + root] + self.base_flags()
+        _, alone, _ = self.run_cli("watch", *argv)
+        rc, out, err = self.run_cli("check", *argv)
+        self.assertEqual(rc, 0, err)
+        said = " ".join(out.split())
+        for line in ("1 older transcript(s) found. Pass a larger --days",
+                     "Read Codex: 1 file"):
+            self.assertIn(line, said)
+        self.assertIn("1 older transcript(s) found", " ".join(alone.split()))
+        self.assertNotIn("Nothing flagged", out)
+
     def test_an_agent_pointed_at_nothing_is_named(self):
         nowhere = os.path.join(self.home, "no-codex")
         rc, out, err = self.run_cli("watch", "--source", "codex",

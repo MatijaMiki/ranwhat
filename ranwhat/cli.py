@@ -678,16 +678,20 @@ def _check(args):
     sources = sum(counts.values())
     scanned = searched.scanned
 
-    places = None if sources or scanned else watch_mod.locations(
+    # Where watch looked, whenever it read nothing, though clean read a
+    # prompt history: without it watch's section gave the general hint,
+    # not that every session there was older than --days.
+    places = None if sources else watch_mod.locations(
         args.sources, root=args.root, state_dir=args.state_dir,
         paths=args.paths, asked=args.source)
+    nothing = places is not None and not scanned
     if args.json:
         print(_json_text({
             "days": args.days,
             "actions": records,
             "secrets": [_finding_json(f) for f in findings.values()],
         }))
-        return _said_nothing_read(places, args.days)
+        return _said_nothing_read(places if nothing else None, args.days)
 
     from .report import DIM
     # Each section once, then one tail. Printing the two standalone reports
@@ -696,8 +700,7 @@ def _check(args):
     # it goes under check's own name.
     print(watch_mod.render(records, counts, args.days, footer=False,
                            locations=places,
-                           title=_CHECK_TITLE if places is not None
-                           else watch_mod.TITLE,
+                           title=_CHECK_TITLE if nothing else watch_mod.TITLE,
                            complete=agents_mod.all_read(args.sources)
                            ).rstrip("\n"))
     if scanned:
@@ -746,7 +749,7 @@ def _check(args):
             tail += term.wrap(why, indent="      ")
     tail += ["", term.rule("-"), term.FOOTER, ""]
     print("\n".join(tail))
-    return 2 if places is not None else 0
+    return 2 if nothing else 0
 
 
 # The header of check's report when it read nothing: watch's section,
