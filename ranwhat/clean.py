@@ -30,13 +30,16 @@ import os
 import re
 import shutil
 import string
+import time
 
 from .watch import CLAUDE_PROJECTS, _fit, discover, transcript_place
 
 from . import agents, fixtures, term
 from . import sources as _registry
 
-BACKUP_ROOT = os.path.join(os.path.expanduser("~"), ".ranwhat", "backups")
+# Where backups go when set; None, as it is but in tests, for backups/ in
+# ranwhat's state directory (_backup_root).
+BACKUP_ROOT = None
 REDACTION = "<ranwhat:redacted:%s>"
 
 # Key names that make the value beside them a secret. A name is read word by
@@ -1867,12 +1870,12 @@ def values_in(path):
 def values_in_store(source, store):
     """values_in, for a file of an agent read through its adapter: (every
     value the rules find in it, the fingerprint each mask in it keeps), or
-    None when it cannot be read."""
+    None when it cannot be read whole (_read_store)."""
     if not os.path.exists(store.path):
         return None
     values = {}
-    findings, masks = scan_store(source, store, values)
-    return {values[fp] for fp in findings}, masks
+    findings, masks, whole = _read_store(source, store, values)
+    return ({values[fp] for fp in findings}, masks) if whole else None
 
 
 def mask_known(text, values):
@@ -2301,7 +2304,7 @@ def _dumped(obj, line):
 
 
 def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
-              remember=None):
+              remember=None, skipped=None):
     """Find (and optionally mask) secrets in one transcript.
 
     Returns (findings, changed). Each finding is a dict describing one
@@ -2322,6 +2325,10 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
     when it could not be read. `remember`, with apply, is called with the
     values about to be masked before the transcript is rewritten (for
     known.Index.remember).
+
+    With apply the transcript is replaced as an agent's file is
+    (_replace): not when it was written to in the last two minutes, or
+    while it was read. `skipped`, a dict, is then given why, by path.
     """
     findings = {}
     rewritten = []
@@ -2370,12 +2377,20 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
     # UTF-8 whatever the locale says: Windows would otherwise decode as
     # cp1252 and write the mojibake back. newline="" hands each line over
     # with its own ending, so a rewrite keeps \r\n where it found \r\n.
+    # A byte that is not UTF-8 is read as U+FFFD, as values_in reads it,
+    # and a line the mask leaves alone is written back as it was (raw).
     lines = []
+    raw = {}                    # line number -> as read, where it was not UTF-8
     texts, owners = [], []      # each string long enough to hold a value, its line
     try:
-        with open(path, "r", encoding="utf-8", errors="replace",
+        st = os.stat(path)
+        with open(path, "r", encoding="utf-8", errors="surrogateescape",
                   newline="") as fh:
             for line in fh:
+                if _LONE_SURROGATE.search(line):
+                    raw[len(lines)] = line
+                    line = line.encode("utf-8", "surrogateescape").decode(
+                        "utf-8", "replace")
                 lines.append(line)
                 stripped = line.strip()
                 if not stripped:
@@ -2480,23 +2495,23 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
         known.update(values)
 
     if apply and changed:
-        if remember is not None:
-            remember([v for fp, v in values.items() if only is None or fp in only])
-        _backup(path)
-        tmp = path + ".ranwhat-tmp"
-        try:
-            _write_like(path, tmp, rewritten)
-            # Refuse to install a file we cannot read back. Only the lines
-            # written anew are asked: one kept as it was read may never
-            # have been JSON, or be deeper than json reads.
-            with open(tmp, encoding="utf-8", newline="") as fh:
-                for line, was in zip(fh, lines):
-                    if line != was:
-                        json.loads(line)
-            os.replace(tmp, path)
-        finally:
-            if os.path.lexists(tmp):
-                os.unlink(tmp)
+        # Refuse to install a file we cannot read back. Only the lines
+        # written anew are asked: one kept as it was read may never have
+        # been JSON, or be deeper than json reads.
+        for new, was in zip(rewritten, lines):
+            if new is not was:
+                json.loads(new)
+        why = _in_use(path, st)
+        if why is None:
+            if remember is not None:
+                remember([v for fp, v in values.items() if only is None or fp in only])
+            why = _replace(path, st, "".join(
+                raw.get(i, new) if new is lines[i] else new
+                for i, new in enumerate(rewritten)))
+        if why is not None:
+            changed = False
+            if skipped is not None:
+                skipped[path] = why
 
     return findings, changed
 
@@ -2555,38 +2570,84 @@ _CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
            | getattr(os, "O_BINARY", 0))
 
 
-def _write_like(original, tmp, lines):
-    """Write the rewritten transcript with the original's permissions.
+# Transcripts this run masked, by real path: the (size, mtime) each was
+# left with. One still so was last written by ranwhat, not by its agent,
+# and a second mask of it is not held back for two minutes.
+_MASKED_HERE = {}
 
-    open(tmp, "w") took the umask default, so a 0600 transcript came back
-    0644 after masking: the one command meant to reduce exposure widened it.
-    The file is created 0600 and only then given the original's mode, so it
-    is never readable by anyone the original was not. A stale tmp from an
-    interrupted run is removed first rather than written through.
 
-    Lines are written exactly as given, endings included. Windows has no
-    mode bits to carry, only a read-only flag, which would leave a tmp that
-    could not be removed if the replace failed; there the new file takes
-    its directory's permissions."""
-    mode = os.stat(original).st_mode & 0o777
-    if os.path.lexists(tmp):
-        os.unlink(tmp)
-    fd = os.open(tmp, _CREATE, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-        fh.writelines(lines)
-        if os.name != "nt":
-            os.fchmod(fh.fileno(), mode)
+def _in_use(path, st):
+    """_rewrite.IN_USE when something but ranwhat wrote to the transcript,
+    as stat'ed in st before it was read, in the last QUIET_SECONDS: a live
+    session appending to it would go on writing to the file it replaced,
+    as _rewrite says of every agent's. Otherwise None."""
+    from .sources import _rewrite
+    if _MASKED_HERE.get(os.path.realpath(path)) == (st.st_size, st.st_mtime_ns):
+        return None
+    if time.time() - st.st_mtime < _rewrite.QUIET_SECONDS:
+        return _rewrite.IN_USE
+    return None
+
+
+def _replace(path, st, text):
+    """Install text as the transcript at path, backed up first, with
+    _rewrite._install: refused when it changed since it was read (st),
+    and on Windows when another process holds it open. None when it was
+    replaced, otherwise why not, with no backup kept: nothing was masked,
+    and a backup is one more copy of the secret."""
+    from .sources import _rewrite
+    try:
+        backup = _backup(path)
+        try:
+            why = _rewrite._install(path, st, text.encode("utf-8", "surrogateescape"))
+        except BaseException:
+            _rewrite._discard(backup)
+            raise
+    except OSError as error:
+        _registry.get("claude-code").warn(("mask", path), "could not mask %s (%s)"
+                                          % (path, error.strerror or error))
+        return NOT_WRITTEN
+    if why:
+        _rewrite._discard(backup)
+        return why
+    after = os.stat(path)
+    _MASKED_HERE[os.path.realpath(path)] = (after.st_size, after.st_mtime_ns)
+    return None
 
 
 def _backup_dest(root, stamp, path):
     """Where the backup of `path` goes: its absolute path, re-rooted under
     root/stamp. Joining C:\\Users\\... onto the root would discard the root
     and name the transcript itself, so on Windows the drive (or a UNC
-    server and share) becomes a directory of its own."""
+    server and share) becomes a directory of its own.
+
+    That makes it longer than the transcript by the root and some forty
+    characters, and past MAX_PATH Windows opens a path only in its \\\\?\\
+    form, which it takes as written: one it could read was not backed up,
+    and so not masked."""
     drive, rest = os.path.splitdrive(os.path.abspath(path))
     parts = [p for p in re.split(r"[\\/:?]+", drive) if p.strip(".")]
     rest = rest.lstrip(os.path.sep + (os.path.altsep or ""))
-    return os.path.join(root, stamp, *parts, rest)
+    dest = os.path.join(root, stamp, *parts, rest)
+    if os.name == "nt" and len(dest) >= _LONG_PATH and not dest.startswith(_WHOLE):
+        dest = (_WHOLE + "UNC" + dest[1:] if dest.startswith("\\\\")
+                else _WHOLE + dest)
+    return dest
+
+
+# Past this many characters Windows makes a directory only by a path in
+# its \\?\ form (MAX_PATH, less twelve), and the prefix of that form.
+_LONG_PATH = 248
+_WHOLE = "\\\\?\\"
+
+
+def _backup_root():
+    """BACKUP_ROOT, or backups/ in ranwhat's state directory: RANWHAT_HOME,
+    ~/.ranwhat by default, as the index's, read when a backup is made.
+    Fixed at import under ~/.ranwhat, a plaintext copy of every masked
+    file went outside the directory the user chose for ranwhat's state."""
+    from .known import home
+    return os.path.abspath(BACKUP_ROOT or os.path.join(home(), "backups"))
 
 
 def _backup(path):
@@ -2602,11 +2663,12 @@ def _backup(path):
     3.13 it ticks every 1 to 16 ms. A stamp already taken gets a counter,
     stamp-1, stamp-2, rather than failing the mask."""
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
-    os.chmod(BACKUP_ROOT, 0o700)
+    root = _backup_root()
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    os.chmod(root, 0o700)
     for attempt in range(100):
         name = "%s-%d" % (stamp, attempt) if attempt else stamp
-        dest = _backup_dest(BACKUP_ROOT, name, path)
+        dest = _backup_dest(root, name, path)
         os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
         try:
             fd = os.open(dest, _CREATE, 0o600)
@@ -2620,7 +2682,7 @@ def _backup(path):
 
 
 def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
-         known=None, copies=True, read=None, remember=None):
+         known=None, copies=True, read=None, remember=None, skipped=None):
     """Scan every transcript. Returns (merged_findings, files_scanned, files_changed).
 
     `progress` is called with (index, total, path) before each file. A large
@@ -2636,6 +2698,8 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
     transcript read whole: check's index takes them (known.Index.take)
     rather than read each transcript a second time. `remember`, with
     apply, is given each value before a transcript loses it to a mask.
+    `skipped`, with apply, is given why each transcript left as it was
+    was not masked (scan_file).
     """
     merged, scanned, changed_files = {}, 0, []
     values = {}
@@ -2654,13 +2718,13 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
                 def took(found, masks, path=path, st=st):
                     read(path, st, found, masks)
         findings, changed = scan_file(path, apply=apply, known=values, read=took,
-                                      remember=remember)
+                                      remember=remember, skipped=skipped)
         if changed:
             changed_files.append(path)
         _merge(merged, findings)
     if copies and merged:
         _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
-                                     remember=remember)
+                                     remember=remember, skipped=skipped)
     if known is not None:
         known.update(values)
     return merged, scanned, changed_files
@@ -2705,13 +2769,14 @@ _SHAPE_LABELS = frozenset(name for _shape, name in _SHAPES_NAMED)
 
 
 def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
-                                 remember=None, least=2):
+                                 remember=None, least=2, skipped=None):
     """Count, and with apply mask, each value of `merged` in the transcripts
     of `paths` it was not found in. Each look costs what it reads, and a
     little more for asking at all, so a thousand small transcripts and ten
-    thousand values stop at the budget too. `remember` as scan_file takes
-    it. With fewer than `least` transcripts there is none to look in: the
-    values were found in them (least=1: found in another agent's files)."""
+    thousand values stop at the budget too. `remember` and `skipped` as
+    scan_file takes them. With fewer than `least` transcripts there is
+    none to look in: the values were found in them (least=1: found in
+    another agent's files)."""
     order = sorted((fp for fp, f in merged.items()
                     if fp in values and f["label"] not in _SHAPE_LABELS),
                    key=lambda fp: (-len(values[fp]), fp))
@@ -2747,7 +2812,8 @@ def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
                 present[fp] = values[fp]
         if present:
             findings, changed = scan_file(path, apply=apply, only=set(present),
-                                          extra=present, remember=remember)
+                                          extra=present, remember=remember,
+                                          skipped=skipped)
             if changed and path not in changed_files:
                 changed_files.append(path)
             _merge(merged, {fp: f for fp, f in findings.items() if f["count"]},
@@ -2822,9 +2888,14 @@ def scan_store(source, store, values):
     it, once, with the files it was read out of. `values`
     ({fingerprint: value}) is given each value found. Never raises: an
     adapter that fails part way warns, and what it gave until then is
-    kept."""
+    kept.
+
+    A value found is counted in every string of the store that holds it,
+    whether or not the rules find it there, as scan_file counts one in a
+    transcript: the same history was seen fewer times in a rollout."""
     findings = {}
     masks = set()
+    strings = []
     origin_now = [None]
     lines_now = [None]
 
@@ -2849,12 +2920,51 @@ def scan_store(source, store, values):
             origin_now[0] = _origin_of(text)
             lines_now[0] = None
             for _container, _key, string_ in _strings(text.node):
+                strings.append(string_)
                 if _MASK_MARK in string_:
                     masks.update(_MASKS.findall(string_))
             _walk(text.node, collect)
     except Exception as error:          # one adapter must not stop the others
         source.stopped(store, error)
+    for fp, n in _holding(strings, {fp: values[fp] for fp in findings}).items():
+        findings[fp]["count"] = max(findings[fp]["count"], n)
     return findings, masks
+
+
+def _holding(texts, values):
+    """{fingerprint: how many of `texts` hold its value}, for `values`
+    ({fingerprint: value}), every value looked for in one pass over them
+    (_rewrite._Forms): asked one at a time, a rollout of 2,700 keys was
+    read 2,700 times."""
+    from .sources import _rewrite
+    if not texts or not values:
+        return {}
+    forms = _rewrite._Forms.raw([(v, fp) for fp, v in values.items()])
+    every = _Strings(texts)
+    held = set()
+    for start, fid in forms.occurrences(every.joined):
+        k = bisect.bisect_right(every.starts, start) - 1
+        if start + len(forms.forms[fid]) <= every.starts[k] + len(every.texts[k]):
+            held.add((fid, k))
+    return collections.Counter(forms.entries[fid][0][1] for fid, _k in held)
+
+
+def _read_store(source, store, values):
+    """scan_store, and whether the store was read whole: not when it
+    cannot be opened, or its adapter counted it as a file not read
+    (Source.unreadable_store, Source.stopped). What the index knew of one
+    that was not is kept, and it is read again next run: indexed as
+    holding what was read of it, its passwords were printed whole until
+    it next changed."""
+    before = source.counts.get("unreadable_stores", 0)
+    findings, masks = scan_store(source, store, values)
+    whole = source.counts.get("unreadable_stores", 0) == before
+    try:
+        with open(store.path, "rb"):
+            pass
+    except OSError:
+        whole = False
+    return findings, masks, whole
 
 
 # The files a search for copies reads as text. A database or a compressed
@@ -2866,9 +2976,10 @@ def _copies_in_stores(stores, merged, values, sources_by_id):
     """Count each value of `merged` in the files of `stores` where the
     rules did not find it: typed into a command with nothing beside it, or
     quoted in a reply. Each file is read once, as text, and each value
-    looked for in every form it can take there (_rewrite.encodings), in
-    the budget _copies_in_other_transcripts spends on Claude Code's.
-    Databases and compressed files are not read this way."""
+    looked for in every form it can take there (_rewrite.encodings, and
+    for an agent that keeps text as lists of bytes, Grok Build, that
+    list), in the budget _copies_in_other_transcripts spends on Claude
+    Code's. Databases and compressed files are not read this way."""
     from .sources import _rewrite
     order = sorted((fp for fp, f in merged.items()
                     if fp in values and f["label"] not in _SHAPE_LABELS),
@@ -2886,6 +2997,7 @@ def _copies_in_stores(stores, merged, values, sources_by_id):
     forms = {}
     for store in stores:
         content = None
+        listed = sources_by_id[store.source].byte_arrays
         for fp in order:
             if store.path in merged[fp]["files"]:
                 continue
@@ -2897,16 +3009,30 @@ def _copies_in_stores(stores, merged, values, sources_by_id):
                     break
             if fp not in forms:
                 forms[fp] = _rewrite.encodings(values[fp])
-            budget -= len(forms[fp]) * len(content) + _CROSS_LOOK
+            budget -= (len(forms[fp]) + listed) * len(content) + _CROSS_LOOK
             if budget < 0:
                 return
-            if any(form in content for form in forms[fp]):
+            if (any(form in content for form in forms[fp])
+                    or listed and _in_byte_list(content, values[fp])):
                 entry = merged[fp]
                 for key in ("sources", "read_only"):
                     entry.setdefault(key, set())
                 entry.setdefault("stores", {})
                 _held_by(entry, sources_by_id[store.source], store)
                 entry["count"] += 1
+
+
+def _in_byte_list(content, value):
+    """True when content holds value's UTF-8 bytes as whole items of a
+    JSON list of integers, as _rewrite masks them there."""
+    from .sources import _rewrite
+    items = _rewrite._byte_list(value)
+    at = content.find(items)
+    while at != -1:
+        if _rewrite._between_items(content, at, at + len(items)):
+            return True
+        at = content.find(items, at + 1)
+    return False
 
 
 def _claude_code_keys(findings):
@@ -2943,7 +3069,8 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     compressed file, or one written to in the last two minutes is left as
     it is, and said so (read_only, skipped). `progress`, `known`, `read`
     and `remember` are scan's, for every agent's files: `read` is called
-    with (path, its signature or os.stat, values, mask fingerprints)."""
+    with (path, its signature or os.stat, values, mask fingerprints), the
+    last two None for a file of another agent not read whole."""
     paths = dict(paths or {})
     root = root or paths.get("claude-code") or CLAUDE_PROJECTS
     selected = list(_registry.ids() if sources is None else sources)
@@ -2958,6 +3085,7 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     extra = sum(len(stores) for _source, stores in others)
     done = 0
     claude_paths = []
+    held = {}                       # transcript not masked -> why
     if "claude-code" in selected:
         step = progress
         if progress and extra:
@@ -2965,7 +3093,7 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                 progress(i, total + extra, path)
         merged, scanned, changed = scan(root, since_days, apply=apply,
                                         progress=step, known=values, read=read,
-                                        remember=remember)
+                                        remember=remember, skipped=held)
         _claude_code_keys(merged)
         out.findings.update(merged)
         out.counts["claude-code"] = done = scanned
@@ -2983,10 +3111,11 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                 progress(done, total, store.path)
             out.stores[store.path] = store
             signed = agents.signature(store.path, store.format)
-            findings, masks = scan_store(source, store, values)
+            findings, masks, whole = _read_store(source, store, values)
             if read is not None and signed is not None:
                 read(store.path, signed,
-                     {values[fp] for fp in findings}, masks)
+                     {values[fp] for fp in findings} if whole else None,
+                     masks if whole else None)
             _merge(out.findings, findings)
 
     if out.findings and out.stores:
@@ -2999,8 +3128,10 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
             if apply and remember is not None:
                 remember([values[fp] for fp in elsewhere if fp in values])
             _copies_in_other_transcripts(claude_paths, elsewhere, values, apply,
-                                         out.changed, remember=remember, least=1)
+                                         out.changed, remember=remember, least=1,
+                                         skipped=held)
             _claude_code_keys(elsewhere)
+    out.skipped.update((path, ("claude-code", why)) for path, why in held.items())
 
     for entry in out.findings.values():
         for path in entry["read_only"]:
@@ -3040,14 +3171,17 @@ def _mask_stores(out, values, by_id, remember=None):
             out.skipped[path] = (store.source, why)
 
 
-# Why a file was not masked, as the report says it.
+# Why a file was not masked, as the report says it. HELD_OPEN is "in use"
+# by the agent's own word (Source.in_use, a lock), not by the file's age:
+# waiting two minutes after its last write does nothing for it.
 NOT_WRITTEN = "could not be written"
+HELD_OPEN = "held open"
 
 
 def _mask_one(source, store, values):
     """Mask values in one adapter file: None when it changed, "" when
     there was nothing to change, or why it was not masked (MaskResult's
-    reasons, or NOT_WRITTEN)."""
+    reasons, NOT_WRITTEN or HELD_OPEN)."""
     try:
         result = source.mask(store, values)
     except OSError as error:
@@ -3056,6 +3190,8 @@ def _mask_one(source, store, values):
         return NOT_WRITTEN
     if result.changed:
         return None
+    if result.skipped == "in use" and source.in_use(store):
+        return HELD_OPEN
     return result.skipped or ""
 
 
@@ -3199,13 +3335,14 @@ def render(findings, scanned, changed_files, applied, footer=True,
                               % _files(len(held)), width)))
     L.append("")
     if read_only:
-        L += _read_only_lines(read_only, DIM, width) + [""]
+        L += _read_only_lines(read_only, DIM, width, shown) + [""]
 
     if applied:
         L.append("  " + GRN("Masked in %d file(s)." % len(changed_files)))
-        L.append(DIM("  Backups: %s" % _fit_path(_home_short(BACKUP_ROOT),
-                                                 width - 11)))
-        L += [DIM(line) for line in _sentences(*_BACKUPS_HOLD)]
+        if changed_files:
+            L.append(DIM("  Backups: %s" % _fit_path(_home_short(_backup_root()),
+                                                     width - 11)))
+            L += [DIM(line) for line in _sentences(*_BACKUPS_HOLD)]
         if skipped:
             L += _skipped_lines(skipped, YEL, width)
     elif advice:
@@ -3239,10 +3376,12 @@ def _agent_names(ids):
 _DELETE_THERE = "To remove it, delete the session in %s."
 
 
-def _read_only_lines(read_only, DIM, width):
+def _read_only_lines(read_only, DIM, width, shown=None):
     """Under the findings: the files that hold one and that ranwhat never
     rewrites, a sentence for each kind of them, agent by agent, and what
-    to do instead."""
+    to do instead, and each file by name, through `shown` as render's
+    paths are: which to remove was in --json and the review only."""
+    shown = shown or _as_it_is
     from .sources.base import WHY_READ_ONLY
     groups = {}
     for path, store in read_only.items():
@@ -3256,6 +3395,8 @@ def _read_only_lines(read_only, DIM, width):
         L += [DIM(line) for line in term.wrap(
             "%s, %s: %s" % (agents.name(source), _files(len(held)), why),
             indent="      ", first="    ")]
+        L += [DIM("      " + _fit_path(shown(_home_short(path)), width - 6))
+              for path in sorted(held)]
     return L
 
 
@@ -3268,6 +3409,8 @@ _NOT_MASKED = {
     "would alter more than the secret": "not masked: masking would have "
                                         "changed more than the secret.",
     NOT_WRITTEN: "could not be written, not masked.",
+    HELD_OPEN: "held open by %s, not masked. Run clean --apply again once "
+               "it lets go; a lock left by a crash clears when it next starts.",
 }
 
 
@@ -3450,10 +3593,11 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
 
         if cmd in ("show", "mask", "keep"):
             if cmd == "mask" and arg == "all":
-                changed_total += _mask(items, scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths, remember=remember,
-                                       stores=stores)
-                items = []
+                did, later = _mask(items, scanned, _print, GRN, RED, DIM,
+                                   values, paths=paths, remember=remember,
+                                   stores=stores, shown=shown)
+                changed_total += did
+                items = [t for t in items if t["files"] & later]
                 continue
             if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
                 _print(RED("  need a number from 1 to %d" % len(items)))
@@ -3492,10 +3636,12 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
                 items.remove(target)
                 _print(DIM("  kept. %d left." % len(items)))
             else:
-                changed_total += _mask([target], scanned, _print, GRN, RED, DIM,
-                                       values, paths=paths, remember=remember,
-                                       stores=stores)
-                items.remove(target)
+                did, later = _mask([target], scanned, _print, GRN, RED, DIM,
+                                   values, paths=paths, remember=remember,
+                                   stores=stores, shown=shown)
+                changed_total += did
+                if not later:           # one left in use stays, to mask again
+                    items.remove(target)
             continue
 
         _print(RED("  unknown command: %s" % _fit(cmd, width - 33))
@@ -3503,7 +3649,7 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
 
 
 def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
-          remember=None, stores=None):
+          remember=None, stores=None, shown=None):
     """Re-walk only the files that hold these secrets, masking just them.
     A file may hold a copy the rules do not find there, typed with no key
     beside it, so each value goes with the walk (scan_file's extra): read
@@ -3521,7 +3667,11 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
     A finding in another agent's files (`stores`, {path: Store}) is masked
     there through that agent's adapter, where it can rewrite the file. A
     file it cannot rewrite is named with why and what to do instead, and
-    one written to in the last two minutes is left for later."""
+    one written to in the last two minutes is left for later. What its
+    adapter says to do once a file is masked (mask_note) is said too, as
+    clean --apply says it.
+
+    Returns (files masked, files left that a later mask may reach)."""
     stores = stores or {}
     wanted = {t["fingerprint"] for t in targets}
     everywhere = paths
@@ -3552,13 +3702,16 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
         remember(list(known.values()))
 
     changed = 0
+    held = {}                       # transcript -> why it was not masked
     for path in paths:
         here = {t["fingerprint"] for t in targets if path in t["files"]}
         found, did = scan_file(path, apply=True, only=wanted,
-                               extra={fp: v for fp, v in known.items() if fp in here})
+                               extra={fp: v for fp, v in known.items() if fp in here},
+                               skipped=held)
         if did:
             changed += 1
     left = {}                       # path -> (source id, why it was not masked)
+    noted = set()                   # agents whose files were masked
     for path in others:
         store = stores.get(path)
         here = [known[t["fingerprint"]] for t in targets
@@ -3571,29 +3724,37 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
         why = _mask_one(_registry.get(store.source), store, here)
         if why is None:
             changed += 1
+            noted.add(store.source)
         elif why:
             left[path] = (store.source, why)
     if everywhere and known:
         elsewhere = []
         _copies_in_other_transcripts(
-            everywhere, {t["fingerprint"]: t for t in targets}, known, True, elsewhere)
+            everywhere, {t["fingerprint"]: t for t in targets}, known, True, elsewhere,
+            skipped=held)
         changed += len(set(elsewhere) - set(paths))
+    left.update((path, ("claude-code", why)) for path, why in held.items())
     if changed:
         _print(GRN("  masked in %d file(s)." % changed))
-        _print(DIM("  Backups: %s" % _fit_path(_home_short(BACKUP_ROOT),
+        _print(DIM("  Backups: %s" % _fit_path(_home_short(_backup_root()),
                                                term.width() - 11)))
         for line in _sentences(*_BACKUPS_HOLD):
             _print(DIM(line))
-    elif not left:
+        from .cli import _sentence
+        for source in _registry.sources():
+            if source.id in noted and getattr(source, "mask_note", ""):
+                for line in term.wrap(_sentence(source.mask_note)):
+                    _print(DIM(line))
+    elif left and all(why == "read-only" for _i, why in left.values()):
+        _print(RED("  nothing changed: every file that holds it is read only."))
+    else:
         _print(RED("  nothing changed."))
     read_only = {p: stores[p] for p, (_i, why) in left.items() if why == "read-only"}
     if read_only:
-        if not changed:
-            _print(RED("  nothing changed: every file that holds it is read only."))
-        for line in _read_only_lines(read_only, DIM, term.width()):
+        for line in _read_only_lines(read_only, DIM, term.width(), shown):
             _print(line)
     skipped = {p: v for p, v in left.items() if v[1] != "read-only"}
     if skipped:
         for line in _skipped_lines(skipped, _as_it_is, term.width()):
             _print(DIM(line))
-    return changed
+    return changed, set(skipped)
