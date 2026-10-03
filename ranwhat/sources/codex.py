@@ -1324,10 +1324,12 @@ class CodexSource(Source):
     def mask(self, store, values):
         """The generic rewrite, for .jsonl and .json; everything else is
         read-only. A .jsonl that Codex compressed since it was found is
-        read-only now; one that is gone is left alone."""
+        read-only now, for the compressed file's reason, which the report
+        reads from the store; one that is gone is left alone."""
         try:
             return Source.mask(self, store, values)
         except FileNotFoundError:
             if store.format == "jsonl" and os.path.exists(store.path + ".zst"):
+                store.why_read_only = WHY_ZST
                 return MaskResult(store.path, skipped="read-only")
             return MaskResult(store.path)

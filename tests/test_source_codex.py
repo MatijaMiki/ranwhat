@@ -1586,6 +1586,19 @@ class Damaged(_Case):
         self.assertEqual((calls, texts, err, err2), ([], [], "", ""))
         self.assertEqual(self.src.mask(store, [SECRET]), MaskResult(path))
 
+    def test_a_rollout_compressed_before_it_is_masked_says_why(self):
+        """The report reads why a file is read only from its store, and a
+        .jsonl store gave it nothing to say."""
+        path = self.write(ROLLOUT, legacy_lines(SECRET))
+        store = self.store_for(path)
+        os.unlink(path)
+        self.write(ROLLOUT + ".zst", b"(\xb5/\xfd compressed")
+        self.assertEqual(self.src.mask(store, [SECRET]),
+                         MaskResult(path, skipped="read-only"))
+        self.assertEqual(store.why_read_only, codex.WHY_ZST)
+        said = " ".join(clean._read_only_lines({path: store}, str, 80))
+        self.assertIn("Resume the thread in Codex", " ".join(said.split()))
+
     def test_a_restored_rollout_is_read_under_its_plain_name(self):
         packed = _compress(b"{}\n")
         if packed is None or not _zstd.available():
