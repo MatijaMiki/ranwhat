@@ -418,6 +418,69 @@ class AFollowUpCommandRunsInPowerShell(unittest.TestCase):
         self.assertEqual(got, r"C:\Python313\python.exe -m ranwhat")
 
 
+class _Tty(io.StringIO):
+    def isatty(self):
+        return True
+
+    def fileno(self):
+        return 1
+
+
+class _Console(object):
+    """kernel32's console calls, for a console in `mode`, that takes a new
+    one when `takes`."""
+
+    def __init__(self, mode, takes):
+        self.mode, self.takes, self.set = mode, takes, []
+
+    def GetConsoleMode(self, handle, ref):
+        ref._obj.value = self.mode
+        return 1
+
+    def SetConsoleMode(self, handle, mode):
+        self.set.append(mode)
+        return 1 if self.takes else 0
+
+
+class AClassicWindowsConsoleGetsNoEscapes(unittest.TestCase):
+    """cmd and Windows PowerShell 5.1 in a classic conhost window show an
+    escape as ←[1m unless it is turned on, and nothing turned it on: every
+    report there was strewn with them, and the progress line never
+    erased."""
+
+    def on_windows(self, console):
+        import ctypes
+        windll = mock.Mock()
+        windll.kernel32 = console
+        return [mock.patch.object(term.os, "name", "nt"),
+                mock.patch.dict(os.environ, {}, clear=False),
+                mock.patch.object(ctypes, "windll", windll, create=True),
+                mock.patch.dict(sys.modules, {"msvcrt": mock.Mock(
+                    get_osfhandle=lambda fd: 7)})]
+
+    def test_a_console_that_takes_escapes_gets_colour(self):
+        console = _Console(mode=3, takes=True)
+        with contextlib.ExitStack() as stack:
+            for patch in self.on_windows(console):
+                stack.enter_context(patch)
+            for name in ("NO_COLOR", "TERM", "COLORTERM"):
+                os.environ.pop(name, None)
+            self.assertEqual(term._colour_depth(_Tty()), 8)
+            self.assertTrue(term.Progress(_Tty()).enabled)
+        self.assertEqual(console.set[0], 3 | 4)
+
+    def test_one_that_does_not_gets_plain_text(self):
+        for console in (_Console(mode=3, takes=False), None):
+            with self.subTest(console=console), contextlib.ExitStack() as stack:
+                for patch in self.on_windows(console):
+                    stack.enter_context(patch)
+                for name in ("NO_COLOR", "TERM", "COLORTERM"):
+                    os.environ.pop(name, None)
+                self.assertEqual(term._colour_depth(_Tty()), 0)
+                self.assertEqual(term.paint("1", "x", _Tty()), "x")
+                self.assertFalse(term.Progress(_Tty()).enabled)
+
+
 class AFileThatCannotBeOpenedIsNamed(unittest.TestCase):
     """Windows gives EINVAL for a name holding ? * < > |, as it does for a
     write to a pipe whose reader has gone, and main() took every EINVAL for
