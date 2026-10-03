@@ -102,9 +102,10 @@ SHELL_FUNCTIONS = {"exec_command": ("cmd",), "shell": ("command", "cmd"),
 # maybe_parse_apply_patch).
 APPLY_PATCH_COMMANDS = ("apply_patch", "applypatch")
 
-# The SQLite home's files, the one table each is read from, and its columns.
-DATABASES = (("thread_history_1.sqlite", "thread_items", ("item_json",)),
-             ("state_5.sqlite", "threads", ("title", "first_user_message")))
+# The SQLite home's files and the one table each is read from, every
+# column of it: threads mirrors session_meta, git remote URL and all.
+DATABASES = (("thread_history_1.sqlite", "thread_items"),
+             ("state_5.sqlite", "threads"))
 
 ENCRYPTED = "encrypted_content"
 
@@ -623,7 +624,7 @@ class CodexSource(Source):
 
     def _databases(self, folder):
         out = []
-        for name, _table, _cols in DATABASES:
+        for name, _table in DATABASES:
             path = os.path.join(folder, name)
             if os.path.isfile(path):
                 store = self.store(path, "sqlite", role="side", unit="database",
@@ -1083,9 +1084,10 @@ class CodexSource(Source):
     # -- secrets ------------------------------------------------------------
 
     def secret_texts(self, store):
-        """Every string the store holds, encrypted_content aside. The output
-        of a call carries that call, so clean can tell what file it came
-        from; a call's own input carries none (it was typed)."""
+        """Every string the store holds, encrypted_content aside; for a
+        database, every string in its one table (DATABASES). The output of
+        a call carries that call, so clean can tell what file it came from;
+        a call's own input carries none (it was typed)."""
         try:
             if store.format == "sqlite":
                 texts = self._database_texts(store)
@@ -1120,10 +1122,10 @@ class CodexSource(Source):
 
     def _database_texts(self, store):
         name = os.path.basename(store.path)
-        spec = [(table, cols) for n, table, cols in DATABASES if n == name]
+        spec = [table for n, table in DATABASES if n == name]
         if not spec:
             return
-        table, wanted = spec[0]
+        table = spec[0]
         # A file that is not a database is said so without opening it in
         # SQLite, which would copy it to a temp folder first. An empty file
         # holds nothing to read.
@@ -1148,8 +1150,7 @@ class CodexSource(Source):
                                  "cannot open %s" % store.path)
                 return
             try:
-                have = _sqlite.columns(conn, table)
-                cols = [c for c in wanted if c in have]
+                cols = _sqlite.columns(conn, table)
                 if not cols:
                     if self._first(store.path, "records"):
                         self.count("unknown")
@@ -1163,10 +1164,9 @@ class CodexSource(Source):
                         if not isinstance(value, str) or not value:
                             continue
                         node = value
-                        if col == "item_json":
-                            decoded = _json_value(value)
-                            if decoded is not None:
-                                node = _without_encrypted(decoded)
+                        decoded = _json_value(value)
+                        if decoded is not None:
+                            node = _without_encrypted(decoded)
                         yield SecretText(node, where="%s row %d, %s"
                                          % (table, index, col))
             except sqlite3.Error as e:

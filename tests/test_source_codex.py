@@ -1203,6 +1203,31 @@ class Secrets(_Case):
             (SECRET, "thread_items row 3, item_json"),
             (TYPED, "threads row 1, first_user_message")]))
 
+    def test_every_column_of_a_thread_table_is_read(self):
+        """Codex copies session_meta's git remote into threads.git_origin_url,
+        and a remote URL can carry a token. Every column that holds text is
+        read, JSON in any of them decoded, encrypted_content left out."""
+        os.makedirs(self.root)
+        remote = "https://x-access-token:" + SHELL_SECRET + "@github.com/acme/app.git"
+        state = os.path.join(self.root, "state_5.sqlite")
+        conn = sqlite3.connect(state)
+        conn.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT, "
+                     "tokens_used INTEGER, title TEXT, first_user_message TEXT, "
+                     "git_sha TEXT, git_branch TEXT, git_origin_url TEXT, "
+                     "sandbox_policy BLOB)")
+        conn.execute("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     (THREAD, "/x/rollout.jsonl", 1200, "Deploy", "deploy it",
+                      "abc123", "main", remote,
+                      _j({"env": "STRIPE_KEY=" + TYPED,
+                          "encrypted_content": "gAAAAB" + SECRET}
+                         ).encode("utf-8")))
+        conn.commit()
+        conn.close()
+        found = found_secrets(self.texts(state))
+        self.assertEqual(sorted((v, w) for v, _o, w in found), sorted([
+            (SHELL_SECRET, "threads row 1, git_origin_url"),
+            (TYPED, "threads row 1, sandbox_policy")]))
+
 
 def _databases(folder):
     """Codex's two databases with the spec's tables and columns, the first
