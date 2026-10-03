@@ -86,11 +86,13 @@ def _connect(uri):
 
 
 def _wal_state(path):
-    """For a database in WAL mode (byte 18 or 19 of its header is 2):
-    "no wal" when its -wal is not there, "no shm" when its -wal is but its
-    -shm is not. "empty" for a file with no bytes: SQLite deletes a -wal it
-    finds beside one, even on a read-only connection. None when it has
-    both, is not in WAL mode, or cannot be read here.
+    """"empty" for a file of no bytes, or of one, which SQLite's POSIX VFS
+    counts as none: SQLite deletes a -wal it finds beside one, even on a
+    read-only connection. "no shm" when a -wal is there but its -shm is
+    not, whatever the header says: SQLite opens any -wal it finds, and
+    makes the -shm. For a database in WAL mode (byte 18 or 19 of its header
+    is 2), "no wal" when its -wal is not there. None otherwise, or when it
+    cannot be read here.
 
     An agent's SQLite removes both on a clean close. Opened mode=ro then,
     stock SQLite makes them in the agent's folder (a file the agent may not
@@ -101,17 +103,16 @@ def _wal_state(path):
             head = fh.read(20)
     except OSError:
         return None
-    if not head:
+    if len(head) < 2:
         return "empty"
+    wal = os.path.exists(path + "-wal")
+    if wal and not os.path.exists(path + "-shm"):
+        return "no shm"
     if len(head) < 20 or not head.startswith(SQLITE_MAGIC):
         return None
     if 2 not in (head[18], head[19]):
         return None
-    if not os.path.exists(path + "-wal"):
-        return "no wal"
-    if not os.path.exists(path + "-shm"):
-        return "no shm"
-    return None
+    return None if wal else "no wal"
 
 
 def _probe(path, immutable):

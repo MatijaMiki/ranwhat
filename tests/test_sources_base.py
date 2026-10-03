@@ -868,6 +868,36 @@ class Sqlite(unittest.TestCase):
                     self.assertEqual(_sqlite.tables(conn), [])
                 self.assertEqual(self._listing(folder), before)
 
+    def test_a_one_byte_database_keeps_the_wal_beside_it(self):
+        """SQLite's POSIX VFS counts a file of one byte as empty (macOS
+        writes an "S" into an empty database on a FAT drive), and deleted
+        the -wal beside it all the same."""
+        folder = tempfile.mkdtemp(dir=self.root)
+        path = os.path.join(folder, "agent.sqlite")
+        with open(path, "wb") as fh:
+            fh.write(b"S")
+        with open(path + "-wal", "wb") as fh:
+            fh.write(b"\x37\x7f\x06\x82" + b"\x00" * 60)
+        before = self._listing(folder)
+        with _sqlite.readonly(path):
+            pass
+        self.assertEqual(self._listing(folder), before)
+
+    def test_a_wal_beside_a_database_not_in_wal_mode_makes_no_shm(self):
+        """SQLite opens any -wal it finds, whatever the header says, and
+        made a -shm beside a database in rollback mode. It is read from a
+        copy, as a WAL database with no -shm is."""
+        folder = tempfile.mkdtemp(dir=self.root)
+        path = os.path.join(folder, "agent.db")
+        self._db(path).close()
+        with open(path + "-wal", "wb") as fh:
+            fh.write(b"\x37\x7f\x06\x82" + b"\x00" * 60)
+        before = self._listing(folder)
+        with _sqlite.readonly(path) as conn:
+            rows = list(_sqlite.iter_rows(conn, "part", ["id"]))
+        self.assertEqual([r["id"] for r in rows], ["p0", "p1", "p2"])
+        self.assertEqual(self._listing(folder), before)
+
     def test_a_name_that_cannot_go_in_a_uri_is_read_from_a_copy(self):
         """A name that is not UTF-8 (a Latin-1 folder on Linux, a lone
         surrogate on Windows) cannot be percent-encoded. The URI was built
