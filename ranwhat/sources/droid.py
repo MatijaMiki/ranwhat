@@ -805,12 +805,12 @@ class DroidSource(Source):
         try:
             doc = json.loads(text.lstrip(_lines.BOM))
         except (ValueError, RecursionError):
-            if self._tally(store):
-                self.count("unparsed")
-            self._bad_store(store, "not JSON")
-            # Searched as text all the same: the history is one document, so
-            # one entry nested deeper than this Python decodes would
-            # otherwise hide every prompt beside it.
+            # Searched as text instead: the history is one document, so one
+            # entry nested deeper than this Python decodes would otherwise
+            # hide every prompt beside it. Nothing in it goes unread, and it
+            # holds no calls, so it is not counted as a file not read.
+            self.warn(store.path, "Droid prompt history %s is not JSON, so "
+                      "its text was searched as it is" % store.path)
             for item in self._log_texts(store):
                 yield item
             return
@@ -821,8 +821,9 @@ class DroidSource(Source):
             yield SecretText(entry, where="entry %d" % index)
 
     def _log_texts(self, store):
-        """A tool-output log, terminal log or background output, read in
-        pieces of at most _CHUNK bytes, each cut after a line end where the
+        """A tool-output log, terminal log or background output, or a
+        prompt history that is not JSON, read in pieces of at most _CHUNK
+        bytes, each cut after a line end where the
         piece holds one (see _cut). The pieces of each are tied to the call
         whose result named it, when stores() found that call this run."""
         try:

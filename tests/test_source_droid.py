@@ -1581,8 +1581,9 @@ class Damaged(DroidCase):
         self.assertEqual(len(warnings), 2, warnings)
         self.assertTrue(any(garbage in w for w in warnings))
         self.assertTrue(any(bad_history in w for w in warnings))
-        self.assertEqual(self.droid.counts["unreadable_stores"], 2)
-        self.assertEqual(self.droid.unreadable, {"not JSON Lines": 1, "not JSON": 1})
+        # The history's text is searched all the same, so it is not unread.
+        self.assertEqual(self.droid.counts["unreadable_stores"], 1)
+        self.assertEqual(self.droid.unreadable, {"not JSON Lines": 1})
 
     def test_unknown_records_and_blocks_are_ignored_and_counted(self):
         lines = spec_sample() + [
@@ -1736,8 +1737,11 @@ class NestedPastTheStack(DroidCase):
                     texts = list(self.droid.secret_texts(self.store(path)))
                 self.assertIn(SECRET, _found(texts))
                 parsed = [t.where for t in texts] == ["entry 1", "entry 2"]
-                self.assertEqual(self.droid.counts["unparsed"], 0 if parsed else 1)
-                self.assertEqual(err.getvalue().count("warning:"),
+                # Searched as text when it does not parse, so not counted
+                # as unread, and the warning says it was searched.
+                self.assertEqual(self.droid.counts["unparsed"], 0)
+                self.assertEqual(self.droid.unreadable, {})
+                self.assertEqual(err.getvalue().count("text was searched"),
                                  0 if parsed else 1)
 
     def test_every_command_reads_on_past_a_nested_line(self):
