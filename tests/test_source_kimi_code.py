@@ -331,6 +331,21 @@ def _sha(path):
         return hashlib.sha256(fh.read()).hexdigest()
 
 
+def _deep(depth=100000):
+    """JSON objects nested `depth` deep, built as text, since json.dumps
+    would need the recursion this is here to test. Python 3.9's parser
+    refuses it; 3.14's accepts it, and then comparing it does not fit."""
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def _parses(text):
+    try:
+        json.loads(text)
+    except RecursionError:
+        return False
+    return True
+
+
 class KimiCodeCase(unittest.TestCase):
     """A temp home, KIMI_CODE_HOME unset, and a temp backup root."""
 
@@ -1864,6 +1879,42 @@ class Damaged(KimiCodeCase):
         with contextlib.redirect_stderr(err):
             self.assertEqual(list(self.src.secret_texts(self._store(path))), [])
         self.assertEqual(err.getvalue().count("warning:"), 1)
+
+    def test_a_call_nested_past_the_stack_is_kept_and_the_rest_read(self):
+        """A tool.call event recorded twice whose args nest too deep for
+        Python to compare, and a message call recorded twice whose
+        arguments string does: nothing escapes, and the calls, the key and
+        the spill file around them are still read. Where the parser gives
+        up first (3.9), the two deep events are skipped and counted."""
+        deep = _deep()
+        spill = self._write(self._tool_results("Bash", "call_3"),
+                            "TOKEN=" + SIDE + "\n")
+        event = _j(_call("call_deep", "Bash", "@", T0 + 2000)).replace(
+            '"@"', deep)
+        message = _assistant([("call_msg", "Bash", deep)], T0 + 2100)
+        lines = [_j(r) for r in _sample()] + [event, event] + [
+            _j(message), _j(_engine(message["message"], T0 + 2101)),
+            _j(_call("call_3", "Bash", {"command": "cat config/prod.env"},
+                     T0 + 3000)),
+            _j(_result("call_3", _persisted_pointer("Bash", "call_3", spill),
+                       T0 + 3100)),
+        ]
+        path = self._wire("".join(line + "\n" for line in lines))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ids = [c.tool_call_id for c in self._calls(path)]
+            found = self._findings(self._stores())
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(ids[0], "call_1")
+        self.assertEqual(ids[-1], "call_3")
+        self.assertIn("call_msg", ids)
+        self.assertEqual(found, {SECRET: {".env"}, SIDE: {"config/prod.env"}})
+        if _parses(deep):
+            self.assertIn("call_deep", ids)
+            self.assertEqual(self.src.counts["unparsed"], 0)
+        else:
+            self.assertNotIn("call_deep", ids)
+            self.assertEqual(self.src.counts["unparsed"], 2)
 
 
 class Window(KimiCodeCase):

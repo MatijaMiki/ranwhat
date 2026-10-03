@@ -302,8 +302,13 @@ def _call_key(record):
         return None
     fn = record.get("function")
     fn = fn if isinstance(fn, dict) else {}
-    text = json.dumps([cid, fn.get("name"), fn.get("arguments")],
-                      sort_keys=True, default=str)
+    try:
+        text = json.dumps([cid, fn.get("name"), fn.get("arguments")],
+                          sort_keys=True, default=str)
+    except RecursionError:
+        # Arguments nested too deep to encode: told apart by id and name
+        # alone, as watch._payload calls every such input "unhashable".
+        text = json.dumps([cid, fn.get("name"), "unhashable"], default=str)
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest()
 
 

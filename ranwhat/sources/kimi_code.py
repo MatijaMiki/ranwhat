@@ -272,8 +272,13 @@ def _message_of(obj, kind):
 
 def _same(a, b):
     """True when two calls with one id have the same name and input: one
-    call recorded twice, not a new call that reused the id."""
-    return a.tool_name == b.tool_name and a.tool_input == b.tool_input
+    call recorded twice, not a new call that reused the id. Input nested
+    too deep for Python to compare is taken for a new call: a copy
+    reported twice is better than a call missed."""
+    try:
+        return a.tool_name == b.tool_name and a.tool_input == b.tool_input
+    except RecursionError:
+        return False
 
 
 def _no_call_type(kind):

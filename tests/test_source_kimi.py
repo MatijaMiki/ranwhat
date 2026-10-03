@@ -256,6 +256,21 @@ def _marker(value):
     return clean.REDACTION % clean._fingerprint(value)
 
 
+def _deep(depth=100000):
+    """JSON objects nested `depth` deep, built as text, since json.dumps
+    would need the recursion this is here to test. Python 3.9's parser
+    refuses it; 3.14's accepts it, and then encoding it again does not fit."""
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def _parses(text):
+    try:
+        json.loads(text)
+    except RecursionError:
+        return False
+    return True
+
+
 # --------------------------------------------------------------------------
 # A temp home and share directory
 # --------------------------------------------------------------------------
@@ -1451,6 +1466,46 @@ class Robustness(KimiCase):
         self.assertEqual(found[SECRET]["files"], {log, out})
         self.assertEqual(found[ROTATED_SECRET]["files"], {spec})
         self.assertEqual(self.calls(), [])
+
+    def test_a_call_nested_past_the_stack_is_kept_and_the_rest_read(self):
+        """A call whose arguments are an object nested too deep for Python
+        to encode, in wire.jsonl and again in context.jsonl, and one whose
+        arguments string is: nothing escapes, the deep call is read once,
+        and the calls and keys around it are still read, the one only
+        context.jsonl holds included. Where the parser gives up first (3.9),
+        the deep lines are skipped and counted."""
+        self.kimi_json()
+        deep = _deep()
+        as_object = {"type": "function", "id": "Shell:1",
+                     "function": {"name": "Shell", "arguments": "@"}}
+        self.write(self.session() + "/wire.jsonl", _spec_wire(SECRET) + [
+            wire(1790000002.0, "ToolCall", as_object).replace('"@"', deep),
+            wire(1790000003.0, "ToolCall", dict(
+                as_object, id="Shell:2",
+                function={"name": "Shell", "arguments": deep})),
+            wire_call(1790000004.0, "Shell:3", "Shell", {"command": "ls"}),
+            wire_result(1790000004.5, "Shell:3", "TOKEN=" + ROTATED_SECRET),
+        ])
+        self.write(self.session() + "/context.jsonl", _spec_context(SECRET) + [
+            _compact({"role": "assistant", "content": "",
+                      "tool_calls": [as_object]}).replace('"@"', deep),
+            ctx_call("Shell:4", "Shell", {"command": "rm -rf build"}),
+        ])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ids = sorted(c.tool_call_id for c in self.calls())
+            found = _scan(self.src, self.stores())
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(self.src.unreadable, {})
+        self.assertEqual(found[SECRET]["origins"], {".env"})
+        self.assertEqual(found[ROTATED_SECRET]["origins"], set())
+        if _parses(deep):
+            self.assertEqual(ids, ["Shell:0", "Shell:1", "Shell:2", "Shell:3",
+                                   "Shell:4"])
+            self.assertEqual(self.src.counts.get("unparsed", 0), 0)
+        else:
+            self.assertEqual(ids, ["Shell:0", "Shell:2", "Shell:3", "Shell:4"])
+            self.assertEqual(self.src.counts["unparsed"], 1)
 
     def test_a_kimi_json_that_is_not_json_only_loses_projects(self):
         self.spec_tree()
