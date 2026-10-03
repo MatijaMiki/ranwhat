@@ -97,22 +97,10 @@ def make_openclaw(command, epoch):
 
 def steps_in(out, cmd):
     """Each command check's tail suggests, as the reader would paste it:
-    a line ending in " \\" continues on the next."""
+    one line each, with any reason beside it cut off."""
     tail = out.split("  What to do with this", 1)[1]
-    steps, current = [], None
-    for line in tail.split("\n"):
-        if current is not None:
-            current += " " + line.strip()
-        elif line.startswith("    %s " % cmd):
-            current = line.strip()
-        else:
-            continue
-        if current.endswith(" \\"):
-            current = current[:-2]
-            continue
-        steps.append(re.split(r"\s{2,}", current)[0])
-        current = None
-    return steps
+    return [re.split(r"\s{2,}", line.strip())[0] for line in tail.split("\n")
+            if line.startswith("    %s " % cmd)]
 
 
 # Outside double quotes, a character cmd or PowerShell hands to the
@@ -1258,24 +1246,27 @@ class NextStepsReadWhatCheckRead(_Base):
                              capture_output=True, text=True, timeout=30)
         self.assertEqual(out.stdout, odd)
 
-    def test_every_line_fits_unless_one_word_cannot(self):
-        # A path longer than the line cannot be broken without breaking
-        # the command, so it is the one thing allowed past the edge. A
-        # Windows shell continues a line differently, so there each
-        # command keeps one line, whatever its length.
+    def test_every_line_fits_but_a_suggested_command(self):
+        # Each shell continues a line differently, so a command folded to
+        # fit pastes into one of them only. Each keeps one line of its
+        # own, whatever its length; every other line fits.
         root, st = make_root(ACTION + SECRET)
         for width in ("46", "60", "96"):
             with mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
                 limit = term.width()
                 steps, _, out = self.run_check(root, st, "--days", "365")
-            tail = out.split("  What to do with this", 1)[1]
-            for line in tail.split("\n"):
-                if os.name == "nt":
-                    self.assertFalse(line.endswith(" \\"), (width, line))
-                elif len(line) > limit:
-                    self.assertEqual(len(line.strip().rstrip(" \\").split()),
-                                     1, (width, line))
             self.assertEqual(len(steps), 3)
+            lines = out.split("\n")
+            commands = ["    " + step for step in steps]
+            for line in lines:
+                if line not in commands:
+                    self.assertLessEqual(len(line), limit, (width, line))
+            for step in steps:
+                self.assertFalse(step.endswith("\\"), (width, step))
+            # At 46 the paths do not fit, so each command has its line.
+            if width == "46":
+                for command in commands:
+                    self.assertIn(command, lines)
 
 
 class WindowsPathsPasteIntoCmdAndPowerShell(unittest.TestCase):

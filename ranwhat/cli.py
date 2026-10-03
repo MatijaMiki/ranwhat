@@ -794,24 +794,12 @@ def _shell_path(path):
     return _quote(path)
 
 
-def _command_lines(cmd, words, indent="    ", more="        "):
-    """`cmd` and its words as lines to paste, folded between words with a
-    trailing backslash, which a POSIX shell joins back into one command.
-    A word is never split, so a path longer than the line has a line to
-    itself; `cmd` is kept whole, since it may hold a quoted path. Windows
-    shells continue lines differently, so there it stays one line."""
-    if os.name == "nt":
-        return [indent + " ".join([cmd] + list(words))]
-    width = term.width()
-    out, line = [], indent + cmd
-    for i, word in enumerate(words):
-        mark = 0 if i == len(words) - 1 else 2       # room for " \"
-        if len(line) + 1 + len(word) + mark > width:
-            out.append(line + " \\")
-            line = more + word
-        else:
-            line += " " + word
-    return out + [line]
+def _command_lines(cmd, words, indent="    "):
+    """`cmd` and its words as one line to paste, whatever its length. Each
+    shell continues a line differently (a backslash in POSIX shells, ^ in
+    cmd, a backtick in PowerShell), so a folded command pastes into one of
+    them only. A word is never split."""
+    return [indent + " ".join([cmd] + list(words))]
 
 
 _POINT_ELSEWHERE = {

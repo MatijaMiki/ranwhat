@@ -129,8 +129,17 @@ class _Cli(unittest.TestCase):
                 for f in files]
 
     def assertFits(self, text, width):
+        """Every line fits but a command check suggests, which keeps a line
+        of its own, whatever its length, to paste into any shell."""
+        commands = ()
+        if "  What to do with this" in text:
+            head = "    %s " % cli.invocation()
+            commands = [line for line in text.split("  What to do with this")[1]
+                        .split("\n")
+                        if line.startswith(head) and "  " not in line.strip()]
         for line in text.split("\n"):
-            self.assertLessEqual(len(line), width, repr(line))
+            if line not in commands:
+                self.assertLessEqual(len(line), width, repr(line))
 
     def assertAllMasked(self, text, *values):
         for value in values:
