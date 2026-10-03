@@ -46,8 +46,11 @@ def searched(selected=None):
 
 # What discover found, kept for the length of one command (run()): check
 # asks it three times of each agent (its read for secrets, the index, its
-# read for actions), and an agent's files are listed once. None outside a
-# command, so a caller that changes files between two reads sees them.
+# read for actions), and an agent's files are listed once. Where it looks
+# is kept apart from what it found there, as it does not depend on --days:
+# clean asks with --days and the index with none, and one stat of a place
+# that is not there serves both. None outside a command, so a caller that
+# changes files between two reads sees them.
 _RUN = None
 
 
@@ -83,12 +86,18 @@ def discover(source, override=None, since_days=None):
 
 
 def _discover(source, override, since_days):
-    try:
-        locations = list(source.locations(override))
-    except Exception as error:      # one adapter must not stop the others
-        source.warn("locations", "could not work out where %s keeps its "
-                                 "history (%s)" % (source.name, error))
-        return [], []
+    where = ("locations", source.id, override)
+    if _RUN is not None and where in _RUN:
+        locations = list(_RUN[where])
+    else:
+        try:
+            locations = list(source.locations(override))
+        except Exception as error:      # one adapter must not stop the others
+            source.warn("locations", "could not work out where %s keeps its "
+                                     "history (%s)" % (source.name, error))
+            return [], []
+        if _RUN is not None:
+            _RUN[where] = list(locations)
     present = [loc for loc in locations if loc.exists]
     if not present:
         return locations, []

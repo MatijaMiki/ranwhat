@@ -13,6 +13,7 @@ Every value here is synthetic, and every file is in a temp directory: the
 home directory each adapter defaults to is an empty one, so only the
 folders --path names are read.
 """
+import contextlib
 import hashlib
 import io
 import json
@@ -782,6 +783,64 @@ class AbsentAgentsCostAStatOrTwo(_Cli):
         every = self.count(lambda: self.run_cli("check", "--json",
                                                 *self.base_flags()))
         self.assertLessEqual(every - before, 4 * 4 * n_agents)
+
+
+class OpenClawIsLookedForOnce(_Cli):
+    """With no OpenClaw on this machine, a command looks for it as little
+    as it can: a stat of its state directory where clean and the index look
+    (agents.discover keeps where an agent looks for the whole run, whatever
+    --days), and one listing where watch reads its actions. watch listed
+    its databases twice (once for the progress total), and check looked for
+    the directory twice, for clean's --days and for the index's whole
+    history."""
+
+    def touches(self, *argv):
+        """How many stats and listings of the OpenClaw state directory, or
+        anything in it, one command makes."""
+        n = [0]
+
+        def counted(fn):
+            def inner(*args, **kwargs):
+                path = args[0] if args else kwargs.get("path")
+                try:
+                    path = os.fspath(path)
+                except TypeError:
+                    path = None
+                if isinstance(path, str) and (
+                        path == self.openclaw
+                        or path.startswith(self.openclaw + os.sep)):
+                    n[0] += 1
+                return fn(*args, **kwargs)
+            return inner
+
+        with contextlib.ExitStack() as stack:
+            for name in ("stat", "lstat", "scandir", "listdir"):
+                stack.enter_context(mock.patch.object(
+                    os, name, counted(getattr(os, name))))
+            rc, _out, err = self.run_cli(*(list(argv) + self.base_flags()))
+        self.assertEqual(rc, 0, err)
+        return n[0]
+
+    def test_each_command(self):
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/x", "ok",
+                                            self.now))
+        for argv, most in ((["check", "--json"], 2), (["watch", "--json"], 2),
+                           (["clean", "--json", "--no-interactive"], 1)):
+            with self.subTest(argv=argv):
+                self.assertLessEqual(self.touches(*argv), most)
+
+    def test_where_an_agent_looks_is_worked_out_once_a_run(self):
+        from ranwhat import agents
+        for source in agents.chosen():
+            with self.subTest(source=source.id):
+                real = type(source).locations
+                with mock.patch.object(type(source), "locations", autospec=True,
+                                       side_effect=real) as where:
+                    with agents.run():
+                        agents.discover(source, None, 30)
+                        agents.discover(source, None, None)
+                        agents.discover(source, None, 30)
+                self.assertEqual(where.call_count, 1)
 
 
 class SourcesCommand(_Cli):

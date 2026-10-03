@@ -2539,13 +2539,14 @@ def scan_openclaw_db(path, source="openclaw", known=None, src=None):
 
 
 def scan_openclaw(state_dir=None, since_days=None, known=None, progress=None,
-                  done=0, total=None):
+                  done=0, total=None, dbs=None):
     """Every database is read whatever its mtime: a live agent's recent
     rows can sit in its -wal file while the database itself looks old.
     With since_days, each action is kept by its own time, as in scan_all.
-    `progress` is called with (done + i, total, path) before the i-th."""
+    `progress` is called with (done + i, total, path) before the i-th.
+    `dbs` are the databases, when the caller has listed them already."""
     records, cutoff = [], _cutoff(since_days)
-    dbs = openclaw_databases(state_dir)
+    dbs = openclaw_databases(state_dir) if dbs is None else dbs
     total = done + len(dbs) if total is None else total
     src = _openclaw_source()
     for i, db in enumerate(dbs, 1):
@@ -2639,9 +2640,9 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
         stores = _agents.transcripts(stores)
         if stores:
             others.append((source, stores))
-    databases = (len(openclaw_databases(state_dir)) if "openclaw" in sources
-                 else 0)
-    extra = sum(len(stores) for _source, stores in others) + databases
+    # Listed once, for the progress total and for reading them.
+    databases = openclaw_databases(state_dir) if "openclaw" in sources else []
+    extra = sum(len(stores) for _source, stores in others) + len(databases)
     done = 0
     if "claude-code" in sources:
         step = progress
@@ -2661,7 +2662,7 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
     if "openclaw" in sources:
         recs, counts["openclaw"] = scan_openclaw(
             state_dir=state_dir, since_days=since_days, known=known,
-            progress=progress, done=done, total=done + extra)
+            progress=progress, done=done, total=done + extra, dbs=databases)
         records += recs
     records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
     return records, counts
