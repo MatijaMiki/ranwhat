@@ -1285,23 +1285,42 @@ class Secrets(KimiCase):
 
     def test_a_value_cut_in_two_by_the_pieces_of_a_call_is_found(self):
         """Neither piece of a call the recorder wrote in two holds the whole
-        value, so the call is given once more when it is whole, at its
-        result, with no call of its own (what was typed has no origin)."""
+        value, so the call is given whole, at its result, in place of the
+        lines its pieces came in, with no call of its own (what was typed
+        has no origin)."""
         ctx, wire_path = self.split_tree()
         texts = list(self.src.secret_texts(self.store(wire_path)))
         self.assertEqual([t.where for t in texts],
-                         ["line 1", "line 2", "line 3", "line 4", "line 5",
-                          "lines 3-5", "line 6"])
-        self.assertIsNone(texts[5].call)
-        self.assertEqual(texts[6].call.command,
+                         ["line 1", "line 2", "line 4", "lines 3-5", "line 6"])
+        self.assertIsNone(texts[3].call)
+        self.assertEqual(texts[4].call.command,
                          "curl -H 'Authorization: Bearer %s' "
                          "https://api.example.com/v1/me" % SECRET)
-        self.assertNotIn(SECRET, json.dumps(texts[2].node))
-        self.assertNotIn(SECRET, json.dumps(texts[4].node))
-        self.assertIn(SECRET, texts[5].node["function"]["arguments"]["command"])
+        self.assertIn(SECRET, texts[3].node["function"]["arguments"]["command"])
         found = _scan(self.src, self.stores())
         self.assertEqual(found[SECRET]["files"], {ctx, wire_path})
         self.assertEqual(found[SECRET]["origins"], set())
+
+    def test_the_pieces_of_a_call_are_searched_only_whole(self):
+        """A value inside one piece is found there once, and the start of a
+        value cut in two is not a secret of its own."""
+        _ctx, wire_path = self.split_tree(inside=True)
+        found = _scan(self.src, [self.store(wire_path)])
+        self.assertEqual(found[SECRET]["count"], 1)
+        key = "sk-" "proj-" "Zq8vR2mT6yLp4WcN0sXe7HbJ" "Pp3kW9dQ2nVb7XcR"
+        command = {"command": "export OPENAI_API_KEY=%s && ./run.sh" % key}
+        shell, rest = split_call("Shell:0", "Shell", command,
+                                 json.dumps(command).index(key) + 25)
+        wire_path = self.write(self.session(SID_OLD) + "/wire.jsonl", [
+            WIRE_HEAD,
+            wire(1790000001.0, "ToolCall", shell),
+            wire(1790000001.1, "StatusUpdate", {"context_usage": 0.1}),
+            wire(1790000001.2, "ToolCallPart", rest),
+            wire_result(1790000002.0, "Shell:0", ""),
+        ])
+        found = _scan(self.src, [self.store(wire_path)])
+        self.assertEqual({value: f["count"] for value, f in found.items()},
+                         {key: 1})
 
     def test_system_prompt_and_prompt_history_are_searched(self):
         self.kimi_json()
