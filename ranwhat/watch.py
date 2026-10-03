@@ -2507,19 +2507,28 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
     for r in records:
         hits = sorted(r["hits"], key=lambda h: -_RANK.get(h.get("severity"), -1))
         title = hits[0]["title"]
-        meta = "  ".join(p for p in (
+        where = "  ".join(p for p in (
             _local_time(r.get("timestamp")),
             _SOURCE_NAMES.get(r.get("source"), "") if labelled else "",
-            _printable(str(r.get("tool_name") or "")),
-            _RAN.get(r.get("actor")), _RAN.get(r.get("status"))) if p)
+            _printable(str(r.get("tool_name") or ""))) if p)
+        ran = "  ".join(p for p in (_RAN.get(r.get("actor")),
+                                    _RAN.get(r.get("status"))) if p)
+        meta = "  ".join(p for p in (where, ran) if p)
         paint = colour.get(r["severity"], DIM)
         if meta and len("  * %s   %s" % (title, meta)) <= width:
             L.append("  " + paint("* ") + BOLD(title) + DIM("   " + meta))
         else:
-            # Too long for one line: when and where go on the next.
+            # Too long for one line: when and where go on the next, and
+            # who ran it on its own line when they do not fit there, since
+            # a cut there read a declined deletion as one that ran.
             L.append("  " + paint("* ") + BOLD(_fit(title, width - 4)))
-            if meta:
-                L.append(DIM(_fit("      " + meta, width)))
+            if meta and len("      " + meta) <= width:
+                L.append(DIM("      " + meta))
+            else:
+                if where:
+                    L.append(DIM(_fit("      " + where, width)))
+                if ran:
+                    L.append(DIM("      " + ran))
         for i, h in enumerate(hits):
             if i:
                 label = "%s (%s)" % (h["title"], h["severity"])
