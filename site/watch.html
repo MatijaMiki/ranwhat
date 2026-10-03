@@ -179,7 +179,7 @@
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Codex</strong></td>
               <td data-label="Location"><code>~/.codex/sessions/</code> and <code>archived_sessions/</code> (<code>$CODEX_HOME</code>); its prompt history, shell snapshots and thread index searched for secrets</td>
-              <td data-label="Format">JSONL; <code>.jsonl.zst</code> and SQLite read only</td>
+              <td data-label="Format">JSONL; SQLite read only; <code>.jsonl.zst</code> read only, on Python 3.14 or with the <code>zstd</code> command</td>
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Gemini CLI</strong></td>
               <td data-label="Location"><code>~/.gemini/tmp/&lt;project&gt;/chats/</code> (<code>$GEMINI_CLI_HOME</code>)</td>
@@ -219,7 +219,7 @@
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>OpenClaw</strong></td>
               <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code> (default <code>~/.openclaw</code>)</td>
-              <td data-label="Format">SQLite, tool calls found by shape</td>
+              <td data-label="Format">SQLite, tool calls found by shape; compressed events and <a href="https://docs.openclaw.ai/reference/database-schemas/layout">cold archives</a> not read yet</td>
               <td data-label="Status">Shipped, secrets read-only</td></tr>
           <tr><td><strong>Meta Muse</strong></td>
               <td data-label="Location">Meta's cloud</td>
