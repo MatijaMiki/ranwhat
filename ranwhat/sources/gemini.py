@@ -763,7 +763,7 @@ class ChatReader(object):
         else:
             reason, why = "could not be opened", str(error)
         if noting:
-            self.source.unreadable_store(reason)
+            self.source.unreadable_store(reason, store.path)
         self.source.warn(store.path, "%s: could not read %s (%s)"
                          % (name, store.path, why))
 

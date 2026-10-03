@@ -500,7 +500,7 @@ class GrokBuildSource(Source):
         key = store.path
         if key in self._warned:
             return
-        self.unreadable_store(reason)
+        self.unreadable_store(reason, store.path)
         self.warn(key, "cannot read Grok Build %s %s (%s)"
                   % (os.path.basename(store.path), store.path, reason))
 

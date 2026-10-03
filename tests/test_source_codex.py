@@ -1611,6 +1611,20 @@ class Damaged(_Case):
         said = " ".join(clean._read_only_lines({path: store}, str, 80))
         self.assertIn("Resume the thread in Codex", " ".join(said.split()))
 
+    def test_a_rollout_compressed_before_it_is_read_is_counted_by_its_store(self):
+        """Read under its other name, a rollout Codex compressed was counted
+        as not read by that name, which no report's list of stores holds:
+        the report counted it among those read."""
+        path = self.write(ROLLOUT, legacy_lines(SECRET))
+        store = self.store_for(path)
+        os.unlink(path)
+        self.write(ROLLOUT + ".zst", b"(\xb5/\xfd compressed")
+        with mock.patch.object(_zstd, "available", return_value=False):
+            calls, _err = self.quiet(list, self.src.tool_calls(store))
+        self.assertEqual(calls, [])
+        self.assertEqual(self.src.unread, {store.path})
+        self.assertEqual(self.src.read_of([store.path]), 0)
+
     def test_a_restored_rollout_is_read_under_its_plain_name(self):
         packed = _compress(b"{}\n")
         if packed is None or not _zstd.available():

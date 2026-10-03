@@ -642,12 +642,12 @@ class KimiSource(Source):
             for call in reader(store, parsed):
                 yield call
         except Exception as e:      # one store must not stop the others
-            self.unreadable_store("could not be read")
+            self.unreadable_store("could not be read", store.path)
             self.warn(store.path, "cannot read Kimi CLI history %s (%s)"
                       % (store.path, e))
             return
         if not parsed[0] and self.counts.get("unparsed", 0) > before:
-            self.unreadable_store("not JSON lines")
+            self.unreadable_store("not JSON lines", store.path)
             self.warn(store.path, "Kimi CLI history %s is not JSON lines; "
                       "nothing in it was read" % store.path)
 

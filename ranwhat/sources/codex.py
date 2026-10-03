@@ -446,11 +446,14 @@ class CodexSource(Source):
         self._tallied.add(key)
         return True
 
-    def _unreadable(self, path, reason, message=None):
-        if self._first(path, "unreadable"):
-            self.unreadable_store(reason)
+    def _unreadable(self, store, reason, message=None, path=None):
+        """Count `store` once a run as a file not read, and warn. `path` is
+        the file that was read for it, when Codex had moved it to its other
+        name (.jsonl and .jsonl.zst); the store is counted by its own."""
+        if self._first(store.path, "unreadable"):
+            self.unreadable_store(reason, store.path)
         if message:
-            self.warn(path, message)
+            self.warn(path or store.path, message)
 
     # -- where to look ------------------------------------------------------
 
@@ -680,7 +683,7 @@ class CodexSource(Source):
                 if fmt == "jsonl":
                     fh = open(path, "rb")
                 else:
-                    fh = self._decompressed(path)
+                    fh = self._decompressed(store, path)
                     if fh is None:
                         return
             except FileNotFoundError:
@@ -694,39 +697,40 @@ class CodexSource(Source):
                     return
                 continue
             except OSError as e:
-                self._unreadable(path, "could not be opened",
-                                 "cannot read %s (%s)" % (path, e))
+                self._unreadable(store, "could not be opened",
+                                 "cannot read %s (%s)" % (path, e), path)
                 return
             try:
                 with fh:
-                    for record in self._json_lines(fh, path):
+                    for record in self._json_lines(fh, store, path):
                         yield record
             except OSError as e:
                 self.warn(path, "stopped reading %s (%s)" % (path, e))
             return
 
-    def _decompressed(self, path):
-        """The decompressed file as a binary stream, or None (counted).
-        FileNotFoundError is the caller's: the file may have just been
-        restored as plain JSONL."""
+    def _decompressed(self, store, path):
+        """The decompressed file at path, read for `store`, as a binary
+        stream, or None (counted). FileNotFoundError is the caller's: the
+        file may have just been restored as plain JSONL."""
         os.stat(path)
         if not _zstd.available():
-            self._unreadable(path, "compressed, " + _zstd.NEEDS)
+            self._unreadable(store, "compressed, " + _zstd.NEEDS, path=path)
             return None
         with open(path, "rb") as fh:
             data = fh.read()
         plain = _zstd.decompress(data)
         if plain is None:
-            self._unreadable(path, NOT_DECOMPRESSED,
-                             "cannot decompress %s" % path)
+            self._unreadable(store, NOT_DECOMPRESSED,
+                             "cannot decompress %s" % path, path)
             return None
         return io.BytesIO(plain)
 
-    def _json_lines(self, fh, path):
+    def _json_lines(self, fh, store, path):
         """Like _lines.iter_json_lines, but a line that is not JSON is
         yielded too (as _BAD with its text), for clean. A complete bad line
         is counted; a last line with no newline is one Codex is still
-        writing, and is not. A file in which nothing parses warns once."""
+        writing, and is not. A file in which nothing parses warns once, and
+        counts `store`, which fh at path was opened for."""
         counting = self._first(path, "lines")
         parsed = bad = 0
         for index, raw in enumerate(fh, 1):
@@ -745,8 +749,9 @@ class CodexSource(Source):
         if counting and bad:
             self.count("unparsed", bad)
         if bad and not parsed:
-            self._unreadable(path, NOT_JSONL,
-                             "%s is not JSON Lines; nothing in it was read" % path)
+            self._unreadable(store, NOT_JSONL,
+                             "%s is not JSON Lines; nothing in it was read" % path,
+                             path)
 
     def _document(self, store):
         """The TypeScript CLI's rollout-*.json: yield ("session", header,
@@ -758,7 +763,7 @@ class CodexSource(Source):
         except FileNotFoundError:
             return
         except OSError as e:
-            self._unreadable(path, "could not be opened",
+            self._unreadable(store, "could not be opened",
                              "cannot read %s (%s)" % (path, e))
             return
         text = raw.decode("utf-8", "surrogateescape").lstrip(_lines.BOM)
@@ -769,7 +774,7 @@ class CodexSource(Source):
         if not (isinstance(doc, dict) and isinstance(doc.get("items"), list)):
             if self._first(path, "lines"):
                 self.count("unparsed")
-            self._unreadable(path, NOT_JSON, "%s does not parse as a Codex "
+            self._unreadable(store, NOT_JSON, "%s does not parse as a Codex "
                              "session; nothing in it was read" % path)
             yield "whole file", _BAD, text
             return
@@ -1123,7 +1128,7 @@ class CodexSource(Source):
         except FileNotFoundError:
             return
         except OSError as e:
-            self._unreadable(store.path, "could not be opened",
+            self._unreadable(store, "could not be opened",
                              "cannot read %s (%s)" % (store.path, e))
             return
         yield SecretText(text, where="whole file")
@@ -1143,18 +1148,18 @@ class CodexSource(Source):
         except FileNotFoundError:
             return
         except OSError as e:
-            self._unreadable(store.path, NOT_DATABASE,
+            self._unreadable(store, NOT_DATABASE,
                              "cannot read %s (%s)" % (store.path, e))
             return
         if not magic:
             return
         if magic != SQLITE_MAGIC:
-            self._unreadable(store.path, NOT_DATABASE,
+            self._unreadable(store, NOT_DATABASE,
                              "%s is not a SQLite database" % store.path)
             return
         with _sqlite.readonly(store.path) as conn:
             if conn is None:
-                self._unreadable(store.path, NOT_DATABASE,
+                self._unreadable(store, NOT_DATABASE,
                                  "cannot open %s" % store.path)
                 return
             try:
@@ -1179,7 +1184,7 @@ class CodexSource(Source):
                                          % (table, index, col))
             except sqlite3.Error as e:
                 # The class only: what an error says can quote a cell.
-                self._unreadable(store.path, NOT_DATABASE,
+                self._unreadable(store, NOT_DATABASE,
                                  "cannot read %s (%s)"
                                  % (store.path, type(e).__name__))
 

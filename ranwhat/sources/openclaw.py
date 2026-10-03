@@ -232,7 +232,7 @@ class OpenClawSource(Source):
         message never holds what SQLite said: an error can quote a cell."""
         if path not in self._unread:
             self._unread.add(path)
-            self.unreadable_store(reason)
+            self.unreadable_store(reason, path)
         self.warn(path, message)
 
     def store_at(self, path):
