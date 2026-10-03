@@ -25,9 +25,8 @@ import agents_fixtures as af  # noqa: E402
 from ranwhat import clean
 from ranwhat.clean import REDACTION, find_secrets, scan, scan_file
 
-# Where a real `clean --apply` puts its backups, read before any test here
-# moves it.
-REAL_BACKUPS = clean.BACKUP_ROOT
+# Where a real `clean --apply` puts its backups with RANWHAT_HOME unset.
+REAL_BACKUPS = os.path.join(os.path.expanduser("~"), ".ranwhat", "backups")
 
 
 def n(text):
@@ -418,6 +417,54 @@ class WhereTheBackupGoes(unittest.TestCase):
                 clean._backup_dest(r"C:\b", "20260927",
                                    r"\\server\share\p\s.jsonl"),
                 r"C:\b\20260927\server\share\p\s.jsonl")
+
+    def test_past_max_path_on_windows_it_is_named_whole(self):
+        """The backup is the home directory and some forty characters
+        longer than the transcript, and past 260 characters Windows opens
+        a path only in its \\\\?\\ form: a subagent's transcript in a
+        project with a long name could be read and not backed up."""
+        transcript = (r"C:\Users\firstname.lastname\.claude\projects\C--Users-"
+                      r"firstname-lastname-Documents-GitHub-acme-payments-service"
+                      r"\0b8e7a1c-2f3d-4e5f-8a9b-0c1d2e3f4a5b\subagents"
+                      r"\agent-a8b3c2d1e0f9a7b6c.jsonl")
+        with mock.patch.object(clean.os, "path", ntpath), \
+             mock.patch.object(clean.os, "name", "nt"):
+            for root, prefix in ((r"C:\Users\firstname.lastname\.ranwhat\backups",
+                                  "\\\\?\\C:\\Users\\"),
+                                 (r"\\server\share\firstname.lastname\.ranwhat\backups",
+                                  "\\\\?\\UNC\\server\\share\\")):
+                dest = clean._backup_dest(root, "20261003-170358-563517", transcript)
+                self.assertTrue(dest.startswith(prefix), dest)
+                self.assertTrue(dest.endswith(transcript[2:]), dest)
+            short = clean._backup_dest(r"C:\b", "20260927", r"C:\p\s.jsonl")
+            self.assertEqual(short, r"C:\b\20260927\C\p\s.jsonl")
+
+
+class BackupsGoWhereRanwhatKeepsItsState(unittest.TestCase):
+    """Backups went to ~/.ranwhat/backups whatever RANWHAT_HOME said, while
+    the index and the feed went under it: a plaintext copy of every masked
+    transcript outside the directory the user chose for ranwhat's state."""
+
+    def test_under_ranwhat_home(self):
+        state = _tempdir(self, "rw-home-")
+        _root, path = _transcript(self, Masking.BODY)
+        with mock.patch.object(clean, "BACKUP_ROOT", None), \
+             mock.patch.dict(os.environ, {"RANWHAT_HOME": state}):
+            dest = clean._backup(path)
+        self.assertTrue(dest.startswith(os.path.join(state, "backups") + os.sep), dest)
+        self.assertEqual(_read(dest), _read(path))
+
+    def test_the_report_names_that_directory(self):
+        state = _tempdir(self, "rw-home-")
+        finding = {"fingerprint": "f" * 12, "label": "DB_PASSWORD", "length": 16,
+                   "hint": "Qm…z", "files": {"/p/s.jsonl"}, "origins": set(),
+                   "projects": {"/p"}, "count": 1}
+        with mock.patch.object(clean, "BACKUP_ROOT", None), \
+             mock.patch.dict(os.environ, {"RANWHAT_HOME": state, "NO_COLOR": "1",
+                                          "RANWHAT_WIDTH": "200"}):
+            text = clean.render({finding["fingerprint"]: finding}, 1,
+                                ["/p/s.jsonl"], True)
+        self.assertIn("Backups: %s" % os.path.join(state, "backups"), text)
 
 
 class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):

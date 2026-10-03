@@ -37,7 +37,9 @@ from .watch import CLAUDE_PROJECTS, _fit, discover, transcript_place
 from . import agents, fixtures, term
 from . import sources as _registry
 
-BACKUP_ROOT = os.path.join(os.path.expanduser("~"), ".ranwhat", "backups")
+# Where backups go when set; None, as it is but in tests, for backups/ in
+# ranwhat's state directory (_backup_root).
+BACKUP_ROOT = None
 REDACTION = "<ranwhat:redacted:%s>"
 
 # Key names that make the value beside them a secret. A name is read word by
@@ -2617,11 +2619,35 @@ def _backup_dest(root, stamp, path):
     """Where the backup of `path` goes: its absolute path, re-rooted under
     root/stamp. Joining C:\\Users\\... onto the root would discard the root
     and name the transcript itself, so on Windows the drive (or a UNC
-    server and share) becomes a directory of its own."""
+    server and share) becomes a directory of its own.
+
+    That makes it longer than the transcript by the root and some forty
+    characters, and past MAX_PATH Windows opens a path only in its \\\\?\\
+    form, which it takes as written: one it could read was not backed up,
+    and so not masked."""
     drive, rest = os.path.splitdrive(os.path.abspath(path))
     parts = [p for p in re.split(r"[\\/:?]+", drive) if p.strip(".")]
     rest = rest.lstrip(os.path.sep + (os.path.altsep or ""))
-    return os.path.join(root, stamp, *parts, rest)
+    dest = os.path.join(root, stamp, *parts, rest)
+    if os.name == "nt" and len(dest) >= _LONG_PATH and not dest.startswith(_WHOLE):
+        dest = (_WHOLE + "UNC" + dest[1:] if dest.startswith("\\\\")
+                else _WHOLE + dest)
+    return dest
+
+
+# Past this many characters Windows makes a directory only by a path in
+# its \\?\ form (MAX_PATH, less twelve), and the prefix of that form.
+_LONG_PATH = 248
+_WHOLE = "\\\\?\\"
+
+
+def _backup_root():
+    """BACKUP_ROOT, or backups/ in ranwhat's state directory: RANWHAT_HOME,
+    ~/.ranwhat by default, as the index's, read when a backup is made.
+    Fixed at import under ~/.ranwhat, a plaintext copy of every masked
+    file went outside the directory the user chose for ranwhat's state."""
+    from .known import home
+    return os.path.abspath(BACKUP_ROOT or os.path.join(home(), "backups"))
 
 
 def _backup(path):
@@ -2637,11 +2663,12 @@ def _backup(path):
     3.13 it ticks every 1 to 16 ms. A stamp already taken gets a counter,
     stamp-1, stamp-2, rather than failing the mask."""
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
-    os.chmod(BACKUP_ROOT, 0o700)
+    root = _backup_root()
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    os.chmod(root, 0o700)
     for attempt in range(100):
         name = "%s-%d" % (stamp, attempt) if attempt else stamp
-        dest = _backup_dest(BACKUP_ROOT, name, path)
+        dest = _backup_dest(root, name, path)
         os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
         try:
             fd = os.open(dest, _CREATE, 0o600)
@@ -3265,7 +3292,7 @@ def render(findings, scanned, changed_files, applied, footer=True,
 
     if applied:
         L.append("  " + GRN("Masked in %d file(s)." % len(changed_files)))
-        L.append(DIM("  Backups: %s" % _fit_path(_home_short(BACKUP_ROOT),
+        L.append(DIM("  Backups: %s" % _fit_path(_home_short(_backup_root()),
                                                  width - 11)))
         L += [DIM(line) for line in _sentences(*_BACKUPS_HOLD)]
         if skipped:
@@ -3646,7 +3673,7 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
     left.update((path, ("claude-code", why)) for path, why in held.items())
     if changed:
         _print(GRN("  masked in %d file(s)." % changed))
-        _print(DIM("  Backups: %s" % _fit_path(_home_short(BACKUP_ROOT),
+        _print(DIM("  Backups: %s" % _fit_path(_home_short(_backup_root()),
                                                term.width() - 11)))
         for line in _sentences(*_BACKUPS_HOLD):
             _print(DIM(line))
