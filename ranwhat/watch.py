@@ -2509,11 +2509,22 @@ _as_iso = _openclaw.as_iso
 _find_tool_calls = _openclaw.find_tool_calls
 
 
-def scan_openclaw_db(path, source="openclaw", known=None):
+def _openclaw_source():
+    """The registry's OpenClaw adapter: the one clean and the index read
+    with, so a database that cannot be read warns once a run and is named
+    in the report's notes (agents.notes)."""
+    try:
+        return _registry.get("openclaw")
+    except KeyError:
+        return _openclaw.OpenClawSource()
+
+
+def scan_openclaw_db(path, source="openclaw", known=None, src=None):
     """Action Records for one OpenClaw database, with `known` masked in
     them as evaluate masks it. A call repeated in the database is one
-    record, the first, whatever its time."""
-    src = _openclaw.OpenClawSource()
+    record, the first, whatever its time. `src` is the adapter that reads
+    it, a fresh one by default."""
+    src = src or _openclaw.OpenClawSource()
     records, seen = [], set()
     for call in src.tool_calls(src.store_at(path)):
         hits, payload = judge(call, known)
@@ -2536,10 +2547,11 @@ def scan_openclaw(state_dir=None, since_days=None, known=None, progress=None,
     records, cutoff = [], _cutoff(since_days)
     dbs = openclaw_databases(state_dir)
     total = done + len(dbs) if total is None else total
+    src = _openclaw_source()
     for i, db in enumerate(dbs, 1):
         if progress:
             progress(done + i, total, db)
-        records.extend(r for r in scan_openclaw_db(db, known=known)
+        records.extend(r for r in scan_openclaw_db(db, known=known, src=src)
                        if _in_window(r, cutoff))
     return records, len(dbs)
 

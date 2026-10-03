@@ -1132,8 +1132,10 @@ class CodexSource(Source):
                         yield SecretText(node, where="%s row %d, %s"
                                          % (table, index, col))
             except sqlite3.Error as e:
+                # The class only: what an error says can quote a cell.
                 self._unreadable(store.path, NOT_DATABASE,
-                                 "cannot read %s (%s)" % (store.path, e))
+                                 "cannot read %s (%s)"
+                                 % (store.path, type(e).__name__))
 
     def _transcript_texts(self, store):
         thread = _Thread(store)

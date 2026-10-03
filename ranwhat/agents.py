@@ -184,10 +184,11 @@ def read_words(counts, others=None):
 def notes(selected=None, locations=None):
     """Sentences on what this run could not read of each agent's history,
     agent by agent: the files it could not read and why (each adapter
-    counts them as it reads), and what the adapter's own notes() says.
-    `locations`, {id: [Location]}, are where each looked, for notes()."""
+    counts them as it reads, OpenClaw's too), and what the adapter's own
+    notes() says. `locations`, {id: [Location]}, are where each looked,
+    for notes()."""
     out = []
-    for source in adapters(selected):
+    for source in chosen(selected):
         for reason, n in sorted(source.unreadable.items()):
             out.append("%s %s not read: %s." % (
                 plural(n, "%s file" % source.name),

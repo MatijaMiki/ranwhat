@@ -1073,6 +1073,43 @@ class OpenClawDatabasesAreIndexed(_Index):
             _run(["check", "--root", root, "--state-dir", self.state])
         self.assertEqual(read, ["openclaw-agent.sqlite"])
 
+    def test_a_cell_that_is_not_utf8(self):
+        """A cell whose bytes are not UTF-8 stopped the read at its row
+        (on 3.9 and 3.10 at the row before), and the index kept that as all
+        the database held: a password in it, and one in the row before,
+        were printed whole wherever Claude Code typed them."""
+        root, project = self.root()
+        _path, conn = self.database(self.rows(1, PW2, 3000))
+        conn.execute("INSERT INTO log VALUES (?, CAST(? AS TEXT), ?)", (
+            "2", ("Saved DB_PASSWORD=%s\n" % PW).encode("utf-8")
+            + b"\xed\xa0\xbd tail", int(time.time() - 2000)))
+        conn.commit()
+        _write(os.path.join(project, "sessB.jsonl"),
+               _typed(2, PW, 600) + _typed(3, PW2, 500, GLUES[1]), 500)
+        for value in (PW, PW2):
+            self.assertNeverShown(root, value)
+            self.assertNeverShown(root, value, "--source", "claude-code")
+
+    def test_a_column_of_any_declared_type(self):
+        """Only TEXT, BLOB, JSON, untyped and *CHAR* columns were read, so a
+        password in a CLOB or an INTEGER column was printed whole wherever
+        Claude Code typed it."""
+        import sqlite3
+        root, project = self.root()
+        path = os.path.join(self.state, "agents", "a1", "agent",
+                            "openclaw-agent.sqlite")
+        os.makedirs(os.path.dirname(path))
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE kv (a CLOB, b INTEGER)")
+        conn.execute("INSERT INTO kv VALUES (?, ?)",
+                     ("DB_PASSWORD=" + PW, "API_TOKEN=" + PW2))
+        conn.commit()
+        conn.close()
+        _write(os.path.join(project, "sessB.jsonl"),
+               _typed(2, PW, 600) + _typed(3, PW2, 500, GLUES[1]), 500)
+        for value in (PW, PW2):
+            self.assertNeverShown(root, value)
+
 
 if __name__ == "__main__":
     unittest.main()

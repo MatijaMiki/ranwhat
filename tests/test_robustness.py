@@ -147,7 +147,8 @@ class OneBadFileDoesNotStopTheScan(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             records, scanned = watch.scan_openclaw(state_dir=root)
         self.assertIn("warning: cannot read", err.getvalue())
-        self.assertIn("file is not a database", err.getvalue())
+        # In ranwhat's words: what SQLite says of an error can quote a cell.
+        self.assertIn("not a readable SQLite database", err.getvalue())
         return records, scanned
 
     def test_corrupt_database_is_skipped_not_fatal(self):

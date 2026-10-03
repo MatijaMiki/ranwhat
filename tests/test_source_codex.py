@@ -1430,6 +1430,51 @@ class Damaged(_Case):
         self.assertEqual(self.src.counts["unknown"], 1)
         self.assertEqual(self.src.counts["unreadable_stores"], 0)
 
+    def test_an_item_that_is_not_utf8_and_the_rows_around_it(self):
+        """An item_json cell whose bytes are not UTF-8 made Python's
+        sqlite3 raise an error quoting the cell, which the warning printed
+        whole, key and all. The read stopped there, on 3.9 and 3.10 losing
+        the row before as well."""
+        path = os.path.join(self.root, "thread_history_1.sqlite")
+        os.makedirs(self.root)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE thread_items (item_json TEXT)")
+        conn.execute("INSERT INTO thread_items VALUES (?)",
+                     (_j(fout("call_0001", "API_KEY=" + SECRET)),))
+        conn.execute("INSERT INTO thread_items VALUES (CAST(? AS TEXT))",
+                     (("OPENAI_API_KEY=" + TYPED + "\n").encode("utf-8")
+                      + b"\xed\xa0\xbd tail",))
+        conn.execute("INSERT INTO thread_items VALUES (?)",
+                     ("GITHUB_TOKEN=" + SHELL_SECRET,))
+        conn.commit()
+        conn.close()
+        texts, err = self.quiet(self.texts, path)
+        self.assertEqual(err, "")
+        self.assertEqual(sorted((v, w) for v, _o, w in found_secrets(texts)),
+                         sorted([(SECRET, "thread_items row 1, item_json"),
+                                 (TYPED, "thread_items row 2, item_json"),
+                                 (SHELL_SECRET, "thread_items row 3, item_json")]))
+        self.assertEqual(self.src.counts["unreadable_stores"], 0)
+
+    def test_a_database_error_is_named_not_quoted(self):
+        """What an error from SQLite or Python's sqlite3 says can quote a
+        cell: the warning names its class only."""
+        _databases(self.root).close()
+        path = os.path.join(self.root, "thread_history_1.sqlite")
+
+        def failing(*args, **kwargs):
+            raise sqlite3.OperationalError(
+                "Could not decode to UTF-8 column 'item_json' with text "
+                "'API_KEY=" + SECRET + "'")
+            yield               # a generator, as iter_rows is
+
+        with mock.patch.object(codex._sqlite, "iter_rows", side_effect=failing):
+            texts, err = self.quiet(self.texts, path)
+        self.assertEqual(texts, [])
+        self.assertIn("OperationalError", err)
+        self.assertNotIn(SECRET, err)
+        self.assertEqual(self.src.unreadable, {codex.NOT_DATABASE: 1})
+
     def test_a_bad_line_in_the_middle_is_still_searched(self):
         lines = legacy_lines(SECRET)
         lines.insert(2, "not json STRIPE_KEY=" + TYPED)

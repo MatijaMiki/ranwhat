@@ -602,16 +602,139 @@ class Sqlite(unittest.TestCase):
             conn, tmp = _sqlite.open_readonly(path)
         try:
             self.assertTrue(tmp and os.path.isdir(tmp))
-            self.assertIn("mode=ro", calls[1])
+            # The copy is ranwhat's own file, opened as one: mode=ro on a
+            # copy of a WAL database with no -shm fails on Apple's SQLite.
+            self.assertTrue(calls[1].endswith("?mode=rw"), calls[1])
+            self.assertNotIn(_sqlite._url_path(self.root), calls[1])
             self.assertEqual(len(list(_sqlite.iter_rows(conn, "part", ["id"]))), 3)
         finally:
             _sqlite.close(conn, tmp)
         self.assertFalse(os.path.exists(tmp))
 
-    def test_never_immutable(self):
+    def _listing(self, folder):
+        """{name: sha256} of every file in folder."""
+        return {name: _sha(os.path.join(folder, name))
+                for name in sorted(os.listdir(folder))}
+
+    def _closed_wal(self, folder, rows=3):
+        """agent.db in folder in WAL mode, its writer closed, as an agent
+        leaves it: SQLite removes the -wal and the -shm on a clean close."""
+        path = os.path.join(folder, "agent.db")
+        writer = sqlite3.connect(path)
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.close()
+        self._db(path, rows).close()
+        for suffix in ("-wal", "-shm"):
+            if os.path.exists(path + suffix):
+                os.remove(path + suffix)
+        with open(path, "rb") as fh:
+            self.assertEqual(fh.read(20)[18:20], b"\x02\x02")    # WAL mode
+        return path
+
+    def test_a_closed_wal_database_is_read_and_nothing_is_made(self):
+        """Opened mode=ro with no -wal or no -shm beside it, stock SQLite
+        makes them (an empty -wal, a 32 KB -shm) in the agent's folder,
+        and Apple's cannot open it at all. Neither may happen: with no
+        -wal there is nothing in one to read."""
+        for keep in ((), ("-shm",)):
+            with self.subTest(keep=keep):
+                folder = tempfile.mkdtemp(dir=self.root)
+                path = self._closed_wal(folder)
+                for suffix in keep:
+                    with open(path + suffix, "wb") as fh:
+                        fh.write(b"\x00" * 32768)
+                before = self._listing(folder)
+                with _sqlite.readonly(path) as conn:
+                    self.assertIsNotNone(conn)
+                    rows = list(_sqlite.iter_rows(conn, "part", ["id"]))
+                self.assertEqual([r["id"] for r in rows], ["p0", "p1", "p2"])
+                self.assertEqual(self._listing(folder), before)
+
+    def test_a_wal_with_no_shm_beside_it_is_read_from_a_copy(self):
+        """A -wal with no -shm (left by a crash, or by a writer in
+        exclusive locking mode) holds rows the database does not. They are
+        read from a copy, where SQLite makes its -shm."""
+        live = os.path.join(tempfile.mkdtemp(dir=self.root), "live.db")
+        writer = sqlite3.connect(live)
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.close()
+        writer = self._db(live, rows=4)          # open: its rows in the -wal
+        folder = tempfile.mkdtemp(dir=self.root)
+        path = os.path.join(folder, "agent.db")
+        try:
+            for suffix in ("", "-wal"):
+                shutil.copy2(live + suffix, path + suffix)
+        finally:
+            writer.close()
+        self.assertGreater(os.path.getsize(path + "-wal"), 0)
+        before = self._listing(folder)
+        with _sqlite.readonly(path) as conn:
+            self.assertIsNotNone(conn)
+            rows = list(_sqlite.iter_rows(conn, "part", ["id"]))
+        self.assertEqual([r["id"] for r in rows], ["p0", "p1", "p2", "p3"])
+        self.assertEqual(self._listing(folder), before)
+
+    def test_text_that_is_not_utf8_is_read_as_it_is(self):
+        """A TEXT cell whose bytes are not UTF-8 (a JS writer's string cut
+        between the halves of a surrogate pair) made Python's sqlite3 raise
+        an error that quoted the cell, whatever secret was in it. It is
+        read with surrogateescape, as every adapter reads a file, through
+        the copy too."""
+        path = os.path.join(self.root, "bytes.db")
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE t (body TEXT)")
+        raw = b"ok \xed\xa0\xbd \xff end"
+        conn.execute("INSERT INTO t VALUES (CAST(? AS TEXT))", (raw,))
+        conn.commit()
+        conn.close()
+        real = sqlite3.connect
+        for locked in (False, True):
+            with self.subTest(copy=locked):
+                calls = []
+
+                def connect(*args, **kwargs):
+                    calls.append(args[0])
+                    if locked and len(calls) == 1:
+                        raise sqlite3.OperationalError("database is locked")
+                    return real(*args, **kwargs)
+
+                with mock.patch.object(_sqlite.sqlite3, "connect",
+                                       side_effect=connect):
+                    with _sqlite.readonly(path) as ro:
+                        [row] = list(_sqlite.iter_rows(ro, "t", ["body"]))
+                self.assertEqual(len(calls), 2 if locked else 1)
+                self.assertEqual(row["body"], "ok \udced\udca0\udcbd \udcff end")
+                self.assertEqual(row["body"].encode("utf-8", "surrogateescape"),
+                                 raw)
+
+    def test_immutable_only_with_no_wal(self):
+        """immutable=1 skips the -wal, where a live database's newest rows
+        are: only one with no -wal is opened so."""
         uri = _sqlite._uri(os.path.join(self.root, "x.db"))
         self.assertTrue(uri.startswith("file:") and uri.endswith("?mode=ro"))
         self.assertNotIn("immutable", uri)
+        path = os.path.join(tempfile.mkdtemp(dir=self.root), "live.db")
+        writer = sqlite3.connect(path)
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.close()
+        writer = self._db(path)                 # open: a -wal and a -shm
+        real, uris = sqlite3.connect, []
+
+        def connect(*args, **kwargs):
+            uris.append(args[0])
+            return real(*args, **kwargs)
+
+        try:
+            with mock.patch.object(_sqlite.sqlite3, "connect",
+                                   side_effect=connect):
+                with _sqlite.readonly(path) as conn:
+                    self.assertEqual(len(list(_sqlite.iter_rows(
+                        conn, "part", ["id"]))), 3)
+        finally:
+            writer.close()
+        self.assertEqual(len(uris), 1)
+        self.assertNotIn("immutable", uris[0])
 
     def test_identifiers_columns_and_filtered_rows(self):
         path = os.path.join(self.root, "q.db")
