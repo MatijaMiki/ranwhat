@@ -218,7 +218,8 @@ class TokenIsNotWrittenThroughASymlink(FeedHome):
         os.chmod(feed.token_path(), 0o644)
         feed.save_token("tok_new")
         self.assertEqual(os.stat(feed.token_path()).st_mode & 0o777, 0o600)
-        self.assertEqual(open(feed.token_path(), encoding="utf-8").read(), "tok_new\n")
+        with open(feed.token_path(), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "tok_new\n")
 
 
 @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
