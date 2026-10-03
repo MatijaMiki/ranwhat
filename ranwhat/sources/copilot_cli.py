@@ -409,11 +409,13 @@ class CopilotCliSource(Source):
         this log names, when it is a regular file on disk inside the OS
         temp folder or the session-state folder holding the log."""
         found = []
-        folders = (tempfile.gettempdir(),
-                   os.path.dirname(os.path.dirname(path)))
         try:
             if not _mentions(path, SIDE_MARK):
                 return found
+            # tempfile raises OSError when no temp folder is usable; then
+            # no saved output is followed, but the log is still read
+            folders = (tempfile.gettempdir(),
+                       os.path.dirname(os.path.dirname(path)))
             with open(path, "rb") as fh:
                 for index, raw in enumerate(fh, 1):
                     if SAVED_MARK not in raw or SIDE_MARK not in raw:

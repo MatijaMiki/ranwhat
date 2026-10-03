@@ -642,6 +642,22 @@ class SideFiles(CopilotCase):
         self.assertEqual([p for p in looked
                           if "evil.example" in p or p == outside], [])
 
+    def test_the_sessions_are_still_listed_when_no_temp_folder_is_usable(self):
+        # tempfile raises when it finds no folder it can write to. A saved
+        # output cannot then be checked, but the session is still read.
+        side = self.saved("1790000000030-copilot-tool-output-u.txt",
+                          ("API_KEY=" + SECRET).encode())
+        quiet = self.write(Log().start().call("call_0", "bash",
+                                              {"command": "ls"}, "ok"),
+                           sid="11111111-2222-4333-8444-555555555555")
+        named = self.write(Log().start().call("call_1", "bash",
+                                              {"command": "ls"},
+                                              large_output(side)))
+        error = FileNotFoundError("No usable temporary directory found")
+        with mock.patch.object(tempfile, "gettempdir", side_effect=error):
+            stores = self.stores()
+        self.assertEqual(sorted(s.path for s in stores), sorted([quiet, named]))
+
     def test_the_saved_path_runs_to_the_end_of_its_line(self):
         win = ("C:\\Users\\Jo Doe\\AppData\\Local\\Temp\\"
                "1774637043987-copilot-tool-output-tk7puw.txt")
