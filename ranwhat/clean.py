@@ -2887,12 +2887,13 @@ def _copies_in_stores(stores, merged, values, sources_by_id):
 def _claude_code_keys(findings):
     """Give findings from Claude Code's own scan the keys every finding
     has now: which agents hold it, in which files, and which of those
-    cannot be masked (none of Claude Code's)."""
+    cannot be masked (none of Claude Code's). Files in path order: in a
+    set's order, the same history gave other --json on every run."""
     for entry in findings.values():
         entry.setdefault("sources", set())
         entry.setdefault("stores", {})
         entry.setdefault("read_only", set())
-        for path in entry["files"]:
+        for path in sorted(entry["files"]):
             if path not in entry["stores"]:
                 entry["stores"][path] = "claude-code"
                 entry["sources"].add("claude-code")

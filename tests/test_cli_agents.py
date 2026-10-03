@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -393,6 +394,50 @@ class CleanAcrossAgents(_Cli):
             self.assertAllMasked(text, PW, PW2)
             self.assertIn(_marker(PW), text)
             self.assertIn(_marker(PW2), text)
+
+
+class StoresInPathOrder(_Cli):
+    """A finding's "stores" was filled from a set, in an order Python's
+    hash seed sets, so check --json and clean --json gave other bytes on
+    every run of the same history. It is in path order."""
+
+    def test_claude_code_keys_in_path_order(self):
+        files, n = set(), 0
+        while len(files) < 2 or list(files) == sorted(files):
+            files.add("/p/s%d.jsonl" % n)
+            n += 1
+        findings = {"fp": {"files": set(files)}}
+        clean._claude_code_keys(findings)
+        self.assertEqual(list(findings["fp"]["stores"]), sorted(files))
+
+    def test_written_in_path_order(self):
+        finding = {"files": {"/c", "/a", "/b"},
+                   "stores": {"/c": "codex", "/a": "claude-code",
+                              "/b": "claude-code"}}
+        self.assertEqual(list(cli._finding_json(finding)["stores"]),
+                         ["/a", "/b", "/c"])
+
+    def test_the_same_bytes_whatever_the_hash_seed(self):
+        for n in range(8):
+            self.claude_transcript(_claude_call(
+                n, "export STRIPE=" + SECRET, "ok", self.now + n), name="s%d" % n)
+        for argv, key in ((["check", "--json"], "secrets"),
+                          (["clean", "--json", "--no-interactive"], "findings")):
+            outs = set()
+            for seed in ("1", "2", "3"):
+                env = dict(os.environ, PYTHONHASHSEED=seed,
+                           PYTHONIOENCODING="utf-8", RANWHAT_HOME=(
+                               tempfile.mkdtemp(prefix="state-", dir=self.tmp)))
+                done = subprocess.run(
+                    [sys.executable, "-m", "ranwhat"] + argv + self.base_flags(),
+                    cwd=REPO, env=env, capture_output=True, encoding="utf-8",
+                    stdin=subprocess.DEVNULL, timeout=20)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                [found] = json.loads(done.stdout)[key]
+                self.assertEqual(len(found["stores"]), 8)
+                self.assertEqual(list(found["stores"]), sorted(found["stores"]))
+                outs.add(done.stdout)
+            self.assertEqual(len(outs), 1, argv)
 
 
 class Flags(_Cli):

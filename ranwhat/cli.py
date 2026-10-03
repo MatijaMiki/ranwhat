@@ -499,12 +499,15 @@ def _finding_json(f):
     """A clean finding as JSON. files, origins and projects are sets in
     memory, and so are sources and read_only; converting only files made
     check --json and clean --json crash on the first secret found, which
-    hid every secret from automation."""
+    hid every secret from automation. stores, {path: agent}, is in path
+    order, so the same history gives the same bytes on every run."""
     out = dict(f)
     for k in ("files", "origins", "projects", "sources", "read_only"):
         v = f.get(k)
         if isinstance(v, (set, frozenset)):
             out[k] = sorted(v) if len(v) > 1 else list(v)
+    if isinstance(f.get("stores"), dict):
+        out["stores"] = dict(sorted(f["stores"].items()))
     return out
 
 
