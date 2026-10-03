@@ -108,6 +108,9 @@ def _load(path):
         raise SystemExit("ranwhat: cannot read (permission denied): %s" % path)
     except ValueError as e:
         raise SystemExit("ranwhat: %s is not valid JSON (%s)" % (path, e))
+    except OSError as e:
+        # A name Windows refuses (profile?.json is EINVAL), and the rest.
+        raise SystemExit("ranwhat: cannot read %s (%s)" % (path, e.strerror or e))
 
 
 def _bundled(name):
@@ -1224,8 +1227,11 @@ def main(argv=None):
 
 def _closed_pipe(error, windows=os.name == "nt"):
     """Whether error is a write to a pipe whose reader has gone: a
-    BrokenPipeError, or on Windows an OSError with EINVAL."""
-    return isinstance(error, BrokenPipeError) or (windows and error.errno == errno.EINVAL)
+    BrokenPipeError, or on Windows an OSError with EINVAL that names no
+    file. Windows gives EINVAL too for a file name holding ? * < > |, and
+    taken for the pipe, that error ended the run with nothing said."""
+    return isinstance(error, BrokenPipeError) or (
+        windows and error.errno == errno.EINVAL and error.filename is None)
 
 
 def _quiet_stdout():

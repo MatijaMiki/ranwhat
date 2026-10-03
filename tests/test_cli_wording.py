@@ -8,6 +8,7 @@ also driving check and clean. A finding told the reader to "Run
 """
 import ast
 import contextlib
+import errno
 import io
 import json
 import os
@@ -378,6 +379,28 @@ class HtmlIsForTheAuthorityReport(unittest.TestCase):
             self.assertIn(command, help_text)
         for command in ("check", "watch", "clean"):
             self.assertNotIn(command, help_text)
+
+
+class AFileThatCannotBeOpenedIsNamed(unittest.TestCase):
+    """Windows gives EINVAL for a name holding ? * < > |, as it does for a
+    write to a pipe whose reader has gone, and main() took every EINVAL for
+    the pipe: `scan profile?.json` exited 1 and said nothing at all."""
+
+    def test_only_an_error_naming_no_file_is_the_pipe(self):
+        self.assertTrue(cli._closed_pipe(
+            OSError(errno.EINVAL, "Invalid argument"), windows=True))
+        self.assertFalse(cli._closed_pipe(
+            OSError(errno.EINVAL, "Invalid argument", "profile?.json"),
+            windows=True))
+
+    def test_scan_says_which_file_and_why(self):
+        bad = OSError(errno.EINVAL, "Invalid argument", "profile?.json")
+        with mock.patch.object(cli, "open", side_effect=bad, create=True), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as stopped:
+                cli.main(["scan", "profile?.json"])
+        self.assertEqual(stopped.exception.code,
+                         "ranwhat: cannot read profile?.json (Invalid argument)")
 
 
 class NoEmDashes(unittest.TestCase):
