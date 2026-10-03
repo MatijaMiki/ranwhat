@@ -126,7 +126,14 @@ def find_tool_calls(obj, depth=0):
     found = _find_tool_calls_raw(obj, depth)
     out, seen = [], set()
     for name, args in found:
-        key = (name, json.dumps(args, sort_keys=True, default=str)[:512])
+        try:
+            dumped = json.dumps(args, sort_keys=True, default=str)[:512]
+        except RecursionError:
+            # Arguments nested past the stack, which 3.14 decodes, key
+            # alike: the OpenAI shape still counts once, at the cost of
+            # keeping only the first of two such calls of one name in a cell.
+            dumped = "unhashable"
+        key = (name, dumped)
         if key not in seen:
             seen.add(key)
             out.append((name, args))
@@ -151,9 +158,13 @@ def _find_tool_calls_raw(obj, depth=0):
         if isinstance(args, str):
             try:
                 args = json.loads(args)
-            except ValueError:
+            except (ValueError, RecursionError):
                 args = {"_raw": args}
-        found.append((str(next(fn[k] for k in NAME_KEYS if k in fn)), args or {}))
+        try:
+            found.append((str(next(fn[k] for k in NAME_KEYS if k in fn)),
+                          args or {}))
+        except RecursionError:
+            pass        # a name nested past the stack is no tool's name
 
     name = next((obj[k] for k in NAME_KEYS if isinstance(obj.get(k), str)), None)
     args = next((obj[k] for k in ARG_KEYS if isinstance(obj.get(k), (dict, str))), None)
@@ -161,7 +172,7 @@ def _find_tool_calls_raw(obj, depth=0):
         if isinstance(args, str):
             try:
                 args = json.loads(args)
-            except ValueError:
+            except (ValueError, RecursionError):
                 args = {"_raw": args}
         if obj.get("type") in (None, "tool_use", "tool_call", "function_call", "tool"):
             found.append((name, args))
@@ -172,7 +183,7 @@ def _find_tool_calls_raw(obj, depth=0):
         elif isinstance(value, str) and value[:1] in ("{", "["):
             try:
                 found.extend(_find_tool_calls_raw(json.loads(value), depth + 1))
-            except ValueError:
+            except (ValueError, RecursionError):
                 pass
     return found
 
@@ -303,7 +314,7 @@ class OpenClawSource(Source):
                         continue
                     try:
                         payload = json.loads(cell)
-                    except ValueError:
+                    except (ValueError, RecursionError):
                         continue
                     for tool, tool_input in find_tool_calls(payload):
                         if not isinstance(tool_input, dict):

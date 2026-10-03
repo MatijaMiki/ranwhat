@@ -51,8 +51,10 @@ def _sha(path):
 
 
 def _ranwhat_temp_dirs():
+    """The copies _sqlite makes. Not isolated_home's ranwhat-home-*: any
+    test run beside this one makes one of those."""
     return set(x for x in os.listdir(tempfile.gettempdir())
-               if x.startswith("ranwhat-"))
+               if x.startswith("ranwhat-") and not x.startswith("ranwhat-home-"))
 
 
 def body(name, args, kind="tool_use"):
@@ -608,6 +610,120 @@ class Unreadable(_Case):
                 self.assertIn(note, " ".join(out.split()))
                 self.assertEqual(err.count("warning:"), 1, err)
                 self.assertNotIn(KEY, out + err)
+
+
+# Past what json.loads reads on Python 3.9; 3.14 reads it, and then
+# json.dumps and str fail on what it read.
+DEEP = 100000
+
+
+def _deep_list():
+    """JSON nested DEEP levels, built as a string: building it as a
+    structure by recursion would fail the same way."""
+    return "[" * DEEP + "]" * DEEP
+
+
+def _deep_object():
+    return '{"a": ' * DEEP + "1" + "}" * DEEP
+
+
+def _nested():
+    """The same as a decoded structure, built in a loop, for a test of
+    find_tool_calls on what 3.14 decodes."""
+    node = 1
+    for _ in range(DEEP):
+        node = {"a": node}
+    return node
+
+
+class NestedPastTheStack(_Case):
+    """A cell nested deeper than Python's stack ended watch and check with
+    a traceback: on 3.9 json.loads raised RecursionError, and on 3.14,
+    which reads it, json.dumps and str did. Such a cell, or a string in
+    one, is passed over as text that is not JSON is; a call whose input is
+    nested so deep is kept; and every other row is still read."""
+
+    BASH = body("bash", {"command": "cat .env"})
+
+    def found(self, agent, *cells):
+        path = self.database(agent, [(c, 1758550000) for c in cells])
+        return [(c.tool_name, c.tool_input.get("command"))
+                for c in self.calls(path)]
+
+    def test_a_cell_nested_past_the_stack_is_skipped_and_the_rest_read(self):
+        sibling = {"type": "tool_use", "name": "bash", "input": {"command": "ls"}}
+        cells = {
+            "a-list": (_deep_list(), []),
+            "an-object": (_deep_object(), []),
+            "a-string-in-it": (json.dumps({"x": _deep_list(), "call": sibling}),
+                               [("bash", "ls")]),
+            "a-tool-name": ('{"function": {"name": %s, "arguments": "{}"}}'
+                            % _deep_list(), []),
+        }
+        for agent, (cell, calls) in cells.items():
+            with self.subTest(cell=agent):
+                self.assertEqual(self.found(agent, cell, self.BASH),
+                                 calls + [("bash", "cat .env")])
+
+    def test_a_call_whose_input_is_nested_past_the_stack_is_kept(self):
+        cells = {
+            "function-arguments": json.dumps({"function": {
+                "name": "deploy", "arguments": _deep_object()}}),
+            "an-input-string": json.dumps({"type": "tool_use", "name": "deploy",
+                                           "input": _deep_object()}),
+        }
+        for agent, cell in cells.items():
+            with self.subTest(cell=agent):
+                self.assertEqual(self.found(agent, cell, self.BASH),
+                                 [("deploy", None), ("bash", "cat .env")])
+
+    def test_find_tool_calls_over_a_structure_nested_past_the_stack(self):
+        """A name nested so deep is no tool's, and is passed over. An
+        OpenAI-style call whose arguments are nested so deep is found twice
+        by the walk and kept once."""
+        deep = _nested()
+        found = openclaw.find_tool_calls([
+            {"function": {"name": deep, "arguments": "{}"}},
+            {"function": {"name": "deploy", "arguments": deep}},
+            {"type": "tool_use", "name": "bash", "input": {"command": "ls"}}])
+        self.assertEqual([name for name, _args in found], ["deploy", "bash"])
+
+    def test_watch_check_and_clean_read_past_it(self):
+        """Each command as a user runs it, in a Python of its own: it exits
+        0 with no traceback, the call and the secret in the rows after the
+        deep ones are found, and the database is left as it was."""
+        now = int(time.time())
+        path = self.database("a1", [(c, now) for c in (
+            _deep_list(),
+            json.dumps({"function": {"name": "deploy",
+                                     "arguments": _deep_object()}}),
+            '{"type": "tool_use", "name": "deploy", "input": %s}'
+            % _deep_object(),
+            self.BASH,
+            _result("API_KEY=" + KEY + "\n"))])
+        before = _sha(path)
+        root = tempfile.mkdtemp(prefix="oc-claude-")
+        self.addCleanup(shutil.rmtree, root, True)
+        env = dict(os.environ, PYTHONPATH=REPO)
+        out = {}
+        for argv in (["watch", "--json"], ["check"],
+                     ["clean", "--json", "--no-interactive"],
+                     ["clean", "--apply", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                run = subprocess.run(
+                    [sys.executable, "-m", "ranwhat"] + argv
+                    + ["--root", root, "--state-dir", self.state],
+                    env=env, capture_output=True, encoding="utf-8",
+                    stdin=subprocess.DEVNULL, timeout=120)
+                self.assertNotIn("Traceback", run.stderr)
+                self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+                self.assertNotIn(KEY, run.stdout + run.stderr)
+                out[" ".join(argv)] = run.stdout
+        self.assertIn("bash", [r["tool_name"]
+                               for r in json.loads(out["watch --json"])])
+        self.assertEqual(len(json.loads(
+            out["clean --json --no-interactive"])["findings"]), 1)
+        self.assertEqual(_sha(path), before)
 
 
 class NeverWritten(_Case):
