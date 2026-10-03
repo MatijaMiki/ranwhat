@@ -1337,6 +1337,47 @@ class SideCopies(_Home):
                              self.LOG.encode("utf-8"))
         self.assertTrue(results["fg"].changed, results["fg"])
 
+    def test_a_background_command_grok_recorded_as_finished_is_masked(self):
+        """task_completed (notification_bridge.rs) is written when the
+        command exits, named by its task id: the id in BackgroundTaskStarted,
+        which is the call's own for a run Grok moved there. Nothing writes
+        to the log after that, so masking it waits for nothing more."""
+        def background(call_id, task_id, t, is_background):
+            lines = shell_lines(call_id, "npm test", t, background=is_background)[:2]
+            return lines + [envelope(t + 1, finished(call_id, {
+                "type": "BackgroundTaskStarted", "task_id": task_id,
+                "task_type": "bash", "output_file": "terminal/%s.log" % call_id,
+                "status": "running", "command": "npm test", "summary": "npm test",
+                "retrieval_hint": ""}, text_content("npm test")), "e-%s-3" % call_id)]
+
+        def completed(task_id, t):
+            return envelope(t, {"sessionUpdate": "task_completed", "task_snapshot": {
+                "task_id": task_id, "command": "npm test", "cwd": CWD,
+                "start_time": {"secs_since_epoch": t - 60, "nanos_since_epoch": 0},
+                "end_time": {"secs_since_epoch": t, "nanos_since_epoch": 0},
+                "output": "", "output_file": "terminal/x.log", "truncated": True,
+                "output_total_bytes": 0, "exit_code": 0, "signal": None,
+                "completed": True, "kind": "bash", "block_waited": False,
+                "explicitly_killed": False, "kill_result_delivered": False,
+                "is_backgrounded": True}, "will_wake": True},
+                "e-done-%s" % task_id, t * 1000, method="_x.ai/session/update")
+
+        updates = (background("bg1", "0199b6c0-0000-7000-8000-00000000000a",
+                              1790000100, True)
+                   + background("bg3", "bg3", 1790000140, False)
+                   + background("bg5", "bg5", 1790000160, False)
+                   + [completed("0199b6c0-0000-7000-8000-00000000000a", 1790000300),
+                      completed("bg3", 1790000310)])
+        folder = self.session(updates=updates, extra={
+            "terminal/%s.log" % name: self.LOG for name in ("bg1", "bg3", "bg5")})
+        results = {}
+        for name in ("bg1", "bg3", "bg5"):
+            store = self.store(folder, os.path.join("terminal", name + ".log"))
+            results[name] = self.src.mask(store, [SECRET])
+        self.assertTrue(results["bg1"].changed, results["bg1"])
+        self.assertTrue(results["bg3"].changed, results["bg3"])
+        self.assertEqual(results["bg5"].skipped, "in use")
+
     def test_a_large_log_is_read_in_overlapping_pieces(self):
         """Pieces end at line ends, so no value is cut in two (a cut one
         would be reported as a second, shorter value); a line longer than a
