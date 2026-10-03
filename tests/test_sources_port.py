@@ -267,16 +267,33 @@ class NoNetworkModule(unittest.TestCase):
         self.assertEqual(out.stdout.strip(), "[]")
 
 
-    def test_a_database_uri_is_what_pathname2url_makes(self):
-        import nturl2path
-        import urllib.request
-        for path in ("C:\\Users\\a b\\x?.db", "\\\\server\\share\\x #.db",
-                     "D:\\%\\y"):
-            self.assertEqual(_sqlite._url_path(path, windows=True),
-                             nturl2path.pathname2url(path), path)
-        for path in ("/a b/x?#%.db", "/home/u/.openclaw/agents/a1/agent/x.sqlite"):
-            self.assertEqual(_sqlite._url_path(path, windows=False),
-                             urllib.request.pathname2url(path), path)
+    def test_a_database_uri_is_one_sqlite_reads(self):
+        # SQLite takes a URI authority only when it is empty or localhost,
+        # so \\server\share is file:////server/share: an empty authority,
+        # then the UNC path. pathname2url gave that until Python 3.12 and
+        # 3.13 changed it to //server/share, which SQLite refuses.
+        for path, url in (
+                ("C:\\Users\\a b\\x?.db", "///C:/Users/a%20b/x%3F.db"),
+                ("\\\\server\\share\\x #.db", "////server/share/x%20%23.db"),
+                ("D:\\%\\y", "///D:/%25/y")):
+            self.assertEqual(_sqlite._url_path(path, windows=True), url, path)
+        for path, url in (
+                ("/a b/x?#%.db", "/a%20b/x%3F%23%25.db"),
+                ("/home/u/.openclaw/agents/a1/agent/x.sqlite",
+                 "/home/u/.openclaw/agents/a1/agent/x.sqlite")):
+            self.assertEqual(_sqlite._url_path(path, windows=False), url, path)
+
+    @unittest.skipIf(os.name == "nt", "a POSIX path stands in for a UNC one")
+    def test_sqlite_refuses_a_host_and_reads_an_empty_authority(self):
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="port-uri-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "x.db")
+        sqlite3.connect(path).execute("CREATE TABLE t (x)").connection.close()
+        conn = sqlite3.connect("file:///" + path + "?mode=ro", uri=True)
+        self.addCleanup(conn.close)
+        self.assertEqual(_sqlite.tables(conn), ["t"])
+        with self.assertRaises(sqlite3.OperationalError):
+            sqlite3.connect("file://server" + path + "?mode=ro", uri=True)
 
 
 class SourcesAreUtf8(unittest.TestCase):

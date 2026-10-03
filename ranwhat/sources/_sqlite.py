@@ -22,11 +22,12 @@ from urllib.parse import quote
 
 
 def _url_path(path, windows=None):
-    """An absolute path as a file: URI's path, percent-encoded, as
-    urllib.request.pathname2url makes it, without importing urllib.request:
-    check, watch and clean import no network module. On Windows,
-    C:\\x\\a b.db is ///C:/x/a%20b.db and \\\\server\\share\\x is
-    ////server/share/x."""
+    """An absolute path as a file: URI's path, percent-encoded, without
+    importing urllib.request: check, watch and clean import no network
+    module. On Windows, C:\\x\\a b.db is ///C:/x/a%20b.db and
+    \\\\server\\share\\x is ////server/share/x. SQLite refuses any URI
+    authority but an empty one or localhost, so a UNC path keeps four
+    slashes, where Python 3.12 and later's pathname2url gives two."""
     if windows is None:
         windows = os.name == "nt"
     if not windows:
