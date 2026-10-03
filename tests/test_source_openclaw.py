@@ -683,7 +683,7 @@ class NestedPastTheStack(_Case):
                 self.assertEqual(self.found(agent, cell, self.BASH),
                                  [("deploy", None), ("bash", "cat .env")])
 
-    def test_find_tool_calls_over_a_structure_nested_past_the_stack(self):
+    def test_find_tool_calls_passes_over_a_deep_name_and_keeps_deep_arguments_once(self):
         """A name nested so deep is no tool's, and is passed over. An
         OpenAI-style call whose arguments are nested so deep is found twice
         by the walk and kept once."""

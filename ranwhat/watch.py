@@ -1941,6 +1941,11 @@ def _raw_strings(tool_input):
     return out
 
 
+# How deep _masked and _shallow follow a recorded value before cutting it
+# to "…": a record is masked and written as JSON by walks that recurse.
+_CUT_DEPTH = 32
+
+
 def _masked(obj, depth=0, known=None):
     from . import clean
     if isinstance(obj, str):
@@ -1950,7 +1955,7 @@ def _masked(obj, depth=0, known=None):
         if known:
             spans = known.merged(obj, spans)
         return clean.mask_for_display(obj, spans)
-    if depth > 32:
+    if depth > _CUT_DEPTH:
         return "…"
     if isinstance(obj, (list, tuple)):
         return [_masked(o, depth + 1, known) for o in obj]
@@ -2066,7 +2071,7 @@ def _shallow(value, depth=0):
     """value as recorded, cut where _masked cuts a payload. A record is
     masked and written as JSON by walks that recurse, and one id nested
     past the stack stopped watch and check before they printed anything."""
-    if depth > 32:
+    if depth > _CUT_DEPTH:
         return "…"
     if isinstance(value, (list, tuple)):
         return [_shallow(v, depth + 1) for v in value]

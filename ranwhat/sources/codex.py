@@ -1045,8 +1045,8 @@ class CodexSource(Source):
             body = json.dumps([call.tool_name, call.actor, call.tool_input],
                               sort_keys=True, default=str)
         except (TypeError, ValueError, RecursionError):
-            # As watch._payload: repr gave up wherever json.dumps did, and
-            # stopped the file. These calls share one fingerprint, so a
+            # As watch._payload, and not repr, which fails wherever
+            # json.dumps does. These calls share one fingerprint, so a
             # replayed copy of any of them counts as seen.
             body = "unhashable"
         return hashlib.sha256(body.encode("utf-8", "surrogatepass")).digest()

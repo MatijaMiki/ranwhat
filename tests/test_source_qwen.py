@@ -1487,7 +1487,7 @@ class DeepNesting(_Home):
                 else:
                     self.assertEqual(_read(path), before)
 
-    def test_a_whole_file_or_lock_nested_past_the_stack(self):
+    def test_a_whole_file_or_lock_nested_past_the_stack_is_taken_as_unparsed(self):
         """A legacy session, a side file or a writer lock: what one that
         does not parse is. The lock then holds its session as in use."""
         for depth in DEPTHS:

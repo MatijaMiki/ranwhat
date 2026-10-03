@@ -1212,7 +1212,7 @@ class DeepNesting(GeminiCase):
                 self.assertEqual(self.src.counts["unparsed"], unparsed)
                 self.assertEqual(self.src.counts["unknown"], 2 - unparsed)
 
-    def test_a_call_with_input_or_output_nested_past_the_stack(self):
+    def test_a_call_nested_past_the_stack_is_read_or_skipped_and_counted(self):
         """Read like any other call where its line parses; skipped and
         counted where it does not. Input held as a JSON string always
         parses as a line, and is kept as its text where it is too deep."""

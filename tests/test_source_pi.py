@@ -1756,7 +1756,7 @@ class Deep(PiCase):
             self.assertNotIn("cm/1", list(calls))
             self.assertEqual(self.pi.counts["unparsed"], 1)
 
-    def test_a_command_the_user_ran_nested_past_the_parser(self):
+    def test_a_command_the_user_ran_nested_past_the_parser_is_read_or_counted(self):
         line = _with_deep(entry(10, bash_execution("DEEP", "DEEP", BASE_MS)),
                           _deep_list())
         calls, _found = self.read(self.session_around([line]))
