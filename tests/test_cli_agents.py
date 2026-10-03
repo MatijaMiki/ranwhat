@@ -35,8 +35,22 @@ sys.path.insert(0, TESTS)
 
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 import agents_fixtures as af  # noqa: E402
-from ranwhat import clean, cli, sources  # noqa: E402
+from ranwhat import clean, cli, sources, term  # noqa: E402
 from ranwhat.sources import _paths, _rewrite  # noqa: E402
+
+
+def setUpModule():
+    # The fake terminals here stand for one that reads escapes. On Windows
+    # term asks the console itself whether it does (term._escapes), and a
+    # StringIO is no console: it would get no colour and no progress line.
+    global _console
+    _console = mock.patch.object(term, "_escapes", lambda stream: True)
+    _console.start()
+
+
+def tearDownModule():
+    _console.stop()
+
 
 SECRET = "sk_" "live_" "Fx7Qw2Er9Ty4Ui1Op6As3Df"
 OTHER = "sk_" "live_" "Mn3Bv5Cx7Zl9Kj2Hg4Fd6Sa"
@@ -515,6 +529,41 @@ class Flags(_Cli):
                 self.assertEqual([r["source"] for r in json.loads(out)],
                                  ["claude-code"])
 
+    def test_root_and_state_dir_expand_a_tilde_as_path_does(self):
+        """--root=~/x and a quoted ~ reach ranwhat as they are written, as
+        does any ~ in cmd and PowerShell. --path expanded it and --root and
+        --state-dir did not: sources found the history there, watch read
+        nothing, and check's clean half alone said what it held."""
+        self.claude_transcript(_claude_call(1, "git push --force origin main",
+                                            "ok", self.now))
+        db = os.path.join(self.home, "oc", "agents", "a1", "agent",
+                          "openclaw-agent.sqlite")
+        os.makedirs(os.path.dirname(db))
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE log (id TEXT, body TEXT, createdAt INTEGER)")
+        conn.execute("INSERT INTO log VALUES ('1', ?, ?)", (json.dumps(
+            {"content": [{"type": "tool_use", "name": "Bash",
+                          "input": {"command": "rm -rf ~/Documents/o"}}]}),
+            int(self.now)))
+        conn.commit()
+        conn.close()
+        # expanduser("~/oc") keeps the "/" on Windows; join after "~".
+        flags = ["--root=" + os.path.join("~", "claude", "projects"),
+                 "--state-dir=" + os.path.join("~", "oc")]
+        rc, out, err = self.run_cli("watch", "--json", *flags)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(r["source"] for r in json.loads(out)),
+                         ["claude-code", "openclaw"])
+        with mock.patch.object(cli, "invocation", return_value="ranwhat"):
+            rc, out, err = self.run_cli("check", *flags)
+        self.assertEqual(rc, 0, err)
+        said = " ".join(out.split())
+        for found in ("git push --force", "rm -rf ~/Documents/o",
+                      "check --json --root %s --state-dir %s" % (
+                          cli._shell_path(self.claude),
+                          cli._shell_path(os.path.join(self.home, "oc")))):
+            self.assertIn(found, said)
+
     def test_source_limits_every_section_of_check(self):
         codex = af.AGENTS[0]
         root = self.agent_root(codex)
@@ -539,8 +588,9 @@ class Flags(_Cli):
         rc, out, _ = self.run_cli("check", "--source", "codex",
                                   "--path", "codex=" + root, *self.base_flags())
         said = " ".join(out.replace("\\\n", " ").split())
-        self.assertIn("clean --root %s --source codex --path codex=%s"
-                      % (cli._shell_path(self.claude), cli._shell_path(root)), said)
+        self.assertIn("clean --root %s --state-dir %s --source codex --path codex=%s"
+                      % (cli._shell_path(self.claude), cli._shell_path(self.openclaw),
+                         cli._shell_path(root)), said)
 
 
 class Reports(_Cli):
@@ -580,6 +630,29 @@ class Reports(_Cli):
                 self.assertIn("ranwhat sources", text)
                 for name in ("Codex", "Gemini", "Copilot", "Droid", "Muse"):
                     self.assertNotIn(name, text)
+
+    def test_checks_watch_half_says_why_when_only_clean_read(self):
+        """With a prompt history in the window and every session older,
+        check's watch half said only "No transcripts found" and the general
+        hint, while watch said how many older ones there were and that a
+        larger --days reads them."""
+        codex = af.AGENTS[0]
+        root = self.agent_root(codex)
+        old = 60 * 86400
+        codex.write(root, [("c1", "shell", "rm -rf ~/Documents/a", "ok",
+                            self.now - old)], age=old)
+        af.write(os.path.join(root, "history.jsonl"),
+                 [af.cx.history_line("hello", ts=int(self.now))])
+        argv = ["--source", "codex", "--path", "codex=" + root] + self.base_flags()
+        _, alone, _ = self.run_cli("watch", *argv)
+        rc, out, err = self.run_cli("check", *argv)
+        self.assertEqual(rc, 0, err)
+        said = " ".join(out.split())
+        for line in ("1 older transcript(s) found. Pass a larger --days",
+                     "Read Codex: 1 file"):
+            self.assertIn(line, said)
+        self.assertIn("1 older transcript(s) found", " ".join(alone.split()))
+        self.assertNotIn("Nothing flagged", out)
 
     def test_an_agent_pointed_at_nothing_is_named(self):
         nowhere = os.path.join(self.home, "no-codex")
@@ -994,6 +1067,22 @@ class SourcesCommand(_Cli):
             if entry["id"] is not None:
                 self.assertEqual(entry["status"], "not found")
                 self.assertTrue(entry["locations"])
+
+    def test_a_path_an_agent_notes_is_cut_to_fit(self):
+        """Codex's note names the path it was pointed at whole, and a word
+        longer than the line was given a line of its own past the edge,
+        under a location line already cut to fit."""
+        parts = ("some", "rather", "long", "directory", "name", "codex-home-file")
+        af.write(os.path.join(self.home, *parts), "not a folder\n")
+        for width in WIDTHS:
+            with self.subTest(width=width), \
+                    mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                rc, out, err = self.run_cli("sources", "--source", "codex",
+                                            "--path", "codex=~/" + "/".join(parts))
+                self.assertEqual(rc, 0, err)
+                self.assertIn("so Codex does not use it", " ".join(out.split()))
+                self.assertIn("codex-home-file", out)
+                self.assertFits(out, int(width))
 
     def test_a_found_agent(self):
         codex = af.AGENTS[0]

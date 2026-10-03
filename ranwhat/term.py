@@ -56,12 +56,38 @@ def _colour_depth(stream=None):
             return 0
     except Exception:             # no isatty, or a closed stream
         return 0
-    if os.environ.get("TERM") == "dumb":
+    if os.environ.get("TERM") == "dumb" or not _escapes(stream):
         return 0
     ct = os.environ.get("COLORTERM", "").lower()
     if "truecolor" in ct or "24bit" in ct:
         return 24
     return 8
+
+
+# ENABLE_VIRTUAL_TERMINAL_PROCESSING: a Windows console that reads escapes.
+_VT = 0x0004
+
+
+def _escapes(stream):
+    """Whether the terminal `stream` writes to reads escapes. Windows
+    Terminal's console does; a classic conhost window, cmd's or Windows
+    PowerShell's, does only once asked to, and printed every escape as
+    ←[1m. So on Windows it is asked, and a console that cannot be, or
+    refuses, gets none."""
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        import msvcrt
+        kernel32 = ctypes.windll.kernel32
+        handle = msvcrt.get_osfhandle(stream.fileno())
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        return bool(mode.value & _VT
+                    or kernel32.SetConsoleMode(handle, mode.value | _VT))
+    except Exception:             # not a console, or no console API
+        return False
 
 
 def colour(stream=None):
@@ -143,7 +169,8 @@ class Progress:
         self.dirty = False
         try:
             self.enabled = bool(self.stream.isatty()
-                                and os.environ.get("TERM") != "dumb")
+                                and os.environ.get("TERM") != "dumb"
+                                and _escapes(self.stream))
         except Exception:
             self.enabled = False
 

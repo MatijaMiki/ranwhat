@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
+import agents_fixtures as af  # noqa: E402
 from ranwhat import clean, term
 
 ANSI = re.compile(r"\033\[[0-9;]*m")
@@ -123,6 +124,34 @@ class ReportFitsTheTerminal(_Width):
     def test_nothing_found(self):
         for width in self.WIDTHS:
             self.assertFits(_render(width, {}, 5, [], False), width)
+
+    def test_each_read_only_file_is_named(self):
+        """The report said how many read-only files of an agent held a
+        secret, and which to delete only in --json and the review."""
+        from ranwhat.sources.base import Store
+        snapshot = ("/Users/someone/.codex/shell_snapshots/"
+                    "0b8e7a1c-2f3d-4e5f-8a9b-0c1d2e3f4a5b.1a2b3c.sh")
+        database = ("/Users/someone/.openclaw/agents/a-rather-long-agent-name/"
+                    "agent/openclaw-agent.sqlite")
+        read_only = {
+            snapshot: Store("codex", snapshot, "text", role="side",
+                            masking="read-only",
+                            why_read_only="Codex's snapshot of your shell."),
+            database: Store("openclaw", database, "sqlite")}
+        for width in ("46", "60", "80"):
+            text = _render(width, FINDINGS, 5, [], False, read_only=read_only)
+            self.assertFits(text, width)
+            lines = _lines(text)
+            for path in (snapshot, database):
+                named = [l for l in lines if l.startswith("      ")
+                         and l.strip().endswith(path[-20:])]
+                self.assertEqual(len(named), 1, (width, path))
+
+    def test_no_backups_are_named_when_nothing_was_masked(self):
+        text = _render("80", FINDINGS, 5, [], True)
+        self.assertIn("Masked in 0 file(s).", text)
+        self.assertNotIn("Backups:", text)
+        self.assertNotIn("They still hold every masked value.", text)
 
     def test_the_cli_at_both_widths(self):
         root = tempfile.mkdtemp(prefix="clean-out-")
@@ -239,12 +268,10 @@ class ReviewFitsTheTerminal(_Width):
         patch.start()
         self.addCleanup(patch.stop)
         for width in self.WIDTHS:
-            path = os.path.join(root, "s%s.jsonl" % width)
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"message": {"content": [{
+            path = af.write(os.path.join(root, "s%s.jsonl" % width), [json.dumps(
+                {"message": {"content": [{
                     "type": "tool_result",
-                    "content": "AWS_ACCESS_KEY_ID=AKIA" "4TRUE7KEYX9QZ2WB\n"}]}})
-                    + "\n")
+                    "content": "AWS_ACCESS_KEY_ID=AKIA" "4TRUE7KEYX9QZ2WB\n"}]}})])
             findings, _changed = clean.scan_file(path)
             text = _review(findings, ["mask 1"], width)
             self.assertFits(text, width)

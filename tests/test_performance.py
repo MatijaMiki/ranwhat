@@ -492,6 +492,8 @@ _COPIES = "\n".join([
     "with open(path, 'w', encoding='utf-8') as fh:",
     "    fh.write(''.join(json.dumps(o, separators=(',', ':')) + '\\n' for o in rows))",
     "assert os.path.getsize(path) <= %d" % MB,
+    # an hour old, past clean's quiet period, so apply masks it
+    "os.utime(path, (time.time() - 3600,) * 2)",
 ])
 
 

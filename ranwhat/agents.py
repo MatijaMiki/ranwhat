@@ -193,7 +193,10 @@ def read_words(counts, others=None):
 
 def all_read(selected=None):
     """Whether this run read all it found of each chosen agent: no store,
-    line or call counted as unreadable, and no note on what was not."""
+    line or call counted as unreadable, and no note on what was not. Every
+    pass of the run counts, the secrets index's and clean's too, and each
+    store once, whichever pass met it first: a file watch itself never
+    reads (older than --days, or a prompt history) withholds its claim."""
     return not notes(selected) and not any(
         source.counts.get(counter)
         for source in chosen(selected)

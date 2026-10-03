@@ -91,14 +91,21 @@ LOCK_DIR = "thread-writer-locks"
 # are (their calls are still reported).
 COPY_MARKER_SINCE = (0, 152, 0)
 
-# function_call names whose arguments carry a shell command, and the key
-# that carries it. shell (rust-v0.50 to 0.80) carries an argv.
-SHELL_FUNCTIONS = {"exec_command": "cmd", "shell": "command",
-                   "shell_command": "command"}
+# function_call names whose arguments carry a shell command, and the keys
+# that may carry it, the first one present. shell (rust-v0.50 to 0.80)
+# carries an argv; the TypeScript CLI's shell named it cmd as often.
+SHELL_FUNCTIONS = {"exec_command": ("cmd",), "shell": ("command", "cmd"),
+                   "shell_command": ("command",)}
 
-# The SQLite home's files, the one table each is read from, and its columns.
-DATABASES = (("thread_history_1.sqlite", "thread_items", ("item_json",)),
-             ("state_5.sqlite", "threads", ("title", "first_user_message")))
+# An argv of two words, the first one of these, is a patch Codex applies
+# itself and never runs in a shell (apply-patch lib.rs
+# maybe_parse_apply_patch).
+APPLY_PATCH_COMMANDS = ("apply_patch", "applypatch")
+
+# The SQLite home's files and the one table each is read from, every
+# column of it: threads mirrors session_meta, git remote URL and all.
+DATABASES = (("thread_history_1.sqlite", "thread_items"),
+             ("state_5.sqlite", "threads"))
 
 ENCRYPTED = "encrypted_content"
 
@@ -259,6 +266,14 @@ def _script(command):
     return command if isinstance(command, str) else None
 
 
+def _patch_of(argv):
+    """The patch in ["apply_patch", PATCH], or None for any other argv."""
+    if (isinstance(argv, (list, tuple)) and len(argv) == 2
+            and argv[0] in APPLY_PATCH_COMMANDS and isinstance(argv[1], str)):
+        return argv[1]
+    return None
+
+
 def _tomllib():
     """The standard library's TOML reader (Python 3.11+), or None."""
     try:
@@ -273,6 +288,13 @@ def _str(value):
 
 def _is_db_home(loc):
     return loc.how == "env CODEX_SQLITE_HOME" or loc.how.startswith("config ")
+
+
+def _separate(locs):
+    """True when the databases have a home of their own that exists. Codex
+    makes it when it first starts with it set, so until then the root's
+    databases are the ones it last wrote."""
+    return any(_is_db_home(loc) and loc.exists for loc in locs)
 
 
 def _without_encrypted(node, depth=0):
@@ -492,8 +514,9 @@ class CodexSource(Source):
 
         The databases are where Codex looks for them: config.toml's
         sqlite_home first, then CODEX_SQLITE_HOME, then CODEX_HOME itself.
-        A relative CODEX_SQLITE_HOME is taken from the current folder, as
-        Codex takes it from its own."""
+        A home that does not exist yet holds none, and CODEX_HOME's own
+        are read until it does (_separate). A relative CODEX_SQLITE_HOME is
+        taken from the current folder, as Codex takes it from its own."""
         try:
             if override:
                 items = [override] if isinstance(override, str) else list(override)
@@ -510,7 +533,7 @@ class CodexSource(Source):
                     if home:
                         from_config.append((home, "config " + config))
             locs = self._locate(roots + (from_config or from_env))
-            separate = any(_is_db_home(loc) for loc in locs)
+            separate = _separate(locs)
             for loc in locs:
                 if loc.exists:
                     loc.found = len(self._stores_at(loc, separate, heads=False))
@@ -542,7 +565,7 @@ class CodexSource(Source):
 
     def stores(self, locations, since_days=None):
         locations = list(locations)
-        separate = any(_is_db_home(loc) for loc in locations)
+        separate = _separate(locations)
         found, seen = [], set()
         for loc in locations:
             for store in self._stores_at(loc, separate):
@@ -609,7 +632,7 @@ class CodexSource(Source):
 
     def _databases(self, folder):
         out = []
-        for name, _table, _cols in DATABASES:
+        for name, _table in DATABASES:
             path = os.path.join(folder, name)
             if os.path.isfile(path):
                 store = self.store(path, "sqlite", role="side", unit="database",
@@ -767,9 +790,13 @@ class CodexSource(Source):
             name = _str(item.get("name"))
             args = base.decode_input(item.get("arguments"))
             if name in SHELL_FUNCTIONS:
-                key = SHELL_FUNCTIONS[name]
+                keys = SHELL_FUNCTIONS[name]
+                key = next((k for k in keys if k in args), keys[0])
                 if name == "shell":
                     value = args.get(key)
+                    patch = _patch_of(value)
+                    if patch is not None:
+                        return self._patched(thread, args, key, patch, common)
                     command = (_shell.argv_to_command(value)
                                if isinstance(value, (list, tuple, str)) else "")
                 else:
@@ -798,6 +825,9 @@ class CodexSource(Source):
         if kind_of == "local_shell_call":
             action = item.get("action")
             action = action if isinstance(action, dict) else {}
+            patch = _patch_of(action.get("command"))
+            if patch is not None:
+                return self._patched(thread, action, "command", patch, common)
             command = _shell.argv_to_command(action.get("command"))
             return ToolCall(self.id, thread.store.path, "local_shell_call",
                             action, kind="shell", known=True,
@@ -809,6 +839,14 @@ class CodexSource(Source):
                             {k: v for k, v in item.items() if k != "type"},
                             kind="fetch", known=True, **common)
         return None
+
+    def _patched(self, thread, args, key, patch, common):
+        """A shell call whose argv hands a patch to apply_patch: the edit it
+        is, as apply_patch's own calls are, its other arguments kept."""
+        tool_input = {k: v for k, v in args.items() if k != key}
+        tool_input["input"] = patch
+        return ToolCall(self.id, thread.store.path, "apply_patch", tool_input,
+                        kind="write", known=True, **common)
 
     @staticmethod
     def _display(item):
@@ -1054,9 +1092,10 @@ class CodexSource(Source):
     # -- secrets ------------------------------------------------------------
 
     def secret_texts(self, store):
-        """Every string the store holds, encrypted_content aside. The output
-        of a call carries that call, so clean can tell what file it came
-        from; a call's own input carries none (it was typed)."""
+        """Every string the store holds, encrypted_content aside; for a
+        database, every string in its one table (DATABASES). The output of
+        a call carries that call, so clean can tell what file it came from;
+        a call's own input carries none (it was typed)."""
         try:
             if store.format == "sqlite":
                 texts = self._database_texts(store)
@@ -1091,10 +1130,10 @@ class CodexSource(Source):
 
     def _database_texts(self, store):
         name = os.path.basename(store.path)
-        spec = [(table, cols) for n, table, cols in DATABASES if n == name]
+        spec = [table for n, table in DATABASES if n == name]
         if not spec:
             return
-        table, wanted = spec[0]
+        table = spec[0]
         # A file that is not a database is said so without opening it in
         # SQLite, which would copy it to a temp folder first. An empty file
         # holds nothing to read.
@@ -1119,8 +1158,7 @@ class CodexSource(Source):
                                  "cannot open %s" % store.path)
                 return
             try:
-                have = _sqlite.columns(conn, table)
-                cols = [c for c in wanted if c in have]
+                cols = _sqlite.columns(conn, table)
                 if not cols:
                     if self._first(store.path, "records"):
                         self.count("unknown")
@@ -1134,10 +1172,9 @@ class CodexSource(Source):
                         if not isinstance(value, str) or not value:
                             continue
                         node = value
-                        if col == "item_json":
-                            decoded = _json_value(value)
-                            if decoded is not None:
-                                node = _without_encrypted(decoded)
+                        decoded = _json_value(value)
+                        if decoded is not None:
+                            node = _without_encrypted(decoded)
                         yield SecretText(node, where="%s row %d, %s"
                                          % (table, index, col))
             except sqlite3.Error as e:
@@ -1295,10 +1332,12 @@ class CodexSource(Source):
     def mask(self, store, values):
         """The generic rewrite, for .jsonl and .json; everything else is
         read-only. A .jsonl that Codex compressed since it was found is
-        read-only now; one that is gone is left alone."""
+        read-only now, for the compressed file's reason, which the report
+        reads from the store; one that is gone is left alone."""
         try:
             return Source.mask(self, store, values)
         except FileNotFoundError:
             if store.format == "jsonl" and os.path.exists(store.path + ".zst"):
+                store.why_read_only = WHY_ZST
                 return MaskResult(store.path, skipped="read-only")
             return MaskResult(store.path)

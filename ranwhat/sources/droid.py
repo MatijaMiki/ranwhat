@@ -19,14 +19,17 @@ cut short, and the prompts the user typed:
   as droid-terminal-<6 chars>/<terminal id>.log (0600), and the result
   names it: "Full command output saved to: <path> (<size>)". stores() reads
   each transcript for those notices and follows only ones that name such a
-  file.
+  file inside the OS temp folder as ranwhat finds it, checked as a string
+  before the path is looked up, so a notice never makes it touch a network
+  share.
 - Execute with fireAndForget starts a background process whose whole
   stdout and stderr go to <OS temp folder>/droid-bg-<Date.now()>.out. The
   file outlives Droid, and the result names it on an "Output: <path>" line
   ("Background process started (PID: n)" or "... completed (...)", then
   "Command: ...", "Output: ...", "Status: ..."). stores() follows those
-  lines too, only to such a file. The process may still be writing to it,
-  and nothing verified tells whether it is, so it is read-only.
+  lines too, only to such a file, and only inside the OS temp folder. The
+  process may still be writing to it, and nothing verified tells whether
+  it is, so it is read-only.
 - Grep, LS, FetchUrl, WebSearch, Task, TaskOutput, ConnectorSearch, mcp_*
   and connectors_* results over 40,000 characters (Task and TaskOutput:
   100,000) are cut to 75% head and 25% tail with "[... truncated N
@@ -56,6 +59,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 import time
 
 from . import _lines, _paths, _stamps, base
@@ -148,13 +152,20 @@ BACKGROUND_WHY = ("A command Droid started in the background may still be "
 _HEADER_MAX = 1 << 16
 
 # A log is read and handed to clean in pieces of at most this many bytes,
-# cut at line ends, so a log larger than clean's per-string limit is still
-# searched to its end and a background process's ever-growing output is
-# never held in memory whole.
+# so a log larger than clean's per-string limit is still searched to its
+# end and this adapter never holds a background process's ever-growing
+# output in memory whole. Each piece after the first starts _OVERLAP to
+# 2 * _OVERLAP bytes before the one before it ended, so a value up to
+# _OVERLAP bytes long lies whole in one of them: a private key block spans
+# lines, and a line with no break in it is cut inside a word. A 4096-bit
+# RSA key in PEM is about 3.2 KB.
 _CHUNK = 256 * 1024
-# Where a piece is cut, in order of preference: after its last line end;
-# else after its last carriage return (progress bars redraw a line with
-# them); else after its last space or tab. No key holds any of them.
+_OVERLAP = 32 * 1024
+# Where a piece ends, in order of preference: after the last line end in
+# its second half; else after the last carriage return there (progress
+# bars redraw a line with them); else after the last space or tab. No key
+# holds any of them. The next piece starts the same way, in the _OVERLAP
+# bytes before the last _OVERLAP bytes of the piece.
 _CUTS = ((b"\n",), (b"\r",), (b" ", b"\t"))
 
 
@@ -241,15 +252,31 @@ def _plain(path, want):
     return want(st.st_mode)
 
 
+def _temp_path(path):
+    """`path`, absolute and with no "..", made normal when it lies inside
+    the OS temp folder, where Droid writes its terminal logs and background
+    outputs. Else None. Compared as strings, nothing looked up: a path in a
+    tool result can name a network share (\\\\host\\share), and on Windows
+    only looking it up sends the user's credentials to that host. What is
+    looked up after is the normal form, the one that was checked."""
+    if not os.path.isabs(path) or ".." in re.split(r"[\\/]+", path):
+        return None
+    path = os.path.abspath(path)
+    folder = os.path.join(os.path.normcase(os.path.abspath(
+        tempfile.gettempdir())), "")
+    return path if os.path.normcase(path).startswith(folder) else None
+
+
 def _terminal_log(path):
-    """`path` when it is a Droid terminal log: an absolute path to
-    droid-terminal-<chars>/<uuid>.log, the file regular and the folder a
-    real one (neither is a link). Else None.
+    """`path` when it is a Droid terminal log: an absolute path inside the
+    OS temp folder to droid-terminal-<chars>/<uuid>.log, the file regular
+    and the folder a real one (neither is a link). Else None.
 
     The notice that names it sits in a tool result, beside the command's
     own output, so its path is checked before anything is read: a line
     that only looks like the notice can point at nothing else."""
-    if not os.path.isabs(path) or ".." in re.split(r"[\\/]+", path):
+    path = _temp_path(path)
+    if path is None:
         return None
     folder, name = os.path.split(path)
     base_name = os.path.basename(folder)
@@ -296,13 +323,12 @@ def _spill_name(path, cid):
 
 def _background_output(path):
     """`path` when it is a Droid background process's output: an absolute
-    path to droid-bg-<13 digits>.out, a regular file and not a link or
-    junction. Else None. As with a terminal log, the line naming it sits
-    beside text the agent wrote (the command), so the name is checked
-    before anything is read."""
-    if not os.path.isabs(path) or ".." in re.split(r"[\\/]+", path):
-        return None
-    if not _BACKGROUND_OUT.match(os.path.basename(path)):
+    path inside the OS temp folder to droid-bg-<13 digits>.out, a regular
+    file and not a link or junction. Else None. As with a terminal log, the
+    line naming it sits beside text the agent wrote (the command), so the
+    path is checked before anything is read."""
+    path = _temp_path(path)
+    if path is None or not _BACKGROUND_OUT.match(os.path.basename(path)):
         return None
     if not _plain(path, stat.S_ISREG):
         return None
@@ -318,12 +344,12 @@ def _background_paths(text):
             if line.startswith(_OUTPUT)]
 
 
-def _cut(buf, size):
-    """Where to end the next piece of `buf`: after the last of the first
-    kind of _CUTS found within `size` bytes, else at `size` moved back to
-    the start of a UTF-8 character. `buf` is longer than `size`."""
+def _cut(buf, low, size):
+    """Where to cut `buf`: after the last of the first kind of _CUTS found
+    in buf[low:size], else at `size` moved back to the start of a UTF-8
+    character. `buf` is longer than `size`."""
     for marks in _CUTS:
-        cut = max(buf.rfind(m, 0, size) for m in marks) + 1
+        cut = max(buf.rfind(m, low, size) for m in marks) + 1
         if cut:
             return cut
     cut = size
@@ -449,11 +475,12 @@ class DroidSource(Source):
     def stores(self, locations, since_days=None):
         """Every transcript, tool-output log and prompt history under the
         locations, and every terminal log and background output a
-        transcript's Execute results name (in the OS temp folder, wherever
-        Droid's was). With since_days, a transcript last written before the
-        window is not read for those: its commands' logs were written before
-        it was. A background process can outlive that, so its output, still
-        growing inside the window, is missed when its session is not."""
+        transcript's Execute results name inside the OS temp folder (Droid
+        and ranwhat both find it from TMPDIR, or TEMP and TMP on Windows).
+        With since_days, a transcript last written before the window is not
+        read for those: its commands' logs were written before it was. A
+        background process can outlive that, so its output, still growing
+        inside the window, is missed when its session is not."""
         found, seen, transcripts = [], set(), []
         # each Droid folder's tool-output logs, by name, for the notices
         # in its own transcripts to be tied to
@@ -822,10 +849,10 @@ class DroidSource(Source):
 
     def _log_texts(self, store):
         """A tool-output log, terminal log or background output, or a
-        prompt history that is not JSON, read in pieces of at most _CHUNK
-        bytes, each cut after a line end where the piece holds one (see
-        _cut). The pieces of each are tied to the call whose result named
-        it, when stores() found that call this run."""
+        prompt history that is not JSON, read in overlapping pieces of at
+        most _CHUNK bytes, each cut after a line end where the piece holds
+        one (see _CUTS). The pieces of each are tied to the call whose
+        result named it, when stores() found that call this run."""
         try:
             fh = open(store.path, "rb")
         except OSError as e:
@@ -844,13 +871,17 @@ class DroidSource(Source):
                     end = not block
                     buf += block
                     continue
-                cut = _cut(buf, _CHUNK) if len(buf) > _CHUNK else len(buf)
-                piece, buf = buf[:cut], buf[cut:]
+                if len(buf) > _CHUNK:
+                    cut = _cut(buf, _CHUNK // 2, _CHUNK)
+                    start = _cut(buf, cut - 2 * _OVERLAP, cut - _OVERLAP)
+                else:
+                    cut = start = len(buf)
                 if not looked:
                     call, looked = self._log_call(store), True
-                yield SecretText(piece.decode("utf-8", "surrogateescape"),
+                yield SecretText(buf[:cut].decode("utf-8", "surrogateescape"),
                                  call=call, where="line %d" % line_no)
-                line_no += piece.count(b"\n")
+                line_no += buf.count(b"\n", 0, start)
+                buf = buf[start:]
 
     def _log_call(self, store):
         """The call a terminal log, background output or tool output log

@@ -163,6 +163,16 @@ def _not_run(tool, decision):
             'request.' % tool)
 
 
+def _interrupted(tool):
+    """The result Kimi Code fills in for a call the user interrupted
+    (toolExecutorService.ts abortedToolOutput)."""
+    return ('The user manually interrupted "%s" (and anything else running '
+            'at the same time). This was a deliberate user action, not a '
+            'system error, timeout, or capacity limit. Do not retry '
+            'automatically or guess at the cause \u2014 wait for the user\'s '
+            'next instruction.' % tool)
+
+
 def _escape_xml(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
@@ -1158,10 +1168,45 @@ class RecordShapes(KimiCodeCase):
 # --------------------------------------------------------------------------
 
 class ReusedIds(KimiCodeCase):
-    """Kimi Code keeps a provider's id unless its own process has seen it,
-    and seeds what it has seen once, from the current context. After a
-    clear, an undo or a compaction and a resume, Kimi K2 numbers its calls
-    from functions.<name>:0 again, so a new call can carry an old id."""
+    """Kimi Code keeps a provider's id unless it has seen it, and each turn
+    seeds what it has seen from the context as it is then (human/agent/
+    turn.ts). After a clear, an undo or a compaction, Kimi K2 numbers its
+    calls from functions.<name>:0 again, so a new call can carry an old
+    id."""
+
+    def test_the_same_call_again_after_a_reset_is_a_new_call(self):
+        """Here vetoed, then after a reset approved and run a day later,
+        then after another run with no answer recorded: three calls, each
+        with its own time and answers. An answer still held at a reset,
+        whose call was never dispatched, goes to no call after it."""
+        rm = {"command": "rm -rf ~/Documents/x"}
+        day = 86400000
+        for reset in (_clear, lambda t: _undo(1, t), _compaction):
+            name = reset(T0)["type"]
+            with self.subTest(reset=name):
+                path = self._wire([
+                    _meta(),
+                    _approval(K2_ID, "rejected", T0 + 1000),
+                    _call(K2_ID, "Bash", rm, T0 + 1100),
+                    _result(K2_ID, _not_run("Bash", "rejected"), T0 + 1200,
+                            is_error=True),
+                    reset(T0 + 2000),
+                    _approval(K2_ID, "approved", T0 + day),
+                    _call(K2_ID, "Bash", rm, T0 + day + 100),
+                    _result(K2_ID, "", T0 + day + 200),
+                    _approval(K2_ID, "rejected", T0 + day + 300),
+                    reset(T0 + day + 400),
+                    _call(K2_ID, "Bash", rm, T0 + 2 * day),
+                    _result(K2_ID, "", T0 + 2 * day + 100),
+                ], sid="s_" + name.replace(".", "_"))
+                self.assertEqual(
+                    [(c.command, c.status, c.timestamp) for c in self._calls(path)],
+                    [("rm -rf ~/Documents/x", "declined",
+                      _stamps.iso_utc(T0 + 1100, "ms")),
+                     ("rm -rf ~/Documents/x", None,
+                      _stamps.iso_utc(T0 + day + 100, "ms")),
+                     ("rm -rf ~/Documents/x", None,
+                      _stamps.iso_utc(T0 + 2 * day, "ms"))])
 
     def test_a_new_call_with_an_old_id_is_reported(self):
         for reset in (_clear(T0 + 3000), _undo(2, T0 + 3000),
@@ -1390,6 +1435,51 @@ class Declined(KimiCodeCase):
         ])
         [call] = self._calls(path)
         self.assertEqual(call.status, "declined")
+
+    def test_a_call_interrupted_before_it_was_dispatched_never_ran(self):
+        """Kimi Code writes a call's tool.call event when it dispatches the
+        call. A turn interrupted while the call waits for approval records
+        no answer and no event: only the result it fills in for the call
+        (loopService.ts backfillAbortedToolResults) and, at the turn's end,
+        the assistant message that asked for it (machine.ts). That call
+        never ran. One dispatched before the interrupt may have."""
+        rm = _j({"command": "rm -rf ~/Documents/x"})
+        for said in (_interrupted("Bash"), 'Tool "Bash" was aborted'):
+            with self.subTest(said=said[:20]):
+                path = self._wire([
+                    _meta(),
+                    _step(1, T0 + 2),
+                    _result(K2_ID, said, T0 + 5000, is_error=True),
+                    _engine({"role": "assistant", "content": [], "toolCalls": [
+                        {"type": "function", "id": K2_ID, "name": "Bash",
+                         "arguments": rm}]}, T0 + 5002),
+                    _engine({"role": "tool", "toolCallId": K2_ID,
+                             "content": [{"type": "text", "text": said}]},
+                            T0 + 5003),
+                ])
+                [call] = self._calls(path)
+                self.assertEqual((call.command, call.output, call.status),
+                                 ("rm -rf ~/Documents/x", said, "declined"))
+        dispatched = self._wire([
+            _meta(),
+            _call(K2_ID, "Bash", {"command": "rm -rf ~/Documents/x"}, T0 + 10),
+            _result(K2_ID, _interrupted("Bash"), T0 + 5000, is_error=True),
+            _engine({"role": "assistant", "content": [], "toolCalls": [
+                {"type": "function", "id": K2_ID, "name": "Bash",
+                 "arguments": rm}]}, T0 + 5002),
+        ], sid="s_dispatched")
+        [call] = self._calls(dispatched)
+        self.assertIsNone(call.status)
+        # another tool's note, or one that only quotes it, is not this one
+        for said in (_interrupted("Read"), "Done. " + _interrupted("Bash")):
+            with self.subTest(said=said[:20]):
+                path = self._wire([
+                    _meta(),
+                    _assistant([(K2_ID, "Bash", rm)], T0),
+                    _result(K2_ID, said, T0 + 10, is_error=True),
+                ], sid="s_other")
+                [call] = self._calls(path)
+                self.assertIsNone(call.status)
 
 
 class ShellMode(KimiCodeCase):

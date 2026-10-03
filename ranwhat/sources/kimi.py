@@ -68,6 +68,12 @@ sources:
 - Up to 0.56 the shell tool was Bash (CMD on Windows), {command, timeout},
   and PatchFile {path, diff} edited files (tools/bash, tools/file/patch.py;
   CHANGELOG 0.57 renames Bash/CMD to Shell and removes PatchFile).
+- The recorder merges a ToolCall with the ToolCallPart records streamed
+  after it, but any other record flushes it first (wire/__init__.py
+  WireSoulSide): a parallel call's result, a subagent's event, a status
+  update. The call is then written with only the start of its arguments,
+  and the rest follows in ToolCallPart records, which add to the latest
+  call of the same agent. The pieces are read as one call (see _Pieces).
 """
 
 from __future__ import annotations
@@ -78,8 +84,9 @@ import os
 import re
 from collections import OrderedDict
 
-from . import _lines, _paths, _stamps
-from .base import SecretText, Source, ToolCall, decode_input, newest_first
+from . import _lines, _paths, _rewrite, _stamps
+from .base import (MaskResult, SecretText, Source, ToolCall, decode_input,
+                   newest_first)
 
 ENV = "KIMI_SHARE_DIR"
 
@@ -134,6 +141,8 @@ APPROVAL_REQUEST = "ApprovalRequest"
 APPROVAL_RESPONSES = ("ApprovalResponse", "ApprovalRequestResolved")
 REJECT = "reject"
 SUBAGENT_EVENT = "SubagentEvent"
+# The wire records a call is read from, the ToolCallPart pieces included.
+CALL_RECORDS = ("ToolCall", "ToolCallPart", "ToolResult")
 
 # Every ToolRejectedError message starts with this: with or without the
 # user's feedback, for the main agent or a subagent, 0.56 to 1.52 alike.
@@ -291,12 +300,12 @@ def _rejected_message(content):
 
 
 def _call_key(record):
-    """What makes two copies of a call the same call: its id, name and
-    arguments. Kimi's ids ("Shell:0") look like a count within one
-    conversation (unverified), so after /clear the same id may name a
-    different call; those differ in their arguments and both are kept. A
-    digest, so a long file's set of seen calls stays small. None for a call
-    with no id."""
+    """What makes two copies of a call in different files the same call:
+    its id, name and arguments. Kimi's ids ("Shell:0") count within one
+    conversation, so after /clear the same call can come back with the
+    same key; within one file every call is read (see _Pending). A digest,
+    so a long file's set of seen calls stays small. None for a call with
+    no id."""
     cid = _id(record.get("id"))
     if cid is None:
         return None
@@ -337,32 +346,50 @@ def _readable(node, depth=0):
 
 
 class _Pending(object):
-    """Calls waiting for their result, deduped by _call_key, in the order
-    they were made. `seen` may be shared, so that copies already yielded
-    from another file of the same conversation are skipped here."""
+    """Calls waiting for their result, in the order they were made, with
+    the records they were read from. `seen` holds the _call_key of every
+    call read, and may be shared, so that copies already yielded from
+    another file of the same conversation are skipped here.
 
-    def __init__(self, seen=None):
+    A context file can hold a copy of a call; a wire.jsonl (`copies`
+    False) records each call once, so there every call is read, and one
+    whose key was seen is a new call made after /clear. Its key is taken
+    when it leaves, since a ToolCallPart may still add to its arguments."""
+
+    def __init__(self, seen=None, copies=True):
         self.calls = OrderedDict()
+        self.records = {}
         self.seen = set() if seen is None else seen
+        self.copies = copies
 
     def add(self, call, record):
         """The calls to yield now: none for a copy already seen; the call
         itself when it has no id (no result can find it); and an earlier
         call still waiting under the same id (a reused id after /clear)."""
-        key = _call_key(record)
-        if key is not None:
-            if key in self.seen:
-                return []
-            self.seen.add(key)
+        if self.copies:
+            key = _call_key(record)
+            if key is not None:
+                if key in self.seen:
+                    return []
+                self.seen.add(key)
         cid = call.tool_call_id
         if cid is None:
             return [call]
-        out = [self.calls.pop(cid)] if cid in self.calls else []
+        out = [self._pop(cid)] if cid in self.calls else []
         self.calls[cid] = call
+        self.records[cid] = record
         return out
 
+    def _pop(self, cid):
+        record = self.records.pop(cid)
+        if not self.copies:
+            key = _call_key(record)
+            if key is not None:
+                self.seen.add(key)
+        return self.calls.pop(cid)
+
     def result(self, cid, output, rejected=False):
-        call = self.calls.pop(cid, None) if cid is not None else None
+        call = self._pop(cid) if cid in self.calls else None
         if call is not None:
             call.output = output
             if rejected:
@@ -370,9 +397,83 @@ class _Pending(object):
         return call
 
     def rest(self):
-        out = list(self.calls.values())
-        self.calls.clear()
-        return out
+        return [self._pop(cid) for cid in list(self.calls)]
+
+
+class _Pieces(object):
+    """The latest call of each agent in a wire.jsonl, while ToolCallPart
+    records may still add to its arguments: until its result, the same
+    agent's next call, or the end of the file. `scope` names the agent:
+    None for the main one, else a subagent's agent_id or its Task call's
+    id. Each call is a copy of its record, whose arguments are joined from
+    their pieces once, when it is whole."""
+
+    def __init__(self):
+        self.latest = {}    # scope -> [first line, last line, record, pieces]
+
+    def call(self, scope, payload, line_no=None):
+        """(The copy of a ToolCall's payload that its pieces will add to;
+        the agent's call before it, now whole, as close() gives it.)"""
+        before = self.close(scope)
+        record = dict(payload)
+        fn = payload.get("function")
+        args = fn.get("arguments") if isinstance(fn, dict) else None
+        if isinstance(fn, dict) and (args is None or isinstance(args, str)):
+            record["function"] = dict(fn)
+            self.latest[scope] = [line_no, line_no, record, [args or ""]]
+        return record, before
+
+    def part(self, scope, payload, line_no=None):
+        """Add a ToolCallPart's arguments_part to the agent's latest call."""
+        entry = self.latest.get(scope)
+        piece = payload.get("arguments_part")
+        if entry is not None and isinstance(piece, str) and piece:
+            entry[1] = line_no
+            entry[3].append(piece)
+
+    def close(self, scope):
+        """The agent's latest call, whole, which nothing adds to any more,
+        as [first line, last line, record, pieces] when it came in pieces;
+        else None."""
+        entry = self.latest.pop(scope, None)
+        if entry is None or len(entry[3]) == 1:
+            return None
+        entry[2]["function"]["arguments"] = "".join(entry[3])
+        return entry
+
+    def answered(self, scope, cid):
+        """close(), when the agent's latest call is the one a result with
+        id `cid` answers."""
+        entry = self.latest.get(scope)
+        if cid is None or entry is None or _id(entry[2].get("id")) != cid:
+            return None
+        return self.close(scope)
+
+    def rest(self):
+        """Each agent's latest call that came in pieces, at the end, whole
+        (see close)."""
+        return [entry for entry in map(self.close, list(self.latest))
+                if entry is not None]
+
+
+def _scope_event(obj):
+    """(scope, type, payload) of a wire record, the event inside a
+    SubagentEvent scoped by its agent_id (1.25 on) or Task call's id (see
+    _Pieces). (None, None, None) when it holds no event with a payload."""
+    message = obj.get("message") if isinstance(obj, dict) else None
+    if not isinstance(message, dict):
+        return None, None, None
+    scope, mtype, payload = None, message.get("type"), message.get("payload")
+    if mtype == SUBAGENT_EVENT and isinstance(payload, dict):
+        scope = _id(payload.get("agent_id")) or _id(
+            payload.get("task_tool_call_id"))
+        event = payload.get("event")
+        if scope is None or not isinstance(event, dict):
+            return None, None, None
+        mtype, payload = event.get("type"), event.get("payload")
+    if not isinstance(payload, dict):
+        return None, None, None
+    return scope, mtype, payload
 
 
 class KimiSource(Source):
@@ -554,7 +655,8 @@ class KimiSource(Source):
         # Every wire record has a time; a call that somehow has none is no
         # later than the file's last write.
         not_after = _stamps.iso_utc(store.mtime, "s")
-        pending = _Pending()
+        pending = _Pending(copies=False)
+        pieces = _Pieces()
         # A pre-1.25 Task subagent's calls, by the Task call's id: its ids
         # count from Shell:0 again, so they are matched apart from the main
         # agent's.
@@ -570,9 +672,10 @@ class KimiSource(Source):
                 continue
             payload = message.get("payload")
             payload = payload if isinstance(payload, dict) else {}
-            if mtype in ("ToolCall", "ToolResult"):
+            if mtype in CALL_RECORDS:
                 for call in self._wire_event(store, mtype, payload, pending,
-                                             obj.get("timestamp"), not_after):
+                                             pieces, None, obj.get("timestamp"),
+                                             not_after):
                     yield call
             elif mtype == SUBAGENT_EVENT:
                 task = _id(payload.get("task_tool_call_id"))
@@ -583,10 +686,10 @@ class KimiSource(Source):
                     # wire.jsonl, which is read for itself.
                     continue
                 etype, epayload = event.get("type"), event.get("payload")
-                if etype in ("ToolCall", "ToolResult") \
-                        and isinstance(epayload, dict):
-                    sub = subs.setdefault(task, _Pending())
+                if etype in CALL_RECORDS and isinstance(epayload, dict):
+                    sub = subs.setdefault(task, _Pending(copies=False))
                     for call in self._wire_event(store, etype, epayload, sub,
+                                                 pieces, task,
                                                  obj.get("timestamp"),
                                                  not_after):
                         yield call
@@ -610,7 +713,8 @@ class KimiSource(Source):
                         owners[0].calls[cid].status = "declined"
             # TurnBegin, StepBegin, ContentPart, StatusUpdate and the rest
             # carry no call.
-        for waiting in [pending] + list(subs.values()):
+        for scope, waiting in [(None, pending)] + list(subs.items()):
+            self._whole(store, waiting, pieces.close(scope))
             for call in waiting.rest():
                 yield call
         sub_seen = set()
@@ -619,19 +723,40 @@ class KimiSource(Source):
         for call in self._folder_extras(store, pending.seen, sub_seen):
             yield call
 
-    def _wire_event(self, store, mtype, payload, pending, stamp, not_after):
-        """The calls a ToolCall or ToolResult payload finishes. A result
-        that is a ToolRejectedError makes its call declined."""
+    def _wire_event(self, store, mtype, payload, pending, pieces, scope,
+                    stamp, not_after):
+        """The calls a ToolCall, ToolCallPart or ToolResult payload of one
+        agent (`scope`, see _Pieces) finishes. A piece adds to the agent's
+        latest call, read again once it is whole. A result that is a
+        ToolRejectedError makes its call declined."""
+        if mtype == "ToolCallPart":
+            pieces.part(scope, payload)
+            return []
         if mtype == "ToolCall":
-            call = self._call(store, payload, timestamp=_stamps.iso_utc(
+            record, before = pieces.call(scope, payload)
+            self._whole(store, pending, before)
+            call = self._call(store, record, timestamp=_stamps.iso_utc(
                 stamp, "s"), not_after=not_after)
-            return pending.add(call, payload) if call is not None else []
+            return pending.add(call, record) if call is not None else []
+        cid = _id(payload.get("tool_call_id"))
+        self._whole(store, pending, pieces.answered(scope, cid))
         value = payload.get("return_value")
         output = (_output_text(value.get("output"))
                   if isinstance(value, dict) else None)
-        call = pending.result(_id(payload.get("tool_call_id")), output,
-                              rejected=_rejected_result(value))
+        call = pending.result(cid, output, rejected=_rejected_result(value))
         return [call] if call is not None else []
+
+    def _whole(self, store, pending, entry):
+        """Read again, from its whole arguments, a call that came in pieces
+        (`entry`, see _Pieces.close) while it waits for its result."""
+        record = entry[2] if entry is not None else None
+        cid = _id(record.get("id")) if record is not None else None
+        if cid is not None and pending.records.get(cid) is record:
+            old = pending.calls[cid]
+            call = self._call(store, record, timestamp=old.timestamp,
+                              not_after=old.not_after)
+            call.status = old.status
+            pending.calls[cid] = call
 
     def _context_calls(self, store, parsed):
         """Calls in a context-format file. It holds no times: each call is
@@ -726,7 +851,9 @@ class KimiSource(Source):
         """Every line of the store, the system prompt and rotated contexts
         included. A ToolResult or tool message carries the call it answers;
         a call's own line carries none (what was typed has no origin). A
-        line that is not JSON is searched as text. A plain text store
+        call a wire.jsonl holds in pieces (see _Pieces) is given once more
+        when it is whole, so a value cut in two by them is found.
+        A line that is not JSON is searched as text. A plain text store
         (output.log, prompt.txt, output) is searched in pieces of whole
         lines; a background task's output.log carries the Shell call its
         spec.json names. spec.json is searched as one document."""
@@ -759,6 +886,7 @@ class KimiSource(Source):
         shape = ("history" if os.path.basename(os.path.dirname(store.path))
                  == "user-history" else "wire" if name == WIRE else "context")
         calls = {}
+        pieces = _Pieces()
         try:
             for line_no, obj, text in _raw_lines(store.path):
                 where = "line %d" % line_no
@@ -767,11 +895,16 @@ class KimiSource(Source):
                     continue
                 answered = None
                 if shape == "wire":
-                    answered = self._wire_answers(store, obj, calls)
+                    answered, whole = self._wire_answers(store, obj, calls,
+                                                         pieces, line_no)
+                    if whole is not None:
+                        yield _whole_text(whole)
                 elif shape == "context":
                     answered = self._context_answers(store, obj, calls)
                 node = _readable(obj) if '"arguments"' in text else obj
                 yield SecretText(node, call=answered, where=where)
+            for whole in pieces.rest():
+                yield _whole_text(whole)
         except OSError as e:
             self.warn(store.path, "cannot read Kimi CLI history %s (%s)"
                       % (store.path, e))
@@ -792,33 +925,29 @@ class KimiSource(Source):
                         tool_call_id=_id(spec.get("tool_call_id")),
                         command=command, consumed=("command",))
 
-    def _wire_answers(self, store, obj, calls):
-        message = obj.get("message") if isinstance(obj, dict) else None
-        if not isinstance(message, dict):
-            return None
-        mtype, payload = message.get("type"), message.get("payload")
-        if not isinstance(payload, dict):
-            return None
-        scope = None
-        if mtype == SUBAGENT_EVENT:
-            # A subagent's call and result, matched within that subagent:
-            # by agent_id from 1.25 on, else by the Task call's id.
-            scope = _id(payload.get("agent_id")) or _id(
-                payload.get("task_tool_call_id"))
-            event = payload.get("event")
-            if scope is None or not isinstance(event, dict):
-                return None
-            mtype, payload = event.get("type"), event.get("payload")
-            if not isinstance(payload, dict):
-                return None
+    def _wire_answers(self, store, obj, calls, pieces, line_no):
+        """(The call a wire line's result answers, or None; a call this
+        line makes whole that came in pieces, as _Pieces.close gives it,
+        or None.) A subagent's call and result are matched within that
+        subagent. `calls` holds each call's record, by scope and id, until
+        its result."""
+        scope, mtype, payload = _scope_event(obj)
         if mtype == "ToolCall":
-            call = self._call(store, payload, count=False)
-            if call is not None and call.tool_call_id is not None:
-                calls[(scope, call.tool_call_id)] = call
-            return None
-        if mtype == "ToolResult":
-            return calls.pop((scope, _id(payload.get("tool_call_id"))), None)
-        return None
+            record, before = pieces.call(scope, payload, line_no)
+            cid = _id(record.get("id"))
+            if cid is not None:
+                calls[(scope, cid)] = record
+            return None, before
+        if mtype == "ToolCallPart":
+            pieces.part(scope, payload, line_no)
+        elif mtype == "ToolResult":
+            cid = _id(payload.get("tool_call_id"))
+            whole = pieces.answered(scope, cid)
+            record = calls.pop((scope, cid), None)
+            if record is not None:
+                return self._call(store, record, count=False), whole
+            return None, whole
+        return None, None
 
     def _context_answers(self, store, obj, calls):
         role = obj.get("role") if isinstance(obj, dict) else None
@@ -848,6 +977,69 @@ class KimiSource(Source):
                                           TASK_RUNTIME))
         status = runtime.get("status") if isinstance(runtime, dict) else None
         return isinstance(status, str) and status not in _TASK_DONE
+
+    def mask(self, store, values):
+        """The generic rewrite, but a wire.jsonl where a value is cut in two
+        by the pieces of a call (see _Pieces) is refused as a file whose
+        masking would change more than the secret. Raw replacement cannot
+        reach that value, and the file would pass for masked with it still
+        there."""
+        if (store.masking == "rewrite" and os.path.basename(store.path) == WIRE
+                and _cut_in_pieces(store.path, values)):
+            return MaskResult(store.path, skipped=_rewrite.ALTERED)
+        return Source.mask(self, store, values)
+
+
+def _whole_text(entry):
+    """A call that came in pieces, as one SecretText of its whole record."""
+    first, last, record, _pieces = entry
+    return SecretText(_readable(record), where="lines %d-%d" % (first, last))
+
+
+def _cut_in_pieces(path, values):
+    """True when one of `values`, in any form it takes in JSON text, runs
+    from one piece of a call's arguments into the next. Only the lines
+    that can hold a call or a piece are parsed."""
+    forms = set()
+    for value in values:
+        if isinstance(value, str) and value:
+            forms.update(_rewrite.encodings(value))
+    if not forms:
+        return False
+    pieces = _Pieces()
+    with open(path, "rb") as fh:
+        for index, raw in enumerate(fh, 1):
+            if b'"ToolCall' not in raw:
+                continue
+            try:
+                obj = json.loads(_lines.decode_line(raw, index == 1))
+            except (ValueError, RecursionError):
+                continue
+            scope, mtype, payload = _scope_event(obj)
+            if mtype == "ToolCall":
+                before = pieces.call(scope, payload)[1]
+                if before is not None and _crosses(before[3], forms):
+                    return True
+            elif mtype == "ToolCallPart":
+                pieces.part(scope, payload)
+    return any(_crosses(entry[3], forms) for entry in pieces.rest())
+
+
+def _crosses(pieces, forms):
+    """True when one of `forms` in the joined `pieces` starts in one piece
+    and ends in another."""
+    whole = "".join(pieces)
+    ends, at = [], 0
+    for piece in pieces[:-1]:
+        at += len(piece)
+        ends.append(at)
+    for form in forms:
+        start = whole.find(form)
+        while start != -1:
+            if any(start < end < start + len(form) for end in ends):
+                return True
+            start = whole.find(form, start + 1)
+    return False
 
 
 def _text_pieces(path):

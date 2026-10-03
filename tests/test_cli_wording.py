@@ -8,6 +8,7 @@ also driving check and clean. A finding told the reader to "Run
 """
 import ast
 import contextlib
+import errno
 import io
 import json
 import os
@@ -378,6 +379,128 @@ class HtmlIsForTheAuthorityReport(unittest.TestCase):
             self.assertIn(command, help_text)
         for command in ("check", "watch", "clean"):
             self.assertNotIn(command, help_text)
+
+
+class AFollowUpCommandRunsInPowerShell(unittest.TestCase):
+    """PowerShell reads a quoted first word as a string, not a command to
+    run, so a suggested `"C:\\Program Files\\Python313\\python.exe" -m
+    ranwhat` failed there with "Unexpected token '-m'": the spelling of
+    every next step check suggested after `py -m ranwhat`."""
+
+    EXE = r"C:\Program Files\Python313\python.exe"
+
+    def spelled(self, exe, on_path, starts):
+        """_python_m on Windows, with `on_path` {name: what PATH finds}
+        and `starts` whether a launcher asked starts this interpreter."""
+        with mock.patch.object(cli.shutil, "which",
+                               side_effect=lambda name, path=None: on_path.get(name)), \
+                mock.patch.object(cli, "_launches", return_value=starts) as asked:
+            return cli._python_m(exe, "", windows=True), asked
+
+    def test_py_when_it_starts_this_interpreter(self):
+        got, asked = self.spelled(self.EXE, {"py": r"C:\Windows\py.exe"}, True)
+        self.assertEqual(got, "py -m ranwhat")
+        asked.assert_called_once_with(r"C:\Windows\py.exe", self.EXE)
+
+    def test_never_a_quoted_first_word(self):
+        store = r"C:\Users\u\AppData\Local\Microsoft\WindowsApps\python3.exe"
+        for on_path, starts in (({}, True),
+                                ({"py": r"C:\Windows\py.exe"}, False),
+                                ({"python3": store}, True)):
+            with self.subTest(on_path=on_path):
+                got, asked = self.spelled(self.EXE, on_path, starts)
+                self.assertEqual(got, "uvx ranwhat")
+                # Python's own names may be the Store's alias, which opens
+                # the Store when it is run: only py is ever asked.
+                for call in asked.call_args_list:
+                    self.assertTrue(call[0][0].endswith("py.exe"), call)
+        got, _ = self.spelled(r"C:\Python313\python.exe", {}, False)
+        self.assertEqual(got, r"C:\Python313\python.exe -m ranwhat")
+
+
+class _Tty(io.StringIO):
+    def isatty(self):
+        return True
+
+    def fileno(self):
+        return 1
+
+
+class _Console(object):
+    """kernel32's console calls, for a console in `mode`, that takes a new
+    one when `takes`."""
+
+    def __init__(self, mode, takes):
+        self.mode, self.takes, self.set = mode, takes, []
+
+    def GetConsoleMode(self, handle, ref):
+        ref._obj.value = self.mode
+        return 1
+
+    def SetConsoleMode(self, handle, mode):
+        self.set.append(mode)
+        return 1 if self.takes else 0
+
+
+class AClassicWindowsConsoleGetsNoEscapes(unittest.TestCase):
+    """cmd and Windows PowerShell 5.1 in a classic conhost window show an
+    escape as ←[1m unless it is turned on, and nothing turned it on: every
+    report there was strewn with them, and the progress line never
+    erased."""
+
+    def on_windows(self, console):
+        import ctypes
+        windll = mock.Mock()
+        windll.kernel32 = console
+        return [mock.patch.object(term.os, "name", "nt"),
+                mock.patch.dict(os.environ, {}, clear=False),
+                mock.patch.object(ctypes, "windll", windll, create=True),
+                mock.patch.dict(sys.modules, {"msvcrt": mock.Mock(
+                    get_osfhandle=lambda fd: 7)})]
+
+    def test_a_console_that_takes_escapes_gets_colour(self):
+        console = _Console(mode=3, takes=True)
+        with contextlib.ExitStack() as stack:
+            for patch in self.on_windows(console):
+                stack.enter_context(patch)
+            for name in ("NO_COLOR", "TERM", "COLORTERM"):
+                os.environ.pop(name, None)
+            self.assertEqual(term._colour_depth(_Tty()), 8)
+            self.assertTrue(term.Progress(_Tty()).enabled)
+        self.assertEqual(console.set[0], 3 | 4)
+
+    def test_one_that_does_not_gets_plain_text(self):
+        for console in (_Console(mode=3, takes=False), None):
+            with self.subTest(console=console), contextlib.ExitStack() as stack:
+                for patch in self.on_windows(console):
+                    stack.enter_context(patch)
+                for name in ("NO_COLOR", "TERM", "COLORTERM"):
+                    os.environ.pop(name, None)
+                self.assertEqual(term._colour_depth(_Tty()), 0)
+                self.assertEqual(term.paint("1", "x", _Tty()), "x")
+                self.assertFalse(term.Progress(_Tty()).enabled)
+
+
+class AFileThatCannotBeOpenedIsNamed(unittest.TestCase):
+    """Windows gives EINVAL for a name holding ? * < > |, as it does for a
+    write to a pipe whose reader has gone, and main() took every EINVAL for
+    the pipe: `scan profile?.json` exited 1 and said nothing at all."""
+
+    def test_only_an_error_naming_no_file_is_the_pipe(self):
+        self.assertTrue(cli._closed_pipe(
+            OSError(errno.EINVAL, "Invalid argument"), windows=True))
+        self.assertFalse(cli._closed_pipe(
+            OSError(errno.EINVAL, "Invalid argument", "profile?.json"),
+            windows=True))
+
+    def test_scan_says_which_file_and_why(self):
+        bad = OSError(errno.EINVAL, "Invalid argument", "profile?.json")
+        with mock.patch.object(cli, "open", side_effect=bad, create=True), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as stopped:
+                cli.main(["scan", "profile?.json"])
+        self.assertEqual(stopped.exception.code,
+                         "ranwhat: cannot read profile?.json (Invalid argument)")
 
 
 class NoEmDashes(unittest.TestCase):

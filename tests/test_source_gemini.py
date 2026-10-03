@@ -763,6 +763,29 @@ class TimeSessionProject(GeminiCase):
         self.write("projects.json", text=json.dumps({"projects": {PROJECT: "proj"}}))
         self.assertEqual(self.calls(path)[0].project, PROJECT)
 
+    def test_a_sha256_folder_maps_through_the_chat_headers_of_its_slug_folder(self):
+        """On Windows the registry keeps a project's path in lower case, but
+        the folder is named by the root in the case the CLI was started
+        with. Each chat header records that same digest, and the migration
+        copied the folder's chats into the slug folder."""
+        started = "C:\\Users\\Alice\\proj"
+        kept = started.lower()
+        hexdir = hashlib.sha256(started.encode("utf-8")).hexdigest()
+        legacy = json.dumps(dict(header(projectHash=hexdir),
+                                 messages=[model("m1", [shell("c1", "ls")])]),
+                            indent=2)
+        path = self.write("tmp/%s/chats/session-old.json" % hexdir, text=legacy)
+        self.write("tmp/proj/.project_root", text=kept)
+        self.write("projects.json", text=json.dumps({"projects": {kept: "proj"}}))
+        self.assertIsNone(self.calls(path)[0].project)
+        for rel, kw in (("chats/session-old.json", {"text": legacy}),
+                        ("chats/session-new.jsonl",
+                         {"lines": [header(projectHash=hexdir)]})):
+            with self.subTest(rel):
+                slug = self.write("tmp/proj/" + rel, **kw)
+                self.assertEqual(self.calls(path)[0].project, kept)
+                os.remove(slug)
+
     def test_an_unknown_sha256_folder_has_no_project(self):
         path = self.write("tmp/%s/chats/%s" % ("ab" * 32, FIXTURE_NAME),
                           spec_lines())
@@ -1664,6 +1687,32 @@ class TerminalGrids(GeminiCase):
             untrusted("STRIPE_SECRET_KEY=" + _marker(LONG))
         self.assertEqual(after.decode("utf-8"),
                          json.dumps(doc, indent=2, ensure_ascii=False))
+
+    def test_a_key_cut_at_the_edge_of_the_terminal_in_a_checkpoint(self):
+        """A checkpoint keeps the CLI's own view of the history, shell grids
+        included, and the model's copy of the output may be gone."""
+        rows = grid([LINE])
+        doc = {"history": [{"type": "user", "text": "show env", "id": 1},
+                           {"type": "tool_group", "id": 2, "tools": [
+                               {"callId": "c1", "name": "Shell",
+                                "resultDisplay": rows, "status": "Success"}]}],
+               "clientHistory": [{"role": "user", "parts": [{"text": "show env"}]}],
+               "toolCall": {"name": "write_file",
+                            "args": {"file_path": "a.txt", "content": "x"}},
+               "commitHash": "abc", "messageId": "p1"}
+        path = self.write(
+            "tmp/proj/checkpoints/2026-01-01T00_00_00_000Z-a.txt-write_file.json",
+            text=json.dumps(doc, indent=2, ensure_ascii=False))
+        found = _findings(self.src, [self.store(path)])
+        self.assertEqual(set(found), {LONG})
+        self.assertEqual(found[LONG]["count"], 1)
+        _before, result, after = self.masked(path, [LONG])
+        self.assertTrue(result.changed, result)
+        rows[0][0]["text"] = "STRIPE_SECRET_KEY=" + _marker(LONG)
+        rows[1][0]["text"] = ""
+        self.assertEqual(after.decode("utf-8"),
+                         json.dumps(doc, indent=2, ensure_ascii=False))
+        self.assertEqual(_findings(self.src, [self.store(path)]), {})
 
     def test_a_line_the_cli_would_not_have_written_is_refused(self):
         """Written back, it would not be the same bytes (here, escapes

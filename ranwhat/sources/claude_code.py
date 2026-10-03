@@ -40,7 +40,11 @@ def transcripts(root):
     subagents wrote, under <session>/subagents/ and a workflow's run below
     it. Read only at the first level, everything a subagent ran or saw went
     unread, and check said all clear. Nothing else there is a transcript:
-    a workflow's journal.jsonl holds the results its agents returned."""
+    a workflow's journal.jsonl holds the results its agents returned.
+    A "~" in root is expanded, as --path's is, and its name is matched as
+    it is: "--root=~/x", which zsh and Windows pass on as typed, and
+    "work [old]" read nothing."""
+    root = glob.escape(os.path.expanduser(root))
     return (glob.glob(os.path.join(root, "*", "*.jsonl"))
             + glob.glob(os.path.join(root, "*", "*", "subagents", "**",
                                      "agent-*.jsonl"), recursive=True))
@@ -52,13 +56,20 @@ def discover(root=None, since_days=None):
     With since_days, only files written inside the window. That is a
     prefilter, not the window itself: a file older than the window cannot
     hold an action inside it, but a recent one can hold old actions, so
-    scan_all judges each action by its own time as well."""
-    paths = sorted(transcripts(root or projects_dir()),
-                   key=lambda p: os.path.getmtime(p), reverse=True)
-    if since_days:
-        cutoff = time.time() - since_days * 86400
-        paths = [p for p in paths if os.path.getmtime(p) >= cutoff]
-    return paths
+    scan_all judges each action by its own time as well.
+
+    One that cannot be stat'ed, a link to nothing or a transcript Claude
+    Code removed after it was listed, is passed over, as stores() does:
+    it stopped watch, check and clean with a traceback."""
+    found = []
+    for path in transcripts(root or projects_dir()):
+        try:
+            found.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
+    found.sort(key=lambda f: f[0], reverse=True)
+    cutoff = time.time() - since_days * 86400 if since_days else None
+    return [p for mtime, p in found if cutoff is None or mtime >= cutoff]
 
 
 def place(path):

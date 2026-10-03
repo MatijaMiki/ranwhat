@@ -33,7 +33,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, TESTS)
 
 import growth  # noqa: E402
-from ranwhat import clean, watch  # noqa: E402
+from ranwhat import agents, clean, watch  # noqa: E402
 from ranwhat import sources  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _shell, _stamps, _zstd, codex  # noqa: E402
 from ranwhat.sources.base import MaskResult  # noqa: E402
@@ -630,6 +630,18 @@ class Discovery(_Case):
         self.assertNotIn(made["state_5.sqlite"], paths)
         self.assertNotIn(made["thread_history_1.sqlite"], paths)
 
+    def test_a_sqlite_home_not_made_yet_leaves_the_roots_databases_counted(self):
+        """Codex makes its SQLite home when it first starts with it set, so
+        until then the root's databases are the ones it last wrote. What
+        sources counts and what clean reads agree on that."""
+        made = self._tree()
+        os.environ["CODEX_SQLITE_HOME"] = os.path.join(self.home, "not-made-yet")
+        locs, stores = agents.discover(self.src)
+        self.assertEqual([(l.how, l.exists, l.found) for l in locs],
+                         [("env CODEX_HOME", True, len(made)),
+                          ("env CODEX_SQLITE_HOME", False, 0)])
+        self.assertEqual(set(s.path for s in stores), set(made.values()))
+
     @unittest.skipUnless(codex._tomllib(), "tomllib is Python 3.11+")
     def test_sqlite_home_from_config_toml(self):
         db_home = os.path.join(self.home, "db from config")
@@ -1010,6 +1022,66 @@ class ToolCalls(_Case):
                          (TS_ID, "rm -rf ~/Documents/x", None, mtime, ""))
         self.assertEqual(rules(call), ["fs.destructive"])
 
+    def test_a_patch_handed_to_apply_patch_as_an_argv_is_a_file_edit(self):
+        """Codex applies ["apply_patch", PATCH] (or "applypatch") itself and
+        never runs it in a shell (apply-patch lib.rs maybe_parse_apply_patch),
+        so what the patch adds to a file is no command. Any other argv,
+        three words long, still is one."""
+        added = ["load_dotenv('.env')", "      - run: npm publish",
+                 "git push --force origin main", "history -c",
+                 "cat ~/.ssh/id_rsa"]
+        patch = ("*** Begin Patch\n*** Update File: app/settings.py\n@@\n"
+                 + "".join("+" + text + "\n" for text in added)
+                 + "*** End Patch\n")
+        t = "2026-10-01T12:00:%02d.000Z"
+        lines = [line(t % 0, "session_meta", meta()),
+                 line(t % 1, "response_item", fcall(
+                     "shell", {"command": ["apply_patch", patch],
+                               "workdir": "/home/dev/app"}, "c1")),
+                 line(t % 2, "response_item", fcall(
+                     "shell", {"command": ["applypatch", patch]}, "c2")),
+                 line(t % 3, "response_item", {
+                     "type": "local_shell_call", "call_id": "c3",
+                     "status": "completed",
+                     "action": {"type": "exec",
+                                "command": ["apply_patch", patch],
+                                "working_directory": "/home/dev/app"}}),
+                 line(t % 4, "response_item", fcall(
+                     "shell", {"cmd": ["apply_patch", patch]}, "c4")),
+                 line(t % 5, "response_item", fcall(
+                     "shell", {"command": ["apply_patch", patch, "x"]}, "c5"))]
+        _path, calls = self._calls(lines)
+        for cid in ("c1", "c2", "c3", "c4"):
+            call = calls[cid]
+            self.assertEqual((call.tool_name, call.kind, call.known,
+                              call.command, call.tool_input["input"]),
+                             ("apply_patch", "write", True, None, patch), cid)
+            self.assertEqual(rules(call), [], cid)
+        self.assertEqual(calls["c1"].tool_input["workdir"], "/home/dev/app")
+        self.assertEqual(calls["c5"].kind, "shell")
+        self.assertIn("cred.read", rules(calls["c5"]))
+
+    def test_a_typescript_shell_call_names_its_command_cmd(self):
+        """The TypeScript CLI ran {"cmd": [...]} as readily as {"command":
+        [...]}, an argv or a bare string (codex-cli parsers.ts
+        parseToolCallArguments)."""
+        doc = json.loads(typescript_doc())
+        doc["items"] += [
+            fcall("shell", {"cmd": ["bash", "-lc", "rm -rf ~/Documents/x"]},
+                  "call_t2"),
+            fcall("shell", {"cmd": ["cat", ".env"]}, "call_t3"),
+            fcall("shell", {"cmd": "rm -rf ~/Documents/y"}, "call_t4")]
+        path = self.write("sessions/rollout-2025-04-20-" + TS_ID + ".json",
+                          _j(doc))
+        calls = {c.tool_call_id: c for c in self.calls(path)}
+        self.assertEqual(
+            [(calls[c].command, calls[c].consumed, rules(calls[c]))
+             for c in ("call_t2", "call_t3", "call_t4")],
+            [("rm -rf ~/Documents/x", frozenset(["cmd"]), ["fs.destructive"]),
+             ("cat .env", frozenset(["cmd"]), ["cred.read"]),
+             ("rm -rf ~/Documents/y", frozenset(["cmd"]), ["fs.destructive"])])
+        self.assertEqual(rules(calls["call_t1"]), ["fs.destructive"])
+
     def test_side_stores_have_no_calls(self):
         path = self.write("history.jsonl", [history_line("rm -rf ~")])
         self.assertEqual(self.calls(path), [])
@@ -1142,6 +1214,31 @@ class Secrets(_Case):
             (SECRET, "thread_items row 1, item_json"),
             (SECRET, "thread_items row 3, item_json"),
             (TYPED, "threads row 1, first_user_message")]))
+
+    def test_every_column_of_a_thread_table_is_read(self):
+        """Codex copies session_meta's git remote into threads.git_origin_url,
+        and a remote URL can carry a token. Every column that holds text is
+        read, JSON in any of them decoded, encrypted_content left out."""
+        os.makedirs(self.root)
+        remote = "https://x-access-token:" + SHELL_SECRET + "@github.com/acme/app.git"
+        state = os.path.join(self.root, "state_5.sqlite")
+        conn = sqlite3.connect(state)
+        conn.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT, "
+                     "tokens_used INTEGER, title TEXT, first_user_message TEXT, "
+                     "git_sha TEXT, git_branch TEXT, git_origin_url TEXT, "
+                     "sandbox_policy BLOB)")
+        conn.execute("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     (THREAD, "/x/rollout.jsonl", 1200, "Deploy", "deploy it",
+                      "abc123", "main", remote,
+                      _j({"env": "STRIPE_KEY=" + TYPED,
+                          "encrypted_content": "gAAAAB" + SECRET}
+                         ).encode("utf-8")))
+        conn.commit()
+        conn.close()
+        found = found_secrets(self.texts(state))
+        self.assertEqual(sorted((v, w) for v, _o, w in found), sorted([
+            (SHELL_SECRET, "threads row 1, git_origin_url"),
+            (TYPED, "threads row 1, sandbox_policy")]))
 
 
 def _databases(folder):
@@ -1500,6 +1597,19 @@ class Damaged(_Case):
         texts, err2 = self.quiet(list, self.src.secret_texts(store))
         self.assertEqual((calls, texts, err, err2), ([], [], "", ""))
         self.assertEqual(self.src.mask(store, [SECRET]), MaskResult(path))
+
+    def test_a_rollout_compressed_before_it_is_masked_says_why(self):
+        """The report reads why a file is read only from its store, and a
+        .jsonl store gave it nothing to say."""
+        path = self.write(ROLLOUT, legacy_lines(SECRET))
+        store = self.store_for(path)
+        os.unlink(path)
+        self.write(ROLLOUT + ".zst", b"(\xb5/\xfd compressed")
+        self.assertEqual(self.src.mask(store, [SECRET]),
+                         MaskResult(path, skipped="read-only"))
+        self.assertEqual(store.why_read_only, codex.WHY_ZST)
+        said = " ".join(clean._read_only_lines({path: store}, str, 80))
+        self.assertIn("Resume the thread in Codex", " ".join(said.split()))
 
     def test_a_restored_rollout_is_read_under_its_plain_name(self):
         packed = _compress(b"{}\n")
