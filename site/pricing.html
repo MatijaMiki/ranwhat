@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pricing | ranwhat</title>
-<meta name="description" content="Free forever on your own machine, with every rule and every source. Paid tiers exist for retention and for records a third party can trust.">
+<title>ranwhat pricing: free locally, Plus at $12 a month</title>
+<meta name="description" content="Free forever on your own machine, with every rule and every source. Plus is $12 a month per organisation and Team is annual. Both paid tiers are being built.">
 <link rel="canonical" href="https://ranwhat.com/pricing">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
@@ -17,20 +17,24 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/pricing">
-<meta property="og:title" content="Pricing | ranwhat">
-<meta property="og:description" content="Free forever on your own machine, with every rule and every source. Paid tiers exist for retention and for records a third party can trust.">
+<meta property="og:title" content="ranwhat pricing: free locally, Plus at $12 a month">
+<meta property="og:description" content="Free forever on your own machine, with every rule and every source. Plus is $12 a month per organisation and Team is annual. Both paid tiers are being built.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="Pricing | ranwhat">
-<meta name="twitter:description" content="Free forever on your own machine, with every rule and every source. Paid tiers exist for retention and for records a third party can trust.">
+<meta name="twitter:title" content="ranwhat pricing: free locally, Plus at $12 a month">
+<meta name="twitter:description" content="Free forever on your own machine, with every rule and every source. Plus is $12 a month per organisation and Team is annual. Both paid tiers are being built.">
 
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Pricing","item":"https://ranwhat.com/pricing"}]}</script>
 </head>
 <body>
 <header>
@@ -45,12 +49,16 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
-
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Pricing</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">Pricing</p>
@@ -77,7 +85,7 @@
           <li>Usage pulls from your own audit logs</li>
           <li>HTML and JSON reports</li>
           <li>MIT licensed, no dependencies</li>
-          <li>Nothing leaves the machine</li>
+          <li>Nothing sent to us</li>
         </ul>
         <a class="act" href="/install">Install</a>
       </div>
@@ -85,6 +93,7 @@
       <div class="plan feature">
         <div class="tier">Plus</div>
         <div class="price">$12<small> / month</small></div>
+        <p class="state">Being built. Not available yet.</p>
         <p class="who">One price for the whole team, however many agents or people you run.</p>
         <ul>
           <li>Everything in Free</li>
@@ -104,6 +113,7 @@
       <div class="plan">
         <div class="tier">Team</div>
         <div class="price">Contact us<small> · annual</small></div>
+        <p class="state">Being built. Not available yet.</p>
         <p class="who">When someone outside the company is going to ask what your agent did, and your own word is not the answer they want.</p>
         <ul>
           <li>Everything in Plus</li>
@@ -134,10 +144,12 @@
         only thing this product really sells is being believed.
       </p>
       <p style="color:var(--muted);font-size:15px">
-        On a real machine the first build reported fifteen findings. Eleven were
-        deletions of build and temp directories: all true, none worth reading.
-        Fixing that cut the report to four. Under per-finding pricing that fix
-        would have cost us money, which is exactly why the meter isn't there.
+        The first watch build flagged six findings on real history, and three
+        were false positives. A later release reported fifteen findings on one
+        machine's 90-day history. Eleven were deletions of build and temp
+        directories: all true, none worth reading. After the fix, the same
+        history gave four. Under per-finding pricing both fixes would have
+        cost us money, which is exactly why the meter isn't there.
       </p>
       <p style="color:var(--muted);font-size:15px">
         Nothing is held back from the free tier to make the paid ones look
@@ -162,13 +174,14 @@
   <div class="shell band split">
     <div class="marginal">Questions</div>
     <div>
-      <h2>The ones worth answering up front.</h2>
+      <h2>Before you pay.</h2>
       <div class="grid2" style="margin-top:8px">
         <div class="cell">
           <h3>Do you see our prompts or data?</h3>
-          <p>No, and not as a policy. The collector runs inside your network and
-             hashes payloads in place. What reaches us is which tool ran, what
-             authority it held, and whether it was reversible.</p>
+          <p>No, and not as a policy. The collector will run inside your
+             network and hash payloads in place. What reaches us will be which
+             tool ran, what authority it held, and whether it was
+             reversible.</p>
         </div>
         <div class="cell">
           <h3>What happens if we stop paying?</h3>
@@ -187,18 +200,23 @@
              you control is one you can rewrite, so an underwriter should
              ignore it. The records are worth something precisely because we
              hold them and you cannot quietly change them. The collector that
-             runs in your network is yours; the chain is deliberately not.</p>
+             will run in your network is yours; the chain is deliberately
+             not.</p>
         </div>
       </div>
       <div class="note" style="margin-top:22px">
         <h3>Honest status</h3>
         <p>Free ships today and is what the GitHub repository contains. Plus
-           and Team are being built. The catalogue feed, the cross-machine
-           collector, the retention store and the hash-chained records are not
-           written yet; everything listed under Local is, and you can read it
-           on GitHub today. These prices are what the paid tiers will launch
-           at. If you want either now, you'd be an early customer shaping
-           them, and you should expect to be treated like one.</p>
+           and Team are being built. The Plus catalogue feed is in development
+           and not available yet: <span class="icode">ranwhat update</span> is
+           in the CLI, but <span class="icode">feed.ranwhat.com</span>, which
+           it fetches from, is not live. The cross-machine collector, the
+           retention store and the hash-chained records are not written yet.
+           Everything listed under Free is, and you can read it on GitHub
+           today. These prices are
+           what the paid tiers will launch at. If you want either now, you'd
+           be an early customer shaping them, and you should expect to be
+           treated like one.</p>
       </div>
     </div>
   </div>
@@ -213,12 +231,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -226,7 +244,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -235,13 +253,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -249,7 +280,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>

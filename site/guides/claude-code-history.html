@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code history: location, retention, deletion | ranwhat</title>
+<meta name="description" content="Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.">
+<link rel="canonical" href="https://ranwhat.com/guides/claude-code-history">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/claude-code-history">
+<meta property="og:title" content="Claude Code history: location, retention, deletion | ranwhat">
+<meta property="og:description" content="Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Claude Code history: location, retention, deletion | ranwhat">
+<meta name="twitter:description" content="Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Where Claude Code keeps your conversation history","description":"Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/watch">Watch</a>
+      <a href="/clean">Clean</a>
+      <a href="/scan">Scan</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Claude Code history</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Where Claude Code keeps your conversation history</h1>
+    <p class="lede">
+      Every Claude Code session is saved on your machine as a plaintext JSONL
+      file, and deleted after 30 days unless you change that. Where the files
+      are, what is in them, how long they stay, and how to remove them.
+    </p>
+    <div class="cmdrow" style="margin-top:26px">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-text">ls -lt ~/.claude/projects/ | head</span>
+        <button class="copy" data-copy="#cmd-text">Copy</button>
+      </div>
+    </div>
+    <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
+      Checked against the Claude Code documentation and the reports under Sources. Published <time datetime="2026-10-02">2 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Where</div>
+    <div>
+      <h2>Where the files are</h2>
+      <p class="lede">
+        Claude Code stores each session as one file,
+        <span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</span>.
+        <span class="icode">&lt;project&gt;</span> is the working directory
+        path with every character that is not a letter or a digit replaced by
+        <span class="icode">-</span>, so a session started in
+        <span class="icode">/Users/you/work/my-repo</span> is saved under
+        <span class="icode">~/.claude/projects/-Users-you-work-my-repo/</span>.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        If the converted name is longer than 200 characters, Claude Code cuts
+        it to 200 and appends a hash of the full path, so it stays within
+        filesystem limits. On Windows, <span class="icode">~/.claude</span> is
+        <span class="icode">%USERPROFILE%\.claude</span>.
+      </p>
+      <div class="term" style="margin-top:22px">
+        <div class="term-body"><pre><span class="c-mut"># projects, most recently used first</span>
+ls -lt ~/.claude/projects/ | head
+
+<span class="c-mut"># sessions in one project, newest first</span>
+ls -lt ~/.claude/projects/-Users-you-work-my-repo/ | head
+
+<span class="c-mut"># the project directory for the folder you are in</span>
+ls -lt ~/.claude/projects/"$(pwd | sed 's/[^A-Za-z0-9]/-/g')"/ | head
+
+<span class="c-mut"># how much is stored</span>
+du -sh ~/.claude/projects</pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        The third command applies the naming rule above. For a path over 200
+        characters it will not find the hashed name; list the directory and
+        look instead.
+      </p>
+      <p style="margin-top:30px">
+        The session file is not the only thing a session leaves behind:
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Path</th><th>What it holds</th><th>Age limit</th></tr></thead>
+        <tbody>
+          <tr><td><code>projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</code></td>
+              <td data-label="What it holds">The full conversation: every message, tool call and tool result.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
+          <tr><td><code>projects/&lt;project&gt;/&lt;session-id&gt;/subagents/</code></td>
+              <td data-label="What it holds">Transcripts of the subagents that session started.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
+          <tr><td><code>projects/&lt;project&gt;/&lt;session-id&gt;/tool-results/</code></td>
+              <td data-label="What it holds">Large tool outputs, spilled to separate files.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
+          <tr><td><code>file-history/&lt;session-id&gt;/</code></td>
+              <td data-label="What it holds">Copies of files taken before Claude edited them, used to rewind to a checkpoint.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
+          <tr><td><code>paste-cache/</code></td>
+              <td data-label="What it holds">The contents of large pastes.</td>
+              <td data-label="Age limit"><span class="chip ok">Swept</span></td></tr>
+          <tr><td><code>history.jsonl</code></td>
+              <td data-label="What it holds">Every prompt you have typed, with its time and project path. Used for up-arrow recall and <span class="icode">Ctrl+R</span> search.</td>
+              <td data-label="Age limit"><span class="chip high">Kept</span></td></tr>
+          <tr><td><code>/tmp/claude/response.md</code></td>
+              <td data-label="What it holds">What <span class="icode">/copy</span> wrote on Claude Code 2.1.59 to 2.1.127: one fixed path for every user on the machine, readable by all of them.</td>
+              <td data-label="Age limit"><span class="chip high">Kept</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Paths that do not start with <span class="icode">/</span> are under
+        <span class="icode">~/.claude/</span>. If you set
+        <span class="icode">CLAUDE_CONFIG_DIR</span>, all of it lives under that
+        directory instead: with <span class="icode">CLAUDE_CONFIG_DIR=~/.claude-work</span>,
+        transcripts are in <span class="icode">~/.claude-work/projects/</span>.
+        In current versions, pasted images and each session's scratchpad are
+        not here at all. They sit under Claude Code's temp directory, such as
+        <span class="icode">/private/tmp/claude-&lt;uid&gt;/</span> on macOS.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Older builds left one more file outside both. On 2.1.59 to 2.1.127,
+        <span class="icode">/copy</span> wrote the response to
+        <span class="icode">/tmp/claude/response.md</span>, readable by
+        everyone (0644) in a directory anyone could enter (0755). Another
+        local user could read what you copied, secrets included, or plant a
+        symlink there so that your next
+        <span class="icode">/copy</span> overwrote a file of their choosing
+        (CVE-2026-46406). 2.1.128 fixed it. Check for a copy an old build
+        left:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>claude --version              <span class="c-mut"># 2.1.128 or later</span>
+ls -la /tmp/claude/           <span class="c-mut"># owner, mode, and whether response.md is a symlink</span>
+rm /tmp/claude/response.md    <span class="c-mut"># once you have looked</span></pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        If <span class="icode">response.md</span> is a symlink, or
+        <span class="icode">/tmp/claude/</span> belongs to another user,
+        someone set up the overwrite the advisory describes. Note where the
+        link points before you remove it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Contents</div>
+    <div>
+      <h2>What is in them</h2>
+      <p class="lede">
+        Everything the session saw. The contents of every file Claude read, the
+        output of every command it ran, and the text you pasted. If the agent
+        ran <span class="icode">cat .env</span>, the values are in the
+        transcript.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        None of it is encrypted.
+        <a href="https://code.claude.com/docs/en/claude-directory#plaintext-storage">Claude
+        Code's documentation</a> says transcripts and history are not encrypted
+        at rest and that OS file permissions are the only protection. Anything
+        that can read your home directory can read them, including whatever
+        backs it up or syncs it. On a shared machine, check its permissions
+        with <span class="icode">ls -ld ~/.claude</span>;
+        <span class="icode">chmod 700 ~/.claude</span> keeps other users out.
+        To keep secrets out of the transcript in the first place, see
+        <a href="/guides/claude-code-env-secrets">how to stop Claude Code
+        reading your .env file</a>.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Format</span>
+          <span class="v">One JSON object per line, for a message, a tool use or metadata. <strong>The format is internal and changes between releases</strong>, so a script that parses its fields can break on any update. Treat the files as text, not as an API.</span></div>
+        <div class="row"><span class="k">Read one</span>
+          <span class="v"><span class="icode">/export</span> copies the current conversation to the clipboard or saves it as a plain-text file, with tool output rendered as readable text. <span class="icode">/export notes.txt</span> skips the menu and writes the file.</span></div>
+        <div class="row"><span class="k">From a script</span>
+          <span class="v"><span class="icode">claude -p --resume &lt;session-id&gt; --output-format json "summarise what we changed"</span> asks the session itself and returns JSON. A <span class="icode">SessionEnd</span> hook receives the transcript's path and can archive it.</span></div>
+      </div>
+      <div class="term" style="margin-top:26px">
+        <div class="term-body"><pre><span class="c-mut"># a readable copy of an older session: resume it, then export</span>
+claude --resume &lt;session-id&gt;
+/export session.txt
+
+<span class="c-mut"># which files mention a value you are worried about</span>
+grep -rlsF 'first-8-chars' ~/.claude/projects ~/.claude/history.jsonl \
+  ~/.claude/file-history ~/.claude/paste-cache</pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        Search for the first few characters of a key, not the whole value, or
+        the full secret ends up in your shell history as well. The recursive
+        search covers subagent transcripts, tool-result files, edit snapshots
+        and large pastes too.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Every tool call is in there with its arguments, so you can also
+        <a href="/guides/claude-code-audit-log">read the transcripts back as an
+        audit log</a> of what the agent ran.
+      </p>
+
+      <h3 style="margin-top:34px">What malware looks for</h3>
+      <p style="color:var(--muted);font-size:15px">
+        File permissions keep other users out. They do not stop a program
+        running as you. On 8 September 2026, Gen Digital reported that
+        commodity infostealers now collect AI coding tools' local data:
+        access and refresh tokens, credentials in MCP configs, prompt
+        histories and conversation databases. It names Claude among the
+        targets of the Remus and CallbackBeaver families, and shows an STG
+        Stealer configuration that collects
+        <span class="icode">~/.claude/.credentials.json</span> and
+        <span class="icode">~/.claude.json</span>: the file Claude Code keeps
+        its login in when it cannot use the macOS Keychain, and its config. The
+        report says the data sits in predictable places, some of it in
+        plaintext. <span class="icode">~/.claude/projects</span> fits that
+        description. Retention is a security setting as well as an audit
+        one: what a stealer cannot find, it cannot take.
+      </p>
+      <div class="rows" style="margin-top:22px">
+        <div class="row"><span class="k">Keep less</span>
+          <span class="v">A <span class="icode">cleanupPeriodDays</span> that matches how far back you actually look.</span></div>
+        <div class="row"><span class="k">Mask</span>
+          <span class="v"><span class="icode">ranwhat clean --apply</span> masks each credential it finds in the transcripts from the last 30 days (<span class="icode">--days N</span> for more). Delete <span class="icode">~/.ranwhat/backups</span> once the result looks right: the backups hold the originals.</span></div>
+        <div class="row"><span class="k">Purge</span>
+          <span class="v"><span class="icode">claude project purge</span> for projects you have finished.</span></div>
+        <div class="row"><span class="k">Login</span>
+          <span class="v">Claude Code keeps its login in the macOS Keychain where it can. On Linux and Windows, and on a Mac when the Keychain rejects the write, it goes in <span class="icode">~/.claude/.credentials.json</span>, protected by file permissions. That file is on the STG Stealer list above.</span></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        After an infection, rotate from a clean device: every credential the
+        transcripts held, the keys in your MCP configs, and your AI services'
+        sessions and API keys, not only browser passwords.
+        <span class="icode">ranwhat clean</span> lists what the transcripts
+        held, and <span class="icode">rotate</span> in its review session
+        groups it by provider.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Retention</div>
+    <div>
+      <h2>How long Claude Code keeps them</h2>
+      <p class="lede">
+        30 days by default. The <span class="icode">cleanupPeriodDays</span>
+        setting changes it: a whole number of days, minimum 1. Claude Code
+        deletes anything older in a background sweep after a session starts,
+        without a message, so an old session simply stops appearing in
+        <span class="icode">/resume</span>.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "cleanupPeriodDays": 90
+}</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Longer</span>
+          <span class="v">Any larger number. The documentation suggests something like <span class="icode">3650</span> for long retention.</span></div>
+        <div class="row"><span class="k">Shorter</span>
+          <span class="v">A smaller number means less sitting on disk. The documentation lists lowering it as a way to reduce exposure.</span></div>
+        <div class="row"><span class="k">Zero</span>
+          <span class="v"><strong><span class="icode">0</span> fails validation.</strong> It does not mean keep nothing.</span></div>
+        <div class="row"><span class="k">Never swept</span>
+          <span class="v"><span class="icode">history.jsonl</span> and <span class="icode">stats-cache.json</span> stay until you delete them, so every prompt you have typed, in every project, is still there.</span></div>
+        <div class="row"><span class="k">Desktop</span>
+          <span class="v">Transcripts of sessions you started or last continued in Claude Desktop or Cowork are kept at any age, unless you set <span class="icode">desktopSessionCleanupPeriodDays</span> in user or managed settings, or in a file passed with <span class="icode">--settings</span>. Each is then deleted once it is older than both limits. If managed settings set <span class="icode">cleanupPeriodDays</span>, that period applies to them instead. Claude Code v2.1.248 or later; earlier versions delete them after <span class="icode">cleanupPeriodDays</span>.</span></div>
+        <div class="row"><span class="k">Paused</span>
+          <span class="v">If Claude Code cannot work out the retention period, it pauses the sweep rather than guess. A settings file that cannot be read or parsed is one cause, and shows a warning in <span class="icode">/status</span>. Runs with <span class="icode">claude -p --bare</span> skip the sweep.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        To stop the files being written at all, set
+        <span class="icode">CLAUDE_CODE_SKIP_PROMPT_HISTORY=1</span>. Sessions
+        started with it write no transcript and no prompt history, and do not
+        appear in <span class="icode">--resume</span>, <span class="icode">--continue</span>
+        or up-arrow history. For a single <span class="icode">claude -p</span> run,
+        <span class="icode">--no-session-persistence</span> skips the transcript.
+      </p>
+      <div class="term" style="margin-top:6px">
+        <div class="term-body"><pre>CLAUDE_CODE_SKIP_PROMPT_HISTORY=1 claude
+claude -p --no-session-persistence "run the tests and list the failures"</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Delete</div>
+    <div>
+      <h2>How to delete them</h2>
+      <p class="lede">
+        <span class="icode">claude project purge</span> removes what Claude
+        Code holds for one project. It prints the full plan first and asks
+        before deleting anything. Start with a dry run.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>claude project purge ~/work/my-repo --dry-run   <span class="c-mut">the plan, nothing deleted</span>
+claude project purge ~/work/my-repo             <span class="c-mut">the plan, then one y/N prompt</span>
+claude project purge ~/work/my-repo --yes       <span class="c-mut">no prompt, for scripts</span>
+claude project purge ~/work/my-repo -i          <span class="c-mut">step through item by item</span>
+claude project purge --all                      <span class="c-mut">every project</span></pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        Leave out the path to pick a project from a list. A path with no stored
+        state is an error, with exit status 1.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Removes</span>
+          <span class="v">The project's transcripts and auto memory under <span class="icode">projects/</span>, its sessions' <span class="icode">tasks/</span>, <span class="icode">debug/</span> and <span class="icode">file-history/</span> entries, its lines in <span class="icode">history.jsonl</span>, and its entry in <span class="icode">~/.claude.json</span>.</span></div>
+        <div class="row"><span class="k">--all</span>
+          <span class="v">Deletes <span class="icode">history.jsonl</span> outright instead of filtering it.</span></div>
+        <div class="row"><span class="k">Leaves</span>
+          <span class="v">Pasted images and session scratchpads, which live in the temp directory. The sweep still removes the images after <span class="icode">cleanupPeriodDays</span>; a purged session's scratchpad stays until you or the operating system clear it. <span class="icode">shell-snapshots/</span> and <span class="icode">backups/</span> are not per project, so it leaves those too and says so in the plan. And <span class="icode">/tmp/claude/response.md</span>, if a build before 2.1.128 ran <span class="icode">/copy</span>.</span></div>
+        <div class="row"><span class="k">Costs</span>
+          <span class="v">Resume, continue and rewind for the deleted sessions, and the project's auto memory. New sessions are unaffected.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        You can also delete the files by hand. The main pieces of one session
+        are its transcript, its directory of subagent and tool-result files,
+        and its edit snapshots. Its prompts stay in
+        <span class="icode">history.jsonl</span>, which purge filters for you.
+      </p>
+      <div class="term" style="margin-top:6px">
+        <div class="term-body"><pre>rm ~/.claude/projects/-Users-you-work-my-repo/&lt;session-id&gt;.jsonl
+rm -r ~/.claude/projects/-Users-you-work-my-repo/&lt;session-id&gt;/
+rm -r ~/.claude/file-history/&lt;session-id&gt;/</pre></div>
+      </div>
+      <div class="note" style="margin-top:26px">
+        <h3>Do not delete these</h3>
+        <p><span class="icode">~/.claude.json</span>, <span class="icode">~/.claude/settings.json</span>
+           and <span class="icode">~/.claude/plugins/</span> hold your auth,
+           preferences and installed plugins. <span class="icode">~/.claude/.credentials.json</span>,
+           where it exists, holds your login. And <span class="icode">claude rm &lt;id&gt;</span>
+           is not a deletion of history: it removes a background session, but its
+           transcript stays on disk and <span class="icode">claude --resume</span>
+           can still open it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Before</div>
+    <div>
+      <h2>Before you delete: see what is in them</h2>
+      <p class="lede">
+        Deleting a transcript removes your local copy of a secret. It does not
+        un-send it. The value already went to the model as part of the
+        conversation, and what the provider retains is set by your account's
+        terms, not by the files on your disk. So the first job is a list of
+        what to rotate.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        For Anthropic accounts, the
+        <a href="https://code.claude.com/docs/en/data-usage#data-retention">data
+        usage page</a> gives the retention: 30 days as standard for Team,
+        Enterprise and API accounts, and 30 days or 5 years for Free, Pro and
+        Max, depending on whether you allow your data to be used for model
+        improvement.
+      </p>
+      <div class="cmdrow" style="margin-top:22px">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="cmd-check">uvx ranwhat check</span>
+          <button class="copy" data-copy="#cmd-check">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+      <p style="margin-top:22px">
+        <span class="icode">check</span> reads the transcripts and changes
+        nothing. It lists the risky actions the agent took, found by the same rules as
+        <a href="/watch">ranwhat watch</a>, and the credentials sitting in the
+        files, as <a href="/clean">ranwhat clean</a> finds them, each with the
+        project it was found in. Rotate those. Then either purge the project, or
+        keep the history and mask the values:
+      </p>
+      <div class="term" style="margin-top:6px">
+        <div class="term-body"><pre>ranwhat clean           <span class="c-mut">report, then a review session: mask 3, keep 3, rotate</span>
+ranwhat clean --apply   <span class="c-mut">mask every value found, backups first</span></pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">--apply</span> replaces each value in place with
+        <span class="icode">&lt;ranwhat:redacted:…&gt;</span>. It copies each
+        file it changes to <span class="icode">~/.ranwhat/backups</span> first,
+        and parses the rewritten file back before it replaces the original.
+        The backup holds the original values, so delete it once you have
+        checked the result.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Reads</span>
+          <span class="v">The session files, <span class="icode">~/.claude/projects/*/*.jsonl</span>, and the subagent transcripts under each session's <span class="icode">subagents/</span>. Not <span class="icode">tool-results/</span>, <span class="icode">file-history/</span>, <span class="icode">paste-cache/</span> or <span class="icode">history.jsonl</span>. The <span class="icode">grep</span> above covers those.</span></div>
+        <div class="row"><span class="k">Window</span>
+          <span class="v"><span class="icode">--days</span>, default 30. A transcript is read if it was written to inside the window, and the watch half then keeps only the actions that happened inside it. That matches Claude Code's default retention. If you raised <span class="icode">cleanupPeriodDays</span> or keep Desktop sessions, widen it: <span class="icode">ranwhat check --days 365</span>.</span></div>
+        <div class="row"><span class="k">Moved config</span>
+          <span class="v">When <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead. <span class="icode">--root PATH</span> reads any other directory.</span></div>
+        <div class="row"><span class="k">Zero</span>
+          <span class="v"><strong>Read the top of the report.</strong> A run that reads nothing says that nothing was checked, rather than that nothing was found. That is not a clean machine: check the directory and the window.</span></div>
+      </div>
+      <p style="margin-top:26px;font-size:14.5px;color:var(--muted)">
+        To stop the values reaching a transcript in the first place, see
+        <a href="/guides/claude-code-env-secrets">Claude Code and .env secrets</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">06 / Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <p class="lede">
+        Every statement about Claude Code on this page comes from its official
+        documentation or Anthropic's security advisory, and the malware
+        findings from Gen Digital's report. Every statement about ranwhat
+        comes from its source.
+      </p>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/sessions#where-transcripts-are-stored">Manage sessions<span>transcript location, naming, /export, claude rm</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/claude-directory#application-data">Explore the .claude directory<span>what is swept, what is kept, plaintext storage, purge</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings-reference#cleanupperioddays">Settings reference<span>cleanupPeriodDays, desktopSessionCleanupPeriodDays</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/env-vars">Environment variables<span>CLAUDE_CONFIG_DIR, CLAUDE_CODE_SKIP_PROMPT_HISTORY</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/data-usage#data-retention">Data usage<span>what Anthropic retains, and for how long</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/authentication">Authentication<span>Keychain and .credentials.json</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/mcp">MCP<span>MCP server configs in ~/.claude.json</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-4vp2-6q8c-pvq2">GHSA-4vp2-6q8c-pvq2<span>CVE-2026-46406, /copy, fixed in 2.1.128</span></a></li>
+        <li><a href="https://www.gendigital.com/blog/insights/research/infostealers-your-ai-agent">Gen Digital: infostealers and your AI agent<span>8 September 2026</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>watch.py and clean.py: what is read, and how masking works</span></a></li>
+      </ul>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides/claude-code-env-secrets">Claude Code and .env secrets<span>keeping credentials out of transcripts</span></a></li>
+        <li><a href="/guides/claude-code-audit-log">Claude Code audit log<span>these files as a record of what ran</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the wider picture</span></a></li>
+        <li><a href="/guides">All guides<span>everything in this section</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <span>cenner</span></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <span>cenner</span>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

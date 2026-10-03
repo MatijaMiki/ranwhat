@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI agent token scopes: check them, then cut them | ranwhat</title>
+<meta name="description" content="Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.">
+<link rel="canonical" href="https://ranwhat.com/guides/ai-agent-token-scopes">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/ai-agent-token-scopes">
+<meta property="og:title" content="AI agent token scopes: check them, then cut them | ranwhat">
+<meta property="og:description" content="Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="AI agent token scopes: check them, then cut them | ranwhat">
+<meta name="twitter:description" content="Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Check what the tokens your AI agent holds can do","description":"Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-agent-token-scopes"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Token scopes","item":"https://ranwhat.com/guides/ai-agent-token-scopes"}]}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/watch">Watch</a>
+      <a href="/clean">Clean</a>
+      <a href="/scan">Scan</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Token scopes</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Check what the tokens your AI agent holds can do</h1>
+    <p class="lede">
+      The permission system on your laptop decides what the agent may run.
+      The token decides what that command can do once it reaches GitHub,
+      Stripe or AWS.
+    </p>
+    <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
+      Checked against the GitHub, Google, Slack, Stripe, AWS, Railway and MCP documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Why</div>
+    <div>
+      <h2>Why scope is the part you control</h2>
+      <p class="lede">
+        An agent running in your shell can use every credential your account
+        can reach:
+        a token in <span class="icode">GITHUB_TOKEN</span>, the profiles in
+        <span class="icode">~/.aws/credentials</span>, the key an MCP server
+        was configured with. Permission prompts decide which commands run. They
+        do not narrow what a token can do once a command uses it.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        The <a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices#scope-minimization">Model
+        Context Protocol's security guidance</a> lists what broad scopes cost
+        when a token leaks. The blast radius expands, because one stolen token
+        reaches unrelated tools and data. Privilege chaining becomes possible,
+        because an attacker can call high-risk tools with no further prompt.
+        The audit trail gets noisier, because one omnibus scope hides what each
+        operation was for. Among its common mistakes is using wildcard or
+        omnibus scopes such as <span class="icode">*</span>,
+        <span class="icode">all</span> and <span class="icode">full-access</span>.
+        Its answer is a progressive, least-privilege model: start with a small
+        set and add scope when a privileged operation first needs it. It is
+        written for MCP servers and clients, and the reasoning holds for any
+        token an agent carries.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        So for each credential there are two questions: what can it do, and
+        which of that has it ever done? The sections below answer the first for
+        GitHub, Google, Slack and Stripe, and the second wherever the provider
+        keeps a record, with each provider's own tools.
+      </p>
+      <div class="note" style="margin-top:26px">
+        <h3>Keep the token off the command line</h3>
+        <p>Anything in a command's arguments is visible to every user on the
+           machine through <span class="icode">ps</span>, and an interactive
+           shell writes it to history. Each command below reads the token from a
+           shell variable and hands it to <span class="icode">curl</span> on
+           standard input through <span class="icode">printf</span>, a shell
+           builtin, so it never appears in an argument list. Set each variable
+           with <span class="icode">read -rs</span>, as in
+           <span class="icode">read -rs GITHUB_TOKEN</span>: it does not echo,
+           and the value stays out of history. Keep it out of the agent's
+           reach too: <a href="/guides/claude-code-env-secrets">a secret an
+           agent reads ends up in its transcript</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / GitHub</div>
+    <div>
+      <h2>GitHub</h2>
+      <p class="lede">
+        Classic personal access tokens and OAuth app tokens carry scopes, and
+        GitHub returns them in the <span class="icode">X-OAuth-Scopes</span>
+        header of any authenticated request. A <span class="icode">HEAD</span>
+        request for a public profile is enough.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" \
+  | curl -sI -H @- https://api.github.com/users/codertocat \
+  | grep -i x-oauth-scopes</pre></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        In GitHub's own example the answer is <span class="icode">repo, user</span>.
+        Four classic scopes deserve a second look when an agent holds them:
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Scope</th><th>What GitHub says it grants</th></tr></thead>
+        <tbody>
+          <tr><td><code>repo</code></td><td data-label="What GitHub says it grants">Read and write access to code, commit statuses, repository invitations, collaborators, deployment statuses and repository webhooks, in public and private repositories. It also lets the token manage organisation-owned projects, invitations, team memberships and webhooks, and projects owned by users.</td></tr>
+          <tr><td><code>workflow</code></td><td data-label="What GitHub says it grants">Adding and updating GitHub Actions workflow files.</td></tr>
+          <tr><td><code>delete_repo</code></td><td data-label="What GitHub says it grants">Deleting any repository the account can administer.</td></tr>
+          <tr><td><code>admin:org</code></td><td data-label="What GitHub says it grants">Full management of the organisation, its teams, projects and memberships.</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        A fine-grained token carries permissions rather than scopes, so that
+        header does not describe it. For fine-grained tokens GitHub sends
+        <span class="icode">X-Accepted-GitHub-Permissions</span>, which says what
+        an endpoint requires, not what the token holds. GitHub does have an
+        endpoint that lists fine-grained tokens with their permissions,
+        <span class="icode">GET /orgs/{org}/personal-access-tokens</span>, but it
+        covers tokens with access to an organisation and only GitHub Apps can
+        call it. For your own token, open Settings &gt; Developer settings &gt;
+        Personal access tokens &gt; Fine-grained tokens.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        For a token used on an organisation's resources, the record of what it
+        did is the organisation audit log. Organisations on GitHub Enterprise
+        Cloud can read it through the REST and GraphQL APIs; the REST endpoint
+        needs an organisation owner, and a classic token needs
+        <span class="icode">read:audit_log</span>.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        To cut: GitHub recommends fine-grained tokens over classic ones whenever
+        possible. Give one a single resource owner, choose Only select
+        repositories, grant the minimal permissions, and set an expiration.
+        Organisation owners can require approval before a fine-grained token
+        reaches the organisation. Fine-grained tokens cannot yet reach Packages,
+        Projects owned by a user account, the Checks API or more than one
+        organisation. Where an agent
+        needs those, keep the classic token's scopes narrow and give it an
+        expiration as well.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Google</div>
+    <div>
+      <h2>Google</h2>
+      <p class="lede">
+        Google's <span class="icode">tokeninfo</span> endpoint describes an
+        access token, and Google documents it for user access tokens and for
+        service account access tokens.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>printf %s "$GOOGLE_TOKEN" \
+  | curl -s -G --data-urlencode access_token@- https://oauth2.googleapis.com/tokeninfo</pre></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        The JSON that comes back includes <span class="icode">scope</span>, the
+        granted scopes, with <span class="icode">azp</span>,
+        <span class="icode">aud</span>, <span class="icode">exp</span>,
+        <span class="icode">expires_in</span> and <span class="icode">email</span>.
+        Google's documented form is
+        <span class="icode">curl "https://oauth2.googleapis.com/tokeninfo?access_token=ACCESS_TOKEN"</span>.
+        It gives the same answer, with the token in curl's arguments; the
+        version above sends the same query without that.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        What a token has used is in the OAuth Token audit activity report of the
+        Admin SDK Reports API,
+        <span class="icode">admin/reports/v1/activity/users/all/applications/token</span>.
+        Its <span class="icode">activity</span> events record an app calling an
+        API, with <span class="icode">app_name</span>,
+        <span class="icode">client_id</span>, <span class="icode">api_name</span>
+        and <span class="icode">method_name</span>. Reading it needs admin
+        privileges in the Workspace domain.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        To cut: Google's Drive guidance is to choose the most narrowly focused
+        scope and avoid any the app does not need. That means
+        <span class="icode">drive.file</span>, which covers files the user opens
+        with the app or shares with it, rather than
+        <span class="icode">drive</span>, which covers every file. Google also
+        recommends requesting a scope in context, when a feature first needs it,
+        rather than all of them at sign-in.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Slack</div>
+    <div>
+      <h2>Slack</h2>
+      <p class="lede">
+        Slack returns an <span class="icode">x-oauth-scopes</span> header with
+        every Web API response, listing the scopes the calling token has.
+        <span class="icode">auth.test</span> needs no scope of its own, so it
+        works with any token.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>printf 'Authorization: Bearer %s\n' "$SLACK_TOKEN" \
+  | curl -s -D - -o /dev/null -X POST -H @- https://slack.com/api/auth.test \
+  | grep -i x-oauth-scopes</pre></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        Drop <span class="icode">-o /dev/null</span> and the
+        <span class="icode">grep</span>, and the body says whose token it is:
+        <span class="icode">team</span>, <span class="icode">user</span>, and
+        <span class="icode">bot_id</span> for a bot token.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        To cut: Slack documents that scopes requested when the app is
+        installed again are added to the scopes the token already has, and
+        that there is no way to remove scopes from an existing token without
+        revoking it entirely. So revoke the token first, with
+        <span class="icode">auth.revoke</span> or by uninstalling the app, then
+        install the app again requesting only the scopes it needs. Slack's
+        advice is to settle the minimum list of scopes the app needs while you
+        build it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Stripe</div>
+    <div>
+      <h2>Stripe</h2>
+      <p class="lede">
+        A Stripe key says what it is in its prefix, and the prefix is most of the
+        answer.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Key</th><th>Prefix</th><th>What it can do</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Secret key</strong></td><td data-label="Prefix"><code>sk_live_</code><br><code>sk_test_</code></td>
+              <td data-label="What it can do">Everything, on every Stripe API. Stripe does not recommend secret keys for new uses, and recommends moving existing ones to restricted keys.</td></tr>
+          <tr><td><strong>Restricted key</strong></td><td data-label="Prefix"><code>rk_live_</code><br><code>rk_test_</code></td>
+              <td data-label="What it can do">Only what you grant, resource by resource: None, Read or Write. Stripe recommends restricted keys for agents.</td></tr>
+          <tr><td><strong>Agent key</strong></td><td data-label="Prefix"><code>rk_</code><br>tagged Agent</td>
+              <td data-label="What it can do">A restricted key marked at creation as belonging to an autonomous agent. Approval rules make a designated reviewer approve sensitive actions; the default rules cover payouts, refunds and account configuration changes.</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        What a key has used is in its request logs: on the API keys page in the
+        Dashboard, open the key's overflow menu and choose View request logs. A
+        <span class="icode">GET</span> is a read; <span class="icode">POST</span>
+        and <span class="icode">DELETE</span> are writes. Stripe's advice is to
+        compare the successful calls with the key's permissions and remove the
+        ones it did not use, through Edit key.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        Agents that reach Stripe through its MCP server have a date to meet. From
+        31 October 2026, Stripe MCP no longer accepts full-access secret keys or
+        restricted keys without the Agent tag, and answers them with a
+        <span class="icode">401</span>. For Claude Code, Stripe documents two
+        set-ups. The first is OAuth: add the server, then authenticate through
+        <span class="icode">/mcp</span>.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>claude mcp add --transport http stripe https://mcp.stripe.com/</pre></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        The second is an agent key in the project's
+        <span class="icode">.mcp.json</span>, referenced from an environment
+        variable rather than written into the file:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>{
+  "mcpServers": {
+    "stripe": {
+      "type": "http",
+      "url": "https://mcp.stripe.com",
+      "headers": {
+        "Authorization": "Bearer ${STRIPE_AGENT_KEY}"
+      }
+    }
+  }
+}</pre></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        Claude Code expands <span class="icode">${VAR}</span> in an HTTP
+        server's headers, and its documentation suggests checking
+        <span class="icode">.mcp.json</span> into version control. That is why
+        the key stays in the variable.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">06 / AWS</div>
+    <div>
+      <h2>AWS</h2>
+      <p class="lede">
+        IAM's last accessed information exists to find permissions nobody uses.
+        Generate a report for the agent's role, wait for it, then list the
+        services it never touched.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>JOB=$(aws iam generate-service-last-accessed-details \
+  --arn arn:aws:iam::123456789012:role/agent-role \
+  --query JobId --output text)
+
+aws iam get-service-last-accessed-details --job-id "$JOB" \
+  --query JobStatus --output text      <span class="c-mut"># repeat until COMPLETED</span>
+
+aws iam get-service-last-accessed-details --job-id "$JOB" --output json \
+  | jq -r '.ServicesLastAccessed[] | select(.LastAuthenticated == null) | .ServiceNamespace'</pre></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        The last command prints each service the role's policies allow that no
+        identity attempted in the tracking period: AWS leaves
+        <span class="icode">LastAuthenticated</span> empty for those. Add
+        <span class="icode">--granularity ACTION_LEVEL</span> to the first
+        command for action data where AWS tracks it. The caller needs
+        <span class="icode">iam:GenerateServiceLastAccessedDetails</span> and
+        <span class="icode">iam:GetServiceLastAccessedDetails</span>.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Window</span>
+          <span class="v">Service data covers at least 400 days, less in a Region that began tracking more recently. Recent activity can take up to four hours to appear.</span></div>
+        <div class="row"><span class="k">Actions</span>
+          <span class="v">Action data covers management actions only, for the services AWS lists, and never data plane events.</span></div>
+        <div class="row"><span class="k">Attempts</span>
+          <span class="v">An entry records an attempt, denied ones included, not a success. <strong>CloudTrail is the authoritative record</strong> of which calls succeeded.</span></div>
+        <div class="row"><span class="k">Policies</span>
+          <span class="v">Only identity-based policies attached to the role or user count. Resource-based policies, SCPs, permissions boundaries and session policies are left out.</span></div>
+        <div class="row"><span class="k">Session</span>
+          <span class="v">Only the principal that generated a report can read it. With temporary role credentials, generate and read it in the same session.</span></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        To cut: rewrite the role's policy down to the services, and where action
+        data exists the actions, that it used. AWS's unused access analyzers can
+        watch for the same thing continuously.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">07 / Railway</div>
+    <div>
+      <h2>Railway</h2>
+      <p class="lede">
+        Railway has four kinds of token, and only one is held to a single
+        environment.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Token</th><th>Reaches</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Account</strong></td><td data-label="Reaches">All your resources and workspaces.</td></tr>
+          <tr><td><strong>Workspace</strong></td><td data-label="Reaches">One workspace.</td></tr>
+          <tr><td><strong>Project</strong></td><td data-label="Reaches">One environment in one project, sent as a <span class="icode">Project-Access-Token</span> header.</td></tr>
+          <tr><td><strong>OAuth</strong></td><td data-label="Reaches">What the user granted.</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        The Railway CLI reads a project token from
+        <span class="icode">RAILWAY_TOKEN</span> and an account token from
+        <span class="icode">RAILWAY_API_TOKEN</span>. On 24 April 2026, a
+        Cursor agent working in PocketOS's staging environment found a Railway
+        token in an unrelated file and called <span class="icode">volumeDelete</span>
+        with it, removing the production database. By Railway's account, the
+        legacy API path it called cascaded the delete, which made the volume's
+        backups look unavailable. The token had been made to manage custom
+        domains through the CLI, but it was an account token, so it could do
+        anything the account could.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        To cut: a project token for the one environment the agent works in,
+        and no account token in a file the agent can read. For agents, Railway
+        suggests its remote MCP server, which signs in through the browser,
+        keeps no token on disk, uses short-lived tokens and lets you pick the
+        workspaces and projects it reaches. Since 1 May 2026, a volume deleted
+        through the API can be restored for 48 hours. That is a recovery
+        window, not a permission.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        If an agent has already read a file holding one,
+        <span class="icode">uvx ranwhat clean</span> finds it in a Claude Code
+        transcript as an assignment such as
+        <span class="icode">RAILWAY_TOKEN=...</span>, or after a
+        <span class="icode">Project-Access-Token</span> header. It has no
+        pattern for the bare value.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">08 / All at once</div>
+    <div>
+      <h2>All of them at once, read-only</h2>
+      <p class="lede">
+        ranwhat runs the same reads and <a href="/scan">scores what it
+        finds</a>. Every call is a read, sent only to the provider that issued
+        the token.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>export RANWHAT_GITHUB_TOKEN="$GITHUB_TOKEN"   <span class="c-mut"># likewise _GOOGLE_, _SLACK_, _STRIPE_</span>
+ranwhat live                                  <span class="c-mut"># ask each provider, read-only</span>
+ranwhat live --pull-usage --github-org ORG    <span class="c-mut"># and which grants were used</span>
+ranwhat scan profile.json --pull-usage        <span class="c-mut"># a declared profile, AWS included</span>
+ranwhat demo                                  <span class="c-mut"># the report on a bundled example</span></pre></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        Without installing anything, <span class="icode">uvx ranwhat live</span>
+        works the same; <a href="/install">Install</a> has the other ways. AWS
+        has no token to introspect, so it goes in a profile: JSON naming each
+        credential and the scopes it was granted. With
+        <span class="icode">--pull-usage</span>, ranwhat runs the two IAM
+        commands above for the identity your AWS CLI resolves to
+        (<span class="icode">--aws-profile</span> picks the profile).
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>{
+  "agent": "deploy-agent",
+  "credentials": [
+    {"provider": "aws", "label": "agent-role",
+     "scopes": ["s3:*", "iam:*", "lambda:InvokeFunction"]}
+  ]
+}</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Introspection</span>
+          <span class="v">Google through <span class="icode">tokeninfo</span>, GitHub through <span class="icode">X-OAuth-Scopes</span> on <span class="icode">GET /user</span>, Slack through <span class="icode">auth.test</span>, and Stripe by key prefix. Tokens come from <span class="icode">RANWHAT_&lt;PROVIDER&gt;_TOKEN</span>; one passed as a flag still works, and prints a warning.</span></div>
+        <div class="row"><span class="k">Usage</span>
+          <span class="v">AWS service last accessed, the GitHub organisation audit log (<span class="icode">--github-org</span>), Stripe events and Google Admin SDK reports, over 90 days by default (<span class="icode">--window-days</span>). Slack has no pull. AWS reports by service, so one recorded attempt on a service marks all of that service's scopes used. Stripe events record changes, so a Stripe read scope is never reported unused on that evidence.</span></div>
+        <div class="row"><span class="k">Evidence</span>
+          <span class="v">Each provider is <span class="chip ok">verified</span> (pulled from its own audit trail), <span class="chip info">self-attested</span> (declared in the profile) or <span class="chip crit">unverified</span> (no evidence, and not assumed safe).</span></div>
+        <div class="row"><span class="k">Catalogue</span>
+          <span class="v">104 scopes across twelve providers: Google, GitHub, GitLab, Microsoft 365, Slack, Discord, Stripe, Shopify, HubSpot, Atlassian, Sentry and AWS. An unrecognised scope is classified by its action verb and flagged unclassified, never assumed safe.</span></div>
+        <div class="row"><span class="k">Limits</span>
+          <span class="v">A fine-grained GitHub token's permissions and a Stripe restricted key's grants are not exposed by the calls it makes, so <span class="icode">live</span> reports them with no scopes: declare them in a profile and use <span class="icode">scan</span>. Every <span class="icode">sk_</span> key is treated as unrestricted.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">09 / In CI</div>
+    <div>
+      <h2>In CI</h2>
+      <p class="lede">
+        An agent in a GitHub Actions job holds the job's
+        <span class="icode">GITHUB_TOKEN</span> and whatever secrets the
+        workflow passes it.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        Before 1.0.74, <span class="icode">anthropics/claude-code-action</span>
+        checked out a pull request's head branch, read
+        <span class="icode">.mcp.json</span> from it and switched on every
+        project MCP server it defined. Anyone who could open a pull request
+        could add one. Once a privileged user or an automatic trigger ran the
+        action on it, the attacker's server ran on the runner, with the
+        workflow's secrets in reach (CVE-2026-47751). Workflows on
+        <span class="icode">@v1</span>, <span class="icode">@beta</span> or
+        <span class="icode">@main</span> have the fix; a pinned version needs
+        1.0.74 or later. Novee's Hugging Face demonstration also ran on an
+        Actions runner, started from an issue comment.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        That fix closes one path; scope decides what the next one reaches.
+        GitHub's advice is to grant <span class="icode">GITHUB_TOKEN</span>
+        the least access it needs, through a <span class="icode">permissions</span>
+        block on the workflow or the job. Pass the agent step only the secrets
+        it uses, and make any key it holds fine-grained or restricted.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">10 / Cut</div>
+    <div>
+      <h2>Cut them down</h2>
+      <p class="lede">
+        One line per provider. Each change narrows what a leaked token can do,
+        whoever ends up holding it.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">GitHub</span>
+          <span class="v">A fine-grained token: one resource owner, only the repositories the agent works on, the minimal permissions, and an expiration.</span></div>
+        <div class="row"><span class="k">Google</span>
+          <span class="v">The narrowest scope that works, <span class="icode">drive.file</span> rather than <span class="icode">drive</span>, requested when a feature first needs it.</span></div>
+        <div class="row"><span class="k">Slack</span>
+          <span class="v">Revoke the token, then install the app again with the minimum scopes. Scopes cannot be removed from an existing token, and a reinstall adds to them.</span></div>
+        <div class="row"><span class="k">Stripe</span>
+          <span class="v">A restricted key tagged for the agent, or OAuth, and no <span class="icode">sk_</span> key. For Stripe MCP, before 31 October 2026. Stripe also recommends an access policy on every live key.</span></div>
+        <div class="row"><span class="k">AWS</span>
+          <span class="v">Remove the services with no <span class="icode">LastAuthenticated</span> in the window, then the actions, where action data exists. Check CloudTrail before removing anything a job depends on.</span></div>
+        <div class="row"><span class="k">Railway</span>
+          <span class="v">A project token for one environment, or Railway's remote MCP server. No account token in a file the agent can read.</span></div>
+        <div class="row"><span class="k">CI</span>
+          <span class="v">A <span class="icode">permissions</span> block on every workflow, only the secrets the agent step uses, and claude-code-action 1.0.74 or later.</span></div>
+        <div class="row"><span class="k">Everywhere</span>
+          <span class="v">Tokens in environment variables or a secrets store, never in a command line or a committed file. Commodity infostealers now collect the credentials in AI tools' MCP configs, Gen Digital reported in September 2026: a narrow, short-lived token limits what a stolen copy can do.</span></div>
+      </div>
+      <p style="margin-top:22px;color:var(--muted);font-size:15px">
+        Scope is one item on the
+        <a href="/guides/ai-coding-agent-security">AI coding agent security
+        checklist</a>, beside what the agent already ran and what it left on
+        disk.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">11 / Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <p class="lede">
+        Every statement about a provider on this page comes from its official
+        documentation, and every incident from the advisory or report linked
+        here. Every statement about ranwhat comes from its source.
+      </p>
+      <ul class="follow">
+        <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices#scope-minimization">MCP security best practices<span>scope minimisation, risks and common mistakes</span></a></li>
+        <li><a href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps">GitHub: scopes for OAuth apps<span>X-OAuth-Scopes, what each scope grants</span></a></li>
+        <li><a href="https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens">GitHub: permissions for fine-grained tokens<span>X-Accepted-GitHub-Permissions</span></a></li>
+        <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">GitHub: managing personal access tokens<span>fine-grained over classic, limits, expiration</span></a></li>
+        <li><a href="https://docs.github.com/en/rest/orgs/personal-access-tokens">GitHub: organisation personal access tokens API<span>GitHub Apps only</span></a></li>
+        <li><a href="https://docs.github.com/en/organizations/keeping-your-organization-secure/managing-security-settings-for-your-organization/reviewing-the-audit-log-for-your-organization">GitHub: reviewing the organisation audit log<span>API access on Enterprise Cloud</span></a></li>
+        <li><a href="https://docs.github.com/en/enterprise-cloud@latest/rest/orgs/orgs#get-the-audit-log-for-an-organization">GitHub: get the audit log for an organisation<span>owner, read:audit_log</span></a></li>
+        <li><a href="https://docs.cloud.google.com/docs/authentication/token-types">Google Cloud: token types<span>tokeninfo for user and service account tokens</span></a></li>
+        <li><a href="https://developers.google.com/workspace/admin/reports/v1/appendix/activity/token">Google Workspace: OAuth Token audit activity<span>Admin SDK Reports events</span></a></li>
+        <li><a href="https://developers.google.com/workspace/admin/reports/v1/quickstart/python">Google Workspace: Reports API Python quickstart<span>an administrator account in the domain</span></a></li>
+        <li><a href="https://developers.google.com/workspace/drive/api/guides/api-specific-auth">Google Drive API: choose scopes<span>drive.file, drive, narrowest scope</span></a></li>
+        <li><a href="https://developers.google.com/identity/protocols/oauth2/web-server">Google: OAuth 2.0 for web server apps<span>incremental authorisation</span></a></li>
+        <li><a href="https://docs.slack.dev/authentication/installing-with-oauth/">Slack: installing with OAuth<span>x-oauth-scopes, additive scopes, auth.revoke</span></a></li>
+        <li><a href="https://docs.slack.dev/reference/methods/auth.test">Slack: auth.test<span>no scope required, response fields</span></a></li>
+        <li><a href="https://docs.stripe.com/keys">Stripe: API keys<span>key types, agent keys, access policies</span></a></li>
+        <li><a href="https://docs.stripe.com/keys/restricted-api-keys">Stripe: restricted API keys<span>permissions, request logs, migration</span></a></li>
+        <li><a href="https://docs.stripe.com/mcp">Stripe: MCP<span>31 October 2026 change, Claude Code set-up</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/mcp">Claude Code: MCP<span>variable expansion in .mcp.json</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_last-accessed.html">AWS IAM: last accessed information<span>tracking period, attempts, permissions</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/cli/latest/reference/iam/generate-service-last-accessed-details.html">AWS CLI: generate-service-last-accessed-details<span>--arn, --granularity</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/cli/latest/reference/iam/get-service-last-accessed-details.html">AWS CLI: get-service-last-accessed-details<span>JobStatus, LastAuthenticated</span></a></li>
+        <li><a href="https://docs.railway.com/reference/public-api">Railway: public API<span>token types, Project-Access-Token</span></a></li>
+        <li><a href="https://docs.railway.com/guides/cli">Railway: CLI<span>RAILWAY_TOKEN, RAILWAY_API_TOKEN</span></a></li>
+        <li><a href="https://www.theregister.com/software/2026/04/27/cursor-opus-agent-snuffs-out-startups-production-database/5224442">The Register: the PocketOS deletion<span>27 April 2026</span></a></li>
+        <li><a href="https://blog.railway.com/p/your-ai-wants-to-nuke-your-database">Railway: Your AI wants to nuke your database<span>the remote MCP server</span></a></li>
+        <li><a href="https://railway.com/changelog/2026-05-01-undoable-deletes">Railway changelog: undoable deletes<span>48-hour soft delete</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code-action/security/advisories/GHSA-8q5r-mmjf-575q">GHSA-8q5r-mmjf-575q<span>CVE-2026-47751, fixed in 1.0.74</span></a></li>
+        <li><a href="https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication">GitHub: automatic token authentication<span>least access for GITHUB_TOKEN</span></a></li>
+        <li><a href="https://novee.security/blog/critical-flaws-in-anthropic-google-and-openais-coding-agents/">Novee: the Hugging Face channel<span>run on an Actions runner</span></a></li>
+        <li><a href="https://www.gendigital.com/blog/insights/research/infostealers-your-ai-agent">Gen Digital: infostealers and your AI agent<span>8 September 2026</span></a></li>
+        <li><a href="https://curl.se/docs/manpage.html">curl manual<span>-H @-, --data-urlencode, -G</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>introspect.py, usage.py, catalog.py, clean.py</span></a></li>
+      </ul>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the wider checklist</span></a></li>
+        <li><a href="/guides/claude-code-env-secrets">Claude Code and .env secrets<span>keeping credentials out of transcripts</span></a></li>
+        <li><a href="/guides">All guides<span>everything in this section</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <span>cenner</span></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <span>cenner</span>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

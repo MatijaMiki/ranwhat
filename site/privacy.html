@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy | ranwhat</title>
-<meta name="description" content="What the tool does with your data, and what this website collects: Google Analytics and an X ad pixel only if you allow them, and nothing from the tool.">
+<title>Privacy: what the ranwhat CLI and ranwhat.com collect</title>
+<meta name="description" content="What the ranwhat CLI sends (only what you ask it to) and what ranwhat.com collects: Google Analytics and an X ad pixel, each only if you allow it.">
 <link rel="canonical" href="https://ranwhat.com/privacy">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -17,19 +17,23 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/privacy">
-<meta property="og:title" content="Privacy | ranwhat">
-<meta property="og:description" content="What the tool does with your data, and what this website collects: Google Analytics and an X ad pixel only if you allow them, and nothing from the tool.">
+<meta property="og:title" content="Privacy: what the ranwhat CLI and ranwhat.com collect">
+<meta property="og:description" content="What the ranwhat CLI sends (only what you ask it to) and what ranwhat.com collects: Google Analytics and an X ad pixel, each only if you allow it.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="Privacy | ranwhat">
-<meta name="twitter:description" content="What the tool does with your data, and what this website collects: Google Analytics and an X ad pixel only if you allow them, and nothing from the tool.">
+<meta name="twitter:title" content="Privacy: what the ranwhat CLI and ranwhat.com collect">
+<meta name="twitter:description" content="What the ranwhat CLI sends (only what you ask it to) and what ranwhat.com collects: Google Analytics and an X ad pixel, each only if you allow it.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Privacy","item":"https://ranwhat.com/privacy"}]}</script>
 </head>
 <body>
 <header>
@@ -44,28 +48,46 @@
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Privacy</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Privacy</p>
+    <h1>Privacy: the tool and this website</h1>
+    <p class="lede">
+      The first half is about the ranwhat command-line tool. The second is
+      about ranwhat.com.
+    </p>
+  </div>
+</section>
+
 <section class="mark-1"  >
   <div class="shell band split">
     <div class="marginal">01 / Boundary</div>
     <div>
-      <h2>Nothing leaves the machine.</h2>
+      <h2>Nothing leaves the machine unless you ask.</h2>
       <p class="lede">
-        Not a policy but an architecture. Anything touching a secret runs locally;
-        live introspection talks only to the credential's own issuer.
+        Not a policy but an architecture. Anything touching a secret runs
+        locally. <span class="icode">live</span>, <span class="icode">update</span>
+        and the <span class="icode">--pull-usage</span> flag go online, and only
+        when you run them.
       </p>
       <div class="grid2">
         <div class="cell">
           <h3>Stays local</h3>
-          <p>Credentials, prompts, tool arguments, file contents, customer records. The CLI holds a token in memory for one call and never writes it down.</p>
+          <p>Credentials, prompts, tool arguments, file contents, customer records. The CLI holds a provider token in memory for one call and never writes it down. The only token it stores is your own subscription token, and only if you run <span class="icode">update --save-token</span> (mode 0600).</p>
         </div>
         <div class="cell">
-          <h3>Would ever leave</h3>
-          <p>Nothing today. When a hosted dashboard exists it receives derived metadata only: what tool, what authority, whether it was reversible, with payloads hashed in place.</p>
+          <h3>Goes online, when you ask</h3>
+          <p><span class="icode">live</span> and <span class="icode">--pull-usage</span> call the provider that issued each token, and nothing else. <span class="icode">update</span>, for Plus subscribers, sends the subscription token to <span class="icode">feed.ranwhat.com</span> and nothing else. A hosted dashboard, when one exists, would receive derived metadata only: what tool, what authority, whether it was reversible, with payloads hashed in place.</p>
         </div>
       </div>
       <div class="rows" style="margin-top:30px">
@@ -189,10 +211,11 @@
 
       <div class="note" style="margin-top:26px">
         <h3>The install is not tracked</h3>
-        <p>Installing or running ranwhat sends us nothing. There is no licence
-           check, no version ping, no crash reporter. We do not know how many
-           people use it, which is occasionally inconvenient and entirely the
-           point.</p>
+        <p>Installing ranwhat, and running check, watch, clean, scan or demo,
+           sends us nothing. There is no licence check, no version ping, no
+           crash reporter. update is the one command that talks to our server,
+           and only when you run it. We do not know how many people use it,
+           which is occasionally inconvenient and entirely the point.</p>
       </div>
     </div>
   </div>
@@ -206,12 +229,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -219,7 +242,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -228,13 +251,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -242,7 +278,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>

@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code deleted my files: what to do now | ranwhat</title>
+<meta name="description" content="Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.">
+<link rel="canonical" href="https://ranwhat.com/guides/claude-code-deleted-files">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="article:published_time" content="2026-10-02">
+<meta property="article:modified_time" content="2026-10-02">
+<meta property="og:url" content="https://ranwhat.com/guides/claude-code-deleted-files">
+<meta property="og:title" content="Claude Code deleted my files: what to do now | ranwhat">
+<meta property="og:description" content="Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Claude Code deleted my files: what to do now | ranwhat">
+<meta name="twitter:description" content="Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Claude Code deleted my files. What now?","description":"Rewind cannot undo rm. Find what Claude Code deleted and when from its transcript, restore from git or backups, and block a repeat with a hook or the sandbox.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-deleted-files"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Deleted files","item":"https://ranwhat.com/guides/claude-code-deleted-files"}]}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/watch">Watch</a>
+      <a href="/clean">Clean</a>
+      <a href="/scan">Scan</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Deleted files</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Claude Code deleted my files. What now?</h1>
+    <p class="lede">
+      Find out exactly what was deleted before you restore anything, and do it
+      soon: the transcript that records it is deleted after 30 days by default.
+    </p>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against the Claude Code and Git documentation, and the advisories and reports under Sources. Published <time datetime="2026-10-02">2 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Find</div>
+    <div>
+      <h2>Find out what was deleted, and when.</h2>
+      <p class="lede">
+        Claude Code writes every message, tool call and tool result to a
+        plaintext transcript, one file per session, at
+        <span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session&gt;.jsonl</span>.
+        Every Bash command the session ran is in there, with the arguments
+        it actually used, which makes it
+        <a href="/guides/claude-code-audit-log">an audit log you already
+        have</a>. Subagents write transcripts of their own, covered below.
+      </p>
+      <p>
+        ranwhat reads those files, subagents' included, and lists the actions
+        worth knowing about, deletions and destructive git among them, newest
+        first. It changes nothing.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="cmd-watch">uvx ranwhat watch --days 7</span>
+        <button class="copy" data-copy="#cmd-watch">Copy</button>
+      </div>
+      <p style="margin-top:22px">
+        For the deletions alone, with the session each came from, filter the
+        JSON:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>uvx ranwhat watch --days 30 --json | jq '.[]
+  | select(any(.hits[]; .rule == "fs.destructive" or .rule == "git.destructive"))
+  | {timestamp, project, session, evidence: [.hits[].evidence]}'</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">session</span> is the transcript's file name and
+        <span class="icode">project</span> the folder it sits in. The text
+        report prints local time; <span class="icode">--json</span> gives the
+        timestamp exactly as the transcript stored it.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Deletion</span>
+          <span class="v"><span class="icode">rm</span> told to recurse and to force, as in <span class="icode">-rf</span>, <span class="icode">-Rf</span> or <span class="icode">-fr</span>. Also <span class="icode">find … -delete</span>, <span class="icode">git rm -r</span>, <span class="icode">shred</span> and <span class="icode">truncate -s 0</span>. <span class="icode">/bin/rm</span> counts, and the payload of <span class="icode">bash -c</span> is read as shell.</span></div>
+        <div class="row"><span class="k">Severity</span>
+          <span class="v">Follows the target. <span class="icode">rm -rf build</span> and <span class="icode">rm -rf /tmp/x</span> are not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical. <span class="icode">rm -rf .git</span>, <span class="icode">rm -r .git</span> and the same with any letter in capitals, such as <span class="icode">rm -Rf .git</span>, are also reported as critical log or history tampering when that option comes straight after <span class="icode">rm</span>. Other spellings, such as <span class="icode">rm -fr .git</span> or <span class="icode">rm -rfv .git</span>, are reported as high recursive deletion.</span></div>
+        <div class="row"><span class="k">Destructive git</span>
+          <span class="v"><span class="icode">push --force</span> or <span class="icode">-f</span> (not <span class="icode">--force-with-lease</span>), <span class="icode">reset --hard</span>, <span class="icode">branch -D</span>, <span class="icode">clean -f</span>, <span class="icode">filter-branch</span> and <span class="icode">remote remove</span>.</span></div>
+        <div class="row"><span class="k">Not reported</span>
+          <span class="v">A plain <span class="icode">rm file</span>, <span class="icode">rm -r</span> without <span class="icode">-f</span>, <span class="icode">mv</span>, <span class="icode">git checkout .</span>, <span class="icode">git restore .</span>, and files a Python or Node script deletes.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        For anything in that last row, search the transcripts yourself. Use
+        the name of what is missing, and include subagent transcripts, which
+        Claude Code keeps in a <span class="icode">subagents/</span> folder
+        beside each session:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>grep -l 'old-notes' ~/.claude/projects/*/*.jsonl | xargs -r ls -lt
+grep -rl 'old-notes' ~/.claude/projects/*/*/subagents/
+grep -oE '.{0,80}old-notes.{0,80}' ~/.claude/projects/&lt;project&gt;/&lt;session&gt;.jsonl</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The first lists the sessions that mention it, most recent first. The
+        last prints the text around each mention, which is usually the command
+        that removed it. Reading these files by hand is covered in
+        <a href="/guides/claude-code-history">Claude Code history</a>.
+      </p>
+      <div class="note" style="margin-top:26px">
+        <h3>Copy the transcript first</h3>
+        <p>Claude Code deletes transcripts older than
+           <span class="icode">cleanupPeriodDays</span>, 30 days by default,
+           and the file snapshots rewind depends on go on the same schedule.
+           Copy the session files you found to somewhere outside
+           <span class="icode">~/.claude</span> before you do anything else.
+           They hold whatever passed through a tool, file contents and command
+           output included, so keep the copy private.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Rewind</div>
+    <div>
+      <h2>What rewind can and cannot restore.</h2>
+      <p class="lede">
+        Run <span class="icode">/rewind</span>, or press Esc twice with an
+        empty prompt, pick the prompt that led to the damage and choose
+        <strong>Restore code</strong>. That covers less than it sounds like.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Restores</span>
+          <span class="v">Edits Claude made with its file editing tools. Every prompt you send that starts a turn takes a checkpoint, and checkpoints are saved with the conversation, so they survive a resumed session.</span></div>
+        <div class="row"><span class="k">Not Bash</span>
+          <span class="v"><strong>Files changed by Bash commands are not tracked.</strong> <span class="icode">rm</span>, <span class="icode">mv</span> and <span class="icode">cp</span> all run through Bash, so a file Claude removed with <span class="icode">rm</span> does not come back through rewind.</span></div>
+        <div class="row"><span class="k">Not subagents</span>
+          <span class="v">Edits a subagent made are usually not in your session's checkpoints. The documentation's answer is to revert them with git.</span></div>
+        <div class="row"><span class="k">Not outside</span>
+          <span class="v">Changes you made yourself, or another Claude Code session made at the same time, are normally not captured.</span></div>
+        <div class="row"><span class="k">Not forever</span>
+          <span class="v">Snapshots are deleted by default about 30 days after the session last saved one. Symlinked and hard-linked files are skipped on restore.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        If the menu offers only <strong>Restore conversation</strong>, no
+        tracked edit comes after that point and rewind has nothing to give
+        back. The snapshots themselves are pre-edit copies of the files Claude
+        changed, kept in <span class="icode">~/.claude/file-history/&lt;session&gt;/</span>.
+        If Claude edited a file with its file tools before it deleted it with
+        <span class="icode">rm</span>, an earlier version may still be there:
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="cmd-history">grep -rl 'a line you remember' ~/.claude/file-history/</span>
+        <button class="copy" data-copy="#cmd-history">Copy</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Restore</div>
+    <div>
+      <h2>Restore from what you have.</h2>
+      <p class="lede">
+        What works depends on whether git ever saw the file. The timestamps
+        from step 1 tell you which state you want back.
+      </p>
+
+      <h3>Tracked files</h3>
+      <p>
+        <span class="icode">git restore</span> puts paths in the working tree
+        back from a restore source: the index by default, or a commit you name
+        with <span class="icode">--source</span>.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>git status                                  <span class="c-mut">which tracked files are gone</span>
+git restore src/app.py                      <span class="c-mut">from the index</span>
+git restore --source=HEAD~1 docs/guide.md   <span class="c-mut">from a commit</span></pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">git restore .</span> brings back everything under
+        the current directory, and also throws away unstaged edits to tracked
+        files there. With <span class="icode">--source</span> and a directory,
+        as in <span class="icode">git restore --source=HEAD~1 docs/</span>, it
+        does the same under that path, and also removes tracked files there
+        that the commit did not have. Read <span class="icode">git status</span>
+        first.
+      </p>
+
+      <h3 style="margin-top:34px">After git reset --hard</h3>
+      <p>
+        <span class="icode">reset --hard</span> overwrites the working tree
+        with the commit it moved to and removes tracked files that commit does
+        not have. The commits it moved away from are still there: the reflog
+        records where HEAD and each branch pointed before.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>git reflog                            <span class="c-mut">HEAD@{1} is where HEAD was one move ago</span>
+git branch rescue HEAD@{1}            <span class="c-mut">keep that state on a branch, then look</span>
+git fsck --lost-found                 <span class="c-mut">dangling objects, staged content included</span></pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        Reflog entries the current tip can no longer reach expire after 30
+        days by default, the rest after 90. Uncommitted edits that the reset overwrote were never in a
+        commit, but if they had been staged with <span class="icode">git add</span>,
+        git stored their content as blobs. <span class="icode">git fsck --lost-found</span>
+        writes dangling blobs into <span class="icode">.git/lost-found/other/</span>
+        as their contents.
+      </p>
+
+      <h3 style="margin-top:34px">Untracked files</h3>
+      <p>
+        <span class="icode">git clean</span> removes files git does not track,
+        and <span class="icode">rm</span> on a file git never saw leaves git
+        nothing to restore. Outside git, the copies are a backup, a
+        filesystem snapshot or a synced folder's version history. Pick the
+        newest one taken before the timestamp step 1 gave you.
+      </p>
+      <p>
+        One more place to look. If the file's contents passed through a tool
+        during a session, because Claude read it, wrote it or printed it, they
+        are in that session's transcript, as a JSON string with newlines
+        escaped as <span class="icode">\n</span>:
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="cmd-transcript">grep -l 'a line you remember' ~/.claude/projects/*/*.jsonl</span>
+        <button class="copy" data-copy="#cmd-transcript">Copy</button>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        If the agent removed <span class="icode">.git</span> itself, the
+        history is gone from this machine. A remote still has whatever was
+        pushed to it: clone it again beside the damaged copy, and move files
+        across by hand.
+      </p>
+
+      <h3 style="margin-top:34px">Deleted in the cloud</h3>
+      <p>
+        Git, rewind and your backups cover this machine. A command that
+        deletes a cloud resource leaves nothing here to restore. On 24 April
+        2026, a Cursor agent working in PocketOS's staging environment found a
+        Railway API token in an unrelated file and used it to delete the
+        production volume, in about nine seconds. The founder said the backups
+        went with it because Railway kept them in the same volume. Railway
+        says the legacy API path the agent called cascaded the delete, which
+        made the backups look unavailable. Railway's CEO stepped in two days
+        later, and the data was back within the hour. On 1 May, Railway made
+        a volume deleted through its API recoverable for 48 hours, as one
+        deleted in its dashboard already was.
+      </p>
+      <p>
+        So the first question after a cloud delete is the provider's own undo
+        window, which runs from the moment of the call. If Claude Code made
+        it, the transcript holds the call and its time:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>uvx ranwhat watch --days 7                     <span class="c-mut">cloud deletes it knows, newest first</span>
+grep -rl 'volumeDelete' ~/.claude/projects     <span class="c-mut">Railway's; use your provider's delete call</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">ranwhat watch</span> flags cloud deletes such as
+        <span class="icode">aws ec2 delete-volume</span>,
+        <span class="icode">kubectl delete</span>,
+        <span class="icode">terraform destroy</span> and
+        <span class="icode">DROP TABLE</span>. A call made straight to a
+        provider's API with <span class="icode">curl</span>, as in this case,
+        is not one of them, so search for the provider's own delete call. To
+        narrow what the next one can reach,
+        <a href="/guides/ai-agent-token-scopes">scope the token</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Prevent</div>
+    <div>
+      <h2>Stop it happening again.</h2>
+      <p class="lede">
+        A hook refuses the command, the sandbox refuses the write, and a
+        commit makes the rest recoverable.
+      </p>
+
+      <h3>A hook that blocks recursive deletes</h3>
+      <p>
+        Claude Code's hooks guide registers two <span class="icode">PreToolUse</span>
+        hooks on Bash. The first appends every command to
+        <span class="icode">~/.claude/bash.log</span>. The second exits 2 when
+        the command contains <span class="icode">rm -rf</span>, and exit 2
+        blocks the call. Both run, so a blocked command is still logged. In
+        <span class="icode">.claude/settings.json</span>:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r .tool_input.command &gt;&gt; ~/.claude/bash.log"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-rm-rf.sh"
+          }
+        ]
+      }
+    ]
+  }
+}</pre></div>
+      </div>
+      <p style="margin-top:22px">
+        The guide leaves the script to you. This one follows the guide's own
+        blocking example, and widens the match to every short-flag spelling of
+        <span class="icode">rm -r</span> and to <span class="icode">find -delete</span>.
+        Save it as <span class="icode">.claude/hooks/block-rm-rf.sh</span>
+        and run <span class="icode">chmod +x</span> on it:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>#!/bin/bash
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+if echo "$COMMAND" | grep -Eq '(^|[^[:alnum:]_])rm +(-[[:alpha:]]+ +)*-[[:alpha:]]*[rR]|find .* -delete'; then
+  echo "Blocked: recursive delete. Ask the user to run it." &gt;&amp;2
+  exit 2
+fi
+
+exit 0</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        It also blocks <span class="icode">rm -rf build</span>. That is the
+        trade: run those yourself, or narrow the pattern. Both hooks need
+        <span class="icode">jq</span> on your path.
+      </p>
+
+      <h3 style="margin-top:34px">Why not a deny rule</h3>
+      <p>
+        A deny rule matches the command text Claude writes, and Claude Code's
+        permissions page is plain about the limit:
+        <span class="icode">Bash(rm *)</span> stops
+        <span class="icode">rm -rf build/</span> but not
+        <span class="icode">/bin/rm -rf build/</span> or
+        <span class="icode">bash -c 'rm -rf build/'</span>. A hook sees the
+        whole command, so the script above catches both. It is still text
+        matching: <span class="icode">rm --recursive</span>, a command built
+        inside a variable, or a Python script that deletes files all get past
+        it.
+      </p>
+
+      <h3 style="margin-top:34px">The sandbox</h3>
+      <p>
+        The sandbox does not read command text. The operating system enforces
+        it for every Bash, PowerShell or Monitor command and its child
+        processes. By default those commands can write only to the working
+        directory, the per-user temp directory and directories you added, so
+        <span class="icode">rm -rf ~/Documents</span> fails and
+        <span class="icode">rm -rf src</span> inside the project does not.
+        <span class="icode">sandbox.filesystem.denyWrite</span> blocks writes
+        to the paths you name, inside the project too:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>{
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyWrite": ["./data", "./migrations"]
+    }
+  }
+}</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        In a project's <span class="icode">.claude/settings.json</span>,
+        <span class="icode">./</span> paths resolve to the project root.
+        <span class="icode">/sandbox</span> opens a panel to turn it on. It runs
+        on macOS, Linux and WSL2, not native Windows. When a command fails
+        under the sandbox, Claude may retry it outside, through the normal
+        permission prompt; <span class="icode">allowUnsandboxedCommands: false</span>
+        removes that retry. If the sandbox cannot start, Claude Code warns
+        and runs commands unsandboxed unless
+        <span class="icode">sandbox.failIfUnavailable</span> is true.
+      </p>
+      <p>
+        The write limit holds only on a patched build. Before 2.1.64, a
+        symlink made by a sandboxed command could lead Claude Code's own,
+        unsandboxed process to write outside the workspace without asking
+        (CVE-2026-39861). From 2.1.38 until 2.1.163, a repository could
+        combine a worktree named <span class="icode">.git</span>, symlinks and
+        git fsmonitor to overwrite files in your home directory, such as
+        <span class="icode">~/.zshenv</span> (CVE-2026-55607). Before 2.1.247,
+        on macOS, a <span class="icode">core.fsmonitor</span> command planted
+        from inside the sandbox ran outside it when Claude Code's own git
+        calls ran, which Accomplish AI called Beltdown. Each needed untrusted
+        content in the session, from a cloned repository or injected
+        instructions. Auto-update has applied all three fixes. If you update
+        by hand, <span class="icode">claude --version</span> should print
+        2.1.247 or later.
+      </p>
+      <p>
+        Rewind and the sandbox cover each other's gaps. Checkpoints track
+        Claude's file tools and not Bash; the sandbox limits Bash and not
+        Claude's file tools.
+      </p>
+
+      <h3 style="margin-top:34px">Commit before long runs</h3>
+      <p>
+        Checkpoints are not version control, and the documentation says so. A
+        commit before you hand over a long task is a restore point that covers
+        Bash, subagents and your own edits alike. Untracked and ignored files
+        are still only as safe as your backups.
+      </p>
+
+      <ul class="follow" style="margin-top:30px">
+        <li><a href="/guides/claude-code-audit-log">Claude Code audit log<span>a lasting record of what Claude Code runs</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the rest of the checklist</span></a></li>
+        <li><a href="/watch">ranwhat watch<span>the nine rules, and what they skip</span></a></li>
+        <li><a href="/guides">All guides<span>the full list</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Where each claim comes from.</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/checkpointing">Checkpointing<span>what rewind tracks, and what it does not</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/claude-directory">Explore the .claude directory<span>transcripts, subagents, file-history, retention</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings-reference#cleanupperioddays">Settings reference<span>cleanupPeriodDays, sandbox keys</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/permissions">Configure permissions<span>what a Bash rule does not match</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/hooks-guide">Automate actions with hooks<span>the two PreToolUse hooks, exit 2</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/sandboxing">Configure the sandboxed Bash tool<span>write limits, denyWrite, platforms</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-vp62-r36r-9xqp">GHSA-vp62-r36r-9xqp<span>CVE-2026-39861, symlinks, fixed in 2.1.64</span></a></li>
+        <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-7835-87q9-rgvv">GHSA-7835-87q9-rgvv<span>CVE-2026-55607, worktrees, fixed in 2.1.163</span></a></li>
+        <li><a href="https://accomplish.ai/blog/beltdown-escaping-the-claude-code-sandbox/">Accomplish AI: Beltdown<span>macOS, fixed in 2.1.247</span></a></li>
+        <li><a href="https://www.theregister.com/software/2026/04/27/cursor-opus-agent-snuffs-out-startups-production-database/5224442">The Register: the PocketOS deletion<span>27 April 2026</span></a></li>
+        <li><a href="https://blog.railway.com/p/your-ai-wants-to-nuke-your-database">Railway: Your AI wants to nuke your database<span>blog.railway.com</span></a></li>
+        <li><a href="https://railway.com/changelog/2026-05-01-undoable-deletes">Railway changelog: undoable deletes<span>48-hour soft delete, 1 May 2026</span></a></li>
+        <li><a href="https://git-scm.com/docs/git-restore">git restore<span>git-scm.com</span></a></li>
+        <li><a href="https://git-scm.com/docs/git-reset">git reset<span>git-scm.com</span></a></li>
+        <li><a href="https://git-scm.com/docs/git-reflog">git reflog<span>git-scm.com</span></a></li>
+        <li><a href="https://git-scm.com/docs/git-fsck">git fsck<span>git-scm.com</span></a></li>
+        <li><a href="https://git-scm.com/docs/git-clean">git clean<span>git-scm.com</span></a></li>
+        <li><a href="https://git-scm.com/book/en/v2/Git-Internals-Git-Objects">Git Internals: Git Objects<span>git add stores blobs</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/watch.py">ranwhat/watch.py<span>the deletion and git rules</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <span>cenner</span></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <span>cenner</span>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

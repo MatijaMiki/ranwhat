@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>About | ranwhat</title>
-<meta name="description" content="Most teams cannot say what their agent did last Tuesday or under whose authority. That gap is the product, built in the open by one person.">
+<title>About ranwhat: AI agent security, built in the open</title>
+<meta name="description" content="Coding agents run commands with your credentials. Claude Code keeps the record as a transcript for 30 days by default. AI agent security, built in the open.">
 <link rel="canonical" href="https://ranwhat.com/about">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
@@ -17,20 +17,25 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/about">
-<meta property="og:title" content="About | ranwhat">
-<meta property="og:description" content="Most teams cannot say what their agent did last Tuesday or under whose authority. That gap is the product, built in the open by one person.">
+<meta property="og:title" content="About ranwhat: AI agent security, built in the open">
+<meta property="og:description" content="Coding agents run commands with your credentials. Claude Code keeps the record as a transcript for 30 days by default. AI agent security, built in the open.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="About | ranwhat">
-<meta name="twitter:description" content="Most teams cannot say what their agent did last Tuesday or under whose authority. That gap is the product, built in the open by one person.">
+<meta name="twitter:title" content="About ranwhat: AI agent security, built in the open">
+<meta name="twitter:description" content="Coding agents run commands with your credentials. Claude Code keeps the record as a transcript for 30 days by default. AI agent security, built in the open.">
 
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"About","item":"https://ranwhat.com/about"}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Person","@id":"https://ranwhat.com/about#matija","name":"Matija Mikulinec","url":"https://ranwhat.com/about","worksFor":{"@id":"https://ranwhat.com/#org"}}</script>
 </head>
 <body>
 <header>
@@ -45,20 +50,25 @@
       <a href="/about" aria-current="page">About</a>
       <a href="/contact">Contact</a>
     </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
   </div>
 </header>
 
 <main id="top">
-
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">About</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">About</p>
     <h1>Agents got credentials before anyone built the recorder.</h1>
     <p class="lede">
       Sometime in the last two years the assistant stopped suggesting commands
-      and started running them. Nobody shipped the thing that writes down what
-      happened.
+      and started running them. In Claude Code, the record of what it ran is
+      <a href="/guides/claude-code-history">a plaintext transcript, deleted
+      after 30 days by default</a>.
     </p>
   </div>
 </section>
@@ -70,24 +80,29 @@
       <p>
         An agent on a developer's laptop today holds a shell, a GitHub token, a
         cloud role and whatever was in the <span class="icode">.env</span> file
-        it read on the way past. In production it holds a payments key. Roughly
-        <strong>42% of new code is AI-generated or AI-assisted</strong>, and a
-        large share of the backend code among it ships with permissions far
-        wider than it uses.
+        it read on the way past. In production it may hold a payments key.
+        <a href="https://code.claude.com/docs/en/claude-directory#plaintext-storage">Claude
+        Code's own documentation</a> is plain about what happens next: anything
+        that passes through a tool is written to a transcript on disk, in
+        plaintext.
       </p>
       <p>
-        Insurers noticed first. Through 2025 and 2026 the major carriers filed
-        to exclude AI-related damage from general liability, and regulators
-        approved most of those filings. A specialist market formed to fill the
-        gap, and it prices on one question above all others:
-        <strong>can you reconstruct what the agent did, and under whose
-        authority?</strong> Most teams cannot. They have latency dashboards and
-        no action record at all.
+        The question that matters after something goes wrong is short:
+        <strong>what did the agent do, and under whose authority?</strong> The
+        transcript holds most of the answer until Claude Code deletes it.
+        Latency dashboards do not hold it at all.
       </p>
       <p>
         That gap is the whole product. Not detecting a villain, since there usually
         isn't one. Producing a record of irreversible actions that holds up when
         somebody outside the company asks.
+      </p>
+      <p>
+        It is one part of <a href="/guides/ai-coding-agent-security">AI agent
+        security</a>: the record of what already ran,
+        what leaked, and what the credentials still allow. It does not block
+        anything while the agent works. Claude Code's permission rules, hooks
+        and sandbox do that.
       </p>
     </div>
   </div>
@@ -101,10 +116,9 @@
       <div class="grid2" style="margin-top:20px">
         <div class="cell">
           <h3>The watcher</h3>
-          <p>Reads what your agents already wrote to disk, Claude Code
-             transcripts and OpenClaw's SQLite store, and surfaces the handful of
-             irreversible actions worth knowing about. No wrapper, no proxy,
-             nothing in the critical path.</p>
+          <p>Reads the transcripts Claude Code already wrote to disk and
+             surfaces the handful of irreversible actions worth knowing about.
+             No wrapper, no proxy, nothing in the critical path.</p>
         </div>
         <div class="cell">
           <h3>The scanner</h3>
@@ -142,11 +156,11 @@
         </div>
         <div class="principle">
           <div class="num">03</div>
-          <h3>Nothing leaves the machine</h3>
-          <p>Anything touching a secret runs locally; introspection talks only
-             to the credential's own issuer. This is an architecture rather than
-             a promise, which is why it can be adopted without a security
-             review.</p>
+          <h3>Local unless you ask</h3>
+          <p>Anything touching a secret runs locally. Introspection talks only
+             to the credential's own issuer, and update sends only a
+             subscription token to our server. This is an architecture rather
+             than a promise, which is why it is short to review.</p>
         </div>
         <div class="principle">
           <div class="num">04</div>
@@ -164,18 +178,25 @@
   <div class="shell band split">
     <div class="marginal">Who</div>
     <div class="prose">
-      <h2>Built by cenner.</h2>
+      <h2>Built by Matija Mikulinec.</h2>
       <p>
-        One person, working in the open. The code is MIT licensed with no
+        One person, working in the open from Zagreb under the name Cenner. The code is MIT licensed with no
         runtime dependencies, because a tool you point at your own credentials
         should be one you can read end to end in an afternoon.
       </p>
       <p>
-        Everything on this site is something the tool actually does. The
-        precision rules exist because the first version was run against a real
-        machine and produced three false positives and eleven findings nobody
-        would want. The fixes for both are in the commit history, with the
-        reasoning.
+        Everything this site says the command-line tool does, it does. The
+        precision rules come from two runs on real history and from probing a
+        released build. The first watch build flagged six findings, and three
+        were false positives: a grep for <span class="icode">rm -rf</span>,
+        the same string inside a Python one-liner, and a heredoc being written
+        to a file. A later release reported fifteen findings on one machine's
+        90-day history, and eleven were true but uninteresting deletions of
+        build and temp directories. After the fix, the same history gave four.
+        Probing a released build found the rest: an
+        <span class="icode">rm -rf</span> inside an echo or a comment, and
+        <span class="icode">git rm --cached</span>, which only unstages. The
+        fixes are in the commit history, with the reasoning.
       </p>
       <div class="note" style="margin-top:26px">
         <h3>Where it is</h3>
@@ -207,18 +228,18 @@
       <table>
         <thead><tr><th>Provider</th><th>Scopes</th><th>Of which</th></tr></thead>
         <tbody>
-          <tr><td><strong>HubSpot</strong></td><td class="mono">12</td><td>1 irreversible, 4 financial</td></tr>
-          <tr><td><strong>Google Workspace</strong></td><td class="mono">11</td><td>3 irreversible</td></tr>
-          <tr><td><strong>Atlassian</strong></td><td class="mono">9</td><td>6 irreversible</td></tr>
+          <tr><td><strong>HubSpot</strong></td><td class="mono">12</td><td>1 destructive, 4 financial</td></tr>
+          <tr><td><strong>Google Workspace</strong></td><td class="mono">11</td><td>3 destructive</td></tr>
+          <tr><td><strong>Atlassian</strong></td><td class="mono">9</td><td>6 destructive</td></tr>
           <tr><td><strong>Discord</strong></td><td class="mono">9</td><td class="mono" style="color:var(--faint)">none</td></tr>
-          <tr><td><strong>GitLab</strong></td><td class="mono">9</td><td>3 irreversible</td></tr>
-          <tr><td><strong>GitHub</strong></td><td class="mono">8</td><td>3 irreversible</td></tr>
-          <tr><td><strong>AWS</strong></td><td class="mono">8</td><td>4 irreversible</td></tr>
-          <tr><td><strong>Microsoft 365</strong></td><td class="mono">8</td><td>4 irreversible</td></tr>
-          <tr><td><strong>Sentry</strong></td><td class="mono">8</td><td>4 irreversible</td></tr>
+          <tr><td><strong>GitLab</strong></td><td class="mono">9</td><td>3 destructive</td></tr>
+          <tr><td><strong>GitHub</strong></td><td class="mono">8</td><td>3 destructive</td></tr>
+          <tr><td><strong>AWS</strong></td><td class="mono">8</td><td>4 destructive</td></tr>
+          <tr><td><strong>Microsoft 365</strong></td><td class="mono">8</td><td>4 destructive</td></tr>
+          <tr><td><strong>Sentry</strong></td><td class="mono">8</td><td>4 destructive</td></tr>
           <tr><td><strong>Shopify</strong></td><td class="mono">8</td><td>3 financial</td></tr>
-          <tr><td><strong>Slack</strong></td><td class="mono">7</td><td>1 irreversible</td></tr>
-          <tr><td><strong>Stripe</strong></td><td class="mono">7</td><td>1 irreversible, 4 financial</td></tr>
+          <tr><td><strong>Slack</strong></td><td class="mono">7</td><td>1 destructive</td></tr>
+          <tr><td><strong>Stripe</strong></td><td class="mono">7</td><td>1 destructive, 4 financial</td></tr>
         </tbody>
       </table>
       </div>
@@ -228,7 +249,7 @@
         shows up in the report rather than hiding in it.
       </p>
       <p style="margin-top:14px">
-        The list grows every week, because providers keep shipping scopes.
+        The list grows as providers ship scopes.
         Missing one you rely on?
         <a href="/contact?about=other">Tell us which &rarr;</a>
       </p>
@@ -244,12 +265,12 @@
         <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
         <p class="fnote">
           A flight recorder for AI agents, and a scanner for the authority they
-          hold. Reads locally, transmits nothing.
+          hold. Reads locally, and goes online only when you ask.
         </p>
         <p class="byline">Built by <span>cenner</span></p>
       </div>
       <div>
-        <h4>Commands</h4>
+        <p class="fh">Commands</p>
         <ul>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
@@ -257,7 +278,7 @@
         </ul>
       </div>
       <div>
-        <h4>Docs</h4>
+        <p class="fh">Docs</p>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
@@ -266,13 +287,26 @@
         </ul>
       </div>
       <div>
-        <h4>Project</h4>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
         </ul>
       </div>
@@ -280,7 +314,7 @@
     <div class="fbase">
       <span>cenner</span>
       <span>ranwhat.com</span>
-      <span>Runs locally &middot; transmits nothing</span>
+      <span>Runs locally &middot; no telemetry</span>
       <span>Python 3.9+ &middot; no dependencies</span>
       <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
     </div>
