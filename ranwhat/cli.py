@@ -1000,6 +1000,10 @@ def _agent_flags(p, args):
         if getattr(args, name) is not None and source_id in paths:
             p.error("%s and --path %s= both point %s elsewhere; give one"
                     % (flag, source_id, agents_mod.name(source_id)))
+        # Expanded as --path is: --root=~/x, a quoted ~, and any ~ in cmd
+        # or PowerShell reach ranwhat as written, and read nothing.
+        if getattr(args, name):
+            setattr(args, name, os.path.expanduser(getattr(args, name)))
     args.path_ids = tuple(paths)
     args.pointed = {i: v for i, v in paths.items() if i not in agents_mod.PORTED}
     args.root = args.root or paths.get("claude-code") or watch_mod.CLAUDE_PROJECTS

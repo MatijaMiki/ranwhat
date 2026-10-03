@@ -515,6 +515,39 @@ class Flags(_Cli):
                 self.assertEqual([r["source"] for r in json.loads(out)],
                                  ["claude-code"])
 
+    def test_root_and_state_dir_expand_a_tilde_as_path_does(self):
+        """--root=~/x and a quoted ~ reach ranwhat as they are written, as
+        does any ~ in cmd and PowerShell. --path expanded it and --root and
+        --state-dir did not: sources found the history there, watch read
+        nothing, and check's clean half alone said what it held."""
+        self.claude_transcript(_claude_call(1, "git push --force origin main",
+                                            "ok", self.now))
+        db = os.path.join(self.home, "oc", "agents", "a1", "agent",
+                          "openclaw-agent.sqlite")
+        os.makedirs(os.path.dirname(db))
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE log (id TEXT, body TEXT, createdAt INTEGER)")
+        conn.execute("INSERT INTO log VALUES ('1', ?, ?)", (json.dumps(
+            {"content": [{"type": "tool_use", "name": "Bash",
+                          "input": {"command": "rm -rf ~/Documents/o"}}]}),
+            int(self.now)))
+        conn.commit()
+        conn.close()
+        flags = ["--root=~/claude/projects", "--state-dir=~/oc"]
+        rc, out, err = self.run_cli("watch", "--json", *flags)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(r["source"] for r in json.loads(out)),
+                         ["claude-code", "openclaw"])
+        with mock.patch.object(cli, "invocation", return_value="ranwhat"):
+            rc, out, err = self.run_cli("check", *flags)
+        self.assertEqual(rc, 0, err)
+        said = " ".join(out.split())
+        for found in ("git push --force", "rm -rf ~/Documents/o",
+                      "check --json --root %s --state-dir %s" % (
+                          cli._shell_path(self.claude),
+                          cli._shell_path(os.path.join(self.home, "oc")))):
+            self.assertIn(found, said)
+
     def test_source_limits_every_section_of_check(self):
         codex = af.AGENTS[0]
         root = self.agent_root(codex)
