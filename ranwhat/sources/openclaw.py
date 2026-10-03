@@ -195,6 +195,7 @@ class OpenClawSource(Source):
     env = (ENV,)
     path_means = ("an OpenClaw state directory, the one --state-dir takes "
                   "(default ~/.openclaw)")
+    read_only = True        # SQLite, every store of it
 
     def default_paths(self, env, home, platform):
         """$OPENCLAW_STATE_DIR when set, else ~/.openclaw: what state_dir()

@@ -1078,7 +1078,9 @@ def _source_entry(source, args):
     read_only = [s for s in stores if s.masking == "read-only"]
     if not source.searched:
         masking = "not searched"
-    elif stores and len(read_only) == len(stores):
+    elif source.read_only or (stores and len(read_only) == len(stores)):
+        # What clean can do with an agent whose every store is read-only
+        # does not wait on finding one: the site says it of OpenClaw.
         masking = "read-only"
     elif read_only:
         masking = "mixed"

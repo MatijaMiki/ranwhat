@@ -252,6 +252,8 @@ class Source(object):
     needs_projects = False  # found through other sources' project dirs
     checked = ""            # the agent release the spec was checked against
     searched = True         # False: clean does not search it for secrets
+    read_only = False       # True: every store is read-only (OpenClaw's
+                            # databases), so clean finds, never masks
     byte_arrays = False     # stores carry text as JSON byte lists (Grok Build)
 
     def __init__(self):

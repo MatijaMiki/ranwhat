@@ -376,6 +376,12 @@ class SearchedForSecrets(_Case):
             next(texts)
             texts.close()
 
+    def test_it_says_every_store_is_read_only_before_one_is_found(self):
+        # `ranwhat sources` and the site say so of OpenClaw without a store.
+        self.assertTrue(self.src.read_only)
+        path = self.database("a1", [(_result("ok"), 1758550000)])
+        self.assertEqual(self.src.store_at(path).masking, "read-only")
+
     def test_mask_refuses(self):
         path = self.database("a1", [(_result("API_KEY=" + KEY), 1758550000)])
         store = self.src.store_at(path)
