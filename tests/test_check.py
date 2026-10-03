@@ -1195,6 +1195,26 @@ class NextStepsReadWhatCheckRead(_Base):
                                                       "--no-interactive"])
         self.assertEqual(json.loads(cleaned)["findings"], doc["secrets"])
 
+    def test_clean_reads_the_openclaw_history_check_read(self):
+        """clean searches OpenClaw, and the step suggested for it left out
+        --state-dir and --path openclaw=: it reviewed ~/.openclaw instead
+        of the database the secret had just been listed from."""
+        root, _ = make_root([tool_use("ls", 1)])
+        state = make_openclaw("export " + STRIPE, int(time.time()) - 3600)
+        for point in (["--state-dir", state], ["--path", "openclaw=" + state]):
+            with self.subTest(point=point[0]):
+                argv = ["check", "--root", root] + point
+                with mock.patch.object(cli, "invocation", return_value="ranwhat"):
+                    _, out, _ = self.run_cli(argv)
+                    _, doc, _ = self.run_cli(argv + ["--json"])
+                secrets = json.loads(doc)["secrets"]
+                self.assertEqual(len(secrets), 1)
+                step = next(s for s in steps_in(out, "ranwhat")
+                            if s.split()[1] == "clean")
+                _, cleaned, _ = self.run_cli(shell_words(step)[1:] + [
+                    "--json", "--no-interactive"])
+                self.assertEqual(json.loads(cleaned)["findings"], secrets)
+
     def test_only_flags_that_differ_from_the_default_are_carried(self):
         root, st = make_root(ACTION + SECRET)
         steps, _, _ = self.run_check(root, st)
@@ -1237,10 +1257,10 @@ class NextStepsReadWhatCheckRead(_Base):
             word = words[words.index("--root") + 1]
             self.assertTrue(word.startswith("~/"), word)
             self.assertEqual(os.path.join(home, word[2:]), odd)
-        # And a real shell reads it back as the path: clean's --root is its
-        # last word, so everything after it is that one word.
+        # And a real shell reads it back as the path: in clean's step
+        # everything between --root and --state-dir is that one word.
         clean_step = next(s for s in steps if s.split()[1] == "clean")
-        word = clean_step.split(" --root ", 1)[1]
+        word = clean_step.split(" --root ", 1)[1].split(" --state-dir ", 1)[0]
         out = subprocess.run(["sh", "-c", "printf %s " + word],
                              env=dict(os.environ, HOME=home),
                              capture_output=True, text=True, timeout=30)

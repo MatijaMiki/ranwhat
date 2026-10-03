@@ -716,7 +716,8 @@ def _check(args):
     steps = []
     if findings:
         # Bare `clean` on a terminal opens the review over these findings.
-        steps.append((["clean"] + _carried(args, "days", "root", "source", "path"),
+        steps.append((["clean"] + _carried(args, "days", "root", "state_dir",
+                                           "source", "path"),
                       "review each secret, then mask it"))
     if records:
         # Not `watch --json`: watch masks what a call shows to be a secret,

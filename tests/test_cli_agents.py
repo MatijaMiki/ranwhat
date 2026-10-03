@@ -539,8 +539,9 @@ class Flags(_Cli):
         rc, out, _ = self.run_cli("check", "--source", "codex",
                                   "--path", "codex=" + root, *self.base_flags())
         said = " ".join(out.replace("\\\n", " ").split())
-        self.assertIn("clean --root %s --source codex --path codex=%s"
-                      % (cli._shell_path(self.claude), cli._shell_path(root)), said)
+        self.assertIn("clean --root %s --state-dir %s --source codex --path codex=%s"
+                      % (cli._shell_path(self.claude), cli._shell_path(self.openclaw),
+                         cli._shell_path(root)), said)
 
 
 class Reports(_Cli):
