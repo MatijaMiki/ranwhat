@@ -47,6 +47,9 @@ WHY_READ_ONLY = {
     "jsonl.zst": "It is compressed; ranwhat does not rewrite compressed files.",
 }
 
+# Why a store a reader gave up on part way was not read (Source.stopped).
+STOPPED = "a %s stopped it part way"
+
 # Per-run counters every adapter keeps, so a format change shows up as a
 # jump in `ranwhat sources --json` instead of as silence.
 COUNTERS = ("unparsed", "unknown", "unreadable_stores", "unreadable_calls")
@@ -278,6 +281,17 @@ class Source(object):
         self._warned.add(key)
         print("  warning: %s" % message, file=sys.stderr)
 
+    def stopped(self, store, error):
+        """A store a reader gave up on part way, on an error nothing below
+        it caught: counted once a run, whichever pass met it, as a file not
+        read, and named by the error's class only, since what an error says
+        can quote what it was reading."""
+        key = ("stopped", store.path)
+        if key not in self._warned:
+            self.unreadable_store(STOPPED % type(error).__name__)
+        self.warn(key, "stopped reading %s %s part way (%s)"
+                  % (self.name or self.id, store.path, type(error).__name__))
+
     # -- where to look ------------------------------------------------------
 
     def default_paths(self, env, home, platform):
@@ -323,7 +337,7 @@ class Source(object):
             return out
         except Exception as e:      # one adapter must not stop the others
             self.warn("locations", "could not work out where %s keeps its "
-                      "history (%s)" % (self.name or self.id, e))
+                      "history (%s)" % (self.name or self.id, type(e).__name__))
             return []
 
     def stores(self, locations, since_days=None):

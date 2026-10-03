@@ -19,6 +19,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -753,6 +754,86 @@ class AllReadOnlyWhenItWas(_Cli):
                     self.assertIn("  " + self.ALL_READ + "\n", out)
                     self.assertNotIn(self.NOT_ALL, out)
                     self.assertFits(out, int(width))
+
+
+def _fails(source, store):
+    """A reader that fails on its first item, saying what it was reading."""
+    raise RuntimeError("held " + SECRET)
+    yield                                   # a generator, as readers are
+
+
+class AReaderThatFails(_Cli):
+    """A reader that raised part way through a store was warned about with
+    what the error said, which can quote what it was reading, and the report
+    still said every call was read. Claude Code's and OpenClaw's readers had
+    no guard at all: one error ended watch and check."""
+
+    def assertNamedCountedAndQuiet(self, out, err, name):
+        self.assertNotIn(SECRET, out + err)
+        self.assertIn("RuntimeError", err)
+        self.assertIn("1 %s file was not read" % name, " ".join(out.split()))
+
+    def test_an_adapter_is_named_by_its_class_and_the_others_read(self):
+        failing, other = af.AGENTS[0], af.AGENTS[1]
+        flags = list(self.base_flags())
+        for agent in (failing, other):
+            root = self.agent_root(agent)
+            agent.write(root, _calls(self.now))
+            flags += ["--source", agent.id, "--path", "%s=%s" % (agent.id, root)]
+        cls = type(sources.get(failing.id))
+        with mock.patch.object(cls, "tool_calls", _fails), \
+                mock.patch.object(cls, "secret_texts", _fails):
+            for argv in (["watch"], ["check"], ["clean", "--no-interactive"]):
+                with self.subTest(argv=argv):
+                    rc, out, err = self.run_cli(*(argv + flags))
+                    self.assertEqual(rc, 0, err)
+                    self.assertNamedCountedAndQuiet(out, err, sources.get(failing.id).name)
+                    if argv[0] != "clean":
+                        self.assertIn("Documents/x", out)
+
+    def test_with_nothing_flagged_the_claim_is_withheld(self):
+        agent = af.AGENTS[0]
+        root = self.agent_root(agent)
+        agent.write(root, [("c1", "shell", "ls", "a.txt\n", self.now)])
+        with mock.patch.object(type(sources.get(agent.id)), "tool_calls", _fails):
+            rc, out, err = self.run_cli("watch", *self.only(agent, root))
+        self.assertIn("Nothing flagged", out)
+        self.assertIn(AllReadOnlyWhenItWas.NOT_ALL, " ".join(out.split()))
+
+    def test_claude_codes_and_openclaws_readers_are_guarded_too(self):
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/c", "ok", self.now))
+        db = os.path.join(self.openclaw, "agents", "a1", "agent",
+                          "openclaw-agent.sqlite")
+        os.makedirs(os.path.dirname(db))
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE log (id TEXT, body TEXT, createdAt INTEGER)")
+        conn.execute("INSERT INTO log VALUES ('1', ?, ?)", (json.dumps(
+            {"content": [{"type": "tool_use", "name": "Bash",
+                          "input": {"command": "rm -rf ~/Documents/o"}}]}),
+            int(self.now)))
+        conn.commit()
+        conn.close()
+        for failing in ("claude-code", "openclaw"):
+            with self.subTest(failing=failing), \
+                    mock.patch.object(type(sources.get(failing)), "tool_calls",
+                                      _fails):
+                for argv in (["watch"], ["check"]):
+                    rc, out, err = self.run_cli(*(argv + self.base_flags()))
+                    self.assertEqual(rc, 0, err)
+                    self.assertNamedCountedAndQuiet(out, err,
+                                                    sources.get(failing).name)
+                    still = "Documents/o" if failing == "claude-code" else "Documents/c"
+                    self.assertIn(still, out)
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "a file its owner cannot open is POSIX, and not as root")
+    def test_a_claude_code_transcript_that_cannot_be_opened_is_counted(self):
+        path = self.claude_transcript(_claude_call(1, "ls", "a.txt", self.now))
+        os.chmod(path, 0)
+        self.addCleanup(os.chmod, path, stat.S_IRUSR | stat.S_IWUSR)
+        rc, out, err = self.run_cli("watch", *self.base_flags())
+        self.assertIn("1 Claude Code file was not read", " ".join(out.split()))
+        self.assertNotIn(AllReadOnlyWhenItWas.ALL_READ, out)
 
 
 class Progress(_Cli):

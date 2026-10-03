@@ -823,9 +823,9 @@ class DroidSource(Source):
     def _log_texts(self, store):
         """A tool-output log, terminal log or background output, or a
         prompt history that is not JSON, read in pieces of at most _CHUNK
-        bytes, each cut after a line end where the
-        piece holds one (see _cut). The pieces of each are tied to the call
-        whose result named it, when stores() found that call this run."""
+        bytes, each cut after a line end where the piece holds one (see
+        _cut). The pieces of each are tied to the call whose result named
+        it, when stores() found that call this run."""
         try:
             fh = open(store.path, "rb")
         except OSError as e:

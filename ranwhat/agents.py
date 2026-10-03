@@ -94,7 +94,8 @@ def _discover(source, override, since_days):
             locations = list(source.locations(override))
         except Exception as error:      # one adapter must not stop the others
             source.warn("locations", "could not work out where %s keeps its "
-                                     "history (%s)" % (source.name, error))
+                                     "history (%s)" % (source.name,
+                                                       type(error).__name__))
             return [], []
         if _RUN is not None:
             _RUN[where] = list(locations)
@@ -105,7 +106,7 @@ def _discover(source, override, since_days):
         stores = list(source.stores(present, since_days))
     except Exception as error:
         source.warn("stores", "could not list %s's history (%s)"
-                    % (source.name, error))
+                    % (source.name, type(error).__name__))
         stores = []
     return locations, stores
 

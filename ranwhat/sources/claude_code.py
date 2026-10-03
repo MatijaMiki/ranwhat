@@ -74,13 +74,16 @@ def place(path):
             os.path.splitext(os.path.basename(path))[0])
 
 
-def tool_uses(path):
+def tool_uses(path, unopened=None):
     """(entry, block) for every tool_use block in the transcript, in order.
     A line that is not JSON, not an object, or holds no list of content is
-    skipped; a transcript that cannot be opened yields nothing."""
+    skipped; a transcript that cannot be opened yields nothing, and is
+    handed to `unopened` with the error, when that is given."""
     try:
         fh = open(path, "r", encoding="utf-8", errors="replace")
-    except OSError:
+    except OSError as error:
+        if unopened is not None:
+            unopened(error)
         return
     with fh:
         for line in fh:
@@ -150,7 +153,8 @@ class ClaudeCodeSource(Source):
         decoded. A name that is not a string is "?", and a time that is not
         one is None: an object there could not be told apart from another."""
         project, session = place(store.path)
-        for entry, block in tool_uses(store.path):
+        for entry, block in tool_uses(store.path,
+                                      lambda e: self._unopened(store, e)):
             tool = block.get("name", "?")
             if not isinstance(tool, str):
                 tool = "?"
@@ -159,6 +163,18 @@ class ClaudeCodeSource(Source):
                            decode=False, session=session, project=project,
                            timestamp=stamp if isinstance(stamp, str) else None,
                            tool_call_id=block.get("id"))
+
+    def _unopened(self, store, error):
+        """A transcript that cannot be opened: counted once a run as a file
+        not read, and warned about once. One deleted since it was listed (as
+        Claude Code deletes old ones) has nothing left to read."""
+        if isinstance(error, FileNotFoundError):
+            return
+        reason = error.strerror or type(error).__name__
+        if ("open", store.path) not in self._warned:
+            self.unreadable_store(reason)
+        self.warn(("open", store.path), "could not read Claude Code "
+                  "transcript %s (%s)" % (store.path, reason))
 
     def secret_texts(self, store):
         """Each line that is JSON, decoded, for a reader that wants every

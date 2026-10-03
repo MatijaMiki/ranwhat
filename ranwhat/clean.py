@@ -2853,8 +2853,7 @@ def scan_store(source, store, values):
                     masks.update(_MASKS.findall(string_))
             _walk(text.node, collect)
     except Exception as error:          # one adapter must not stop the others
-        source.warn(("secrets", store.path), "could not read %s %s (%s)"
-                    % (source.name, store.path, error))
+        source.stopped(store, error)
     return findings, masks
 
 

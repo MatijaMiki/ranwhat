@@ -2117,15 +2117,29 @@ _transcripts = _claude.transcripts
 discover = _claude.discover
 
 
+def _claude_source():
+    """The registry's Claude Code adapter, which counts what this run could
+    not read for the report's notes (agents.notes), as _openclaw_source."""
+    try:
+        return _registry.get("claude-code")
+    except KeyError:
+        return _claude.ClaudeCodeSource()
+
+
 def scan_transcript(path, source="claude-code", known=None):
     """Produce Action Records for one transcript, with `known` masked in
-    them as evaluate masks it."""
-    src = _claude.ClaudeCodeSource()
+    them as evaluate masks it. A reader that fails part way keeps what it
+    read until then, as scan_source does for every other adapter."""
+    src = _claude_source()
+    store = src.store_at(path)
     records = []
-    for call in src.tool_calls(src.store_at(path)):
-        hits, payload = judge(call, known)
-        if hits:
-            records.append(_record(call, hits, payload, source))
+    try:
+        for call in src.tool_calls(store):
+            hits, payload = judge(call, known)
+            if hits:
+                records.append(_record(call, hits, payload, source))
+    except Exception as error:          # one transcript must not stop the rest
+        src.stopped(store, error)
     return records
 
 
@@ -2551,16 +2565,20 @@ def scan_openclaw_db(path, source="openclaw", known=None, src=None):
     record, the first, whatever its time. `src` is the adapter that reads
     it, a fresh one by default."""
     src = src or _openclaw.OpenClawSource()
+    store = src.store_at(path)
     records, seen = [], set()
-    for call in src.tool_calls(src.store_at(path)):
-        hits, payload = judge(call, known)
-        if not hits:
-            continue
-        key = (call.tool_name, _hash(payload))
-        if key in seen:
-            continue
-        seen.add(key)
-        records.append(_record(call, hits, payload, source))
+    try:
+        for call in src.tool_calls(store):
+            hits, payload = judge(call, known)
+            if not hits:
+                continue
+            key = (call.tool_name, _hash(payload))
+            if key in seen:
+                continue
+            seen.add(key)
+            records.append(_record(call, hits, payload, source))
+    except Exception as error:          # one database must not stop the rest
+        src.stopped(store, error)
     return records
 
 
@@ -2633,8 +2651,7 @@ def scan_source(source, stores, since_days=None, known=None, progress=None,
                 seen.add(key)
                 records.append(record)
         except Exception as error:      # one adapter must not stop the others
-            source.warn(("calls", store.path), "could not read %s %s (%s)"
-                        % (source.name, store.path, error))
+            source.stopped(store, error)
     return records
 
 
