@@ -13,6 +13,7 @@ import shutil
 import string
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -112,6 +113,14 @@ def tearDownModule():
     shutil.rmtree(_scratch, ignore_errors=True)
 
 
+def _aged(path):
+    """path, last written an hour ago: past clean's quiet period, so
+    scan_file(apply=True) masks it rather than leave it as in use."""
+    when = time.time() - 3600
+    os.utime(path, (when, when))
+    return path
+
+
 def _transcript(content):
     d = tempfile.mkdtemp(prefix="shapes-", dir=_scratch)
     path = os.path.join(d, "s.jsonl")
@@ -119,7 +128,7 @@ def _transcript(content):
         fh.write(json.dumps({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": "t1", "content": content}]}})
             + "\n")
-    return path
+    return _aged(path)
 
 
 class KeysThatStartWithASlash(unittest.TestCase):
@@ -1073,7 +1082,7 @@ def _grep_transcript(command, output):
         fh.write(json.dumps({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": "g1", "content": output}]}})
             + "\n")
-    return path
+    return _aged(path)
 
 
 class AssignmentsInsideAValue(Leaks, growth.Assertions, unittest.TestCase):

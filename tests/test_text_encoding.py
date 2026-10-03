@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -144,6 +145,9 @@ class UnderALocaleThatIsNotUtf8(unittest.TestCase):
         cls.original = "".join(lines).encode("utf-8")
         with open(cls.transcript, "wb") as fh:
             fh.write(cls.original)
+        # Last written an hour ago, past clean's quiet period, so it is masked.
+        when = time.time() - 3600
+        os.utime(cls.transcript, (when, when))
         # With the byte-order mark PowerShell 5 writes.
         with open(cls.profile, "wb") as fh:
             fh.write(b"\xef\xbb\xbf" + json.dumps(
