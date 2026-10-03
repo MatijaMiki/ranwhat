@@ -73,6 +73,12 @@ def _sha(path):
         return hashlib.sha256(fh.read()).hexdigest()
 
 
+def _open_files():
+    """How many files this process has open, where /dev/fd lists them
+    (Linux, macOS); None elsewhere."""
+    return len(os.listdir("/dev/fd")) if os.path.isdir("/dev/fd") else None
+
+
 def _ranwhat_temp_dirs():
     return set(x for x in os.listdir(tempfile.gettempdir())
                if x.startswith("ranwhat-"))
@@ -85,7 +91,8 @@ def _ranwhat_temp_dirs():
 STDLIB = {"__future__", "ast", "collections", "compression", "contextlib",
           "datetime", "glob", "hashlib", "importlib", "io", "json", "ntpath",
           "os", "posixpath", "re", "shlex", "shutil", "sqlite3", "stat",
-          "subprocess", "sys", "tempfile", "threading", "time", "urllib"}
+          "subprocess", "sys", "tempfile", "threading", "time", "urllib",
+          "weakref"}
 
 
 class PackageRules(unittest.TestCase):
@@ -651,6 +658,31 @@ class Sqlite(unittest.TestCase):
         finally:
             _sqlite.close(conn, tmp)
         self.assertFalse(os.path.exists(tmp))
+
+    def test_a_reader_stopped_mid_table_lets_go_of_the_copy(self):
+        # From Python 3.11 a connection closed while a cursor is still open
+        # keeps its file open until the cursor goes, and Windows cannot
+        # remove an open file: the copy was left behind.
+        path = os.path.join(self.root, "locked.db")
+        self._db(path).close()
+        real, refused = sqlite3.connect, []
+
+        def flaky(*args, **kwargs):
+            if not refused:
+                refused.append(args[0])
+                raise sqlite3.OperationalError("database is locked")
+            return real(*args, **kwargs)
+
+        before = _open_files()
+        with mock.patch.object(_sqlite.sqlite3, "connect", side_effect=flaky):
+            conn, tmp = _sqlite.open_readonly(path)
+        self.assertTrue(tmp)
+        rows = _sqlite.iter_rows(conn, "part", ["id"])
+        cursor = conn.execute("SELECT id FROM part")
+        next(rows), next(cursor)
+        _sqlite.close(conn, tmp)
+        self.assertFalse(os.path.exists(tmp))
+        self.assertEqual(_open_files(), before)
 
     def _listing(self, folder):
         """{name: sha256} of every file in folder."""

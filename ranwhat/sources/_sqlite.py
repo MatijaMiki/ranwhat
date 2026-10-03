@@ -18,6 +18,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import weakref
 from urllib.parse import quote
 
 
@@ -54,8 +55,32 @@ def _text(raw):
     return raw.decode("utf-8", "surrogateescape")
 
 
+class _Connection(sqlite3.Connection):
+    """A connection that closes its cursors when it closes. From Python
+    3.11, a connection closed while a cursor is still open (a reader
+    stopped mid-table) keeps its file open until the cursor goes, and
+    Windows cannot remove a temp copy that is open."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cursors = weakref.WeakSet()
+
+    def cursor(self, *args, **kwargs):
+        cursor = super().cursor(*args, **kwargs)
+        self._cursors.add(cursor)
+        return cursor
+
+    def execute(self, *args):
+        return self.cursor().execute(*args)
+
+    def close(self):
+        for cursor in list(self._cursors):
+            cursor.close()
+        super().close()
+
+
 def _connect(uri):
-    conn = sqlite3.connect(uri, uri=True, timeout=5)
+    conn = sqlite3.connect(uri, uri=True, timeout=5, factory=_Connection)
     conn.text_factory = _text
     return conn
 
