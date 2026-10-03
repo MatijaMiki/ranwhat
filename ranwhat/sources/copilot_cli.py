@@ -13,7 +13,10 @@ Stores:
 - a large tool output the CLI saved to its own file, found only where a
   result says "Saved to: <path>" and only when the file's base name is
   <digits>-copilot-tool-output-<id>.txt (side, text). It is never looked
-  for anywhere else.
+  for anywhere else, and that path is looked up only when, as a string,
+  it lies inside the OS temp folder or the session-state folder holding
+  the log (a session file system saves it in session-state/temp), so a
+  result never makes ranwhat touch a network share.
 
 Never opened: session-store.db (the CLI's own index, rebuilt from
 session-state by /chronicle reindex), workspace.yaml, plan.md,
@@ -29,6 +32,7 @@ import os
 import re
 import stat
 import subprocess
+import tempfile
 
 from . import _lines, _paths, _stamps
 from .base import SecretText, Source, ToolCall, decode_input, newest_first
@@ -241,6 +245,22 @@ def side_pieces(fh):
         buf = buf[start:]
 
 
+def _inside(path, folders):
+    """`path`, absolute, made normal when it lies inside one of `folders`.
+    Else None. Compared as strings, nothing looked up: a path in a result
+    can name a network share (\\\\host\\share), and on Windows only looking
+    it up sends the user's credentials to that host. What is looked up
+    after is the normal form, the one that was checked."""
+    if not os.path.isabs(path):
+        return None
+    path = os.path.abspath(path)
+    for folder in folders:
+        root = os.path.join(os.path.normcase(os.path.abspath(folder)), "")
+        if os.path.normcase(path).startswith(root):
+            return path
+    return None
+
+
 def _regular_file(path):
     """True for a regular file that is not a symlink."""
     try:
@@ -386,8 +406,11 @@ class CopilotCliSource(Source):
     @staticmethod
     def _saved_files(path):
         """[(path, toolCallId)] for each large-output file a result in
-        this log names, when it is a regular file on disk."""
+        this log names, when it is a regular file on disk inside the OS
+        temp folder or the session-state folder holding the log."""
         found = []
+        folders = (tempfile.gettempdir(),
+                   os.path.dirname(os.path.dirname(path)))
         try:
             if not _mentions(path, SIDE_MARK):
                 return found
@@ -405,7 +428,8 @@ class CopilotCliSource(Source):
                         continue
                     data = obj["data"]
                     for side in saved_paths(_output(data)):
-                        if os.path.isabs(side) and _regular_file(side):
+                        side = _inside(side, folders)
+                        if side is not None and _regular_file(side):
                             found.append((side, _call_id(data.get("toolCallId"))))
         except OSError:
             return found

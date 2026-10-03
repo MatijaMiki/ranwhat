@@ -19,14 +19,17 @@ cut short, and the prompts the user typed:
   as droid-terminal-<6 chars>/<terminal id>.log (0600), and the result
   names it: "Full command output saved to: <path> (<size>)". stores() reads
   each transcript for those notices and follows only ones that name such a
-  file.
+  file inside the OS temp folder as ranwhat finds it, checked as a string
+  before the path is looked up, so a notice never makes it touch a network
+  share.
 - Execute with fireAndForget starts a background process whose whole
   stdout and stderr go to <OS temp folder>/droid-bg-<Date.now()>.out. The
   file outlives Droid, and the result names it on an "Output: <path>" line
   ("Background process started (PID: n)" or "... completed (...)", then
   "Command: ...", "Output: ...", "Status: ..."). stores() follows those
-  lines too, only to such a file. The process may still be writing to it,
-  and nothing verified tells whether it is, so it is read-only.
+  lines too, only to such a file, and only inside the OS temp folder. The
+  process may still be writing to it, and nothing verified tells whether
+  it is, so it is read-only.
 - Grep, LS, FetchUrl, WebSearch, Task, TaskOutput, ConnectorSearch, mcp_*
   and connectors_* results over 40,000 characters (Task and TaskOutput:
   100,000) are cut to 75% head and 25% tail with "[... truncated N
@@ -56,6 +59,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 import time
 
 from . import _lines, _paths, _stamps, base
@@ -248,15 +252,31 @@ def _plain(path, want):
     return want(st.st_mode)
 
 
+def _temp_path(path):
+    """`path`, absolute and with no "..", made normal when it lies inside
+    the OS temp folder, where Droid writes its terminal logs and background
+    outputs. Else None. Compared as strings, nothing looked up: a path in a
+    tool result can name a network share (\\\\host\\share), and on Windows
+    only looking it up sends the user's credentials to that host. What is
+    looked up after is the normal form, the one that was checked."""
+    if not os.path.isabs(path) or ".." in re.split(r"[\\/]+", path):
+        return None
+    path = os.path.abspath(path)
+    folder = os.path.join(os.path.normcase(os.path.abspath(
+        tempfile.gettempdir())), "")
+    return path if os.path.normcase(path).startswith(folder) else None
+
+
 def _terminal_log(path):
-    """`path` when it is a Droid terminal log: an absolute path to
-    droid-terminal-<chars>/<uuid>.log, the file regular and the folder a
-    real one (neither is a link). Else None.
+    """`path` when it is a Droid terminal log: an absolute path inside the
+    OS temp folder to droid-terminal-<chars>/<uuid>.log, the file regular
+    and the folder a real one (neither is a link). Else None.
 
     The notice that names it sits in a tool result, beside the command's
     own output, so its path is checked before anything is read: a line
     that only looks like the notice can point at nothing else."""
-    if not os.path.isabs(path) or ".." in re.split(r"[\\/]+", path):
+    path = _temp_path(path)
+    if path is None:
         return None
     folder, name = os.path.split(path)
     base_name = os.path.basename(folder)
@@ -303,13 +323,12 @@ def _spill_name(path, cid):
 
 def _background_output(path):
     """`path` when it is a Droid background process's output: an absolute
-    path to droid-bg-<13 digits>.out, a regular file and not a link or
-    junction. Else None. As with a terminal log, the line naming it sits
-    beside text the agent wrote (the command), so the name is checked
-    before anything is read."""
-    if not os.path.isabs(path) or ".." in re.split(r"[\\/]+", path):
-        return None
-    if not _BACKGROUND_OUT.match(os.path.basename(path)):
+    path inside the OS temp folder to droid-bg-<13 digits>.out, a regular
+    file and not a link or junction. Else None. As with a terminal log, the
+    line naming it sits beside text the agent wrote (the command), so the
+    path is checked before anything is read."""
+    path = _temp_path(path)
+    if path is None or not _BACKGROUND_OUT.match(os.path.basename(path)):
         return None
     if not _plain(path, stat.S_ISREG):
         return None
@@ -456,11 +475,12 @@ class DroidSource(Source):
     def stores(self, locations, since_days=None):
         """Every transcript, tool-output log and prompt history under the
         locations, and every terminal log and background output a
-        transcript's Execute results name (in the OS temp folder, wherever
-        Droid's was). With since_days, a transcript last written before the
-        window is not read for those: its commands' logs were written before
-        it was. A background process can outlive that, so its output, still
-        growing inside the window, is missed when its session is not."""
+        transcript's Execute results name inside the OS temp folder (Droid
+        and ranwhat both find it from TMPDIR, or TEMP and TMP on Windows).
+        With since_days, a transcript last written before the window is not
+        read for those: its commands' logs were written before it was. A
+        background process can outlive that, so its output, still growing
+        inside the window, is missed when its session is not."""
         found, seen, transcripts = [], set(), []
         # each Droid folder's tool-output logs, by name, for the notices
         # in its own transcripts to be tied to

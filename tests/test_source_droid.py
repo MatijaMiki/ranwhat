@@ -344,6 +344,21 @@ def _tempdir(case, prefix):
     return path
 
 
+@contextlib.contextmanager
+def looked_up():
+    """Every path os.stat and os.lstat are given while active."""
+    paths = []
+
+    def spy(real):
+        def look(path, *args, **kwargs):
+            paths.append(str(path))
+            return real(path, *args, **kwargs)
+        return look
+    with mock.patch("os.stat", spy(os.stat)), \
+            mock.patch("os.lstat", spy(os.lstat)):
+        yield paths
+
+
 def assert_covered(case, text, pieces):
     """The pieces are in file order, each at most _CHUNK bytes, the first
     at the start of `text` and the last at its end, and each starts at
@@ -1113,6 +1128,49 @@ class Secrets(DroidCase):
             output=execute_result("y\n" * 10000, real)),
             name="88888888-bbbb-4bbb-8bbb-000000000008", age=60)
         self.assertIn(real, [s.path for s in self.stores()])
+
+    def test_a_path_outside_the_temp_folder_is_never_looked_up(self):
+        # A notice is text a command or a fetched page can print, and on
+        # Windows looking up a network share it names (\\host\share) sends
+        # the user's credentials to that host. Droid writes these files in
+        # the OS temp folder, so a path anywhere else is not looked up.
+        secret_line = ("KEY=" + SECRET + "\n").encode("utf-8")
+        outside = _tempdir(self, "droid-outside-")
+        share = "//evil.example/share/"
+        unc = "\\\\evil.example\\share\\"
+        logs = [
+            self.write("droid-terminal-Out111/%s.log" % TERMINAL_ID, None,
+                       raw=secret_line, root=outside),
+            share + "droid-terminal-abc123/%s.log" % TERMINAL_ID,
+            unc + "droid-terminal-abc123\\%s.log" % TERMINAL_ID,
+            "\\\\?\\UNC\\evil.example\\share\\droid-terminal-abc123\\%s.log"
+            % TERMINAL_ID,
+        ]
+        outputs = [
+            self.write("droid-bg-%d.out" % BG_STAMP, None, raw=secret_line,
+                       root=outside),
+            share + "droid-bg-%d.out" % BG_STAMP,
+            unc + "droid-bg-%d.out" % BG_STAMP,
+        ]
+        real = self.terminal_log("KEY=" + SECRET + "\n")
+        lines = [header()]
+        for n, path in enumerate(logs + [real]):
+            lines += call_lines(10 + 2 * n, "toolu_%d" % n, "Execute",
+                                {"command": "make"},
+                                output=execute_result("y\n" * 10000, path))
+        for n, path in enumerate(outputs):
+            lines += call_lines(40 + 2 * n, "toolu_bg%d" % n, "Execute",
+                                {"command": "npm run dev", "fireAndForget": True},
+                                output=background_result(path))
+        transcript = self.session(lines)
+        with mock.patch.object(tempfile, "tempdir", self.tmp), \
+                looked_up() as looked:
+            stores = self.stores()
+            for store in stores:
+                list(self.droid.secret_texts(store))
+        self.assertEqual({s.path for s in stores}, {transcript, real})
+        self.assertEqual([p for p in looked
+                          if "evil.example" in p or p.startswith(outside)], [])
 
     def test_a_large_result_of_another_tool_is_in_artifacts_tool_outputs(self):
         full = ("src/a.py:1:x\n" * 3000 + "src/env.py:9:STRIPE_KEY=" + SECRET + "\n"
