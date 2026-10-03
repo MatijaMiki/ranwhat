@@ -515,6 +515,35 @@ class EveryColumnIsRead(_Case):
                           "2025-09-22T14:06:40Z"))
 
 
+class OwnLoginIsNotALeak(_Case):
+    """OpenClaw keeps its own provider credentials in the agent's database,
+    in auth_profile_store, and their order and cooldowns in
+    auth_profile_state (docs.openclaw.ai/concepts/oauth). That is its login,
+    not a secret it leaked: clean said to rotate it, and to delete a
+    session that does not hold it."""
+
+    def test_its_auth_tables_are_not_searched(self):
+        path = self.database("a1", [(_result("API_KEY=" + KEY), 1758550000)])
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE auth_profile_store "
+                     "(id TEXT PRIMARY KEY, profile TEXT)")
+        conn.execute("INSERT INTO auth_profile_store VALUES (?, ?)",
+                     ("anthropic:default", json.dumps(
+                         {"type": "api_key", "provider": "anthropic",
+                          "key": KEY2})))
+        conn.execute("CREATE TABLE auth_profile_state (id TEXT, state TEXT)")
+        conn.execute("INSERT INTO auth_profile_state VALUES (?, ?)",
+                     ("anthropic:default", "DB_PASSWORD=" + PW))
+        conn.commit()
+        conn.close()
+        store = self.src.store_at(path)
+        self.assertEqual([t.where for t in self.src.secret_texts(store)],
+                         ["log row 1, id", "log row 1, body"])
+        values = {}
+        clean.scan_store(self.src, store, values)
+        self.assertEqual(list(values.values()), [KEY])
+
+
 class StateDirAsOpenClawReadsIt(_Case):
     """OPENCLAW_STATE_DIR and --state-dir read as OpenClaw reads them: "~"
     expanded, the variable trimmed and an empty one unset, and the folder
