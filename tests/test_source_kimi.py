@@ -159,6 +159,16 @@ def sub_event(ts, task_cid, mtype, payload):
         "event": {"type": mtype, "payload": payload}})
 
 
+def split_call(cid, name, args, cut):
+    """A ToolCall the recorder flushed when only `cut` characters of its
+    arguments had streamed, and the ToolCallPart that brings the rest
+    (wire/__init__.py WireSoulSide): (call payload, part payload)."""
+    whole = json.dumps(args)
+    call = call_payload(cid, name, args)
+    call["function"]["arguments"] = whole[:cut]
+    return call, {"arguments_part": whole[cut:]}
+
+
 def _compact(obj):
     """pydantic's model_dump_json: no spaces, non-ASCII as it is."""
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
@@ -350,6 +360,33 @@ class KimiCase(unittest.TestCase):
             when = time.time() - age
             os.utime(path, (when, when))
         return ctx, wire_path, hist, rotated
+
+    def split_tree(self, inside=False, age=3600):
+        """A session whose wire.jsonl holds a Shell call the recorder wrote
+        in two pieces around a parallel call's result, with SECRET typed
+        into its command: cut in two by the pieces, or (inside) whole in
+        the second. context.jsonl holds the call whole. (context, wire)."""
+        self.kimi_json()
+        curl = {"command": "curl -H 'Authorization: Bearer %s' "
+                           "https://api.example.com/v1/me" % SECRET}
+        at = json.dumps(curl).index(SECRET)
+        shell, rest = split_call("Shell:1", "Shell", curl,
+                                 at - 3 if inside else at + 10)
+        read = {"path": "/Users/me/proj/README.md"}
+        wire_path = self.write(self.session() + "/wire.jsonl", [
+            WIRE_HEAD,
+            wire_call(1790000001.0, "ReadFile:0", "ReadFile", read),
+            wire(1790000002.0, "ToolCall", shell),
+            wire_result(1790000002.1, "ReadFile:0", "hello\n"),
+            wire(1790000002.2, "ToolCallPart", rest),
+            wire_result(1790000003.0, "Shell:1", "{}"),
+        ], age=age)
+        ctx = self.write(self.session() + "/context.jsonl", [
+            ctx_call("ReadFile:0", "ReadFile", read),
+            ctx_result("ReadFile:0", "hello\n", message=""),
+            ctx_call("Shell:1", "Shell", curl), ctx_result("Shell:1", "{}"),
+        ], age=age)
+        return ctx, wire_path
 
     # -- reading -------------------------------------------------------------
 
@@ -998,22 +1035,126 @@ class ToolCalls(KimiCase):
         self.assertEqual(_judge(patch), ([], ""))
         self.assertEqual(bash.tool_input["timeout"], 60)
 
-    def test_dedupe_by_call_but_not_by_a_reused_id(self):
-        """A second copy of a call is one call. Kimi's ids look like a count
-        within a conversation, so after /clear "Shell:0" may name another
-        call: same id, other arguments, two calls."""
-        copy = wire_call(1790000001.0, "Shell:0", "Shell", {"command": "cat .env"})
-        self.wire_session([
-            copy, copy,
-            wire_result(1790000001.5, "Shell:0", "A=1\n"),
-            wire_call(1790000009.0, "Shell:0", "Shell", {"command": "ls -la"}),
-            wire_result(1790000009.5, "Shell:0", "total 0\n"),
+    def test_a_call_again_with_an_old_id_and_arguments_is_a_new_call(self):
+        """The recorder writes each call once, and Kimi's ids count within a
+        conversation, so after /clear the same call can come back as
+        "Shell:0" with the same arguments: here rejected, then asked for
+        again and run. Each is a call of its own, with its own time and
+        result; their copies in the rotated and the new context.jsonl are
+        copies."""
+        rm = {"command": "rm -rf ~/projects/app"}
+        path = self.wire_session([
+            wire(1790000000.0, "TurnBegin", {"user_input": "delete the app"}),
+            wire_call(1790000001.0, "Shell:0", "Shell", rm),
+            wire_rejected(1790000005.0, "Shell:0"),
+            wire(1790000060.0, "TurnBegin", {"user_input": "/clear"}),
+            wire(1790000120.0, "TurnBegin", {"user_input": "ok, delete it"}),
+            wire_call(1790000121.0, "Shell:0", "Shell", rm),
+            wire_result(1790000125.0, "Shell:0", ""),
+            wire_call(1790000130.0, "Shell:1", "Shell", {"command": "ls -la"}),
+            wire_result(1790000131.0, "Shell:1", "total 0\n"),
+        ])
+        self.write(self.session() + "/context_1.jsonl", [
+            ctx_call("Shell:0", "Shell", rm), ctx_rejected("Shell:0")])
+        self.write(self.session() + "/context.jsonl", [
+            ctx_call("Shell:0", "Shell", rm), ctx_result("Shell:0", ""),
+            ctx_call("Shell:1", "Shell", {"command": "ls -la"}),
+            ctx_result("Shell:1", "total 0\n")])
+        calls = self.calls()
+        self.assertEqual([(c.store, c.tool_call_id, c.command, c.status,
+                           c.output, c.timestamp) for c in calls], [
+            (path, "Shell:0", "rm -rf ~/projects/app", "declined", "",
+             "2026-09-21T14:13:21Z"),
+            (path, "Shell:0", "rm -rf ~/projects/app", None, "",
+             "2026-09-21T14:15:21Z"),
+            (path, "Shell:1", "ls -la", None, "total 0\n",
+             "2026-09-21T14:15:30Z")])
+
+    def test_a_call_whose_arguments_came_in_pieces_is_read_whole(self):
+        """The recorder merges a ToolCall with the ToolCallPart records
+        streamed after it, but any other record flushes it first
+        (wire/__init__.py WireSoulSide): a parallel call's result, a
+        subagent's event, a status update. The call is then written with
+        only the start of its arguments, often none, and the rest follows.
+        The pieces are one call, read whole with its own time, and the
+        copy context.jsonl holds is that call."""
+        rm = {"command": "rm -rf ~/projects/app"}
+        agent = {"description": "tidy", "prompt": "remove the old build"}
+        shell, shell_rest = split_call("Shell:1", "Shell", rm, 15)
+        task, task_rest = split_call("Agent:2", "Agent", agent, 0)
+        middle = len(task_rest["arguments_part"]) // 2
+        sub_call, sub_rest = split_call("Shell:0", "Shell", {"command": "pwd"}, 5)
+        copy = {"parent_tool_call_id": "Agent:2", "agent_id": "a1b2c3",
+                "subagent_type": "coder"}
+        path = self.wire_session([
+            wire_call(1790000001.0, "ReadFile:0", "ReadFile",
+                      {"path": "/Users/me/proj/README.md"}),
+            wire(1790000002.0, "ToolCall", shell),
+            wire_result(1790000002.1, "ReadFile:0", "hello\n"),
+            wire(1790000002.2, "ToolCallPart", shell_rest),
+            wire_result(1790000003.0, "Shell:1", ""),
+            wire(1790000004.0, "ToolCall", task),
+            # from 1.25 a copy of the subagent's own wire.jsonl, pieces too
+            wire(1790000004.1, "SubagentEvent", dict(copy, event={
+                "type": "ToolCall", "payload": sub_call})),
+            wire(1790000004.2, "SubagentEvent", dict(copy, event={
+                "type": "ToolCallPart", "payload": sub_rest})),
+            wire(1790000004.3, "ToolCallPart",
+                 {"arguments_part": task_rest["arguments_part"][:middle]}),
+            wire(1790000004.4, "StatusUpdate", {"context_usage": 0.2}),
+            wire(1790000004.5, "ToolCallPart",
+                 {"arguments_part": task_rest["arguments_part"][middle:]}),
+            wire_result(1790000009.0, "Agent:2", "Removed it.", message=""),
+        ])
+        self.write(self.session() + "/context.jsonl", [
+            ctx_call("ReadFile:0", "ReadFile", {"path": "/Users/me/proj/README.md"}),
+            ctx_result("ReadFile:0", "hello\n", message=""),
+            ctx_call("Shell:1", "Shell", rm), ctx_result("Shell:1", ""),
+            ctx_call("Agent:2", "Agent", agent),
+            ctx_result("Agent:2", "Removed it.", message=""),
         ])
         calls = self.calls()
-        self.assertEqual([(c.tool_call_id, c.command, c.output, c.timestamp)
-                          for c in calls], [
-            ("Shell:0", "cat .env", "A=1\n", "2026-09-21T14:13:21Z"),
-            ("Shell:0", "ls -la", "total 0\n", "2026-09-21T14:13:29Z")])
+        self.assertEqual([(c.store, c.tool_call_id, c.tool_input, c.timestamp,
+                           c.output) for c in calls], [
+            (path, "ReadFile:0", {"path": "/Users/me/proj/README.md"},
+             "2026-09-21T14:13:21Z", "hello\n"),
+            (path, "Shell:1", rm, "2026-09-21T14:13:22Z", ""),
+            (path, "Agent:2", agent, "2026-09-21T14:13:24Z", "Removed it.")])
+        self.assertEqual(calls[1].command, "rm -rf ~/projects/app")
+        self.assertEqual([h["rule"] for h in _judge(calls[1])[0]],
+                         ["fs.destructive"])
+
+    def test_a_piece_goes_to_the_latest_call_of_its_own_agent(self):
+        """Before 1.25 a Task subagent's records reached the main wire.jsonl
+        wrapped in SubagentEvent, a piece of its call too, while the main
+        agent could still be streaming a call of its own."""
+        sub_call, sub_rest = split_call("Shell:0", "Shell",
+                                        {"command": "rm -rf ~/Documents/x"}, 10)
+        main_call, main_rest = split_call("Shell:2", "Shell",
+                                          {"command": "cat ~/.aws/credentials"}, 14)
+        task = {"description": "tidy up", "subagent_name": "coder",
+                "prompt": "remove the old docs"}
+        path = self.wire_session([
+            wire_call(1790000001.0, "Task:1", "Task", task),
+            sub_event(1790000002.0, "Task:1", "ToolCall", sub_call),
+            wire(1790000002.5, "ToolCall", main_call),
+            sub_event(1790000003.0, "Task:1", "ToolCallPart", sub_rest),
+            wire(1790000003.5, "ToolCallPart", main_rest),
+            sub_event(1790000004.0, "Task:1", "ToolResult",
+                      result_payload("Shell:0", "")),
+            wire_result(1790000005.0, "Shell:2", "[default]\n"),
+            wire_result(1790000009.0, "Task:1", "Removed the old docs.", message=""),
+        ], head=WIRE_HEAD_124)
+        self.write(self.session() + "/context_sub_1.jsonl", [
+            ctx_call("Shell:0", "Shell", {"command": "rm -rf ~/Documents/x"}),
+            ctx_result("Shell:0", "")])
+        calls = self.calls()
+        self.assertEqual(sorted((c.tool_call_id, c.command, c.timestamp)
+                                for c in calls), [
+            ("Shell:0", "rm -rf ~/Documents/x", "2026-09-21T14:13:22Z"),
+            ("Shell:2", "cat ~/.aws/credentials", "2026-09-21T14:13:22Z"),
+            ("Task:1", None, "2026-09-21T14:13:21Z")])
+        self.assertEqual({c.store for c in calls}, {path})
 
     def test_a_folder_with_both_files_reads_calls_from_wire_only(self):
         ctx, wire_path, _hist = self.spec_tree()
@@ -1141,6 +1282,26 @@ class Secrets(KimiCase):
         # the call's arguments are decoded for clean; the record is not changed
         args = texts[2].node["message"]["payload"]["function"]["arguments"]
         self.assertEqual(args, {"command": "cat .env"})
+
+    def test_a_value_cut_in_two_by_the_pieces_of_a_call_is_found(self):
+        """Neither piece of a call the recorder wrote in two holds the whole
+        value, so the call is given once more when it is whole, at its
+        result, with no call of its own (what was typed has no origin)."""
+        ctx, wire_path = self.split_tree()
+        texts = list(self.src.secret_texts(self.store(wire_path)))
+        self.assertEqual([t.where for t in texts],
+                         ["line 1", "line 2", "line 3", "line 4", "line 5",
+                          "lines 3-5", "line 6"])
+        self.assertIsNone(texts[5].call)
+        self.assertEqual(texts[6].call.command,
+                         "curl -H 'Authorization: Bearer %s' "
+                         "https://api.example.com/v1/me" % SECRET)
+        self.assertNotIn(SECRET, json.dumps(texts[2].node))
+        self.assertNotIn(SECRET, json.dumps(texts[4].node))
+        self.assertIn(SECRET, texts[5].node["function"]["arguments"]["command"])
+        found = _scan(self.src, self.stores())
+        self.assertEqual(found[SECRET]["files"], {ctx, wire_path})
+        self.assertEqual(found[SECRET]["origins"], set())
 
     def test_system_prompt_and_prompt_history_are_searched(self):
         self.kimi_json()
@@ -1370,6 +1531,35 @@ class Masking(KimiCase):
         os.unlink(os.path.join(os.path.dirname(log), "runtime.json"))
         self.assertFalse(self.src.in_use(self.store(log)))
 
+    def test_a_value_cut_in_two_by_the_pieces_of_a_call_is_not_masked_there(self):
+        """Raw replacement cannot reach a value cut in two by the pieces of
+        a call, so that wire.jsonl is refused as a file whose masking would
+        change more than the secret, and clean names it as not masked. The
+        whole copy in context.jsonl is masked."""
+        ctx, wire_path = self.split_tree()
+        before = self._read(wire_path)
+        result = self.src.mask(self.store(wire_path), [SECRET])
+        self.assertEqual(result, MaskResult(
+            wire_path, skipped="would alter more than the secret"))
+        self.assertEqual(self._read(wire_path), before)
+        self.assertEqual(self._backups(), [])
+        result = self.src.mask(self.store(ctx), [SECRET])
+        self.assertEqual((result.changed, result.skipped), (True, None))
+        found = _scan(self.src, self.stores())
+        self.assertEqual(found[SECRET]["files"], {wire_path})
+
+    def test_a_value_whole_in_one_piece_is_masked(self):
+        ctx, wire_path = self.split_tree(inside=True)
+        for path in (wire_path, ctx):
+            result = self.src.mask(self.store(path), [SECRET])
+            self.assertEqual((result.changed, result.skipped), (True, None))
+        text = self._read(wire_path).decode("utf-8")
+        self.assertNotIn(SECRET, text)
+        self.assertIn(_marker(SECRET), text)
+        [shell] = [c for c in self.calls(wire_path) if c.tool_call_id == "Shell:1"]
+        self.assertEqual(shell.command, "curl -H 'Authorization: Bearer %s' "
+                         "https://api.example.com/v1/me" % _marker(SECRET))
+
     def test_a_file_written_in_the_last_two_minutes_is_in_use(self):
         _ctx, wire_path, _hist = self.spec_tree(age=5)
         before = self._read(wire_path)
@@ -1530,9 +1720,10 @@ def call(root):
 """
 
 
-class LargeFile(KimiCase):
+class LargeFile(growth.Assertions, KimiCase):
 
     CALLS = 20000
+    PIECES = 20000
 
     def share(self, n):
         """A share directory whose one session ran n(CALLS) commands."""
@@ -1578,6 +1769,38 @@ class LargeFile(KimiCase):
         self.assertGreater(size, 30 * 1024 * 1024)
         growth.assert_linear(self, measured, "a %d MB wire file" % (size // 10 ** 6))
         self.assertEqual(measured.result, [self.CALLS, 4 * self.CALLS + 1])
+
+    def pieces(self, n):
+        """A share directory whose one session holds a Shell call written in
+        n(PIECES) pieces, a status update flushing the call before each."""
+        root = tempfile.mkdtemp(prefix="pieces-share-", dir=self.tmp)
+        folder = os.path.join(root, "sessions", "0" * 32, "pieces")
+        os.makedirs(folder)
+        count = n(self.PIECES)
+        command = {"command": "echo " + "x" * 59 * count}
+        args = json.dumps(command)
+        size = len(args) // count + 1
+        call, _rest = split_call("Shell:0", "Shell", command, size)
+        with open(os.path.join(folder, "wire.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(WIRE_HEAD + "\n" + wire(1790000000.0, "ToolCall", call) + "\n")
+            for at in range(size, len(args), size):
+                fh.write(wire(1790000000.1, "StatusUpdate", {"context_usage": 0.1})
+                         + "\n" + wire(1790000000.2, "ToolCallPart", {
+                             "arguments_part": args[at:at + size]}) + "\n")
+            fh.write(wire_result(1790000001.0, "Shell:0", "") + "\n")
+        return root
+
+    def test_a_call_in_many_pieces_is_read_in_linear_time(self):
+        def read(root):
+            src = kimi.KimiSource()
+            [store] = src.stores(src.locations(override=root))
+            [shell] = src.tool_calls(store)
+            texts = sum(1 for _ in src.secret_texts(store))
+            masked = src.mask(store, [SECRET])
+            return len(shell.command), texts, masked.changed
+        length, _texts, changed = self.assertScalesLinearly(
+            self.pieces, read, "a call in %d pieces" % self.PIECES)
+        self.assertEqual((length, changed), (5 + 59 * self.PIECES, False))
 
 
 if __name__ == "__main__":

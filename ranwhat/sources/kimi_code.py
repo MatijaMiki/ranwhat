@@ -40,7 +40,11 @@ at record.message, so the message is record.message.message. A message's
 toolCalls (arguments a JSON string, or null) are read only for an id no
 tool.call event carries; sessions migrated from the Python Kimi CLI
 (protocol 1.0) have nothing else, in the shape {type, id, function: {name,
-arguments}}, with their outputs in tool messages. A command the user typed
+arguments}}, with their outputs in tool messages. Kimi Code writes a
+call's tool.call event when it dispatches the call, so one it never
+dispatched, a turn interrupted while the call waited for approval, is only
+in a message too: its result is the note Kimi Code fills in for an
+interrupted or aborted call, and it is declined. A command the user typed
 in shell mode is a user message wrapped in <bash-input>, and its output is
 the next shell message. A call whose approval the user rejected or
 cancelled is recorded too, but never ran. Undo, compaction and branch
@@ -48,8 +52,7 @@ switches are recorded in the same file; calls on abandoned branches still
 ran and are reported.
 
 A tool call id is not unique within a file: after a clear, an undo or a
-compaction and a resume, a new call can carry an old call's id (see
-_collect).
+compaction, a new call can carry an old call's id (see _collect).
 """
 
 from __future__ import annotations
@@ -144,6 +147,20 @@ _ENGINE_EVENTS = frozenset((
 # An approval answered with one of these vetoes the call: Kimi Code still
 # records it, with a result saying it was not run.
 _NOT_RUN = frozenset(("rejected", "cancelled"))
+
+# After one of these, the next turn can give a new call an old call's id:
+# each turn seeds its ids from the context as it is then (human/agent/
+# turn.ts, human/llm/toolCallIdNormalizer.ts), and these take calls out.
+_RESETS = frozenset(("context.clear", "context.undo",
+                     "context.apply_compaction"))
+
+# The result Kimi Code fills in for a call a turn was interrupted or
+# aborted before (agent/toolExecutor/toolExecutorService.ts
+# abortedToolOutput), by the call's tool name: the start of the first, all
+# of the second.
+_INTERRUPTED = ('The user manually interrupted "%s" (and anything else '
+                'running at the same time).')
+_ABORTED = 'Tool "%s" was aborted'
 
 # Shell mode: what the user typed, XML-escaped (& < > ") inside this
 # wrapper, recorded as a user message.
@@ -279,6 +296,16 @@ def _same(a, b):
         return a.tool_name == b.tool_name and a.tool_input == b.tool_input
     except RecursionError:
         return False
+
+
+def _never_dispatched(call):
+    """True when a call only a message holds has for its result the note
+    Kimi Code fills in for a call interrupted or aborted before it ran
+    (loopService.ts backfillAbortedToolResults): it never got a tool.call
+    event, so it was never dispatched."""
+    text, name = call.output, call.tool_name
+    return isinstance(text, str) and (text.startswith(_INTERRUPTED % name)
+                                      or text == _ABORTED % name)
 
 
 def _no_call_type(kind):
@@ -620,22 +647,25 @@ class KimiCodeSource(Source):
         line, index) or ("shell", line): unique even when ids are not.
 
         A toolCallId is not unique within a file. Kimi Code keeps a
-        provider's id unless its own process has already seen it, and seeds
-        that set once, from the current context
-        (human/llm/toolCallIdNormalizer.ts, llmRequesterService.ts); Kimi
-        K2 numbers its ids functions.<name>:<n> over the conversation it
-        sees. After a clear, an undo or a compaction and then a resume, a
-        new call can carry an old call's id. So:
+        provider's id unless it has already seen it, and each turn seeds
+        what it has seen from the context as it is then
+        (human/agent/turn.ts, human/llm/toolCallIdNormalizer.ts); Kimi K2
+        numbers its ids functions.<name>:<n> over the conversation it sees.
+        After a clear, an undo or a compaction (_RESETS), a new call can
+        carry an old call's id, and the same name and args. So:
 
         - a tool.call event is the call an earlier event with its id made,
-          recorded again, only when its name and args are that call's;
-          otherwise it is a new call, and both are reported;
+          recorded again, only when its name and args are that call's and
+          no reset came between them; otherwise it is a new call, and both
+          are reported;
         - a call in a message is a copy when an event has carried its id
           (the event wins, whatever the message's arguments say) or when
           the latest call with its id came from a message and has the same
           name and arguments; otherwise it is a call of its own. An event
           replaces a message's call with its id while that call has no
-          output yet;
+          output yet and no reset came between them. A call only a message
+          holds whose result is Kimi Code's note that it was interrupted
+          or aborted was never dispatched, so never ran: it is declined;
         - a tool.result or a tool message belongs to the latest call before
           it with its id; a call's output is the first it gets;
         - an approval answer is recorded just before the tool.call event of
@@ -643,10 +673,10 @@ class KimiCodeSource(Source):
           (toolApproval/toolApprovalService.ts records it in the
           before-execute hook, then toolExecutor/toolExecutorService.ts
           dispatches the call), so it is held for the next tool.call event
-          with its id. One still held at the end goes to the latest call
-          with its id when only a message made that call (an id no event
-          carries); otherwise it gated a call that was never dispatched,
-          and is dropped.
+          with its id. One still held at a reset or at the end goes to the
+          latest call with its id when only a message made that call (an id
+          no event carries); otherwise it gated a call that was never
+          dispatched, and is dropped.
 
         Raises OSError when the file cannot be opened."""
         first = _key(store.path) not in self._counted
@@ -659,6 +689,8 @@ class KimiCodeSource(Source):
         answered = set()    # keys a tool.result or tool message has named
         decisions = {}      # key -> every approval decision for it
         held = {}           # toolCallId -> decisions no call has taken yet
+        resets = 0          # _RESETS records so far
+        made = {}           # key -> resets before its call was made
         owner_keys = {}     # line number -> key of the call it answers
         owners = {}         # line number -> the call whose output it holds
         shell = None        # the last shell-mode command, until its output
@@ -668,6 +700,15 @@ class KimiCodeSource(Source):
         def unknown():
             if first:
                 self.count("unknown")
+
+        def settle():
+            """Give each answer still held to the call only a message made
+            with its id; the rest gated calls never dispatched."""
+            for cid, said in held.items():
+                key = latest.get(cid)
+                if key is not None and cid not in by_event:
+                    decisions.setdefault(key, set()).update(said)
+            held.clear()
 
         def answer(cid, line_no):
             """The key of the call a result line for `cid` answers."""
@@ -695,15 +736,18 @@ class KimiCodeSource(Source):
                         calls[("event", line_no)] = call
                         continue
                     key = by_event.get(cid)
-                    if key is None or not _same(calls[key], call):
+                    if key is None or made[key] != resets \
+                            or not _same(calls[key], call):
                         prior = latest.get(cid)
                         if key is None and prior is not None \
-                                and prior not in answered:
+                                and prior not in answered \
+                                and made[prior] == resets:
                             # an event wins over a message's copy of the
                             # same call
                             del calls[prior]
                         key = ("event", line_no)
                         calls[key] = call
+                        made[key] = resets
                         by_event[cid] = latest[cid] = key
                     # else: the same call recorded again
                     for said in held.pop(cid, ()):
@@ -758,6 +802,7 @@ class KimiCodeSource(Source):
                         continue            # another copy of that message
                     key = ("message", line_no, index)
                     calls[key] = call
+                    made[key] = resets
                     latest[cid] = key
                 key = answer(_id(message.get("toolCallId")), line_no)
                 if key is not None and key not in replies:
@@ -771,6 +816,9 @@ class KimiCodeSource(Source):
                     said = result.get("decision")
                     held.setdefault(cid, []).append(
                         said if isinstance(said, str) else None)
+            elif kind in _RESETS:
+                resets += 1
+                settle()
             elif kind is not None and _no_call_type(kind):
                 continue
             else:
@@ -779,10 +827,7 @@ class KimiCodeSource(Source):
             self.count("unparsed", skipped.get("unparsed", 0))
         if not parsed and skipped.get("unparsed"):
             self._unreadable(store, "not JSON lines")
-        for cid, said in held.items():
-            key = latest.get(cid)
-            if key is not None and cid not in by_event:
-                decisions.setdefault(key, set()).update(said)
+        settle()
         for key, call in calls.items():
             if key in outputs:
                 call.output = outputs[key]
@@ -791,7 +836,8 @@ class KimiCodeSource(Source):
             # Declined only when every answer to its approval said no: a
             # call approved even once may have run.
             said = decisions.get(key)
-            if said and said <= _NOT_RUN:
+            if (said and said <= _NOT_RUN) or (
+                    key[0] == "message" and _never_dispatched(call)):
                 call.status = "declined"
         for line_no, key in owner_keys.items():
             if key in calls:
