@@ -406,12 +406,14 @@ class _Pieces(object):
     agent's next call, or the end of the file. `scope` names the agent:
     None for the main one, else a subagent's agent_id or its Task call's
     id. Each call is a copy of its record, whose arguments are joined from
-    their pieces once, when it is whole."""
+    their pieces once, when it is whole. `line` is what the call's own line
+    is searched as, kept for when the call turns out to be in one piece."""
 
     def __init__(self):
-        self.latest = {}    # scope -> [first line, last line, record, pieces]
+        # scope -> [first line, last line, record, pieces, line]
+        self.latest = {}
 
-    def call(self, scope, payload, line_no=None):
+    def call(self, scope, payload, line_no=None, line=None):
         """(The copy of a ToolCall's payload that its pieces will add to;
         the agent's call before it, now whole, as close() gives it.)"""
         before = self.close(scope)
@@ -420,25 +422,27 @@ class _Pieces(object):
         args = fn.get("arguments") if isinstance(fn, dict) else None
         if isinstance(fn, dict) and (args is None or isinstance(args, str)):
             record["function"] = dict(fn)
-            self.latest[scope] = [line_no, line_no, record, [args or ""]]
+            self.latest[scope] = [line_no, line_no, record, [args or ""], line]
         return record, before
 
     def part(self, scope, payload, line_no=None):
-        """Add a ToolCallPart's arguments_part to the agent's latest call."""
+        """Add a ToolCallPart's arguments_part to the agent's latest call.
+        True when it did."""
         entry = self.latest.get(scope)
         piece = payload.get("arguments_part")
-        if entry is not None and isinstance(piece, str) and piece:
-            entry[1] = line_no
-            entry[3].append(piece)
+        if entry is None or not isinstance(piece, str) or not piece:
+            return False
+        entry[1] = line_no
+        entry[3].append(piece)
+        return True
 
     def close(self, scope):
-        """The agent's latest call, whole, which nothing adds to any more,
-        as [first line, last line, record, pieces] when it came in pieces;
-        else None."""
+        """The agent's latest call, which nothing adds to any more, as
+        [first line, last line, record, pieces, line], its arguments
+        joined when it came in pieces; None when there is none."""
         entry = self.latest.pop(scope, None)
-        if entry is None or len(entry[3]) == 1:
-            return None
-        entry[2]["function"]["arguments"] = "".join(entry[3])
+        if entry is not None and len(entry[3]) > 1:
+            entry[2]["function"]["arguments"] = "".join(entry[3])
         return entry
 
     def answered(self, scope, cid):
@@ -450,10 +454,8 @@ class _Pieces(object):
         return self.close(scope)
 
     def rest(self):
-        """Each agent's latest call that came in pieces, at the end, whole
-        (see close)."""
-        return [entry for entry in map(self.close, list(self.latest))
-                if entry is not None]
+        """Each agent's latest call, at the end (see close)."""
+        return [self.close(scope) for scope in list(self.latest)]
 
 
 def _scope_event(obj):
@@ -749,7 +751,7 @@ class KimiSource(Source):
     def _whole(self, store, pending, entry):
         """Read again, from its whole arguments, a call that came in pieces
         (`entry`, see _Pieces.close) while it waits for its result."""
-        record = entry[2] if entry is not None else None
+        record = entry[2] if entry is not None and len(entry[3]) > 1 else None
         cid = _id(record.get("id")) if record is not None else None
         if cid is not None and pending.records.get(cid) is record:
             old = pending.calls[cid]
@@ -851,8 +853,9 @@ class KimiSource(Source):
         """Every line of the store, the system prompt and rotated contexts
         included. A ToolResult or tool message carries the call it answers;
         a call's own line carries none (what was typed has no origin). A
-        call a wire.jsonl holds in pieces (see _Pieces) is given once more
-        when it is whole, so a value cut in two by them is found.
+        call a wire.jsonl holds in pieces (see _Pieces) is given whole, in
+        place of the lines of its pieces, so a value cut in two by them is
+        found, and found once, not also its start as a value of its own.
         A line that is not JSON is searched as text. A plain text store
         (output.log, prompt.txt, output) is searched in pieces of whole
         lines; a background task's output.log carries the Shell call its
@@ -894,14 +897,16 @@ class KimiSource(Source):
                     yield SecretText(text, where=where)
                     continue
                 answered = None
+                node = _readable(obj) if '"arguments"' in text else obj
                 if shape == "wire":
-                    answered, whole = self._wire_answers(store, obj, calls,
-                                                         pieces, line_no)
+                    answered, whole, held = self._wire_answers(
+                        store, obj, calls, pieces, line_no, node)
                     if whole is not None:
                         yield _whole_text(whole)
+                    if held:
+                        continue
                 elif shape == "context":
                     answered = self._context_answers(store, obj, calls)
-                node = _readable(obj) if '"arguments"' in text else obj
                 yield SecretText(node, call=answered, where=where)
             for whole in pieces.rest():
                 yield _whole_text(whole)
@@ -925,29 +930,30 @@ class KimiSource(Source):
                         tool_call_id=_id(spec.get("tool_call_id")),
                         command=command, consumed=("command",))
 
-    def _wire_answers(self, store, obj, calls, pieces, line_no):
+    def _wire_answers(self, store, obj, calls, pieces, line_no, node):
         """(The call a wire line's result answers, or None; a call this
-        line makes whole that came in pieces, as _Pieces.close gives it,
-        or None.) A subagent's call and result are matched within that
-        subagent. `calls` holds each call's record, by scope and id, until
-        its result."""
+        line makes whole, as _Pieces.close gives it, or None; whether the
+        line, `node` as it is searched, is held to be given with its call
+        when that is whole.) A subagent's call and result are matched
+        within that subagent. `calls` holds each call's record, by scope
+        and id, until its result."""
         scope, mtype, payload = _scope_event(obj)
         if mtype == "ToolCall":
-            record, before = pieces.call(scope, payload, line_no)
+            record, before = pieces.call(scope, payload, line_no, node)
             cid = _id(record.get("id"))
             if cid is not None:
                 calls[(scope, cid)] = record
-            return None, before
+            return None, before, scope in pieces.latest
         if mtype == "ToolCallPart":
-            pieces.part(scope, payload, line_no)
-        elif mtype == "ToolResult":
+            return None, None, pieces.part(scope, payload, line_no)
+        if mtype == "ToolResult":
             cid = _id(payload.get("tool_call_id"))
             whole = pieces.answered(scope, cid)
             record = calls.pop((scope, cid), None)
             if record is not None:
-                return self._call(store, record, count=False), whole
-            return None, whole
-        return None, None
+                return self._call(store, record, count=False), whole, False
+            return None, whole, False
+        return None, None, False
 
     def _context_answers(self, store, obj, calls):
         role = obj.get("role") if isinstance(obj, dict) else None
@@ -991,8 +997,11 @@ class KimiSource(Source):
 
 
 def _whole_text(entry):
-    """A call that came in pieces, as one SecretText of its whole record."""
-    first, last, record, _pieces = entry
+    """A call held by _Pieces, as one SecretText: its own line when it came
+    in one piece, else its whole record."""
+    first, last, record, pieces, line = entry
+    if len(pieces) == 1:
+        return SecretText(line, where="line %d" % first)
     return SecretText(_readable(record), where="lines %d-%d" % (first, last))
 
 
@@ -1028,6 +1037,8 @@ def _cut_in_pieces(path, values):
 def _crosses(pieces, forms):
     """True when one of `forms` in the joined `pieces` starts in one piece
     and ends in another."""
+    if len(pieces) < 2:
+        return False
     whole = "".join(pieces)
     ends, at = [], 0
     for piece in pieces[:-1]:
