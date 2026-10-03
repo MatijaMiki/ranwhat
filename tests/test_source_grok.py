@@ -1226,6 +1226,50 @@ class SideCopies(_Home):
         self.assertEqual(text.call.tool_name, "run_terminal_cmd")
         self.assertEqual(origin_of(text), ".env")
 
+    def test_copies_of_the_history_beside_the_transcript_are_searched_and_masked(self):
+        """The compacted history a rewind restores, the whole history sent
+        for a compaction or a recap (pretty-printed JSON, notification.rs),
+        and an MCP output saved whole for being over the limit
+        (mcp_truncate.rs) each hold tool output: a second clean must not
+        find the key still there."""
+        result = {"type": "tool_result", "tool_call_id": "c1",
+                  "content": "API_KEY=%s\n" % SECRET}
+        history = [{"type": "assistant", "content": "", "tool_calls": [{
+            "id": "c1", "name": "run_terminal_cmd",
+            "arguments": "{\"command\":\"cat .env\"}"}]}, result]
+        mcp_key = "sk_" "live_" "McpDumpR2mT6yLp4WcN0sXe7"
+        copies = {
+            "compaction_checkpoints/ck1.json": {
+                "checkpoint_id": "ck1", "prompt_index_at_compaction": 3,
+                "compacted_history": history, "schema_version": 2,
+                "created_at": "2026-09-01T10:00:00Z", "reread_file_paths": [".env"]},
+            "compaction_requests/rq1.json": {
+                "schema_version": 2, "request_id": "rq1", "trigger": "auto",
+                "chat_history": history, "summary": "ran cat .env"},
+            "recap_requests/rc1.json": {
+                "schema_version": 1, "request_id": "rc1", "trigger": "manual",
+                "chat_history": history, "summary": None},
+        }
+        extra = {name: json.dumps(doc, indent=2) for name, doc in copies.items()}
+        extra["mcp/call_7.txt"] = "rows\nSTRIPE_KEY=%s\n" % mcp_key
+        extra["mcp/call_8.json"] = json.dumps({"env": {"STRIPE_KEY": mcp_key}})
+        extra["mcp/notes.md"] = "STRIPE_KEY=%s\n" % mcp_key
+        folder = self.session(updates=shell_lines("c1", "ls", 1790000100), extra=extra)
+        got = sorted((os.path.relpath(s.path, folder), s.format, s.role)
+                     for s in self.stores() if os.path.dirname(s.path) != folder)
+        self.assertEqual(got, sorted([
+            (os.path.join(*name.split("/")), fmt, "side") for name, fmt in (
+                ("compaction_checkpoints/ck1.json", "json"),
+                ("compaction_requests/rq1.json", "json"),
+                ("recap_requests/rc1.json", "json"),
+                ("mcp/call_7.txt", "text"), ("mcp/call_8.json", "json"))]))
+        self.assertEqual(set(secrets(self.src, self.stores())), {SECRET, mcp_key})
+        for store in self.stores():
+            if os.path.dirname(store.path) != folder:
+                self.assertTrue(self.src.mask(store, [SECRET, mcp_key]).changed,
+                                store.path)
+        self.assertEqual(secrets(self.src, self.stores()), {})
+
     def test_a_key_in_a_compaction_record_has_no_origin(self):
         segment = ("# HISTORICAL -- DO NOT EDIT\n\n[tool_request: run_terminal_cmd]\n"
                    "- command: cat .env\n[tool_response]\nAPI_KEY=%s\n" % SECRET)

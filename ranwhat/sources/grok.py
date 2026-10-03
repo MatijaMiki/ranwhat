@@ -15,13 +15,20 @@ Windows). In each sessions/<encoded cwd>/<session uuid>/ folder:
     compaction/segment_NNN.md, compaction/INDEX.md
                             side: the turns a compaction dropped, tool
                             output included, as Markdown
+    compaction_checkpoints/<id>.json, compaction_requests/<id>.json,
+    recap_requests/<id>.json
+                            side: copies of the conversation, tool output
+                            included
+    mcp/<id>.json, mcp/<id>.txt
+                            side: an MCP output saved whole for being over
+                            the limit
 
 Subagent and worktree child sessions sit in the same tree. The <encoded
 cwd> folder name is never decoded (it can be a slug plus a hash): the
 working directory is summary.json's info.cwd.
 
 Nothing else is opened: not config.toml, not logs/, not any other session
-file (plan.json, rewind_points.jsonl, compaction_checkpoints/, ...). The
+file (plan.json, rewind_points.jsonl, subagents/, ...). The
 community grok-cli keeps grok.db in the same ~/.grok; this adapter tells
 the two apart by file, so grok.db alone is zero stores here.
 
@@ -78,6 +85,14 @@ COMPACTION = "compaction"
 COMPACTION_INDEX = "INDEX.md"
 SEGMENT_PREFIX = "segment_"
 SEGMENT_SUFFIX = ".md"
+
+# Copies of the conversation, tool output included, each <id>.json written
+# once and pretty-printed (notification.rs): the compacted history a rewind
+# restores, and the whole history sent for a compaction or a recap.
+HISTORY_COPIES = ("compaction_checkpoints", "compaction_requests", "recap_requests")
+# An MCP output over the limit, saved whole as mcp/<call id>.json when it
+# is JSON, else .txt (mcp_truncate.rs).
+MCP = "mcp"
 
 # Both are written: the standard ACP method and xAI's extension. Old
 # sessions also hold lines with no envelope, the notification itself
@@ -248,6 +263,14 @@ def _is_compaction(name):
         return False
     number = name[len(SEGMENT_PREFIX):-len(SEGMENT_SUFFIX)]
     return number.isdigit() and number.isascii()
+
+
+def _is_json(name):
+    return name.endswith(".json") and len(name) > len(".json")
+
+
+def _is_mcp_dump(name):
+    return _is_json(name) or (name.endswith(".txt") and len(name) > len(".txt"))
 
 
 def _log_call_id(path):
@@ -541,6 +564,14 @@ class GrokBuildSource(Source):
         for path in _files(os.path.join(session_dir, COMPACTION), _is_compaction):
             out.append(self.store(path, "text", role="side",
                                   unit="compaction record", **fields))
+        for folder in HISTORY_COPIES:
+            for path in _files(os.path.join(session_dir, folder), _is_json):
+                out.append(self.store(path, "json", role="side",
+                                      unit="history copy", **fields))
+        for path in _files(os.path.join(session_dir, MCP), _is_mcp_dump):
+            kind = "json" if path.endswith(".json") else "text"
+            out.append(self.store(path, kind, role="side", unit="tool output",
+                                  **fields))
         return [s for s in out if s is not None]
 
     # -- tool calls ----------------------------------------------------------
@@ -738,8 +769,9 @@ class GrokBuildSource(Source):
     # -- clean ---------------------------------------------------------------
 
     def secret_texts(self, store):
-        """Every line of updates.jsonl and chat_history.jsonl, the whole
-        summary.json, and every terminal log and compaction record. A call's
+        """Every line of updates.jsonl and chat_history.jsonl, the whole of
+        summary.json and of each history copy and saved MCP output, and every
+        terminal log and compaction record. A call's
         output (rawOutput and content; a tool_result; its terminal log)
         carries that call, so clean can credit the file it was read from. A
         Bash output byte array is given as its decoded text."""
@@ -747,8 +779,8 @@ class GrokBuildSource(Source):
         try:
             if store.format == "text":
                 texts = self._plain_texts(store)
-            elif base_name == SUMMARY:
-                texts = self._summary_texts(store)
+            elif store.format == "json":
+                texts = self._json_texts(store)
             elif base_name in (UPDATES, CHAT_HISTORY):
                 calls, _background = self._assemble(store)
                 if base_name == UPDATES:
@@ -762,7 +794,7 @@ class GrokBuildSource(Source):
         except Exception as e:      # one store must not stop the others
             self._cannot_read(store, str(e) or type(e).__name__)
 
-    def _summary_texts(self, store):
+    def _json_texts(self, store):
         with open(store.path, "rb") as fh:
             raw = fh.read()
         try:
@@ -770,7 +802,7 @@ class GrokBuildSource(Source):
         except (ValueError, RecursionError):
             self._cannot_read(store, "not JSON")
             return
-        yield SecretText(doc, where=SUMMARY)
+        yield SecretText(doc, where=os.path.basename(store.path))
 
     def _plain_texts(self, store):
         """A terminal log, credited to the call whose output it is, or a
