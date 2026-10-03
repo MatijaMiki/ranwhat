@@ -190,6 +190,15 @@ def read_words(counts, others=None):
     return "Read " + said if said else None
 
 
+def all_read(selected=None):
+    """Whether this run read all it found of each chosen agent: no store,
+    line or call counted as unreadable, and no note on what was not."""
+    return not notes(selected) and not any(
+        source.counts.get(counter)
+        for source in chosen(selected)
+        for counter in ("unparsed", "unreadable_stores", "unreadable_calls"))
+
+
 def notes(selected=None, locations=None):
     """Sentences on what this run could not read of each agent's history,
     agent by agent: the files it could not read and why (each adapter

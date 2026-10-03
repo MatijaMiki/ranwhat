@@ -737,7 +737,7 @@ class NothingToRead(_Base):
 
     ROOT = "/nonexistent/ranwhat-root"
     NOWHERE = ["--root", ROOT, "--state-dir", "/nonexistent/ranwhat-state"]
-    CLEAR = ("Nothing flagged", "Every tool call was read", "No secrets found")
+    CLEAR = ("Nothing flagged", "Every call was read", "No secrets found")
 
     def assertNotAllClear(self, text):
         for line in self.CLEAR:

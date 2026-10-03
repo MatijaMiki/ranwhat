@@ -715,6 +715,46 @@ class Reports(_Cli):
                     self.assertNotIn("—", out + err)
 
 
+class AllReadOnlyWhenItWas(_Cli):
+    """With nothing flagged, check's watch section said every tool call
+    was read when a store could not be, and watch said it above the note
+    saying so. The sentence was also wider than 46 columns."""
+
+    ALL_READ = "Every call was read; none tripped a rule."
+    NOT_ALL = "some could not be read"
+
+    def nothing_flagged(self, garbage):
+        agent = af.AGENTS[0]
+        root = self.agent_root(agent)
+        agent.write(root, [("c1", "shell", "ls", "a.txt\n", self.now)])
+        if garbage:
+            agent.garbage(root)
+        return self.only(agent, root)
+
+    def test_a_store_not_read_withholds_the_claim(self):
+        flags = self.nothing_flagged(garbage=True)
+        for width in WIDTHS:
+            for argv in (["watch"], ["check"]):
+                with self.subTest(width=width, argv=argv), \
+                        mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                    rc, out, err = self.run_cli(*(argv + flags))
+                    self.assertIn("Nothing flagged", out)
+                    self.assertNotIn(self.ALL_READ, out)
+                    self.assertIn(self.NOT_ALL, " ".join(out.split()))
+                    self.assertFits(out, int(width))
+
+    def test_everything_read_says_so_in_one_line(self):
+        flags = self.nothing_flagged(garbage=False)
+        for width in WIDTHS:
+            for argv in (["watch"], ["check"]):
+                with self.subTest(width=width, argv=argv), \
+                        mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                    rc, out, err = self.run_cli(*(argv + flags))
+                    self.assertIn("  " + self.ALL_READ + "\n", out)
+                    self.assertNotIn(self.NOT_ALL, out)
+                    self.assertFits(out, int(width))
+
+
 class Progress(_Cli):
     """One count for every agent's files together, in each pass."""
 

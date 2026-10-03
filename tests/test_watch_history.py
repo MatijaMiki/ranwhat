@@ -222,7 +222,7 @@ class NothingToReadIsNotAnAllClear(_Width):
 
     def assertNotAllClear(self, text):
         self.assertNotIn("Nothing flagged", text)
-        self.assertNotIn("Every tool call was read", text)
+        self.assertNotIn("Every call was read", text)
 
     def test_no_transcripts_says_so_and_where_it_looked(self):
         text = plain(watch.render([], 0, 30,

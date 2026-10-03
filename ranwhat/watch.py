@@ -2369,9 +2369,12 @@ TITLE = ("  ranwhat watch  ", "· local agent flight recorder")
 
 
 def render(records, scanned, days, footer=True, locations=None, notes=None,
-           title=TITLE):
+           title=TITLE, complete=True):
     """`footer=False` is for check, which prints one footer for all sections.
     It gates only the closing rule and footer line, never a finding.
+
+    `complete` is False when a store, line or call went unread this run
+    (agents.all_read): then nothing flagged is not said to be everything.
 
     `title` is the header, (name, what it is): check gives its own when
     this is all it prints above its tail, with nothing read. A header too
@@ -2415,8 +2418,11 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
         L += _nothing_read(days, locations, width)
         return "\n".join(L)
     if not records:
-        L += ["  " + GRN("Nothing flagged."),
-              DIM("  Every tool call was read, none tripped a rule."), ""]
+        said = ("Every call was read; none tripped a rule." if complete else
+                "No call that was read tripped a rule, but some could not be "
+                "read.")
+        L += ["  " + GRN("Nothing flagged.")]
+        L += [DIM(line) for line in term.wrap(said, limit=width)] + [""]
         if notes:
             L += notes + [""]
         return "\n".join(L)

@@ -697,7 +697,9 @@ def _check(args):
     print(watch_mod.render(records, counts, args.days, footer=False,
                            locations=places,
                            title=_CHECK_TITLE if places is not None
-                           else watch_mod.TITLE).rstrip("\n"))
+                           else watch_mod.TITLE,
+                           complete=agents_mod.all_read(args.sources)
+                           ).rstrip("\n"))
     if scanned:
         print(clean_mod.render(findings, searched.counts, [], False, footer=False,
                                advice=False, others=searched.others,
@@ -1404,7 +1406,8 @@ def _main(argv=None):
             print(_json_text(records))
             return _said_nothing_read(places, args.days)
         print(watch_mod.render(records, counts, args.days, locations=places,
-                               notes=_notes(args)))
+                               notes=_notes(args),
+                               complete=agents_mod.all_read(args.sources)))
         return 2 if places is not None else 0
 
     if args.command == "demo":
