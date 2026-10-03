@@ -1146,6 +1146,121 @@ class Robustness(CopilotCase):
 
 
 # --------------------------------------------------------------------------
+# JSON nested deeper than Python recurses
+# --------------------------------------------------------------------------
+
+# Stands in for deeply nested JSON in a fixture, and is replaced by it in
+# the bytes written: building the nesting as an object would take the very
+# recursion these tests are about.
+DEEP = "@deep@"
+# Python 3.9's json.loads gives up on both. 3.14's reads both, and leaves
+# the recursion to whatever walks the result next.
+DEPTHS = (2000, 100000)
+
+
+def _deep(depth):
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def _with_deep(data, depth):
+    return data.replace(b'"' + DEEP.encode() + b'"', _deep(depth).encode())
+
+
+def _found(texts):
+    """Every secret clean's own walk finds in these SecretTexts."""
+    out = []
+    for text in texts:
+        clean._walk(text.node, lambda value, *_: out.append(value))
+    return out
+
+
+def nested_calls(depth):
+    """Tool arguments and results nested `depth` deep, in every place the
+    log keeps them, then the spec's call, whose output holds SECRET."""
+    log = (Log().start()
+           .run(T0, "c1", "bash", {"command": "ls", "x": DEEP})
+           .add("tool.execution_complete", {
+               "toolCallId": "c1", "success": True,
+               "result": {"content": "API_KEY=" + TYPED, "contents": DEEP}}, T0)
+           .run(T0, "c2", "bash", '{"command":"ls","x":%s}' % _deep(depth))
+           .done(T0, "c2", "ok")
+           .ask(T0, request("c3", "bash", DEEP)))
+    log.events += spec_sample().events[1:]
+    return _with_deep(log.data(), depth)
+
+
+class NestedPastTheStack(CopilotCase):
+    """One line nested deeper than Python recurses stops nothing: it is
+    counted and kept as text, as any line that does not parse is, and
+    everything else in the log is still read."""
+
+    def read(self):
+        store = self.only_store()
+        calls = self.calls(store)
+        for call in calls:
+            judge(call)
+        return store, calls, list(self.src.secret_texts(store))
+
+    def test_a_line_nested_past_the_stack_is_kept_and_the_rest_read(self):
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.src.reset()
+                # the first line, where the project is read, and holding the
+                # markers the search for saved outputs parses a line for
+                deep = ("[" * depth + '"Saved to: /tmp/1790000000000'
+                        '-copilot-tool-output-x.txt"' + "]" * depth + "\n")
+                self.write(deep.encode() + spec_sample().data())
+                store, calls, texts = self.read()
+                self.assertIsNone(store.project)
+                self.assertEqual([c.tool_call_id for c in calls], ["call_1"])
+                self.assertIn(SECRET, calls[0].output)
+                self.assertEqual(len(texts), 6)
+                self.assertIn(SECRET, _found(texts))
+                # 3.9 cannot parse it; 3.14 can, and it is not an event
+                self.assertEqual(self.src.counts["unparsed"]
+                                 + self.src.counts["unknown"], 1)
+
+    def test_a_call_nested_past_the_stack_does_not_hide_the_next(self):
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.src.reset()
+                self.write(nested_calls(depth))
+                _store, calls, texts = self.read()
+                by_id = {c.tool_call_id: c for c in calls}
+                self.assertIn(SECRET, by_id["call_1"].output)
+                self.assertEqual(set(_found(texts)), {SECRET, TYPED})
+                # arguments in a JSON string it cannot decode are kept as text
+                kept = by_id["c2"].tool_input
+                self.assertTrue(set(kept) == {"_raw"} or kept["command"] == "ls")
+                # each line that did not parse is counted and kept as text
+                self.assertEqual(self.src.counts["unparsed"],
+                                 sum(isinstance(t.node, str) for t in texts))
+
+    def test_every_command_reads_on_past_a_nested_line(self):
+        self.write(nested_calls(DEPTHS[0]))
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home,
+                   RANWHAT_HOME=os.path.join(self.tmp, "state"),
+                   PYTHONIOENCODING="utf-8")
+        flags = ["--source", "copilot-cli", "--path", "copilot-cli=" + self.root,
+                 "--days", "36500"]
+        for argv in (["watch"], ["check", "--json"],
+                     ["clean", "--no-interactive"],
+                     ["clean", "--apply", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                done = subprocess.run(
+                    [sys.executable, "-m", "ranwhat"] + argv + flags, cwd=REPO,
+                    env=env, capture_output=True, encoding="utf-8",
+                    stdin=subprocess.DEVNULL, timeout=60)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertNotIn("Traceback", done.stderr)
+                if argv[0] == "check":
+                    found = {f["fingerprint"]
+                             for f in json.loads(done.stdout)["secrets"]}
+                    self.assertEqual(found, {clean._fingerprint(SECRET),
+                                             clean._fingerprint(TYPED)})
+
+
+# --------------------------------------------------------------------------
 # The --days window
 # --------------------------------------------------------------------------
 

@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -1627,6 +1628,152 @@ class Damaged(DroidCase):
             self.assertEqual(list(self.droid.secret_texts(store)), [])
         self.assertEqual(err.getvalue().count("warning:"), 1)
         self.assertEqual(self.droid.counts["unreadable_stores"], 1)
+
+
+# --------------------------------------------------------------------------
+# JSON nested deeper than Python recurses
+# --------------------------------------------------------------------------
+
+# Stands in for deeply nested JSON in a fixture, and is replaced by it in
+# the bytes written: building the nesting as an object would take the very
+# recursion these tests are about.
+DEEP = '"@deep@"'
+# Python 3.9's json.loads gives up on both. 3.14's reads both, and leaves
+# the recursion to whatever walks the result next.
+DEPTHS = (2000, 100000)
+
+
+def _deep(depth):
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+def _with_deep(data, depth):
+    return data.replace(DEEP.encode("utf-8"), _deep(depth).encode("utf-8"))
+
+
+def _found(texts):
+    """Every secret clean's own walk finds in these SecretTexts."""
+    out = []
+    for text in texts:
+        clean._walk(text.node, lambda value, *_: out.append(value))
+    return out
+
+
+class NestedPastTheStack(DroidCase):
+    """One line or entry nested deeper than Python recurses stops nothing:
+    it is counted or kept as the adapter keeps any it cannot read, and
+    everything else in the store is still read."""
+
+    def read(self, path):
+        store = self.store(path)
+        calls = list(self.droid.tool_calls(store))
+        for call in calls:
+            judge(call)
+        return store, calls, list(self.droid.secret_texts(store))
+
+    def test_a_line_nested_past_the_stack_is_skipped_and_the_rest_read(self):
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.droid.reset()
+                # the first line, where the header is read, and holding the
+                # notice stores() parses a line for
+                deep = ("[" * depth + _dump(droid_module._SAVED + "/x (1KB)")
+                        + "]" * depth + "\n")
+                rest = "".join(_dump(l) + "\n" for l in call_lines(
+                    2, "toolu_01ABC", "Execute", {"command": "cat .env"},
+                    "STRIPE_KEY=" + SECRET + EXIT_0))
+                path = self.session(None, name="deep-%d" % depth,
+                                    raw=(deep + rest).encode("utf-8"))
+                store, calls, texts = self.read(path)
+                self.assertEqual((store.session, store.project),
+                                 ("deep-%d" % depth, None))
+                self.assertEqual([c.tool_call_id for c in calls], ["toolu_01ABC"])
+                self.assertIn(SECRET, calls[0].output)
+                self.assertIn(SECRET, _found(texts))
+                # 3.9 cannot parse it; 3.14 can, and it is not a record
+                self.assertEqual(self.droid.counts["unparsed"]
+                                 + self.droid.counts["unknown"], 1)
+
+    def test_a_call_nested_past_the_stack_does_not_hide_the_next(self):
+        bash = ('{"type":"bash_result","command":"env","stdout":%s,'
+                '"stderr":"","exitCode":0}')
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.droid.reset()
+                lines = [
+                    header(),
+                    message(1, "assistant", [use("toolu_D1", "Execute",
+                                                 {"command": "ls", "x": DEEP})]),
+                    message(2, "user", [result("toolu_D1", [DEEP])]),
+                    message(3, "assistant", [use(
+                        "toolu_D2", "Execute",
+                        '{"command":"ls","x":%s}' % _deep(depth))]),
+                    message(4, "user", [{"type": "text",
+                                         "text": bash % _deep(depth)}]),
+                ] + call_lines(5, "toolu_01ABC", "Execute",
+                               {"command": "cat .env"},
+                               "STRIPE_KEY=" + SECRET + EXIT_0)
+                raw = "".join(_dump(l) + "\n" for l in lines).encode("utf-8")
+                path = self.session(None, name="calls-%d" % depth,
+                                    raw=_with_deep(raw, depth))
+                _store, calls, texts = self.read(path)
+                by_id = {c.tool_call_id: c for c in calls}
+                self.assertIn(SECRET, by_id["toolu_01ABC"].output)
+                self.assertIn(SECRET, _found(texts))
+                # input in a JSON string it cannot decode is kept as text
+                kept = by_id["toolu_D2"].tool_input
+                self.assertTrue(set(kept) == {"_raw"} or kept["command"] == "ls")
+
+    def test_a_prompt_history_nested_past_the_stack_is_still_searched(self):
+        for depth in DEPTHS:
+            with self.subTest(depth=depth):
+                self.droid.reset()
+                path = self.write("state/history.json", None, raw=_with_deep(
+                    history_file([prompt("deploy with " + SECRET), "@deep@"]),
+                    depth))
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    texts = list(self.droid.secret_texts(self.store(path)))
+                self.assertIn(SECRET, _found(texts))
+                parsed = [t.where for t in texts] == ["entry 1", "entry 2"]
+                self.assertEqual(self.droid.counts["unparsed"], 0 if parsed else 1)
+                self.assertEqual(err.getvalue().count("warning:"),
+                                 0 if parsed else 1)
+
+    def test_every_command_reads_on_past_a_nested_line(self):
+        depth = DEPTHS[0]
+        lines = [header(),
+                 message(1, "assistant", [use("toolu_D1", "Execute",
+                                              {"command": "ls", "x": DEEP})]),
+                 message(2, "assistant", [use(
+                     "toolu_D2", "Execute",
+                     '{"command":"ls","x":%s}' % _deep(depth))])]
+        lines += call_lines(3, "toolu_01ABC", "Execute", {"command": "cat .env"},
+                            "STRIPE_KEY=" + SECRET + EXIT_0)
+        raw = "".join(_dump(l) + "\n" for l in lines).encode("utf-8")
+        self.session(None, raw=_with_deep(raw, depth))
+        self.write("state/history.json", None, raw=_with_deep(history_file(
+            [prompt("export API_TOKEN=" + TYPED), "@deep@"]), depth))
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home,
+                   RANWHAT_HOME=_tempdir(self, "droid-state-"),
+                   PYTHONIOENCODING="utf-8")
+        flags = ["--source", "droid", "--path", "droid=" + self.home,
+                 "--days", "36500"]
+        for argv in (["watch"], ["check", "--json"],
+                     ["clean", "--no-interactive"],
+                     ["clean", "--apply", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                done = subprocess.run(
+                    [sys.executable, "-m", "ranwhat"] + argv + flags, cwd=REPO,
+                    env=env, capture_output=True, encoding="utf-8",
+                    stdin=subprocess.DEVNULL, timeout=60)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertNotIn("Traceback", done.stderr)
+                if argv[0] == "check":
+                    found = {f["fingerprint"]
+                             for f in json.loads(done.stdout)["secrets"]}
+                    self.assertEqual(found, {clean._fingerprint(SECRET),
+                                             clean._fingerprint(TYPED)})
 
 
 class Window(DroidCase):

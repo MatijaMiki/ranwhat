@@ -808,6 +808,11 @@ class DroidSource(Source):
             if self._tally(store):
                 self.count("unparsed")
             self._bad_store(store, "not JSON")
+            # Searched as text all the same: the history is one document, so
+            # one entry nested deeper than this Python decodes would
+            # otherwise hide every prompt beside it.
+            for item in self._log_texts(store):
+                yield item
             return
         if not isinstance(doc, list):
             yield SecretText(doc, where="whole file")
