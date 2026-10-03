@@ -26,9 +26,10 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import agents_fixtures as af  # noqa: E402
 import growth  # noqa: E402
 import isolated_home  # noqa: E402,F401
-from ranwhat import clean, cli, known, watch  # noqa: E402
+from ranwhat import clean, cli, known, sources, watch  # noqa: E402
 
 PW = "Hq7xT2mVp9LwZr4kNd"
 PW2 = "Rw4KzQ8nVy2TmXp6Jh"
@@ -939,17 +940,11 @@ class CheckReadsEachTranscriptOnce(_Index):
         self.assertNeverShown(root, PW2)
 
 
-@unittest.skipIf(os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
-                 "mode 000 keeps the owner out only off Windows, and not root")
-class AStoreThatCouldNotBeReadIsReadAgain(_Index):
-    """An agent's file that could not be read was indexed as holding no
-    secrets, under its size and time. Made readable again, unchanged, it
-    was never read again: watch printed a password clean finds in it
-    whole, on every run, wherever a command typed it."""
+class _CodexHistory(_Index):
+    """A home with one Codex rollout, which read DB_PASSWORD=PW."""
 
     def setUp(self):
         _Index.setUp(self)
-        import agents_fixtures as af
         home = _tempdir(self, "known-agents-home-")
         for patch in (mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}),
                       mock.patch("ranwhat.sources._paths.home", return_value=home)):
@@ -962,6 +957,53 @@ class AStoreThatCouldNotBeReadIsReadAgain(_Index):
         self.rollout = self.codex.write(self.codex_root, [
             ("c1", "shell", "cat .env", "DB_PASSWORD=%s\n" % PW, time.time() - 3000)])
         self.addCleanup(os.chmod, self.rollout, 0o600)
+
+    def watched(self, value):
+        """watch --json, twice, over a transcript that types value."""
+        root, project = self.root()
+        _write(os.path.join(project, "sessB.jsonl"), _typed(2, value, 600), 600)
+        where = ["--root", root, "--state-dir", self.state,
+                 "--path", "codex=" + self.codex_root]
+        return [_run(["watch", "--json"] + where)[1] for _time in range(2)]
+
+
+class AStoreReadInPart(_CodexHistory):
+    """What was read of an agent's file that its adapter did not read whole
+    was dropped with it: a rollout Codex's reader searches only as text,
+    and counts as not read, or one it stops on part way each time, was
+    never indexed, and watch printed what clean finds in it whole."""
+
+    def test_one_searched_only_as_text(self):
+        af.write(os.path.join(os.path.dirname(self.rollout), "rollout-2026-10-01T15-"
+                              "00-00-11111111-2222-4333-8444-555555555555.jsonl"),
+                 ["not JSON: DB_PASSWORD=%s" % PW2, "nor this"])
+        with mock.patch("sys.stderr", io.StringIO()):
+            for out in self.watched(PW2):
+                self.assertNotIn(PW2, out)
+                self.assertIn(clean.DISPLAY_MASK % clean._hint(PW2), _shown(out))
+
+    def test_one_stopped_on_part_way_each_time(self):
+        source = type(sources.get("codex"))
+        real = source.secret_texts
+
+        def stops(self_, store):
+            for text in real(self_, store):
+                yield text
+            raise ValueError("a record it does not know")
+        with mock.patch.object(source, "secret_texts", stops), \
+             mock.patch("sys.stderr", io.StringIO()):
+            for out in self.watched(PW):
+                self.assertNotIn(PW, out)
+                self.assertIn(clean.DISPLAY_MASK % clean._hint(PW), _shown(out))
+
+
+@unittest.skipIf(os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+                 "mode 000 keeps the owner out only off Windows, and not root")
+class AStoreThatCouldNotBeReadIsReadAgain(_CodexHistory):
+    """An agent's file that could not be read was indexed as holding no
+    secrets, under its size and time. Made readable again, unchanged, it
+    was never read again: watch printed a password clean finds in it
+    whole, on every run, wherever a command typed it."""
 
     def test_by_watch_or_by_check(self):
         for first in ("watch", "check"):
@@ -978,12 +1020,12 @@ class AStoreThatCouldNotBeReadIsReadAgain(_Index):
                 self.assertNotIn(PW, out + err)
                 self.assertIn(clean.DISPLAY_MASK % clean._hint(PW), _shown(out))
 
-    def test_one_read_part_way_keeps_what_the_index_knew_of_it(self):
-        from ranwhat import agents, sources
+    def test_one_read_part_way_or_not_at_all_is_not_taken_as_read_whole(self):
+        from ranwhat import agents
         source = sources.get("codex")
         (store,) = [s for s in agents.discover(source, self.codex_root)[1]
                     if s.path == self.rollout]
-        self.assertEqual(clean.values_in_store(source, store), ({PW}, set()))
+        self.assertEqual(clean.values_in_store(source, store), ({PW}, set(), True))
         real = type(source).secret_texts
 
         def stops(self_, store_):
@@ -993,11 +1035,11 @@ class AStoreThatCouldNotBeReadIsReadAgain(_Index):
         with mock.patch.object(type(source), "secret_texts", stops), \
              mock.patch("sys.stderr", io.StringIO()):
             source.reset()
-            self.assertIsNone(clean.values_in_store(source, store))
+            self.assertFalse(clean.values_in_store(source, store)[2])
         os.chmod(self.rollout, 0)
         source.reset()
         with mock.patch("sys.stderr", io.StringIO()):
-            self.assertIsNone(clean.values_in_store(source, store))
+            self.assertEqual(clean.values_in_store(source, store), (set(), set(), False))
 
 
 class TheIndexKeepsAShortTag(_Index):
