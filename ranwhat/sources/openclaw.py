@@ -10,12 +10,13 @@ recognised by shape rather than by column name.
 
 The database is opened read-only. It belongs to a running agent.
 
-Ported from watch with no change in what is read; watch keeps its names
-(openclaw_state_dir, openclaw_databases, scan_openclaw_db, _find_tool_calls,
-_as_iso) for these. clean searches it for secrets too (design 3.9's
-follow-up): every text cell of every table, whatever its column's declared
-type, through the same read-only open. It is never masked: a database is
-read only.
+Ported from watch, which keeps its names (openclaw_state_dir,
+openclaw_databases, scan_openclaw_db, _find_tool_calls, _as_iso) for these.
+Tool calls are now read from text in a column of any declared type, where
+watch read only text-typed columns. clean searches it for secrets too
+(design 3.9's follow-up): every text cell of every table but OpenClaw's own
+login, whatever its column's declared type, through the same read-only
+open. It is never masked: a database is read only.
 
 Nothing here imports watch or clean at import time.
 """
@@ -38,10 +39,18 @@ ENV = "OPENCLAW_STATE_DIR"
 STATE_DEFAULT = os.path.join(os.path.expanduser("~"), ".openclaw")
 
 
+def _from_env(env):
+    """OPENCLAW_STATE_DIR as OpenClaw reads it: trimmed, and unset when that
+    leaves nothing. An empty one was read as the current directory."""
+    return (env.get(ENV) or "").strip() or None
+
+
 def state_dir():
     """Read the env var when asked, not at import time -- a caller that sets
-    OPENCLAW_STATE_DIR after importing was silently ignored."""
-    return os.environ.get(ENV, STATE_DEFAULT)
+    OPENCLAW_STATE_DIR after importing was silently ignored. "~" is
+    expanded, as OpenClaw expands it."""
+    value = _from_env(os.environ)
+    return os.path.expanduser(value) if value else STATE_DEFAULT
 
 
 # Keys that carry a tool's name, and keys that carry its arguments, across the
@@ -49,6 +58,12 @@ def state_dir():
 # various framework wrappers).
 NAME_KEYS = ("name", "toolName", "tool_name", "tool", "function_name")
 ARG_KEYS = ("input", "arguments", "args", "params", "parameters", "toolInput")
+
+# OpenClaw keeps the agent's own provider credentials in its database, in
+# auth_profile_store, and their order and cooldowns in auth_profile_state
+# (docs.openclaw.ai/concepts/oauth). That is its login, not a leak, so
+# clean does not search a table named auth_*.
+AUTH_TABLE = "auth_"
 
 # What clean's report says of a database that holds a secret: why it is
 # left as it is, and what to do instead.
@@ -64,10 +79,12 @@ DAMAGED = "part of it is damaged"
 
 def databases(state_dir_=None):
     """Every agent's database under the state directory (default:
-    state_dir()), in name order."""
-    root = state_dir_ or state_dir()
+    state_dir()), in name order. A "~" in it is expanded, as --path's is,
+    and its name is matched as it is: "--state-dir ~/oc", which zsh and
+    Windows pass on as typed, and "oc [x]" read nothing."""
+    root = os.path.expanduser(state_dir_ or state_dir())
     return sorted(glob.glob(os.path.join(
-        root, "agents", "*", "agent", "openclaw-agent.sqlite")))
+        glob.escape(root), "agents", "*", "agent", "openclaw-agent.sqlite")))
 
 
 def agent_id(path):
@@ -198,10 +215,11 @@ class OpenClawSource(Source):
     read_only = True        # SQLite, every store of it
 
     def default_paths(self, env, home, platform):
-        """$OPENCLAW_STATE_DIR when set, else ~/.openclaw: what state_dir()
-        reads."""
-        if ENV in env:
-            return [(env[ENV], "env " + ENV)]
+        """$OPENCLAW_STATE_DIR when set and not empty, else ~/.openclaw:
+        what state_dir() reads."""
+        value = _from_env(env)
+        if value:
+            return [(value, "env " + ENV)]
         return [(_paths.join(platform, home, ".openclaw"), "default")]
 
     def reset(self):
@@ -327,16 +345,19 @@ class OpenClawSource(Source):
             rows.close()
 
     def secret_texts(self, store):
-        """Every text cell of every table (_rows), in table and row order:
-        the JSON it holds, decoded, or else the text itself (a BLOB, and
-        TEXT, read as UTF-8, any byte that is not UTF-8 kept as it is).
-        "where" is "<table> row <n>, <column>". The schema is not
-        documented, so no cell is known to be a call's output, and none
-        names a file a value was read out of. Never raises: a database that
-        cannot be read warns and is counted."""
+        """Every text cell of every table (_rows) but OpenClaw's own login
+        (AUTH_TABLE), in table and row order: the JSON it holds, decoded,
+        or else the text itself (a BLOB, and TEXT, read as UTF-8, any byte
+        that is not UTF-8 kept as it is). "where" is "<table> row <n>,
+        <column>". The schema is not documented, so no cell is known to be
+        a call's output, and none names a file a value was read out of.
+        Never raises: a database that cannot be read warns and is
+        counted."""
         rows = self._rows(store.path)
         try:
             for table, index, cols, cells, _stamps in rows:
+                if table.lower().startswith(AUTH_TABLE):
+                    continue
                 for col, cell in zip(cols, cells):
                     if isinstance(cell, bytes):
                         cell = cell.decode("utf-8", "surrogateescape")

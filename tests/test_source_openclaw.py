@@ -144,6 +144,19 @@ class DefaultPaths(unittest.TestCase):
         self.assertEqual((loc.path, loc.how),
                          (os.path.abspath("/set/later"), "env OPENCLAW_STATE_DIR"))
 
+    def test_the_variable_is_trimmed_and_an_empty_one_is_unset(self):
+        # as OpenClaw reads it
+        for value in ("", "  "):
+            env = {"OPENCLAW_STATE_DIR": value}
+            self.assertEqual(self.src.default_paths(env, "/home/u", "linux"),
+                             [("/home/u/.openclaw", "default")])
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual(watch.openclaw_state_dir(),
+                                 openclaw.STATE_DEFAULT)
+        env = {"OPENCLAW_STATE_DIR": " /srv/oc "}
+        self.assertEqual(self.src.default_paths(env, "/home/u", "linux"),
+                         [("/srv/oc", "env OPENCLAW_STATE_DIR")])
+
 
 class Registry(unittest.TestCase):
 
@@ -500,6 +513,94 @@ class EveryColumnIsRead(_Case):
         self.assertEqual((call.tool_input, call.project, call.timestamp),
                          ({"command": "rm -rf ~/old"}, "calls",
                           "2025-09-22T14:06:40Z"))
+
+
+class OwnLoginIsNotALeak(_Case):
+    """OpenClaw keeps its own provider credentials in the agent's database,
+    in auth_profile_store, and their order and cooldowns in
+    auth_profile_state (docs.openclaw.ai/concepts/oauth). That is its login,
+    not a secret it leaked: clean said to rotate it, and to delete a
+    session that does not hold it."""
+
+    def test_its_auth_tables_are_not_searched(self):
+        path = self.database("a1", [(_result("API_KEY=" + KEY), 1758550000)])
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE auth_profile_store "
+                     "(id TEXT PRIMARY KEY, profile TEXT)")
+        conn.execute("INSERT INTO auth_profile_store VALUES (?, ?)",
+                     ("anthropic:default", json.dumps(
+                         {"type": "api_key", "provider": "anthropic",
+                          "key": KEY2})))
+        conn.execute("CREATE TABLE auth_profile_state (id TEXT, state TEXT)")
+        conn.execute("INSERT INTO auth_profile_state VALUES (?, ?)",
+                     ("anthropic:default", "DB_PASSWORD=" + PW))
+        conn.commit()
+        conn.close()
+        store = self.src.store_at(path)
+        self.assertEqual([t.where for t in self.src.secret_texts(store)],
+                         ["log row 1, id", "log row 1, body"])
+        values = {}
+        clean.scan_store(self.src, store, values)
+        self.assertEqual(list(values.values()), [KEY])
+
+
+class StateDirAsOpenClawReadsIt(_Case):
+    """OPENCLAW_STATE_DIR and --state-dir read as OpenClaw reads them: "~"
+    expanded, the variable trimmed and an empty one unset, and the folder
+    taken as it is named. watch read them as given, so in one run sources
+    and clean read a folder whose actions watch passed over."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = tempfile.mkdtemp(prefix="oc-claude-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def rm_rf(self):
+        return self.database("a1", [(body("bash", {"command": "rm -rf ~"}),
+                                     int(time.time()))])
+
+    def watched(self, *argv):
+        rc, out, err = _run_cli("watch", "--json", "--source", "openclaw",
+                                "--root", self.root, *argv)
+        self.assertEqual(rc, 0, err)
+        return [h["rule"] for r in json.loads(out) for h in r["hits"]]
+
+    def found(self, *argv):
+        rc, out, err = _run_cli("sources", "--json", "--source", "openclaw",
+                                *argv)
+        self.assertEqual(rc, 0, err)
+        [entry] = json.loads(out)
+        return entry["transcripts"]
+
+    def test_a_tilde_in_the_variable_or_the_flag(self):
+        self.state = os.path.join(self.home, "oc")
+        path = self.rm_rf()
+        # expanduser("~/oc") keeps the "/" on Windows; join after "~".
+        given = os.path.join("~", "oc")
+        with mock.patch.dict(os.environ, {"OPENCLAW_STATE_DIR": given}):
+            self.assertEqual(watch.openclaw_state_dir(), self.state)
+            self.assertEqual(watch.openclaw_databases(), [path])
+            self.assertEqual(self.watched(), ["fs.destructive"])
+            self.assertEqual(self.found(), 1)
+        os.environ.pop("OPENCLAW_STATE_DIR")
+        self.assertEqual(watch.openclaw_databases(given), [path])
+        self.assertEqual(self.watched("--state-dir=" + given),
+                         ["fs.destructive"])
+        self.assertEqual(self.found("--state-dir=" + given), 1)
+
+    def test_an_empty_variable_reads_the_default(self):
+        self.rm_rf()
+        with mock.patch.dict(os.environ, {"OPENCLAW_STATE_DIR": ""}), \
+                mock.patch.object(openclaw, "STATE_DEFAULT", self.state):
+            self.assertEqual(self.watched(), ["fs.destructive"])
+            self.assertEqual(self.found(), 1)
+
+    def test_brackets_in_its_name(self):
+        self.state = os.path.join(self.home, "oc [x]")
+        path = self.rm_rf()
+        self.assertEqual(watch.openclaw_databases(self.state), [path])
+        self.assertEqual(self.watched("--state-dir", self.state),
+                         ["fs.destructive"])
 
 
 class _Failing(object):
