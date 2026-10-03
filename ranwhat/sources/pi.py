@@ -117,9 +117,13 @@ NOT_EXECUTED = ('Tool call "%s" was not executed: the response hit the '
 # The error results Pi writes instead of running a call it will not run
 # (see the module notes; agent-loop.ts prepareToolCall, ai validation.ts
 # validateToolArguments). Not "Operation aborted": read and write also
-# throw it part way. %s is the call's name.
+# throw it part way. %s is the call's name. INVALID goes on to the
+# arguments as JSON, after RECEIVED, so a command that ran and printed its
+# start (bash puts its status line last) is not taken for it; a nested
+# record's error, which Pi cuts at 500 characters, may then read as a run.
 NOT_FOUND = "Tool %s not found"
 INVALID = 'Validation failed for tool "%s":'
+RECEIVED = "\n\nReceived arguments:\n"
 BLOCKED = "Tool execution was blocked"
 
 # How many nested calls Pi records for one model-issued call
@@ -185,8 +189,15 @@ def _refused(text, name):
     `name` (NOT_FOUND, INVALID, BLOCKED)."""
     if not isinstance(text, str):
         return False
-    return text == BLOCKED or (name is not None and (
-        text == NOT_FOUND % name or text.startswith(INVALID % name)))
+    if text == BLOCKED or (name is not None and text == NOT_FOUND % name):
+        return True
+    if name is None or not text.startswith(INVALID % name):
+        return False
+    try:
+        json.loads(text.rpartition(RECEIVED)[2])
+    except (ValueError, RecursionError):
+        return False
+    return True
 
 
 def session_from_name(path):

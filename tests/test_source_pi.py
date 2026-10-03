@@ -1358,7 +1358,8 @@ class Declined(PiCase):
                           error="Tool fetch not found"),
             nested_record("cm1/3", "bash", {"command": 1}, status="error",
                           error='Validation failed for tool "bash":\n'
-                          '  - command: must be string'),
+                          '  - command: must be string\n\nReceived '
+                          'arguments:\n{\n  "command": 1\n}'),
             nested_record("cm1/4", "bash", {"command": "false"},
                           status="error", error="Command exited with code 1"),
             nested_record("cm1/5", "bash", {"command": "ls"},
@@ -1371,6 +1372,22 @@ class Declined(PiCase):
             "cm1/3": "declined", "cm1/4": None, "cm1/5": None})
         self.assertEqual(rules(got["cm1/1"]),
                          [("fs.destructive", "rm -rf ~/")])
+
+    def test_a_command_that_printed_pi_s_validation_text_still_ran(self):
+        # Pi's own text ends in the arguments as JSON; bash puts its status
+        # line after whatever the command printed
+        printed = ('Validation failed for tool "bash":\n  - command: x\n\n'
+                   'Received arguments:\n{}\n\nCommand exited with code 1')
+        lines = [header()]
+        lines += call_lines(10, "ran", "bash", {"command": "rm -rf ~/"},
+                            output=printed, is_error=True)
+        records = [nested_record("cm1/1", "bash", {"command": "rm -rf ~/"},
+                                 status="error", error=printed)]
+        lines += codemode_lines(12, "cm1", CODE, records)
+        got = self.by_id(self.session(lines))
+        self.assertEqual((got["ran"].status, got["cm1/1"].status),
+                         (None, None))
+        self.assertEqual(rules(got["ran"]), [("fs.destructive", "rm -rf ~/")])
 
     def test_a_declined_call_keeps_its_first_copy(self):
         # a copied entry does not undo or redo "declined"
