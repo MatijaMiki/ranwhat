@@ -2736,8 +2736,9 @@ def scan_sources_counted(sources=SOURCES, root=None, state_dir=None,
     OpenClaw databases, and each other agent's transcripts (its sessions,
     in its own words). A store this run counted as a file not read, in this
     pass or an earlier one, is not among them (agents.notes names it), and
-    `unread`, a dict, is given how many of each agent's there were: one
-    that read nothing of what it found has nothing to read to say. Zero
+    `unread`, a dict, is given how many of each agent's there were, so a
+    caller can tell a scan that could read none of what it found from one
+    that found nothing. Zero
     read is not an all-clear: locations() says whether there was anything
     to read at all. `progress` is scan_all's, counting every source's
     transcripts together, and `known` (a known.Matcher) is masked in every
