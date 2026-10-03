@@ -355,10 +355,7 @@ def _launches(found, executable):
     """Whether running `found` starts this interpreter.
 
     macOS's /usr/bin/python3 is not a link but a launcher for the Command Line
-    Tools' copy, so no comparison of paths can tell; only asking it can. POSIX
-    only: on Windows, python3 on PATH may be the Store alias."""
-    if os.name == "nt":
-        return False
+    Tools' copy, so no comparison of paths can tell; only asking it can."""
     import subprocess
     probe = subprocess.run(
         [found, "-I", "-S", "-c", "import sys; sys.stdout.write(sys.executable)"],
@@ -368,24 +365,42 @@ def _launches(found, executable):
     return bool(started) and _same_file(started, executable)
 
 
-def _python_m(executable, path):
+def _python_m(executable, path, windows=None):
     """`python -m ranwhat` is running a checkout or venv, not the PyPI build.
 
     Spelled with the bare name when that name, looked up on the user's PATH,
     starts this interpreter, and with the full path otherwise. python3 is
     tried after the interpreter's own name, since python3.12 may be what ran
-    but python3 is what people type."""
+    but python3 is what people type.
+
+    On Windows neither name is run to ask, since either on PATH may be the
+    Store's alias, which opens the Store. Nor is the interpreter named by a
+    quoted first word: PowerShell reads one as a string, not a command, and
+    every step suggested after `py -m ranwhat` failed there. py, when it
+    starts this interpreter, is next, then a path that needs no quotes,
+    then uvx."""
+    if windows is None:
+        windows = os.name == "nt"
     for name in dict.fromkeys((os.path.basename(executable), "python3")):
         try:
             found = shutil.which(name, path=path)
             # abspath, not realpath: a venv's bin/python is a symlink to the
             # base interpreter, which does not have ranwhat.
-            if found and (_same_file(found, executable)
-                          or _launches(found, executable)):
+            if found and (_same_file(found, executable) or (
+                    not windows and _launches(found, executable))):
                 return "%s -m ranwhat" % name
         except Exception:
             continue          # a launcher that hangs or fails is not ours
-    return "%s -m ranwhat" % _quote(executable)
+    if not windows:
+        return "%s -m ranwhat" % _quote(executable, windows=False)
+    try:
+        found = shutil.which("py", path=path)
+        if found and _launches(found, executable):
+            return "py -m ranwhat"
+    except Exception:
+        pass
+    word = _quote(executable, windows=True)
+    return "%s -m ranwhat" % word if word == executable else "uvx ranwhat"
 
 
 def invocation():

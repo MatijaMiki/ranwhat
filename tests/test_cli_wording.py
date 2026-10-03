@@ -381,6 +381,43 @@ class HtmlIsForTheAuthorityReport(unittest.TestCase):
             self.assertNotIn(command, help_text)
 
 
+class AFollowUpCommandRunsInPowerShell(unittest.TestCase):
+    """PowerShell reads a quoted first word as a string, not a command to
+    run, so a suggested `"C:\\Program Files\\Python313\\python.exe" -m
+    ranwhat` failed there with "Unexpected token '-m'": the spelling of
+    every next step check suggested after `py -m ranwhat`."""
+
+    EXE = r"C:\Program Files\Python313\python.exe"
+
+    def spelled(self, exe, on_path, starts):
+        """_python_m on Windows, with `on_path` {name: what PATH finds}
+        and `starts` whether a launcher asked starts this interpreter."""
+        with mock.patch.object(cli.shutil, "which",
+                               side_effect=lambda name, path=None: on_path.get(name)), \
+                mock.patch.object(cli, "_launches", return_value=starts) as asked:
+            return cli._python_m(exe, "", windows=True), asked
+
+    def test_py_when_it_starts_this_interpreter(self):
+        got, asked = self.spelled(self.EXE, {"py": r"C:\Windows\py.exe"}, True)
+        self.assertEqual(got, "py -m ranwhat")
+        asked.assert_called_once_with(r"C:\Windows\py.exe", self.EXE)
+
+    def test_never_a_quoted_first_word(self):
+        store = r"C:\Users\u\AppData\Local\Microsoft\WindowsApps\python3.exe"
+        for on_path, starts in (({}, True),
+                                ({"py": r"C:\Windows\py.exe"}, False),
+                                ({"python3": store}, True)):
+            with self.subTest(on_path=on_path):
+                got, asked = self.spelled(self.EXE, on_path, starts)
+                self.assertEqual(got, "uvx ranwhat")
+                # Python's own names may be the Store's alias, which opens
+                # the Store when it is run: only py is ever asked.
+                for call in asked.call_args_list:
+                    self.assertTrue(call[0][0].endswith("py.exe"), call)
+        got, _ = self.spelled(r"C:\Python313\python.exe", {}, False)
+        self.assertEqual(got, r"C:\Python313\python.exe -m ranwhat")
+
+
 class AFileThatCannotBeOpenedIsNamed(unittest.TestCase):
     """Windows gives EINVAL for a name holding ? * < > |, as it does for a
     write to a pipe whose reader has gone, and main() took every EINVAL for
