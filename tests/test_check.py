@@ -34,6 +34,20 @@ try:
 except ImportError:         # Windows: tty needs termios, which it lacks
     pty = None
 
+
+def setUpModule():
+    # The fake terminals here stand for one that reads escapes. On Windows
+    # term asks the console itself whether it does (term._escapes), and a
+    # StringIO is no console: it would get no colour and no progress line.
+    global _console
+    _console = mock.patch.object(term, "_escapes", lambda stream: True)
+    _console.start()
+
+
+def tearDownModule():
+    _console.stop()
+
+
 # The pinned output shows transcript times in the reader's zone. Only
 # time.tzset can pin it to UTC, and Windows has none, so there the exact
 # output holds only on a machine that is already on UTC, as CI's is.

@@ -35,8 +35,22 @@ sys.path.insert(0, TESTS)
 
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 import agents_fixtures as af  # noqa: E402
-from ranwhat import clean, cli, sources  # noqa: E402
+from ranwhat import clean, cli, sources, term  # noqa: E402
 from ranwhat.sources import _paths, _rewrite  # noqa: E402
+
+
+def setUpModule():
+    # The fake terminals here stand for one that reads escapes. On Windows
+    # term asks the console itself whether it does (term._escapes), and a
+    # StringIO is no console: it would get no colour and no progress line.
+    global _console
+    _console = mock.patch.object(term, "_escapes", lambda stream: True)
+    _console.start()
+
+
+def tearDownModule():
+    _console.stop()
+
 
 SECRET = "sk_" "live_" "Fx7Qw2Er9Ty4Ui1Op6As3Df"
 OTHER = "sk_" "live_" "Mn3Bv5Cx7Zl9Kj2Hg4Fd6Sa"
@@ -533,7 +547,9 @@ class Flags(_Cli):
             int(self.now)))
         conn.commit()
         conn.close()
-        flags = ["--root=~/claude/projects", "--state-dir=~/oc"]
+        # expanduser("~/oc") keeps the "/" on Windows; join after "~".
+        flags = ["--root=" + os.path.join("~", "claude", "projects"),
+                 "--state-dir=" + os.path.join("~", "oc")]
         rc, out, err = self.run_cli("watch", "--json", *flags)
         self.assertEqual(rc, 0, err)
         self.assertEqual(sorted(r["source"] for r in json.loads(out)),

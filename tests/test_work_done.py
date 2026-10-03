@@ -23,6 +23,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
 from ranwhat import clean, introspect, term, watch
 
+
+def setUpModule():
+    # The fake terminals here stand for one that reads escapes. On Windows
+    # term asks the console itself whether it does (term._escapes), and a
+    # StringIO is no console: it would get no colour and no progress line.
+    global _console
+    _console = mock.patch.object(term, "_escapes", lambda stream: True)
+    _console.start()
+
+
+def tearDownModule():
+    _console.stop()
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
