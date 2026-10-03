@@ -430,20 +430,20 @@ def _mask(node, raw, byte_arrays):
     return _rebuild(node, byte_arrays, iter(masked))
 
 
-def _same_but_masked(old, new, raw, byte_arrays, before=None):
+def _same_but_masked(old, new, raw, byte_arrays, before=None, depth=0):
     """True when `new` decodes to `old` decoded and masked. False when it
     does not, or when either does not decode. None when either is nested
     too deep for the check to walk: 3.14's json reads far deeper than
     Python recurses. `before`, when given, is `old` decoded already;
-    `new` None is `old` unchanged."""
+    `new` None is `old` unchanged; `depth` is _expand's."""
     try:
         if before is None:
             before = _decode(old)
         # Read before either is walked, so a line too deep to walk that
         # the mask left unreadable is still refused.
         after = None if new is None else _decode(new)
-        before = _expand(before)
-        after = before if new is None else _expand(after)
+        before = _expand(before, depth)
+        after = before if new is None else _expand(after, depth)
         return after == _mask(before, raw, byte_arrays)
     except ValueError:
         return False
@@ -484,9 +484,23 @@ def _same_but_masked_flat(old, new, raw, byte_arrays):
     was, now = _items(old, byte_arrays), _items(new, byte_arrays)
     if len(was) != len(now) or was[0::2] != now[0::2]:
         return False
-    return _same_but_masked("[%s]" % ",".join(was[1::2]),
+    same = _same_but_masked("[%s]" % ",".join(was[1::2]),
                             None if old == new else "[%s]" % ",".join(now[1::2]),
-                            raw, byte_arrays) is True
+                            raw, byte_arrays)
+    if same is not None:
+        return same
+    # A string can hold JSON shallow enough to open and too deep to
+    # compare: 3.9 compares it in fewer levels than it opens it. Then each
+    # item is checked alone, and one like that as text, as JSON nested
+    # past _NEST_MAX.
+    for a, b in zip(was[1::2], now[1::2]):
+        a, b = "[%s]" % a, "[%s]" % b
+        same = _same_but_masked(a, b, raw, byte_arrays)
+        if same is None:
+            same = _same_but_masked(a, b, raw, byte_arrays, depth=_NEST_MAX)
+        if not same:
+            return False
+    return True
 
 
 def _verify(kind, old, new, plan, byte_arrays, forms=None):
