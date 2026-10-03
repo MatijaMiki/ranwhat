@@ -868,6 +868,22 @@ class Sqlite(unittest.TestCase):
                     self.assertEqual(_sqlite.tables(conn), [])
                 self.assertEqual(self._listing(folder), before)
 
+    def test_a_name_that_cannot_go_in_a_uri_is_read_from_a_copy(self):
+        """A name that is not UTF-8 (a Latin-1 folder on Linux, a lone
+        surrogate on Windows) cannot be percent-encoded. The URI was built
+        outside the guard that falls back to the copy, so the error ended
+        the read."""
+        path = os.path.join(self.root, "agent-\udcff.sqlite")
+        self.assertEqual(_sqlite.open_readonly(path), (None, None))
+        plain = os.path.join(self.root, "plain.sqlite")
+        self._db(plain).close()
+        try:
+            os.rename(plain, path)
+        except (OSError, UnicodeError):
+            self.skipTest("this file system refuses the name")
+        with _sqlite.readonly(path) as conn:
+            self.assertEqual(len(list(_sqlite.iter_rows(conn, "part", ["id"]))), 3)
+
     def test_text_that_is_not_utf8_is_read_as_it_is(self):
         """A TEXT cell whose bytes are not UTF-8 (a JS writer's string cut
         between the halves of a surrogate pair) made Python's sqlite3 raise

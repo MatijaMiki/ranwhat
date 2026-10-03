@@ -114,11 +114,11 @@ def _wal_state(path):
     return None
 
 
-def _probe(uri):
-    """A connection to uri that has read the schema, or None."""
+def _probe(path, immutable):
+    """A read-only connection to path that has read the schema, or None."""
     conn = None
     try:
-        conn = _connect(uri)
+        conn = _connect(_uri(path, immutable=immutable))
         conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
         return conn
     except (sqlite3.Error, ValueError):
@@ -146,7 +146,7 @@ def open_readonly(path):
     the first query, and the caller's warning names the reason."""
     state = _wal_state(path)
     if state != "no shm":
-        conn = _probe(_uri(path, immutable=state in ("no wal", "empty")))
+        conn = _probe(path, state in ("no wal", "empty"))
         if conn is not None:
             return conn, None
     tmp = tempfile.mkdtemp(prefix="ranwhat-")
