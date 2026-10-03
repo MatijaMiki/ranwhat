@@ -144,6 +144,19 @@ class DefaultPaths(unittest.TestCase):
         self.assertEqual((loc.path, loc.how),
                          (os.path.abspath("/set/later"), "env OPENCLAW_STATE_DIR"))
 
+    def test_the_variable_is_trimmed_and_an_empty_one_is_unset(self):
+        # as OpenClaw reads it
+        for value in ("", "  "):
+            env = {"OPENCLAW_STATE_DIR": value}
+            self.assertEqual(self.src.default_paths(env, "/home/u", "linux"),
+                             [("/home/u/.openclaw", "default")])
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual(watch.openclaw_state_dir(),
+                                 openclaw.STATE_DEFAULT)
+        env = {"OPENCLAW_STATE_DIR": " /srv/oc "}
+        self.assertEqual(self.src.default_paths(env, "/home/u", "linux"),
+                         [("/srv/oc", "env OPENCLAW_STATE_DIR")])
+
 
 class Registry(unittest.TestCase):
 
@@ -500,6 +513,62 @@ class EveryColumnIsRead(_Case):
         self.assertEqual((call.tool_input, call.project, call.timestamp),
                          ({"command": "rm -rf ~/old"}, "calls",
                           "2025-09-22T14:06:40Z"))
+
+
+class StateDirAsOpenClawReadsIt(_Case):
+    """OPENCLAW_STATE_DIR and --state-dir read as OpenClaw reads them: "~"
+    expanded, the variable trimmed and an empty one unset, and the folder
+    taken as it is named. watch read them as given, so in one run sources
+    and clean read a folder whose actions watch passed over."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = tempfile.mkdtemp(prefix="oc-claude-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def rm_rf(self):
+        return self.database("a1", [(body("bash", {"command": "rm -rf ~"}),
+                                     int(time.time()))])
+
+    def watched(self, *argv):
+        rc, out, err = _run_cli("watch", "--json", "--source", "openclaw",
+                                "--root", self.root, *argv)
+        self.assertEqual(rc, 0, err)
+        return [h["rule"] for r in json.loads(out) for h in r["hits"]]
+
+    def found(self, *argv):
+        rc, out, err = _run_cli("sources", "--json", "--source", "openclaw",
+                                *argv)
+        self.assertEqual(rc, 0, err)
+        [entry] = json.loads(out)
+        return entry["transcripts"]
+
+    def test_a_tilde_in_the_variable_or_the_flag(self):
+        self.state = os.path.join(self.home, "oc")
+        path = self.rm_rf()
+        with mock.patch.dict(os.environ, {"OPENCLAW_STATE_DIR": "~/oc"}):
+            self.assertEqual(watch.openclaw_state_dir(), self.state)
+            self.assertEqual(watch.openclaw_databases(), [path])
+            self.assertEqual(self.watched(), ["fs.destructive"])
+            self.assertEqual(self.found(), 1)
+        os.environ.pop("OPENCLAW_STATE_DIR")
+        self.assertEqual(watch.openclaw_databases("~/oc"), [path])
+        self.assertEqual(self.watched("--state-dir=~/oc"), ["fs.destructive"])
+        self.assertEqual(self.found("--state-dir=~/oc"), 1)
+
+    def test_an_empty_variable_reads_the_default(self):
+        self.rm_rf()
+        with mock.patch.dict(os.environ, {"OPENCLAW_STATE_DIR": ""}), \
+                mock.patch.object(openclaw, "STATE_DEFAULT", self.state):
+            self.assertEqual(self.watched(), ["fs.destructive"])
+            self.assertEqual(self.found(), 1)
+
+    def test_brackets_in_its_name(self):
+        self.state = os.path.join(self.home, "oc [x]")
+        path = self.rm_rf()
+        self.assertEqual(watch.openclaw_databases(self.state), [path])
+        self.assertEqual(self.watched("--state-dir", self.state),
+                         ["fs.destructive"])
 
 
 class _Failing(object):

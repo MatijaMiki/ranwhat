@@ -38,10 +38,18 @@ ENV = "OPENCLAW_STATE_DIR"
 STATE_DEFAULT = os.path.join(os.path.expanduser("~"), ".openclaw")
 
 
+def _from_env(env):
+    """OPENCLAW_STATE_DIR as OpenClaw reads it: trimmed, and unset when that
+    leaves nothing. An empty one was read as the current directory."""
+    return (env.get(ENV) or "").strip() or None
+
+
 def state_dir():
     """Read the env var when asked, not at import time -- a caller that sets
-    OPENCLAW_STATE_DIR after importing was silently ignored."""
-    return os.environ.get(ENV, STATE_DEFAULT)
+    OPENCLAW_STATE_DIR after importing was silently ignored. "~" is
+    expanded, as OpenClaw expands it."""
+    value = _from_env(os.environ)
+    return os.path.expanduser(value) if value else STATE_DEFAULT
 
 
 # Keys that carry a tool's name, and keys that carry its arguments, across the
@@ -64,10 +72,12 @@ DAMAGED = "part of it is damaged"
 
 def databases(state_dir_=None):
     """Every agent's database under the state directory (default:
-    state_dir()), in name order."""
-    root = state_dir_ or state_dir()
+    state_dir()), in name order. A "~" in it is expanded, as --path's is,
+    and its name is matched as it is: "--state-dir ~/oc", which zsh and
+    Windows pass on as typed, and "oc [x]" read nothing."""
+    root = os.path.expanduser(state_dir_ or state_dir())
     return sorted(glob.glob(os.path.join(
-        root, "agents", "*", "agent", "openclaw-agent.sqlite")))
+        glob.escape(root), "agents", "*", "agent", "openclaw-agent.sqlite")))
 
 
 def agent_id(path):
@@ -198,10 +208,11 @@ class OpenClawSource(Source):
     read_only = True        # SQLite, every store of it
 
     def default_paths(self, env, home, platform):
-        """$OPENCLAW_STATE_DIR when set, else ~/.openclaw: what state_dir()
-        reads."""
-        if ENV in env:
-            return [(env[ENV], "env " + ENV)]
+        """$OPENCLAW_STATE_DIR when set and not empty, else ~/.openclaw:
+        what state_dir() reads."""
+        value = _from_env(env)
+        if value:
+            return [(value, "env " + ENV)]
         return [(_paths.join(platform, home, ".openclaw"), "default")]
 
     def reset(self):
