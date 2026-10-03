@@ -449,6 +449,19 @@ class JsonLines(unittest.TestCase):
                          [(2, {"ok": 1})])
         self.assertEqual(counts["unparsed"], 1)
 
+    def test_json_nested_past_the_stack_is_read_or_skipped_never_raised(self):
+        """3.9's json gives up on it; 3.14's reads it. Either way the other
+        lines are read, and a call's input or a settings file holding it
+        comes back as what json made of it, or as text it could not."""
+        deep = "[" * 100000 + "]" * 100000
+        path = self._file(('{"a":1}\n' + deep + '\n{"b":2}\n').encode("utf-8"))
+        counts = {}
+        rows = list(_lines.iter_json_lines(path, counts))
+        self.assertEqual([r for r in rows if r[0] != 2], [(1, {"a": 1}), (3, {"b": 2})])
+        self.assertEqual(len(rows) - 2 + counts.get("unparsed", 0), 1)
+        self.assertIn(set(base.decode_input(deep)), ({"_raw"}, {"_value"}))
+        self.assertIn(type(_jsonc.loads(deep)), (type(None), list))
+
     def test_missing_file_raises_for_the_caller(self):
         with self.assertRaises(OSError):
             list(_lines.iter_json_lines(os.path.join(
@@ -1199,6 +1212,29 @@ class SourceContract(unittest.TestCase):
         with open(path, encoding="utf-8") as fh:
             self.assertNotIn(SECRET, fh.read())
 
+    def test_a_text_nested_past_the_stack_does_not_stop_the_rest_of_the_store(self):
+        """clean wrote a call's input out as JSON to find the file it read.
+        One nested past the stack raised there, and clean gave up on the
+        store: neither the secret beside it nor any after it was found."""
+        deep = "TOKEN=" + SECRET
+        for _ in range(100000):         # as an adapter's json.loads hands it over
+            deep = {"a": deep}
+        password = "Xk9mPq2v" "Rt7wLz4b"
+
+        class Deep(_Toy):
+            def secret_texts(self, store):
+                call = ToolCall(self.id, store.path, "Bash", {"x": deep})
+                yield SecretText({"in": deep}, call=call, where="line 1")
+                yield SecretText("DB_PASSWORD=" + password, where="line 2")
+        toy = Deep()
+        path = self._session(os.path.join(self.home, ".toy"), "s.jsonl", [{}])
+        values = {}
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            clean.scan_store(toy, toy.store(path, "jsonl"), values)
+        self.assertEqual(sorted(values.values()), sorted([SECRET, password]))
+        self.assertEqual(err.getvalue(), "")
+
 
 # --------------------------------------------------------------------------
 # _rewrite: the generic masker
@@ -1372,6 +1408,44 @@ class Rewrite(unittest.TestCase):
         self.assertTrue(result.changed)
         self.assertEqual(json.loads(self._read(path)),
                          {"t": _marker(value), "b": [1, 2]})
+
+    def test_a_line_nested_past_the_stack_does_not_stop_the_rest_being_masked(self):
+        """3.14's json reads a line far deeper than the check can walk, and
+        3.9's cannot read it at all. On 3.14 one such line refused the
+        whole file, the secret on another line too; on 3.9 a string holding
+        JSON that deep did. Each is now what a line json cannot read is:
+        only its raw text is masked, and every other line is checked."""
+        for depth in (2000, 100000):
+            nest = '{"a":' * depth + "1" + "}" * depth
+            lines = ['{"note":"an \\u00e9 escape","d":%s}' % nest,
+                     '{"out":"KEY=%s"}' % SECRET,
+                     '{"s":"KEY=%s","d":%s}' % (SECRET, nest),
+                     '{"args":"%s","s":"KEY=%s"}' % ("[" * depth + "]" * depth, SECRET)]
+            original = ("\n".join(lines) + "\n").encode("utf-8")
+            expected = original.replace(SECRET.encode(), _marker(SECRET).encode())
+            for byte_arrays in (False, True):
+                with self.subTest(depth=depth, byte_arrays=byte_arrays):
+                    path = self._write("deep.jsonl", original)
+                    result = _rewrite.rewrite_file(path, [SECRET], "jsonl",
+                                                   byte_arrays=byte_arrays)
+                    self.assertEqual((result.changed, result.skipped), (True, None))
+                    # Not assertEqual: a diff of these lines is megabytes.
+                    self.assertTrue(self._read(path) == expected,
+                                    "a byte other than the secret changed")
+
+    def test_a_document_nested_past_the_stack_is_refused_whole(self):
+        """A .json file is one document, checked whole: one too deep for the
+        check is left as it is, as one json cannot read, never half checked."""
+        for depth in (2000, 100000):
+            with self.subTest(depth=depth):
+                doc = ('{"s":"KEY=%s","d":%s}\n' % (
+                    SECRET, '{"a":' * depth + "1" + "}" * depth)).encode("utf-8")
+                path = self._write("deep.json", doc)
+                result = _rewrite.rewrite_file(path, [SECRET], "json")
+                self.assertEqual((result.changed, result.skipped),
+                                 (False, _rewrite.ALTERED))
+                self.assertTrue(self._read(path) == doc, "the document changed")
+                self.assertEqual(self._backups(), [])
 
     # -- one pass, as replacing each form in turn did ---------------------
 

@@ -2190,7 +2190,12 @@ def _named_by_call(block):
         return []
     if isinstance(args, dict) and isinstance(args.get("command"), str):
         args = dict(args, command=_without_heredocs(args["command"]))
-    return _origins(json.dumps(args, ensure_ascii=False))
+    try:
+        return _origins(json.dumps(args, ensure_ascii=False))
+    except RecursionError:
+        # Nested too deep to write out, as a line too deep to read: it
+        # names no file, and the rest of the transcript is read on.
+        return []
 
 
 def _named_by_input(call):
@@ -2274,6 +2279,17 @@ def _origin_for_line(obj, last_call, call_origins):
     # grep -r output says which file each of its lines came from. Any
     # other mention of a file in the output is just text.
     return _GREP_LINE
+
+
+def _dumped(obj, line):
+    """obj written back as the line it was read from, with that line's
+    ending, or None when it is nested too deep for json.dumps to write:
+    3.14's json reads far deeper than it writes. That line is kept as it
+    was read, as one json cannot read is, and the rest masked."""
+    try:
+        return json.dumps(obj, ensure_ascii=False) + line[len(line.rstrip("\r\n")):]
+    except RecursionError:
+        return None
 
 
 def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
@@ -2370,10 +2386,10 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
                 new, masked = _walk(obj, collect, replace=apply, only=only,
                                     seen=texts)
                 owners.extend([len(lines) - 1] * (len(texts) - before))
-                if apply and masked:
+                written = _dumped(new, line) if apply and masked else None
+                if written is not None:
                     changed = True
-                    ending = line[len(line.rstrip("\r\n")):]
-                    rewritten.append(json.dumps(new, ensure_ascii=False) + ending)
+                    rewritten.append(written)
                 else:
                     rewritten.append(line)
     except OSError:
@@ -2437,10 +2453,10 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
             fps = mask.get(next(visit, None))
             return _masked_copies(text, fps, values) if fps else text
         new, masked = _each_string(now, change)
-        if masked:
+        written = _dumped(new, lines[i]) if masked else None
+        if written is not None:
             changed = True
-            ending = lines[i][len(lines[i].rstrip("\r\n")):]
-            rewritten[i] = json.dumps(new, ensure_ascii=False) + ending
+            rewritten[i] = written
     for fp, n in places.items():
         if fp not in findings:
             if not n:
@@ -2462,10 +2478,12 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
         tmp = path + ".ranwhat-tmp"
         try:
             _write_like(path, tmp, rewritten)
-            # refuse to install a file we cannot read back
-            with open(tmp, encoding="utf-8") as fh:
-                for line in fh:
-                    if line.strip():
+            # Refuse to install a file we cannot read back. Only the lines
+            # written anew are asked: one kept as it was read may never
+            # have been JSON, or be deeper than json reads.
+            with open(tmp, encoding="utf-8", newline="") as fh:
+                for line, was in zip(fh, lines):
+                    if line != was:
                         json.loads(line)
             os.replace(tmp, path)
         finally:

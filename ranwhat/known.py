@@ -436,7 +436,8 @@ class Index(object):
         if key is not None:
             try:
                 index._load(json.loads(_read(index.path).decode("utf-8")))
-            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            except (OSError, ValueError, TypeError, KeyError, AttributeError,
+                    RecursionError):
                 index.values, index.files = {}, {}
         return index
 

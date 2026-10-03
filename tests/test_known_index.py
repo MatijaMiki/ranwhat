@@ -333,8 +333,10 @@ class TheIndexHoldsNoValue(_Index):
 
 class ADamagedIndexIsRebuilt(_Index):
 
+    # The last is nested past the stack: 3.9's json raised RecursionError
+    # on it, which no except caught, and check ended in a traceback.
     DAMAGE = (b"", b"{", b"not json at all", b"\x00\xff\xfe garbage", b"[]",
-              b'{"version": 999}', b"null")
+              b'{"version": 999}', b"null", b"[" * 100000 + b"]" * 100000)
 
     def test_each_damage(self):
         root, project = self.root()

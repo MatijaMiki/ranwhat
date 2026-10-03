@@ -9,6 +9,7 @@ before it is installed:
 - jsonl: the same number of lines; every line that parsed still parses;
   and each line decodes to exactly what the old line decodes to with the
   values masked in its strings (and in strings that are JSON themselves).
+  A line nested too deep to walk is taken as one that does not parse.
 - json: the same check on the whole document.
 - text: the same number of lines.
 - always: no encoding of any value is left.
@@ -358,7 +359,7 @@ def _expand(node, depth=0):
         if depth < _NEST_MAX and node.lstrip()[:1] in ("{", "["):
             try:
                 inner = _decode(node)
-            except ValueError:
+            except (ValueError, RecursionError):
                 return node
             if isinstance(inner, list) or (isinstance(inner, tuple)
                                            and inner[0] == "obj"):
@@ -427,17 +428,20 @@ def _mask(node, raw, byte_arrays):
 
 def _same_but_masked(old, new, raw, byte_arrays, before=None):
     """True when `new` decodes to `old` decoded and masked. False when it
-    does not, when `new` does not decode, or when the check cannot run.
-    `before`, when given, is `old` decoded already; `new` None is `old`
-    unchanged."""
+    does not, or when either does not decode. None when either is nested
+    too deep for the check to walk: 3.14's json reads far deeper than
+    Python recurses. `before`, when given, is `old` decoded already;
+    `new` None is `old` unchanged."""
     try:
         if before is None:
             before = _decode(old)
         before = _expand(before)
         after = before if new is None else _expand(_decode(new))
         return after == _mask(before, raw, byte_arrays)
-    except (ValueError, RecursionError):
+    except ValueError:
         return False
+    except RecursionError:
+        return None
 
 
 def _verify(kind, old, new, plan, byte_arrays, forms=None):
@@ -447,8 +451,9 @@ def _verify(kind, old, new, plan, byte_arrays, forms=None):
     if _leftover(new, plan, byte_arrays, forms):
         return False
     if kind == "json":
+        # A document too deep to check is refused, as one json cannot read.
         return _same_but_masked(old.lstrip("\ufeff"), new.lstrip("\ufeff"),
-                                _Forms.raw(plan), byte_arrays)
+                                _Forms.raw(plan), byte_arrays) is True
     old_lines, new_lines = old.split("\n"), new.split("\n")
     if len(old_lines) != len(new_lines):
         return False
@@ -474,8 +479,11 @@ def _verify(kind, old, new, plan, byte_arrays, forms=None):
             continue            # not JSON before: only the raw text changed
         # An untouched line with escapes may still hold a value in a form
         # no encoding has: it is checked against itself, masked.
-        if not _same_but_masked(was, None if was == now else now, raw,
-                                byte_arrays, before=decoded):
+        same = _same_but_masked(was, None if was == now else now, raw,
+                                byte_arrays, before=decoded)
+        if same is None:
+            continue            # too deep to walk: as a line json cannot read
+        if not same:
             return False
     return True
 
