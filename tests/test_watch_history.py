@@ -138,12 +138,14 @@ class DefaultRoot(unittest.TestCase):
         self.env(HOME=path, USERPROFILE=path)
 
     def assertSamePath(self, a, b):
-        self.assertEqual(os.path.normpath(a), os.path.normpath(b))
+        """The same place, absolute as the adapter's location is: on
+        Windows /synthetic is on the current drive."""
+        self.assertEqual(a, os.path.abspath(b))
 
     def test_claude_config_dir_moves_the_projects_directory(self):
         self.env(CLAUDE_CONFIG_DIR="/synthetic/claude-config")
-        self.assertEqual(watch.claude_projects(),
-                         os.path.join("/synthetic/claude-config", "projects"))
+        self.assertSamePath(watch.claude_projects(),
+                            os.path.join("/synthetic/claude-config", "projects"))
 
     def test_a_home_relative_config_dir_is_expanded(self):
         self.home("/synthetic/home")
