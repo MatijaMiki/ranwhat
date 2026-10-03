@@ -167,6 +167,12 @@ _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 # .project_root holds one absolute path; nothing past this is read.
 _PROJECT_ROOT_MAX = 4096
 
+# A chat's projectHash, read from the start of the file only when a 64-hex
+# folder is not named otherwise. Inside a string the quotes are escaped, so
+# only the header's own key matches.
+_HEADER_MAX = 4096
+_HEADER_HASH = re.compile(r'"projectHash"\s*:\s*"([0-9a-f]{64})"')
+
 # Patched by tests. On Windows os.kill(pid, 0) does not test a process: it
 # terminates it.
 _WINDOWS = os.name == "nt"
@@ -960,13 +966,35 @@ def _sha256(text):
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def _header_hashes(folder):
+    """The projectHash in the header of each chat directly in a project
+    folder's chats/. The header comes first in both layouts, so only the
+    start of each file is read."""
+    out = set()
+    for pattern in ("session-*.jsonl", "session-*.json"):
+        for path in glob.glob(os.path.join(glob.escape(folder), "chats", pattern)):
+            try:
+                with open(path, "rb") as fh:
+                    head = fh.read(_HEADER_MAX).decode("utf-8", "replace")
+            except OSError:
+                continue
+            match = _HEADER_HASH.search(head)
+            if match:
+                out.add(match.group(1))
+    return out
+
+
 def project_map(root, tmp, names):
     """{folder name: project root or None} for the folders in root/tmp.
 
     A slug folder: the text of its .project_root, else the path
     projects.json maps to that slug. A 64-hex folder (v0.28 and earlier):
-    the known project path whose sha256 is the folder name. The projectHash
-    in a session header is the same digest and cannot be reversed."""
+    the known project path whose sha256 is the folder name, else the
+    project of a slug folder whose chat headers carry that digest. The
+    second is needed on Windows, where the registry keeps every path in
+    lower case but the folder was named by the root in the case the CLI
+    was started with; a header's projectHash is that same digest, and
+    cannot be reversed."""
     roots = {}
     for name in names:
         value = _read_project_root(os.path.join(tmp, name, ".project_root"))
@@ -985,6 +1013,12 @@ def project_map(root, tmp, names):
             out[name] = by_hash.get(name)
         else:
             out[name] = roots.get(name) or by_slug.get(name)
+    missing = {n for n in names if out[n] is None and _HEX64.match(n)}
+    for name in names:
+        if missing and out[name] is not None and not _HEX64.match(name):
+            for digest in _header_hashes(os.path.join(tmp, name)) & missing:
+                out[digest] = out[name]
+                missing.discard(digest)
     return out
 
 

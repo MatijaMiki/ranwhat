@@ -763,6 +763,29 @@ class TimeSessionProject(GeminiCase):
         self.write("projects.json", text=json.dumps({"projects": {PROJECT: "proj"}}))
         self.assertEqual(self.calls(path)[0].project, PROJECT)
 
+    def test_a_sha256_folder_maps_through_the_chat_headers_of_its_slug_folder(self):
+        """On Windows the registry keeps a project's path in lower case, but
+        the folder is named by the root in the case the CLI was started
+        with. Each chat header records that same digest, and the migration
+        copied the folder's chats into the slug folder."""
+        started = "C:\\Users\\Alice\\proj"
+        kept = started.lower()
+        hexdir = hashlib.sha256(started.encode("utf-8")).hexdigest()
+        legacy = json.dumps(dict(header(projectHash=hexdir),
+                                 messages=[model("m1", [shell("c1", "ls")])]),
+                            indent=2)
+        path = self.write("tmp/%s/chats/session-old.json" % hexdir, text=legacy)
+        self.write("tmp/proj/.project_root", text=kept)
+        self.write("projects.json", text=json.dumps({"projects": {kept: "proj"}}))
+        self.assertIsNone(self.calls(path)[0].project)
+        for rel, kw in (("chats/session-old.json", {"text": legacy}),
+                        ("chats/session-new.jsonl",
+                         {"lines": [header(projectHash=hexdir)]})):
+            with self.subTest(rel):
+                slug = self.write("tmp/proj/" + rel, **kw)
+                self.assertEqual(self.calls(path)[0].project, kept)
+                os.remove(slug)
+
     def test_an_unknown_sha256_folder_has_no_project(self):
         path = self.write("tmp/%s/chats/%s" % ("ab" * 32, FIXTURE_NAME),
                           spec_lines())
