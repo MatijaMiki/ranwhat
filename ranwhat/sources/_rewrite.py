@@ -9,7 +9,9 @@ before it is installed:
 - jsonl: the same number of lines; every line that parsed still parses;
   and each line decodes to exactly what the old line decodes to with the
   values masked in its strings (and in strings that are JSON themselves).
-  A line nested too deep to walk is taken as one that does not parse.
+  A line nested too deep to walk is checked without walking it: the text
+  between its strings is the same, and its strings decode to the old ones
+  masked.
 - json: the same check on the whole document.
 - text: the same number of lines.
 - always: no encoding of any value is left.
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import time
 
@@ -58,7 +61,8 @@ _CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
            | getattr(os, "O_BINARY", 0))
 
 # JSON nested in a JSON string, nested in a JSON string...: this many levels
-# are opened when checking a line. Deeper text is compared as text.
+# are opened when checking a line. Deeper text, or JSON too deep to walk,
+# is compared as text.
 _NEST_MAX = 4
 
 _GO_ESCAPES = (("&", "\\u0026"), ("<", "\\u003c"), (">", "\\u003e"),
@@ -359,11 +363,11 @@ def _expand(node, depth=0):
         if depth < _NEST_MAX and node.lstrip()[:1] in ("{", "["):
             try:
                 inner = _decode(node)
+                if isinstance(inner, list) or (isinstance(inner, tuple)
+                                               and inner[0] == "obj"):
+                    return ("json", _expand(inner, depth + 1))
             except (ValueError, RecursionError):
-                return node
-            if isinstance(inner, list) or (isinstance(inner, tuple)
-                                           and inner[0] == "obj"):
-                return ("json", _expand(inner, depth + 1))
+                pass
         return node
     if isinstance(node, list):
         return [_expand(v, depth) for v in node]
@@ -447,6 +451,44 @@ def _same_but_masked(old, new, raw, byte_arrays, before=None):
         return None
 
 
+_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')
+_INTS = re.compile(r"(\[\s*[0-9]+(?:\s*,\s*[0-9]+)*\s*\])")
+
+
+def _items(line, byte_arrays):
+    """`line` cut at its JSON strings, and for a byte-array format at its
+    lists of integers: [text, item, text, ..., text]. Each string is
+    matched from its opening quote, so the cut is one pass however deep
+    the line is nested."""
+    parts, at = [], 0
+    while True:
+        start = line.find('"', at)
+        found = None if start == -1 else _STRING.match(line, start)
+        if found is None:
+            parts.append(line[at:])
+            break
+        parts += [line[at:start], found.group()]
+        at = found.end()
+    if byte_arrays:
+        parts = [p for i, part in enumerate(parts)
+                 for p in (_INTS.split(part) if i % 2 == 0 else (part,))]
+    return parts
+
+
+def _same_but_masked_flat(old, new, raw, byte_arrays):
+    """_same_but_masked for a line too deep to walk, without walking it:
+    True when the text between its items (_items) is unchanged, and the
+    items, read as one list a level deep, decode to the old ones masked.
+    Then `new` is `old` with nothing but those items changed, to whatever
+    reads it."""
+    was, now = _items(old, byte_arrays), _items(new, byte_arrays)
+    if len(was) != len(now) or was[0::2] != now[0::2]:
+        return False
+    return _same_but_masked("[%s]" % ",".join(was[1::2]),
+                            None if old == new else "[%s]" % ",".join(now[1::2]),
+                            raw, byte_arrays) is True
+
+
 def _verify(kind, old, new, plan, byte_arrays, forms=None):
     """True when `new` changes nothing in `old` but the secret. Each line
     is decoded once, and the values looked for in all its strings at
@@ -478,14 +520,16 @@ def _verify(kind, old, new, plan, byte_arrays, forms=None):
             continue
         try:
             decoded = _decode(was)
-        except (ValueError, RecursionError):
+        except ValueError:
             continue            # not JSON before: only the raw text changed
+        except RecursionError:
+            decoded = None      # too deep for this Python's json to read
         # An untouched line with escapes may still hold a value in a form
         # no encoding has: it is checked against itself, masked.
-        same = _same_but_masked(was, None if was == now else now, raw,
-                                byte_arrays, before=decoded)
+        same = None if decoded is None else _same_but_masked(
+            was, None if was == now else now, raw, byte_arrays, before=decoded)
         if same is None:
-            continue            # too deep to walk: as a line json cannot read
+            same = _same_but_masked_flat(was, now, raw, byte_arrays)
         if not same:
             return False
     return True
