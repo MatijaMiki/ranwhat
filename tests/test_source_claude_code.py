@@ -28,7 +28,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, TESTS)
 
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
-from ranwhat import clean, sources, watch  # noqa: E402
+from ranwhat import clean, cli, sources, watch  # noqa: E402
 from ranwhat.sources import _paths  # noqa: E402
 from ranwhat.sources.base import MaskResult, SecretText, Store  # noqa: E402
 from ranwhat.sources.claude_code import ClaudeCodeSource  # noqa: E402
@@ -282,6 +282,55 @@ class ToolCalls(_Case):
                          ["toolu_01", "toolu_03"])
         self.assertEqual([(r["session"], r["project"]) for r in records],
                          [(SID, SLUG)] * 2)
+
+
+def _deep(depth):
+    """JSON text of a list nested depth levels."""
+    return "[" * depth + "]" * depth
+
+
+def _in_place(entry, placeholder, depth):
+    """The entry's line with its placeholder string swapped for _deep(depth)."""
+    return json.dumps(entry).replace(json.dumps(placeholder), _deep(depth), 1)
+
+
+class NestedPastTheStack(_Case):
+    """A transcript is written by another program, so any value in it may
+    be nested deeper than Python recurses. Python 3.9's json stops near
+    1,000 levels and 3.14's reads 100,000, so what one let through met
+    watch's own walks, and one such call ended the run."""
+
+    def test_a_call_nested_past_the_stack_is_judged_and_the_rest_read(self):
+        path = self.write(SLUG + "/s.jsonl", [
+            tool_use("rm -rf ~/Documents/before", "toolu_01"),
+            _in_place(tool_use(None, "toolu_02", tool_input={
+                "command": "rm -rf ~/Documents/deep", "args": "ARGS"}), "ARGS", 100000),
+            _in_place(tool_result("toolu_02", "OUT"), "OUT", 100000),
+            _deep(100000),
+            tool_use("rm -rf ~/Documents/after", "toolu_03"),
+            tool_result("toolu_03", "API_KEY=" + KEY)])
+        evidence = [r["hits"][0]["evidence"] for r in watch.scan_transcript(path)]
+        self.assertIn("rm -rf ~/Documents/before", evidence)
+        self.assertIn("rm -rf ~/Documents/after", evidence)
+        texts = list(self.src.secret_texts(self.src.store_at(path)))
+        self.assertIn(KEY, json.dumps(texts[-1].node))
+
+    def test_an_id_nested_deep_is_cut_in_the_record(self):
+        for depth in (900, 100000):
+            path = self.write(SLUG + "/s%d.jsonl" % depth, [
+                _in_place(tool_use("rm -rf ~/Documents/deep", "ID"), "ID", depth),
+                tool_use("rm -rf ~/Documents/after", "toolu_02")])
+            with self.subTest(depth=depth):
+                records = watch.scan_transcript(path)
+                self.assertIn("rm -rf ~/Documents/after",
+                              [r["hits"][0]["evidence"] for r in records])
+                doc = json.loads(cli._json_text(
+                    cli._masked_strings(records, str.strip)))
+                for record in doc:
+                    node, levels = record["tool_call_id"], 0
+                    while isinstance(node, list) and node:
+                        node, levels = node[0], levels + 1
+                    self.assertLess(levels, 100)
 
 
 class Secrets(_Case):

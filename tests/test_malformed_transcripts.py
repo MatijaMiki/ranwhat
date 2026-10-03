@@ -51,6 +51,19 @@ ODD_LINES = {
     "a timestamp that is an object": json.dumps(dict(_call("rm -rf ~/x"), timestamp={"t": 1})),
     "deep nesting": '{"a":' * 900 + json.dumps("TOKEN=" + KEY) + "}" * 900,
     "deeper than json reads": "[" * 100000 + "]" * 100000,
+    # Read by Python 3.14's json, and by 3.9's at 900, then walked by watch:
+    # the id is in every record, the argument is judged.
+    "an id nested deep": json.dumps(_call("rm -rf ~/x", id="ID")).replace(
+        '"ID"', "[" * 900 + "]" * 900),
+    "an id nested past the stack": json.dumps(_call("rm -rf ~/x", id="ID")).replace(
+        '"ID"', "[" * 100000 + "]" * 100000),
+    "an argument nested past the stack": json.dumps(_call(
+        "rm -rf ~/x", input={"command": "rm -rf ~/x", "args": "ARGS"})).replace(
+        '"ARGS"', "[" * 100000 + "]" * 100000),
+    "a result nested past the stack": json.dumps(
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "a", "content": "OUT"}]}}).replace(
+        '"OUT"', "[" * 100000 + "]" * 100000),
     "a lone surrogate": json.dumps(_call("rm -rf ~/x \ud83d")),
     "a lone surrogate in a value": json.dumps(
         {"type": "user", "message": {"content": [

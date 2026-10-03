@@ -1870,7 +1870,12 @@ def _base_name(tool_name):
 
 def _words(value):
     if isinstance(value, (list, tuple)):
-        return " ".join(str(c) for c in value)
+        try:
+            return " ".join(str(c) for c in value)
+        except RecursionError:
+            # An item nested deeper than str() recurses is no word of a
+            # command, and stopped the whole store; the strings beside it are.
+            return " ".join(c for c in value if isinstance(c, str))
     return value if isinstance(value, str) else ""
 
 
@@ -2057,15 +2062,30 @@ def judge(call, known=None):
     return evaluate(NEUTRAL % call.kind, call.tool_input, known)
 
 
+def _shallow(value, depth=0):
+    """value as recorded, cut where _masked cuts a payload. A record is
+    masked and written as JSON by walks that recurse, and one id nested
+    past the stack stopped watch and check before they printed anything."""
+    if depth > 32:
+        return "…"
+    if isinstance(value, (list, tuple)):
+        return [_shallow(v, depth + 1) for v in value]
+    if isinstance(value, dict):
+        return {k: _shallow(v, depth + 1) for k, v in value.items()}
+    return value
+
+
 def _record(call, hits, payload, source):
-    """The Action Record for a judged call that tripped a rule."""
+    """The Action Record for a judged call that tripped a rule. Its id is
+    kept as the agent wrote it, an object too, so it is cut as a payload
+    is."""
     return {
         "source": source,
         "session": call.session,
         "project": call.project,
         "timestamp": call.timestamp,
         "tool_name": call.tool_name,
-        "tool_call_id": call.tool_call_id,
+        "tool_call_id": _shallow(call.tool_call_id),
         "payload_hash": _hash(payload),
         "severity": max(hits, key=lambda h: ["medium", "high", "critical"]
                         .index(h["severity"]))["severity"],
