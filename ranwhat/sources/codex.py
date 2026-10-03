@@ -290,6 +290,13 @@ def _is_db_home(loc):
     return loc.how == "env CODEX_SQLITE_HOME" or loc.how.startswith("config ")
 
 
+def _separate(locs):
+    """True when the databases have a home of their own that exists. Codex
+    makes it when it first starts with it set, so until then the root's
+    databases are the ones it last wrote."""
+    return any(_is_db_home(loc) and loc.exists for loc in locs)
+
+
 def _without_encrypted(node, depth=0):
     """`node` with every value under a key named encrypted_content left
     out: opaque data the server encrypted, never a readable secret."""
@@ -507,8 +514,9 @@ class CodexSource(Source):
 
         The databases are where Codex looks for them: config.toml's
         sqlite_home first, then CODEX_SQLITE_HOME, then CODEX_HOME itself.
-        A relative CODEX_SQLITE_HOME is taken from the current folder, as
-        Codex takes it from its own."""
+        A home that does not exist yet holds none, and CODEX_HOME's own
+        are read until it does (_separate). A relative CODEX_SQLITE_HOME is
+        taken from the current folder, as Codex takes it from its own."""
         try:
             if override:
                 items = [override] if isinstance(override, str) else list(override)
@@ -525,7 +533,7 @@ class CodexSource(Source):
                     if home:
                         from_config.append((home, "config " + config))
             locs = self._locate(roots + (from_config or from_env))
-            separate = any(_is_db_home(loc) for loc in locs)
+            separate = _separate(locs)
             for loc in locs:
                 if loc.exists:
                     loc.found = len(self._stores_at(loc, separate, heads=False))
@@ -557,7 +565,7 @@ class CodexSource(Source):
 
     def stores(self, locations, since_days=None):
         locations = list(locations)
-        separate = any(_is_db_home(loc) for loc in locations)
+        separate = _separate(locations)
         found, seen = [], set()
         for loc in locations:
             for store in self._stores_at(loc, separate):

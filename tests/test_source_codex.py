@@ -33,7 +33,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, TESTS)
 
 import growth  # noqa: E402
-from ranwhat import clean, watch  # noqa: E402
+from ranwhat import agents, clean, watch  # noqa: E402
 from ranwhat import sources  # noqa: E402
 from ranwhat.sources import _paths, _rewrite, _shell, _stamps, _zstd, codex  # noqa: E402
 from ranwhat.sources.base import MaskResult  # noqa: E402
@@ -629,6 +629,18 @@ class Discovery(_Case):
         self.assertIn(moved, paths)
         self.assertNotIn(made["state_5.sqlite"], paths)
         self.assertNotIn(made["thread_history_1.sqlite"], paths)
+
+    def test_a_sqlite_home_not_made_yet_leaves_the_roots_databases_counted(self):
+        """Codex makes its SQLite home when it first starts with it set, so
+        until then the root's databases are the ones it last wrote. What
+        sources counts and what clean reads agree on that."""
+        made = self._tree()
+        os.environ["CODEX_SQLITE_HOME"] = os.path.join(self.home, "not-made-yet")
+        locs, stores = agents.discover(self.src)
+        self.assertEqual([(l.how, l.exists, l.found) for l in locs],
+                         [("env CODEX_HOME", True, len(made)),
+                          ("env CODEX_SQLITE_HOME", False, 0)])
+        self.assertEqual(set(s.path for s in stores), set(made.values()))
 
     @unittest.skipUnless(codex._tomllib(), "tomllib is Python 3.11+")
     def test_sqlite_home_from_config_toml(self):
