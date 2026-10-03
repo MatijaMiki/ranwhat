@@ -5,16 +5,25 @@ script *containing* a dangerous string, or on a grep searching *for* one,
 gets muted within a day -- and a muted watcher records nothing anyone reads.
 Every case here is a real pattern that tripped the naive implementation.
 """
+import contextlib
+import io
+import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import growth  # noqa: E402
-from ranwhat import watch  # noqa: E402
+import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
+from ranwhat import cli, sources, watch  # noqa: E402
+from ranwhat.sources import _paths  # noqa: E402
+from ranwhat.sources.base import Source, ToolCall  # noqa: E402
 
 
 def _judged(command):
@@ -660,3 +669,110 @@ class SearchingHistoryIsNotRunning(unittest.TestCase):
                 ("git log --oneline; git push --force", [("git.destructive", watch.HIGH)])):
             with self.subTest(command=command):
                 self.assertEqual(_hits(command), expected)
+
+
+# Deeper than either Python recurses: 3.9 stops near 1,000 levels, and 3.14
+# at the end of its C stack.
+PAST_THE_STACK = 100000
+
+
+def _nested(depth):
+    """A list nested depth levels, built by a loop. Any adapter may hand
+    watch one: Python 3.14's json reads far deeper than 3.9's."""
+    node = []
+    for _ in range(depth):
+        node = [node]
+    return node
+
+
+class _DeepAgent(Source):
+    """A throwaway adapter whose calls carry values nested past the stack,
+    between ordinary ones. One store, s.jsonl where it is pointed, naming
+    the calls it holds."""
+    id = "deep-agent"
+    name = "Deep Agent"
+    unit = "session"
+    path_means = "a Deep Agent directory"
+
+    def stores(self, locations, since_days=None):
+        found = [self.store(os.path.join(loc.path, "s.jsonl"), "jsonl")
+                 for loc in locations]
+        return [s for s in found if s]
+
+    def tool_calls(self, store):
+        deep = _nested(PAST_THE_STACK)
+
+        def shell(command, tool_input=None, **fields):
+            return ToolCall(self.id, store.path, "shell",
+                            dict({"cmd": command}, **(tool_input or {})),
+                            kind="shell", known=True, command=command,
+                            consumed=("cmd",), **fields)
+
+        calls = {
+            "one": shell("rm -rf ~/Documents/one", {"args": deep}),
+            # A name the adapter does not know, judged by it: a shell tool
+            # whose input is a list, with the deep item last.
+            "two": ToolCall(self.id, store.path, "run_shell_command",
+                            ["rm", "-rf", "~/Documents/two", deep]),
+            "three": shell("rm -rf ~/Documents/three", tool_call_id=deep),
+            "four": shell("rm -rf ~/Documents/four", tool_call_id="last")}
+        with open(store.path, encoding="utf-8") as fh:
+            for name in fh.read().split():
+                yield calls[name]
+
+
+class NestingPastTheStack(unittest.TestCase):
+    """A value nested deeper than Python recurses, anywhere in one call,
+    stopped watch reading the store it was in, and a record holding one
+    stopped watch and check on the way out. Every call around it must
+    still be read, judged and written."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="deep-home-")
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.place = os.path.join(self.home, "deep")
+        os.makedirs(self.place)
+        patches = [mock.patch.dict(os.environ, {
+                       "HOME": self.home, "USERPROFILE": self.home,
+                       "CLAUDE_CONFIG_DIR": os.path.join(self.home, ".claude")}),
+                   mock.patch.object(_paths, "home", return_value=self.home)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        sources.register(_DeepAgent)
+        self.addCleanup(sources.unregister, _DeepAgent.id)
+
+    def holding(self, *names):
+        """The store, holding these calls; the commands they ran."""
+        with open(os.path.join(self.place, "s.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(names) + "\n")
+        return ["rm -rf ~/Documents/%s" % n for n in names]
+
+    def test_a_call_nested_past_the_stack_is_judged_and_the_rest_read(self):
+        wanted = self.holding("one", "two", "three", "four")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            records, counts = watch.scan_sources_counted(
+                sources=(_DeepAgent.id,), paths={_DeepAgent.id: self.place})
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(counts, {_DeepAgent.id: 1})
+        self.assertEqual(sorted(r["hits"][0]["evidence"] for r in records),
+                         sorted(wanted))
+
+    def test_an_id_nested_past_the_stack_is_written_with_the_rest(self):
+        # Only the id: str() of the other two takes 3.14 most of a second.
+        wanted = self.holding("three", "four")
+        for argv in (["watch"], ["watch", "--json"], ["check", "--json"]):
+            out, err = io.StringIO(), io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(err):
+                rc = cli.main(argv + [
+                    "--source", _DeepAgent.id,
+                    "--path", "%s=%s" % (_DeepAgent.id, self.place),
+                    "--root", os.path.join(self.home, "projects"),
+                    "--state-dir", os.path.join(self.home, "oc"), "--days", "30"])
+            self.assertEqual((rc, err.getvalue()), (0, ""), argv)
+            for command in wanted:
+                self.assertIn(command, out.getvalue(), argv)
+            if "--json" in argv:
+                json.loads(out.getvalue())

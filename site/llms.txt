@@ -1,6 +1,6 @@
 # ranwhat
 
-> ranwhat is an open-source command-line tool for AI coding agent security. It reads the transcripts Claude Code writes to disk and reports what the agent actually did: credential reads, destructive commands, package publishing and other risky actions. It finds credentials left in those transcripts and scores the authority of an agent's credentials. MIT licence, Python 3.9 or newer, no dependencies.
+> ranwhat is an open-source command-line tool for AI coding agent security. It reads the history Claude Code and eleven other coding agents write to disk and reports what each agent actually did: credential reads, destructive commands, package publishing and other risky actions. It finds credentials left in that history and scores the authority of an agent's credentials. MIT licence, Python 3.9 or newer, no dependencies.
 
 Run it without installing: `uvx ranwhat check`. Or install it: `pipx install ranwhat` or `pip install ranwhat`. No account is needed.
 
@@ -10,13 +10,14 @@ Commands:
 
 - `ranwhat check`: watch and clean in one read-only pass. It never changes anything.
 - `ranwhat watch`: nine rules over what the agent ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, and local files uploaded with curl. `--json` prints one record per flagged call.
-- `ranwhat clean`: finds credentials in Claude Code transcripts, passwords typed into commands (`mysql -pPASSWORD`, `curl -u user:password`) among them, says what to rotate, and masks them only when asked (`--apply`, or `mask` in the review session). Backups go to `~/.ranwhat/backups`.
+- `ranwhat clean`: finds credentials in every agent's transcripts, passwords typed into commands (`mysql -pPASSWORD`, `curl -u user:password`) among them, says what to rotate, and masks them only when asked (`--apply`, or `mask` in the review session). Backups go to `~/.ranwhat/backups`.
+- `ranwhat sources`: every coding agent ranwhat reads, where it looked for each one's history, and whether it found any. `check`, `watch` and `clean` read them all by default; `--source ID` reads one, and `--path ID=PATH` reads one from elsewhere.
 - `ranwhat scan profile.json`: scores authority, observability and reversibility for the credentials an agent holds. `--html report.html` writes a report. `--pull-usage` checks which grants were used, against the provider's own audit trail.
 - `ranwhat live`: the same, from read-only token introspection. Pass tokens in the environment (`RANWHAT_GITHUB_TOKEN`, `RANWHAT_GOOGLE_TOKEN`, `RANWHAT_SLACK_TOKEN`, `RANWHAT_STRIPE_TOKEN`), not as flags.
 - `ranwhat demo`: an authority scan on a bundled example, with no setup.
 - `ranwhat update`: refreshes the capability catalogue. Needs a Plus subscription, and Plus is not available yet.
 
-`check`, `watch` and `clean` read Claude Code transcripts, `~/.claude/projects/*/*.jsonl` and each session's `subagents/` transcripts, or the same under `$CLAUDE_CONFIG_DIR/projects` when that is set, for the last 30 days by default (`--days N`). `--root PATH` reads another directory.
+Agents read: Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, Grok Build, Droid, Kimi Code, Kimi CLI, Pi, Muse Code and OpenClaw. `check`, `watch` and `clean` read all twelve, each from where it keeps its history, for the last 30 days by default (`--days N`). For Claude Code that is `~/.claude/projects/*/*.jsonl` and each session's `subagents/` transcripts, or the same under `$CLAUDE_CONFIG_DIR/projects` when that is set; `--root PATH` reads another directory. Databases and compressed files are only read: OpenClaw's history is a database, so `clean` finds its secrets but cannot mask them there. Meta Muse, Grok Bot and the current Amp keep their history in their vendor's cloud, so there is nothing local to read. Cursor is next.
 
 `check` and `watch` hide every secret `clean` finds, anywhere in the history whatever `--days` says, in what they print. They keep an index for that in `~/.ranwhat/known/` (`$RANWHAT_HOME/known/` when set): salted fingerprints, never a secret, readable by you alone.
 

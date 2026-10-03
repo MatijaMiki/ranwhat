@@ -788,5 +788,69 @@ class AssignmentsTriedAtTheirSeparator(unittest.TestCase):
         self.assertLess(best(clean._assign_search), best(self.regex_alone) / 1.5)
 
 
+
+class TheGenericRewriteIsLinear(growth.Assertions, unittest.TestCase):
+    """Masking a file another agent writes (sources/_rewrite.py) searched
+    the whole file once for each form of each value, decoded every line
+    holding a backslash (every line of a Codex rollout has a \\n) and
+    asked every value of every string on it, then searched the whole
+    result again for each form. The values found in a file grow with it,
+    so the cost was quadratic: a Codex rollout of 2,700 distinct keys, a
+    megabyte, took 3.9s against 0.27s at a quarter of it, where Claude
+    Code's scan_file masks the same calls in a quarter of a second."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="perf-rewrite-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        p = mock.patch.object(clean, "BACKUP_ROOT", os.path.join(self.tmp, "b"))
+        p.start()
+        self.addCleanup(p.stop)
+        self.built = 0
+
+    def rollout(self, n, prefix=""):
+        """(root, path, values): a Codex rollout of n(2700) calls of `cat
+        .env`, each printing a key of its own after `prefix`."""
+        import agents_fixtures as af
+        rnd = random.Random(7)
+        alnum = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        values = [prefix + "".join(rnd.choice(alnum) for _ in range(32))
+                  for _ in range(n(2700))]
+        self.built += 1
+        root = os.path.join(self.tmp, "r%d" % self.built, ".codex")
+        now = time.time() - 600
+        path = af.AGENTS[0].write(root, [
+            ("c%d" % i, "shell", "cat .env", "API_KEY=%s\n" % v, now + i)
+            for i, v in enumerate(values)])
+        return root, path, values
+
+    def test_masking_a_rollout_of_distinct_keys(self):
+        from ranwhat.sources import _rewrite
+
+        def mask(built):
+            _root, path, values = built
+            result = _rewrite.rewrite_file(path, values, "jsonl")
+            return result.changed, result.skipped
+        # keys of one kind share a prefix longer than a window of the text
+        for prefix in ("", "sk-" "ant-" "api03-" + "A" * 12):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.assertScalesLinearly(
+                    lambda n: self.rollout(n, prefix), mask, "rewrite_file",
+                    rebuild=True), (True, None))
+
+    def test_clean_apply_on_a_rollout_of_distinct_keys(self):
+        def apply(built):
+            root, path, values = built
+            with mock.patch("ranwhat.sources._paths.home", return_value=self.tmp):
+                out = clean.scan_sources(sources=["codex"], paths={"codex": root},
+                                         apply=True)
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            return (len(out.findings), out.changed == [path],
+                    sum(v in text for v in values))
+        found, changed, left = self.assertScalesLinearly(
+            self.rollout, apply, "scan_sources(apply=True)", rebuild=True)
+        self.assertEqual((found, changed, left), (2700, True, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

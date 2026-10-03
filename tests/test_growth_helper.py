@@ -1,9 +1,13 @@
 """growth.py reads how a cost grows from times a shared runner can disturb.
 These pin how it reads them, with the clock replaced by a script."""
+import os
+import sys
 import unittest
 from unittest import mock
 
-import growth
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import growth  # noqa: E402
 
 
 def scripted(times):
@@ -52,6 +56,36 @@ class ReadingGrowth(unittest.TestCase):
         old = growth.Measured.from_json({"best": [[1.0, 0.2], [0.25, 0.05]],
                                          "pairs": [[1.0, 0.25]]})
         self.assertEqual(old.runs, [])
+
+
+# The child script measure_apart runs: its clock is the script below, the
+# same one that slowed the large size above, so the best times read past 8
+# and only a try's own runs read 4.
+_SCRIPTED_CHILD = """
+queue = [0.068, 1.20, 0.30, 1.25, 0.14, 0.62, 0.15, 0.60, 0.137, 0.549]
+
+def _seconds(call, arg):
+    return queue.pop(0), arg
+
+growth.seconds = _seconds
+
+def call(arg):
+    return arg
+"""
+
+
+class ReadingGrowthApart(unittest.TestCase):
+
+    def test_each_try_comes_back_from_the_child(self):
+        measured, full = growth.measure_apart(lambda n: n(4), _SCRIPTED_CHILD)
+        self.assertEqual(full, 4)
+        self.assertEqual(measured.result, 4)
+        self.assertEqual(measured.runs[0], {0.25: 0.068, 1.0: 1.20})
+        self.assertEqual(len(measured.runs), 2)
+        self.assertGreaterEqual(
+            growth.growth(measured.best[1.0], measured.best[0.25]), 8)
+        self.assertLess(measured.growth(1.0, 0.25), growth.LIMIT)
+        growth.assert_linear(self, measured)
 
 
 if __name__ == "__main__":

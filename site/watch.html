@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat watch: audit what Claude Code already ran</title>
-<meta name="description" content="Nine rules over what Claude Code already wrote to disk: credential reads, rm -rf, force pushes, npm publish, terraform destroy and more.">
+<meta name="description" content="Nine rules over what Claude Code, Codex, Gemini CLI and nine more coding agents wrote to disk: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="canonical" href="https://ranwhat.com/watch">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -18,7 +18,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/watch">
 <meta property="og:title" content="ranwhat watch: audit what Claude Code already ran">
-<meta property="og:description" content="Nine rules over what Claude Code already wrote to disk: credential reads, rm -rf, force pushes, npm publish, terraform destroy and more.">
+<meta property="og:description" content="Nine rules over what Claude Code, Codex, Gemini CLI and nine more coding agents wrote to disk: credential reads, rm -rf, force pushes, npm publish.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,7 +27,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat watch: audit what Claude Code already ran">
-<meta name="twitter:description" content="Nine rules over what Claude Code already wrote to disk: credential reads, rm -rf, force pushes, npm publish, terraform destroy and more.">
+<meta name="twitter:description" content="Nine rules over what Claude Code, Codex, Gemini CLI and nine more coding agents wrote to disk: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -63,9 +63,9 @@
     <p class="eyebrow">ranwhat watch</p>
     <h1>See the risky commands Claude Code already ran.</h1>
     <p class="lede">
-      ranwhat watch reads the transcripts Claude Code has already written to
-      disk and reports the nine kinds of action worth a second look. It
-      changes nothing.
+      ranwhat watch reads what Claude Code and eleven other coding agents
+      have already written to disk and reports the nine kinds of action
+      worth a second look. It changes nothing.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -166,34 +166,103 @@
     <div>
       <h2>Reads the agents already on your machine.</h2>
       <p class="lede">
-        No wrapper, no proxy, nothing in your critical path. It reads what the
-        agent already wrote to disk.
+        No wrapper, no proxy, nothing in your critical path. It reads what
+        each agent already wrote to disk, all of them by default.
       </p>
       <div class="scroll">
       <table class="stack">
-        <thead><tr><th>Agent</th><th>Location</th><th>Format</th></tr></thead>
+        <thead><tr><th>Agent</th><th>Location</th><th>Format</th><th>Status</th></tr></thead>
         <tbody>
           <tr><td><strong>Claude Code</strong></td>
-              <td data-label="Location"><code>~/.claude/projects/*/*.jsonl</code>, and each session's <code>subagents/</code></td>
-              <td data-label="Format">JSONL transcripts</td></tr>
+              <td data-label="Location"><code>~/.claude/projects/*/*.jsonl</code>, and each session's <code>subagents/</code> (<code>$CLAUDE_CONFIG_DIR</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Codex</strong></td>
+              <td data-label="Location"><code>~/.codex/sessions/</code> and <code>archived_sessions/</code> (<code>$CODEX_HOME</code>); its prompt history, shell snapshots and thread index searched for secrets</td>
+              <td data-label="Format">JSONL; <code>.jsonl.zst</code> and SQLite read only</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Gemini CLI</strong></td>
+              <td data-label="Location"><code>~/.gemini/tmp/&lt;project&gt;/chats/</code> (<code>$GEMINI_CLI_HOME</code>)</td>
+              <td data-label="Format">JSONL, JSON</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>GitHub Copilot CLI</strong></td>
+              <td data-label="Location"><code>~/.copilot/session-state/&lt;session&gt;/events.jsonl</code> (<code>$COPILOT_HOME</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Qwen Code</strong></td>
+              <td data-label="Location"><code>~/.qwen/projects/&lt;project&gt;/chats/</code>, and older <code>tmp/&lt;hash&gt;/chats/</code> (<code>$QWEN_RUNTIME_DIR</code>, <code>$QWEN_HOME</code>)</td>
+              <td data-label="Format">JSONL, JSON</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Grok Build</strong></td>
+              <td data-label="Location"><code>~/.grok/sessions/&lt;folder&gt;/&lt;session&gt;/updates.jsonl</code> (<code>$GROK_HOME</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Droid</strong></td>
+              <td data-label="Location"><code>~/.factory/sessions/</code> (<code>$FACTORY_HOME_OVERRIDE</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Kimi Code</strong></td>
+              <td data-label="Location"><code>~/.kimi-code/sessions/</code> (<code>$KIMI_CODE_HOME</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Kimi CLI</strong></td>
+              <td data-label="Location"><code>~/.kimi/sessions/</code> (<code>$KIMI_SHARE_DIR</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Pi</strong></td>
+              <td data-label="Location"><code>~/.pi/agent/sessions/</code> (<code>$PI_CODING_AGENT_DIR</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Muse Code</strong></td>
+              <td data-label="Location"><code>~/.local/share/muse/sessions/</code> (<code>$XDG_DATA_HOME/muse</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>OpenClaw</strong></td>
-              <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code> (default <code>~/.openclaw</code>, or <code>--state-dir</code>)</td>
-              <td data-label="Format">SQLite, tool calls found by shape; compressed events and <a href="https://docs.openclaw.ai/reference/database-schemas/layout">cold archives</a> not read yet</td></tr>
+              <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code> (default <code>~/.openclaw</code>)</td>
+              <td data-label="Format">SQLite, tool calls found by shape</td>
+              <td data-label="Status">Shipped, secrets read-only</td></tr>
+          <tr><td><strong>Meta Muse</strong></td>
+              <td data-label="Location">Meta's cloud</td>
+              <td data-label="Format">Nothing on your machine</td>
+              <td data-label="Status">Cloud only</td></tr>
+          <tr><td><strong>Grok Bot</strong></td>
+              <td data-label="Location">xAI's cloud</td>
+              <td data-label="Format">Nothing on your machine</td>
+              <td data-label="Status">Cloud only</td></tr>
+          <tr><td><strong>Amp</strong></td>
+              <td data-label="Location"><code>ampcode.com</code>, for the current Amp</td>
+              <td data-label="Format">Nothing on your machine</td>
+              <td data-label="Status">Cloud only</td></tr>
+          <tr><td><strong>Cursor</strong></td>
+              <td data-label="Location">Its local history</td>
+              <td data-label="Format">Not read yet</td>
+              <td data-label="Status">Next</td></tr>
         </tbody>
       </table>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        When <span class="icode">CLAUDE_CONFIG_DIR</span> is set, transcripts
-        are read from <span class="icode">$CLAUDE_CONFIG_DIR/projects</span>
-        instead, and <span class="icode">--root PATH</span> reads any other
-        directory.
+        Each agent is read from where it keeps its history, and the variable
+        in brackets moves it for ranwhat as it moves it for the agent.
+        <span class="icode">--source ID</span> reads one agent,
+        <span class="icode">--path ID=PATH</span> reads one from elsewhere,
+        and <span class="icode">ranwhat sources</span> lists where it looked
+        and what it found.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
-        Not read yet: the large tool outputs Claude Code stores in
+        Databases and compressed files are only ever read. OpenClaw keeps its
+        history in SQLite, so <a href="/clean">clean</a> finds its secrets
+        but cannot mask them there. Not read yet: the large tool outputs
+        Claude Code stores in
         <span class="icode">&lt;session&gt;/tool-results/</span>, and
         <span class="icode">~/.claude/history.jsonl</span>.
         <a href="/guides/claude-code-history">Where Claude Code keeps your
         history</a> lists the files a session leaves behind.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Meta Muse, Grok Bot and the current Amp keep their history in their
+        vendor's cloud, so there is nothing on your machine to read. Muse
+        Code and Grok Build, Meta's and xAI's coding CLIs, are read. Cursor
+        is next, once its format is checked against a primary source.
       </p>
     </div>
   </div>

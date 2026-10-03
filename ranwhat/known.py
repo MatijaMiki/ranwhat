@@ -45,7 +45,7 @@ import os
 import re
 import stat
 
-from . import clean
+from . import agents, clean
 from .watch import _transcripts, claude_projects
 
 # 2: 16 bits of the head hash, not 64. An index of version 1 is read, its
@@ -397,10 +397,18 @@ def _hex(text, size):
 class Index(object):
     """The index of one transcript root: for each transcript (its resolved
     path), its size and modification time when it was read, the values
-    clean finds in it, and the masks it holds."""
+    clean finds in it, and the masks it holds.
 
-    def __init__(self, root, where, key, stored):
+    Every other agent's files are in it too, wherever each keeps them (its
+    default, or `paths`, {source id: path}): a value found in a Codex
+    session is masked where a Claude Code transcript shows it, and the
+    other way round. Whatever --source a run is limited to, every agent is
+    indexed: a value is no less a secret for being found by an agent the
+    report leaves out."""
+
+    def __init__(self, root, where, key, stored, paths=None):
         self.root = root
+        self.paths = dict(paths or {})
         self.where = where
         name = hashlib.sha256(_bytes(os.path.realpath(root))).hexdigest()[:16]
         self.path = os.path.join(where, "index-%s.json" % name)
@@ -415,18 +423,21 @@ class Index(object):
         self._migrated = False          # read from an older version: write it again
 
     @classmethod
-    def open(cls, root=None):
+    def open(cls, root=None, paths=None):
         """The index of root (default: claude_projects()) as it was kept,
         or an empty one. Nothing is written until update has something to
-        keep."""
+        keep. `paths`, {source id: path}, points the other agents
+        elsewhere."""
         root = root or claude_projects()
         where = index_dir()
         key = _stored_key(where)
-        index = cls(root, where, key or os.urandom(_KEY_SIZE), key is not None)
+        index = cls(root, where, key or os.urandom(_KEY_SIZE), key is not None,
+                    paths)
         if key is not None:
             try:
                 index._load(json.loads(_read(index.path).decode("utf-8")))
-            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            except (OSError, ValueError, TypeError, KeyError, AttributeError,
+                    RecursionError):
                 index.values, index.files = {}, {}
         return index
 
@@ -470,16 +481,38 @@ class Index(object):
         """What clean found reading the transcript at path: the values the
         rules find there and the fingerprint each mask in it keeps, as
         clean.values_in returns them. st is its os.stat from before it was
-        read. update keeps this in place of a read of its own while the
-        transcript is still that size and that age: one written to since
-        is read again, so nothing it gained in the meantime is missed."""
-        if not stat.S_ISREG(st.st_mode):
+        read, or for another agent's file its agents.signature. update
+        keeps this in place of a read of its own while the transcript is
+        still that size and that age: one written to since is read again,
+        so nothing it gained in the meantime is missed."""
+        if not hasattr(st, "st_mode"):          # a signature, not a stat
+            size, mtime = st
+        elif stat.S_ISREG(st.st_mode):
+            size, mtime = st.st_size, st.st_mtime_ns
+        else:
             return
         try:
             real = os.path.realpath(path)
         except OSError:
             return
-        self._taken[real] = (st.st_size, st.st_mtime_ns, set(values), set(fingerprints))
+        self._taken[real] = (size, mtime, set(values), set(fingerprints))
+
+    def _adapter_files(self):
+        """{resolved path: (size, mtime_ns, path, (source, store))} for
+        every file of every agent clean searches through its adapter."""
+        out = {}
+        for source in agents.searched():
+            _locations, stores = agents.discover(source, self.paths.get(source.id))
+            for store in stores:
+                signed = agents.signature(store.path, store.format)
+                if signed is None:
+                    continue
+                try:
+                    real = os.path.realpath(store.path)
+                except OSError:
+                    continue
+                out.setdefault(real, signed + (store.path, (source, store)))
+        return out
 
     def update(self, progress=None):
         """Read again each transcript under the root that is new or has
@@ -487,7 +520,7 @@ class Index(object):
         is now (take), forget those gone, keep the index, and return a
         Matcher for every value it knows. `progress` is called with
         (index, total, path) before each one is read."""
-        now = {}
+        now = self._adapter_files()
         for path in _transcripts(self.root):
             try:
                 st = os.stat(path)
@@ -495,8 +528,8 @@ class Index(object):
             except OSError:
                 continue
             if stat.S_ISREG(st.st_mode):
-                now[real] = (st.st_size, st.st_mtime_ns, path)
-        stale = [real for real, (size, mtime, _path) in now.items()
+                now[real] = (st.st_size, st.st_mtime_ns, path, None)
+        stale = [real for real, (size, mtime, _path, _adapter) in now.items()
                  if self.files.get(real, (None, None))[:2] != (size, mtime)]
         stale.sort(key=lambda real: now[real][1], reverse=True)     # newest first
         gone = [real for real in self.files if real not in now]
@@ -508,11 +541,12 @@ class Index(object):
         self._taken.clear()
         unread = [real for real in stale if real not in found]
         for i, real in enumerate(unread, 1):
-            path = now[real][2]
+            path, adapter = now[real][2:]
             if progress:
                 progress(i, len(unread), path)
             self.rescanned += 1
-            got = clean.values_in(path)
+            got = (clean.values_in(path) if adapter is None
+                   else clean.values_in_store(*adapter))
             if got is not None:         # unreadable now: what it held is kept
                 found[real] = got
         read = {}

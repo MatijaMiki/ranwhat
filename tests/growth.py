@@ -26,10 +26,17 @@ Where a test compares two costs at one size instead (this one costs no
 more than that one), settle() gives it the same best-of-TRIES, so that a
 margin can be a proportion rather than a number of seconds.
 
+Where the input is a file tree too large to build twice in one run (a
+transcript of tens of megabytes), measure_apart() builds it here at each
+size and measures the call on its own interpreter, stopped after HANG.
+
 Imported by the tests, and by the scripts they run in a fresh interpreter;
 it needs nothing but the standard library.
 """
 import gc
+import json
+import os
+import subprocess
 import sys
 import time
 
@@ -193,3 +200,50 @@ def settle(once, fine):
         if fine(*best):
             break
     return best
+
+
+# measure() stops trying once it has spent CEILING, so a linear case is
+# done within about twice that even on a slow machine; past HANG the run
+# is taken for one that would never finish, and fails.
+HANG = 3 * CEILING
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+_APART = """
+import json, sys
+sys.path[:0] = json.loads(sys.argv[1])
+import growth
+<call>
+first, inputs = json.loads(sys.argv[2])
+measured = growth.measure(lambda n: first, call,
+                          inputs=dict((s, x) for s, x in inputs))
+print(json.dumps({"measured": measured.as_json(), "result": measured.result}))
+"""
+
+
+def measure_apart(build, call, env=None, hang=HANG):
+    """measure() on a fresh interpreter: `call` is the source of a module
+    that defines call(input), and build(n) makes each input here, once per
+    size, in JSON (the root of a file tree, usually). What call returns
+    must be JSON too. Returns the Measured, its result what call returned
+    at full size, and the input at full size. The Measured carries each
+    try's runs back from the child too, so its growth is read as
+    measure()'s is: a slow spell over one size is not a quadratic here
+    either."""
+    scales = sorted({s for pair in QUARTER for s in pair}, reverse=True)
+    inputs = [(scale, build(sized(scale))) for scale in scales]
+    first = build(sized(scales[-1] / SCALE))
+    script = _APART.replace("<call>", call, 1)
+    try:
+        run = subprocess.run(
+            [sys.executable, "-c", script,
+             json.dumps([HERE, os.path.dirname(HERE)]),
+             json.dumps([first, inputs])],
+            env=env, capture_output=True, encoding="utf-8", timeout=hang)
+    except subprocess.TimeoutExpired:
+        raise AssertionError("still running after %ds" % hang)
+    if run.returncode:
+        raise AssertionError(run.stderr)
+    doc = json.loads(run.stdout.splitlines()[-1])
+    measured = Measured.from_json(doc["measured"])
+    measured.result = doc["result"]
+    return measured, inputs[0][1]

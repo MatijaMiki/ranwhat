@@ -1,6 +1,7 @@
 """The site states numbers that come from the catalogue. Those numbers drift
 the moment a provider is added, and a marketing page that undercounts its own
 product is the kind of thing nobody notices for months."""
+import functools
 import html
 import html.parser
 import importlib.util
@@ -9,6 +10,8 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -840,6 +843,150 @@ class GuidesHangTogether(unittest.TestCase):
             self.assertEqual(shown, [article["dateModified"]], page.name)
             self.assertEqual(lastmod.get(url_for(page)), article["dateModified"],
                              page.name)
+
+
+# Number words, as the site writes counts ("Nine rules", "twelve providers").
+WORDS = dict(enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve "
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty"
+    .split()))
+
+
+@functools.lru_cache(maxsize=1)
+def sources_json():
+    """What `ranwhat sources --json` says, run in a home that holds no
+    agent's history: every agent ranwhat knows, in its order, with nothing
+    found on this machine deciding what the site says."""
+    from ranwhat import sources
+    home = tempfile.mkdtemp(prefix="site-sources-")
+    try:
+        moved = {var for source in sources.sources() for var in source.env}
+        env = {k: v for k, v in os.environ.items() if k not in moved}
+        env.update(HOME=home, USERPROFILE=home,
+                   RANWHAT_HOME=os.path.join(home, "state"),
+                   PYTHONPATH=str(SITE.parent))
+        out = subprocess.run([sys.executable, "-m", "ranwhat", "sources",
+                              "--json"], cwd=str(SITE.parent), env=env,
+                             capture_output=True, text=True, encoding="utf-8",
+                             timeout=60)
+        return json.loads(out.stdout)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def site_status(entry):
+    """The status the site gives an agent `ranwhat sources --json` lists."""
+    if entry["status"] == "cloud only":
+        return "Cloud only"
+    if entry["status"] == "next":
+        return "Next"
+    if entry["masking"] == "read-only":
+        return "Shipped, secrets read-only"
+    return "Shipped"
+
+
+def names(*statuses):
+    """The names of the agents with these site statuses, in order."""
+    return [e["name"] for e in sources_json() if site_status(e) in statuses]
+
+
+def listed(items):
+    """Names as a sentence lists them: "A, B and C"."""
+    items = list(items)
+    return items[0] if len(items) == 1 else \
+        ", ".join(items[:-1]) + " and " + items[-1]
+
+
+SHIPPED = ("Shipped", "Shipped, secrets read-only")
+
+
+class SiteAgentsComeFromTheRegistry(unittest.TestCase):
+    """Every agent the site, llms.txt and the README name, and every count
+    of them, is what `ranwhat sources --json` says."""
+
+    def test_the_registry_is_what_sources_lists(self):
+        from ranwhat import sources
+        self.assertEqual(names(*SHIPPED), [s.name for s in sources.sources()])
+        self.assertEqual(names("Cloud only"),
+                         [name for name, _ in sources.CLOUD_ONLY])
+        self.assertEqual(names("Next"), [name for name, _ in sources.NEXT])
+
+    def test_the_watch_page_lists_every_agent_with_its_status(self):
+        section = read(SITE / "watch.html").split("03 / Sources", 1)[1]
+        table = re.search(r'<table class="stack">(.*?)</table>', section, re.S)
+        body = table.group(1).split("</thead>", 1)[1]
+        rows = []
+        for row in re.findall(r"<tr>(.*?)</tr>", body, re.S):
+            cells = [plain(c) for c in re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.S)]
+            rows.append((cells[0], cells[-1]))
+        self.assertEqual(rows, [(e["name"], site_status(e)) for e in sources_json()])
+        paragraphs = plain(section.split("</table>", 1)[1].split("</section>", 1)[0])
+        self.assertIn(listed(names("Cloud only")).replace(" Amp", " the current Amp"),
+                      paragraphs)
+        self.assertIn("%s is next" % listed(names("Next")), paragraphs)
+
+    def test_every_count_of_agents_is_the_registrys(self):
+        shipped = names(*SHIPPED)
+        n = len(shipped)
+        allowed = []
+        for k in range(1, 4):
+            lead = ", ".join(shipped[:k]) + " and " + WORDS[n - k]
+            allowed += [lead + tail for tail in (" other coding agents",
+                                                 " more coding agents",
+                                                 " more agents")]
+        counted = re.compile(r"\b(%s) (?:more|other) (?:coding )?agents\b"
+                             % "|".join(WORDS.values()))
+        every = re.compile(r"\b[Aa]ll (%s)\b" % "|".join(WORDS.values()))
+        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md"]
+        seen = 0
+        for page in files:
+            text = read(page)
+            for chunk in (plain(text), " ".join(text.split())):
+                for m in counted.finditer(chunk):
+                    seen += 1
+                    self.assertTrue(any(chunk[:m.end()].endswith(a) for a in allowed),
+                                    "%s: ...%s" % (page.name, chunk[max(0, m.start() - 60):m.end()]))
+                for m in every.finditer(chunk):
+                    if chunk[m.end():m.end() + 7] in (" by def", ", each "):
+                        self.assertEqual(m.group(1), WORDS[n], page.name)
+        self.assertGreaterEqual(seen, 10)
+
+    def test_the_faq_names_every_agent(self):
+        answer = dict(faq_blocks(read(SITE / "faq.html")))["Which agents does it read?"]
+        self.assertTrue(answer.startswith(listed(names(*SHIPPED)) + ", from the "),
+                        answer)
+        self.assertIn("read all %s by default" % WORDS[len(names(*SHIPPED))], answer)
+        self.assertIn(listed(names("Cloud only")).replace(" Amp", " the current Amp"),
+                      answer)
+        self.assertIn("%s is next." % listed(names("Next")), answer)
+        for name in names("Shipped, secrets read-only"):
+            self.assertIn("%s keeps its history in a database" % name, answer)
+        home = dict(faq_blocks(read(SITE / "index.html")))
+        self.assertEqual(home.get("Which agents does it read?"), answer)
+
+    def test_the_clean_page_says_which_agents_it_masks_and_only_reads(self):
+        rows = re.findall(r'<span class="k">([^<]+)</span>\s*<span class="v">(.*?)</span></div>',
+                          read(SITE / "clean.html"), re.S)
+        masks = plain(dict(rows)["Masks"])
+        self.assertIn("That covers %s." % listed(names("Shipped")), masks)
+        self.assertTrue(re.search(r"Read only: %s\b" % re.escape(
+            listed(names("Shipped, secrets read-only"))), masks), masks)
+
+    def test_llms_txt_names_every_agent(self):
+        text = " ".join(read(SITE / "llms.txt").split())
+        self.assertIn("Agents read: %s." % listed(names(*SHIPPED)), text)
+        self.assertIn(listed(names("Cloud only")).replace(" Amp", " the current Amp"),
+                      text)
+        self.assertIn("%s is next." % listed(names("Next")), text)
+
+    def test_the_readme_table_names_every_agent(self):
+        readme = read(SITE.parent / "README.md")
+        table = readme.split("| Source | Location | Format |", 1)[1].split("\n\n", 1)[0]
+        rows = [line.split("|")[1].strip() for line in table.strip().splitlines()[1:]]
+        self.assertEqual([re.sub(r" \(.*\)$", "", r) for r in rows], names(*SHIPPED))
+        text = " ".join(readme.split())
+        for name in names("Cloud only") + names("Next"):
+            self.assertIn(name, text)
 
 
 class ThemeSwitch(unittest.TestCase):

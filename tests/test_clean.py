@@ -11,6 +11,7 @@ import ntpath
 import os
 import random
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -463,6 +464,16 @@ class RewriteKeepsEveryByteItDoesNotMask(unittest.TestCase):
         original, after, mask = self._apply(lines)
         self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
 
+    def test_half_an_emoji_is_written_back_as_the_escape_it_was_read_as(self):
+        """Node writes a string cut inside an emoji with the half it kept
+        as an escape, \\ud83d. json reads that as a lone surrogate, which
+        UTF-8 cannot write, and clean --apply ended in a traceback."""
+        lines = [self._line("JWT_ACCESS_SECRET=%s café, cut @" % self.SECRET)
+                 .replace("@", "\\ud83d") + "\n",
+                 self._line("untouched @").replace("@", "\\udfff") + "\n"]
+        original, after, mask = self._apply(lines)
+        self.assertEqual(after, original.replace(self.SECRET.encode(), mask))
+
 
 class InteractiveReview(unittest.TestCase):
     """`ranwhat clean` on a terminal with findings and no --apply lands in
@@ -781,3 +792,99 @@ def _mask_each(text, values):
         if shown:
             text = text[:-1 - shown] + clean.DISPLAY_MASK % clean._hint(value) + "\u2026"
     return text
+
+
+# Deep enough that Python 3.9's json cannot read it, and that 3.14's reads
+# it but json.dumps cannot write it back. Built as text, never by recursion.
+DEEP = 100000
+
+
+def _deep_dict(depth=DEEP):
+    return '{"a":' * depth + "1" + "}" * depth
+
+
+class OneLineNestedPastTheStack(unittest.TestCase):
+    """A line nested past the stack, from someone else's writer, ended
+    clean in a traceback. 3.9's json cannot read it, and clean --apply read
+    every line back, those it never parsed too. 3.14's reads it, and then
+    json.dumps could not write out a call's input to look for the file it
+    reads, nor the line back once a secret in it was masked. Every other
+    line is read and masked, and the odd ones kept as they were read."""
+
+    KEY = "sk_" "live_" + "Zq8Lm3Np5Rt7Vx9Bc2Df4Gh6"
+    OTHER = "8f3a9c2e1b7d4f6a" "0c5e8b2d7f1a4c9e"
+    ODD = (
+        "not json at all",
+        "[" * DEEP + "]" * DEEP,
+        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+        '"id":"a","name":"Bash","input":{"command":"cat api/.env","x":'
+        + _deep_dict() + '}}]}}',
+        '{"type":"user","message":{"content":[{"type":"tool_result",'
+        '"tool_use_id":"b","content":"JWT_ACCESS_SECRET=' + OTHER
+        + '","deep":' + _deep_dict() + '}]}}',
+    )
+
+    def setUp(self):
+        backups = os.path.join(_tempdir(self, "deep-bk-"), "backups")
+        patch = mock.patch.object(clean, "BACKUP_ROOT", backups)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _lines(self):
+        result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "a",
+             "content": "TOKEN=" + self.KEY}]}})
+        return [line + "\n" for line in self.ODD + (result,)]
+
+    def _transcript(self, root=None):
+        d = os.path.join(root or _tempdir(self, "deep-"), "-tmp-deep")
+        os.makedirs(d)
+        path = os.path.join(d, "s.jsonl")
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.writelines(self._lines())
+        return path
+
+    def test_a_line_nested_past_the_stack_is_skipped_and_the_rest_read(self):
+        findings, changed = scan_file(self._transcript())
+        self.assertIn(clean._fingerprint(self.KEY), findings)
+        self.assertFalse(changed)
+
+    def test_apply_masks_the_rest_and_keeps_the_odd_lines_as_read(self):
+        path = self._transcript()
+        _findings, changed = scan_file(path, apply=True)
+        self.assertTrue(changed)
+        with open(path, encoding="utf-8", newline="") as fh:
+            after = fh.readlines()
+        # Not assertEqual: a diff of these lines is megabytes.
+        self.assertTrue(after[:len(self.ODD)] == self._lines()[:len(self.ODD)],
+                        "an odd line was not kept as it was read")
+        self.assertNotIn(self.KEY, after[-1])
+        self.assertIn(REDACTION % clean._fingerprint(self.KEY), after[-1])
+
+    def test_every_command_reads_on_and_clean_masks_the_rest(self):
+        home = _tempdir(self, "deep-home-")
+        root = os.path.join(home, "projects")
+        path = self._transcript(root)
+        # Nothing of this machine's own: no agent's variable points anywhere.
+        env = {k: v for k, v in os.environ.items()
+               if k in ("PATH", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT")}
+        env.update(HOME=home, USERPROFILE=home, NO_COLOR="1",
+                   PYTHONIOENCODING="utf-8",
+                   RANWHAT_HOME=os.path.join(home, "rw"),
+                   PYTHONPATH=os.path.dirname(os.path.dirname(
+                       os.path.abspath(__file__))))
+        where = ["--root", root, "--days", "30"]
+        state = ["--state-dir", os.path.join(home, "oc")]
+        for argv in (["watch"] + state, ["check"] + state,
+                     ["clean", "--no-interactive"],
+                     ["clean", "--apply", "--no-interactive"]):
+            with self.subTest(argv=argv):
+                run = subprocess.run(
+                    [sys.executable, "-m", "ranwhat"] + argv + where,
+                    capture_output=True, timeout=60, env=env,
+                    stdin=subprocess.DEVNULL)
+                err = run.stderr.decode("utf-8", "replace")
+                self.assertNotIn("Traceback", err)
+                self.assertEqual(run.returncode, 0, err[-400:])
+                self.assertNotIn(self.KEY, run.stdout.decode("utf-8", "replace"))
+        self.assertFalse(self.KEY in _read(path), "the key is still in the transcript")

@@ -97,22 +97,10 @@ def make_openclaw(command, epoch):
 
 def steps_in(out, cmd):
     """Each command check's tail suggests, as the reader would paste it:
-    a line ending in " \\" continues on the next."""
+    one line each, with any reason beside it cut off."""
     tail = out.split("  What to do with this", 1)[1]
-    steps, current = [], None
-    for line in tail.split("\n"):
-        if current is not None:
-            current += " " + line.strip()
-        elif line.startswith("    %s " % cmd):
-            current = line.strip()
-        else:
-            continue
-        if current.endswith(" \\"):
-            current = current[:-2]
-            continue
-        steps.append(re.split(r"\s{2,}", current)[0])
-        current = None
-    return steps
+    return [re.split(r"\s{2,}", line.strip())[0] for line in tail.split("\n")
+            if line.startswith("    %s " % cmd)]
 
 
 # Outside double quotes, a character cmd or PowerShell hands to the
@@ -664,7 +652,7 @@ class APathIsNotARoot(_Base):
                                                 if command == "clean" else
                                                 [command, "--root", projects, "--state-dir", st])
                     self.assertEqual(rc, 0, err)
-                    self.assertIn("2 transcript(s) scanned", out)
+                    self.assertIn("Read Claude Code: 2 transcripts", out)
 
     def test_a_path_with_no_transcripts_near_it_suggests_no_root(self):
         """`check ~/Desktop/app`, a project's source, said to pass --root
@@ -703,7 +691,7 @@ class APathIsNotARoot(_Base):
                         [command, "--state-dir", st]
                         + (["--no-interactive"] if command == "clean" else []))
                     self.assertEqual(rc, 0, err)
-                    self.assertIn("1 transcript(s) scanned", out)
+                    self.assertIn("Read Claude Code: 1 transcript", out)
         # With none in the projects directory either, no step is offered.
         nothing = tempfile.mkdtemp(prefix="check-none-")
         with mock.patch.object(watch, "CLAUDE_PROJECTS", nothing):
@@ -749,7 +737,7 @@ class NothingToRead(_Base):
 
     ROOT = "/nonexistent/ranwhat-root"
     NOWHERE = ["--root", ROOT, "--state-dir", "/nonexistent/ranwhat-state"]
-    CLEAR = ("Nothing flagged", "Every tool call was read", "No secrets found")
+    CLEAR = ("Nothing flagged", "Every call was read", "No secrets found")
 
     def assertNotAllClear(self, text):
         for line in self.CLEAR:
@@ -764,6 +752,31 @@ class NothingToRead(_Base):
         self.assertIn("--root", out)
         self.assertEqual(self.lines(out).count(FOOTER), 1)
         self.assertEqual(err, "")
+
+    def test_check_says_it_under_its_own_name(self):
+        """With nothing read, watch's section is all check prints above its
+        tail, and it opened with watch's header ("ranwhat watch · local
+        agent flight recorder") in a report check printed."""
+        old = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 60 * 86400))
+        root, st = make_root([tool_use("ls", 1, old)], age_days=60)
+        for argv in (["check"] + self.NOWHERE,
+                     ["check", "--root", root, "--state-dir", st]):
+            for width in ("46", "60", "80"):
+                with mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
+                    with self.subTest(argv=argv[:2], width=width):
+                        rc, out, _ = self.run_cli(argv)
+                        self.assertEqual(rc, 2)
+                        self.assertTrue(out.startswith(
+                            "\n  ranwhat check  · watch and clean in "
+                            "one pass\n"), out[:80])
+                        self.assertNotIn("ranwhat watch", out)
+                        self.assertNotIn("flight recorder", out)
+                        self.assertNotIn("ranwhat clean", out)
+                        self.assertEqual(self.lines(out).count(FOOTER), 1)
+        # watch's own report keeps its own
+        rc, out, _ = self.run_cli(["watch"] + self.NOWHERE)
+        self.assertTrue(out.startswith("\n  ranwhat watch  · local agent "
+                                       "flight recorder\n"), out[:80])
 
     def test_it_is_said_once(self):
         _, out, _ = self.run_cli(["check"] + self.NOWHERE)
@@ -780,9 +793,10 @@ class NothingToRead(_Base):
         self.assertNotAllClear(out)
         self.assertIn("No transcripts found", out)
         self.assertIn(self.ROOT, out)
-        for hint in ("--root", "CLAUDE_CONFIG_DIR"):
-            self.assertIn(hint, out)
-        self.assertNotIn("--state-dir", out)       # clean reads no OpenClaw
+        # clean searches OpenClaw too, and says where it looked for it
+        for hint in ("--root", "CLAUDE_CONFIG_DIR", "--state-dir",
+                     "OPENCLAW_STATE_DIR"):
+            self.assertIn(hint, " ".join(out.split()))
 
     def test_clean_apply_with_nothing_to_read_exits_2(self):
         with mock.patch.object(clean, "scan", lambda *a, **k: ({}, 0, [])):
@@ -808,6 +822,34 @@ class NothingToRead(_Base):
             for line in err.rstrip("\n").split("\n"):
                 self.assertLessEqual(len(line), term.width(), line)
 
+    def test_a_long_path_on_stderr_is_cut_to_fit(self):
+        """An agent pointed at a long path by its own variable: --json's
+        line on stderr printed it whole, past the edge of the terminal.
+        It is cut in the middle to the line, as the text report cuts it,
+        so where it starts and where it ends both still show."""
+        deep = os.path.join(self.nowhere, *["a-rather-long-directory-name"] * 4)
+        env = {"CODEX_HOME": os.path.join(deep, "codex"),
+               "OPENCLAW_STATE_DIR": os.path.join(deep, "openclaw")}
+        for width in ("46", "60", "80"):
+            env["RANWHAT_WIDTH"] = width
+            with mock.patch.dict(os.environ, env):
+                limit = term.width()
+                for argv in (["check", "--json"], ["watch", "--json"],
+                             ["clean", "--json", "--no-interactive"]):
+                    for only in ([], ["--source", "codex"]):
+                        with self.subTest(width=width, argv=argv + only):
+                            rc, _, err = self.run_cli(argv + only
+                                                      + ["--root", self.ROOT])
+                            said = " ".join(err.split())
+                            self.assertEqual(rc, 2)
+                            self.assertIn("No transcripts found", said)
+                            for line in err.rstrip("\n").split("\n"):
+                                self.assertLessEqual(len(line), limit, line)
+                            if only:
+                                self.assertIn("…", said)
+                                self.assertIn("codex (Codex)", said)
+                                self.assertIn("--path codex=PATH", said)
+
     def test_history_older_than_the_window_points_at_days(self):
         old = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 60 * 86400))
         root, st = make_root([tool_use("rm -rf ~/Documents/a", 1, old)],
@@ -821,15 +863,20 @@ class NothingToRead(_Base):
         self.assertEqual((rc, json.loads(out)), (2, []))
         self.assertIn("--days", err)
 
-    def test_openclaw_alone_does_not_clear_claude_code(self):
+    def test_openclaw_alone_is_what_each_section_read(self):
+        """With OpenClaw unsearched, clean's section said where it had
+        looked for Claude Code instead of "No secrets found". OpenClaw is
+        searched now, so each section names what it read, as for any
+        other agent read alone."""
         state = make_openclaw("rm -rf ~/Documents/thesis", int(time.time()) - 3600)
         rc, out, _ = self.run_cli(["check", "--root", self.ROOT,
                                    "--state-dir", state])
         self.assertEqual(rc, 0)                  # OpenClaw was read
         self.assertIn("Bulk or recursive deletion", out)
-        secrets = out.split("  ranwhat clean", 1)[1]
-        self.assertNotIn("No secrets found", secrets)
-        self.assertIn(self.ROOT, secrets)
+        secrets = " ".join(out.split("  ranwhat clean", 1)[1].split())
+        self.assertIn("Read OpenClaw: 1 database", secrets)
+        self.assertIn("No secrets found.", secrets)
+        self.assertNotIn("not searched", out)
 
     def test_a_read_that_finds_nothing_is_still_an_all_clear(self):
         rc, out, _ = self.check([tool_use("ls", 1)])
@@ -890,16 +937,26 @@ class TheRootIsTheProjectsDirectory(_Base):
                     self.assertIn("1 transcript", said)
 
     def test_json_says_so_on_stderr(self):
+        """Whole on a terminal wide enough for them, as the text report
+        says them (above); on a narrower one each path is cut to the line,
+        as there."""
         config, projects, st = self.config()
         for argv in (["check", "--json", "--root", config, "--state-dir", st],
                      ["watch", "--json", "--root", config, "--state-dir", st],
                      ["clean", "--json", "--no-interactive", "--root", config]):
-            with self.subTest(argv=argv[0]):
+            with self.subTest(argv=argv[0]), \
+                    mock.patch.dict(os.environ, {"RANWHAT_WIDTH": "400"}):
                 rc, _, err = self.run_cli(argv)
                 said = " ".join(err.split())
                 self.assertEqual(rc, 2)
                 self.assertIn("--root %s" % shown(projects), said)
                 self.assertIn("CLAUDE_CONFIG_DIR=%s" % shown(config), said)
+            with self.subTest(argv=argv[0], width=WIDTH):
+                rc, _, err = self.run_cli(argv)
+                self.assertEqual(rc, 2)
+                self.assertIn("--root", err)
+                for line in err.rstrip("\n").split("\n"):
+                    self.assertLessEqual(len(line), term.width(), line)
 
     def test_the_suggestion_reads_it(self):
         config, projects, st = self.config()
@@ -950,22 +1007,37 @@ class TheRootIsTheProjectsDirectory(_Base):
                         self.assertLessEqual(len(line), limit, (argv, line))
 
 
-class OpenClawIsNotSearchedForSecrets(_Base):
-    """watch's section counted each OpenClaw database as a transcript ("2
-    transcript(s) scanned"), and clean's, which reads no OpenClaw, said "1
-    transcript(s) scanned" and "No secrets found." With a live-shaped key in
-    an OpenClaw tool result, right after the `cat .env` watch had just
-    flagged, that was an all-clear on history nobody searched."""
+class OpenClawIsSearchedForSecrets(_Base):
+    """OpenClaw was the one agent clean never searched: check said so under
+    its report ("OpenClaw history is not searched for secrets"), and a
+    password read out of its database was printed whole by watch, check
+    and their --json wherever a later command typed it. Its databases are
+    searched now, read only, as every other agent's database is (design
+    3.9's follow-up), and the index knows what they hold.
+
+    Before that, watch's section counted each database as a transcript ("2
+    transcript(s) scanned") and clean's said "No secrets found." with a
+    live-shaped key in an OpenClaw tool result: an all-clear on history
+    nobody searched."""
+
+    PASSWORD = "Vb6nM3qW" "z8Kt2Lp5Rx"
+    TYPED = "./deploy.sh prod %s -e 'DROP DATABASE prod '"
 
     def setUp(self):
         super().setUp()
         self.root, _ = make_root([tool_use("ls", 1)])
         self.state = make_openclaw("cat .env", int(time.time()) - 3600)
-        db = os.path.join(self.state, "agents", "a1", "agent", "openclaw-agent.sqlite")
-        conn = sqlite3.connect(db)
+        self.db = os.path.join(self.state, "agents", "a1", "agent",
+                               "openclaw-agent.sqlite")
+        conn = sqlite3.connect(self.db)
         conn.execute("INSERT INTO log VALUES (?, ?, ?)", ("2", json.dumps(
-            {"content": [{"type": "tool_result", "content": STRIPE}]}),
+            {"content": [{"type": "tool_result", "content": STRIPE + "\n"
+                          + "DB_PASSWORD=" + self.PASSWORD + "\n"}]}),
             int(time.time()) - 3500))
+        conn.execute("INSERT INTO log VALUES (?, ?, ?)", ("3", json.dumps(
+            {"content": [{"type": "tool_use", "name": "bash", "input": {
+                "command": self.TYPED % self.PASSWORD}}]}),
+            int(time.time()) - 3400))
         conn.commit()
         conn.close()
         self.argv = ["--root", self.root, "--state-dir", self.state]
@@ -974,28 +1046,71 @@ class OpenClawIsNotSearchedForSecrets(_Base):
         rc, out, _ = self.run_cli(["check"] + self.argv)
         self.assertEqual(rc, 0)
         watch_part, clean_part = out.split("  ranwhat clean", 1)
-        self.assertIn("1 transcript(s) and 1 OpenClaw database(s) scanned",
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
                       " ".join(watch_part.split()))
         self.assertIn("Credential material accessed", watch_part)
-        self.assertNotIn("2 transcript(s)", out)
-        self.assertIn("1 transcript(s) scanned", clean_part)
+        self.assertNotIn("2 transcript", out)
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
+                      " ".join(clean_part.split()))
 
-    def test_no_all_clear_on_history_it_did_not_search(self):
-        _, out, _ = self.run_cli(["check"] + self.argv)
+    def test_what_it_holds_is_found_and_said_to_be_read_only(self):
+        _, out, err = self.run_cli(["check"] + self.argv)
         clean_part = " ".join(out.split("  ranwhat clean", 1)[1].split())
-        self.assertNotIn("No secrets found.", clean_part)
-        self.assertIn("OpenClaw history is not searched for secrets", clean_part)
+        self.assertIn("2 distinct secret(s)", clean_part)
+        self.assertIn("agent OpenClaw", clean_part)
+        self.assertIn("read only 1 file, not masked (below)", clean_part)
+        self.assertIn("OpenClaw, 1 file: OpenClaw keeps this in a database; "
+                      "delete the session in OpenClaw.", clean_part)
+        self.assertNotIn("not searched", out + err)
+        self.assertNotIn("No secrets found", out)
 
-    def test_json_keeps_its_shape_and_says_so_on_stderr(self):
+    def test_json_lists_them_and_says_nothing_on_stderr(self):
         rc, out, err = self.run_cli(["check", "--json"] + self.argv)
-        self.assertEqual(rc, 0)
-        self.assertEqual(sorted(json.loads(out)), ["actions", "days", "secrets"])
-        self.assertIn("OpenClaw history is not searched for secrets", " ".join(err.split()))
+        self.assertEqual((rc, err), (0, ""))
+        doc = json.loads(out)
+        self.assertEqual(sorted(doc), ["actions", "days", "secrets"])
+        self.assertEqual(len(doc["secrets"]), 2)
+        for finding in doc["secrets"]:
+            self.assertEqual((finding["sources"], finding["read_only"],
+                              finding["files"]),
+                             (["openclaw"], [self.db], [self.db]))
+
+    def test_no_report_prints_a_value_found_there(self):
+        """The password is typed with nothing beside it that says it is
+        one: only what clean found in the database hides it."""
+        masked = clean.DISPLAY_MASK % clean._hint(self.PASSWORD)
+        for argv in (["check"], ["check", "--json"], ["watch"],
+                     ["watch", "--json"]):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_cli(argv + self.argv)
+                self.assertEqual(rc, 0)
+                self.assertNotIn(self.PASSWORD, out + err)
+                shown = (out if "--json" not in argv else json.dumps(
+                    json.loads(out), ensure_ascii=False))
+                self.assertIn(masked + " -e 'DROP DATABASE prod '", shown)
 
     def test_watch_counts_a_database_as_one(self):
         _, out, _ = self.run_cli(["watch"] + self.argv)
-        self.assertIn("1 transcript(s) and 1 OpenClaw database(s) scanned",
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
                       " ".join(out.split()))
+
+    def test_clean_reads_it_and_help_says_so(self):
+        rc, out, _ = self.run_cli(["clean", "--no-interactive"] + self.argv)
+        self.assertEqual(rc, 0)
+        said = " ".join(out.split())
+        self.assertIn("Read Claude Code: 1 transcript; OpenClaw: 1 database",
+                      said)
+        self.assertIn("2 distinct secret(s)", said)
+        self.assertIn("OpenClaw keeps this in a database", said)
+        shown = io.StringIO()
+        with contextlib.redirect_stdout(shown), \
+                mock.patch.dict(os.environ, {"COLUMNS": "200"}):
+            try:
+                cli.main(["--help"])
+            except SystemExit:
+                pass
+        self.assertIn("check, watch, clean: OpenClaw state directory",
+                      " ".join(shown.getvalue().split()))
 
 
 class NextSteps(_Base):
@@ -1131,24 +1246,27 @@ class NextStepsReadWhatCheckRead(_Base):
                              capture_output=True, text=True, timeout=30)
         self.assertEqual(out.stdout, odd)
 
-    def test_every_line_fits_unless_one_word_cannot(self):
-        # A path longer than the line cannot be broken without breaking
-        # the command, so it is the one thing allowed past the edge. A
-        # Windows shell continues a line differently, so there each
-        # command keeps one line, whatever its length.
+    def test_every_line_fits_but_a_suggested_command(self):
+        # Each shell continues a line differently, so a command folded to
+        # fit pastes into one of them only. Each keeps one line of its
+        # own, whatever its length; every other line fits.
         root, st = make_root(ACTION + SECRET)
         for width in ("46", "60", "96"):
             with mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
                 limit = term.width()
                 steps, _, out = self.run_check(root, st, "--days", "365")
-            tail = out.split("  What to do with this", 1)[1]
-            for line in tail.split("\n"):
-                if os.name == "nt":
-                    self.assertFalse(line.endswith(" \\"), (width, line))
-                elif len(line) > limit:
-                    self.assertEqual(len(line.strip().rstrip(" \\").split()),
-                                     1, (width, line))
             self.assertEqual(len(steps), 3)
+            lines = out.split("\n")
+            commands = ["    " + step for step in steps]
+            for line in lines:
+                if line not in commands:
+                    self.assertLessEqual(len(line), limit, (width, line))
+            for step in steps:
+                self.assertFalse(step.endswith("\\"), (width, step))
+            # At 46 the paths do not fit, so each command has its line.
+            if width == "46":
+                for command in commands:
+                    self.assertIn(command, lines)
 
 
 class WindowsPathsPasteIntoCmdAndPowerShell(unittest.TestCase):
