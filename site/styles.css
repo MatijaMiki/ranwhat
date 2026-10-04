@@ -227,7 +227,7 @@ header{
   white-space:nowrap;
 }
 .ghost:hover{background:var(--ink);color:var(--ground)}
-/* Six links plus a button do not fit one phone line, and hiding pages is
+/* Eight links plus a button do not fit one phone line, and hiding pages is
    worse than a taller bar. The GitHub button is a sibling of <nav> rather
    than inside it, so it can sit up beside the wordmark and the links get a
    full row of their own: two rows instead of three. */
