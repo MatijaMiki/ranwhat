@@ -43,7 +43,8 @@ class BranchBuildsCanRun(unittest.TestCase):
         self.assertEqual(config["previews"], {})
         self.assertEqual(config["name"], "ranwhat-contact")
         self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL"])
-        self.assertEqual([r["pattern"] for r in config["routes"]], ["ranwhat.com/api/*"])
+        self.assertEqual([r["pattern"] for r in config["routes"]],
+                         ["ranwhat.com/api/*", "feed.ranwhat.com/v1/*"])
 
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
     def test_the_contact_binding_reaches_one_inbox(self):
