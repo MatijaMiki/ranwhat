@@ -42,6 +42,26 @@ class ReadingGrowth(unittest.TestCase):
         with self.assertRaises(AssertionError):
             growth.assert_linear(self, m)
 
+    def test_a_quarter_size_shorter_than_a_time_slice_is_not_a_quadratic(self):
+        # A Linux runner's five tries of a case that grows 3.8 times. The
+        # quarter size fit in a time slice and ran untouched in each, and
+        # the full size shared a busy core in each, so every try read past
+        # 8 when a time under 0.002s was the only one read as noise.
+        tries = [0.00362, 0.0384, 0.0037, 0.0402, 0.00365, 0.0389,
+                 0.0041, 0.0436, 0.00368, 0.0395]
+        with mock.patch.object(growth, "FLOOR", 0.002):
+            self.assertGreaterEqual(
+                self.measure(tries).growth(1.0, 0.25), growth.LIMIT)
+        m = self.measure(tries)
+        self.assertEqual(len(m.runs), 1)
+        growth.assert_linear(self, m)
+
+    def test_a_quadratic_cost_with_a_short_quarter_size_still_fails(self):
+        # 6ms at a quarter of the size, 16 times that at full size.
+        m = self.measure([0.006, 0.096] * growth.TRIES)
+        with self.assertRaises(AssertionError):
+            growth.assert_linear(self, m)
+
     def test_a_linear_cost_stops_after_one_try(self):
         m = self.measure([0.05, 0.20])
         self.assertEqual(len(m.runs), 1)
