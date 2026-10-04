@@ -97,31 +97,31 @@
       <table class="stack">
         <thead><tr><th>Rule</th><th>Severity</th><th>Why it's on the list</th></tr></thead>
         <tbody>
-          <tr><td><strong>Credential access</strong><br><code>.env · ~/.aws/credentials · id_rsa</code></td>
+          <tr><td><strong>Credential access</strong><br><code>.env · ~/.aws/credentials&nbsp;·&nbsp;id_rsa</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">Read a file whose only purpose is holding secrets. The contents are now in a context you don't control, and in the transcript too: <a href="/clean">find and mask them with ranwhat clean</a>. Then <a href="/guides/claude-code-env-secrets">block the next read</a>.</td></tr>
-          <tr><td><strong>Secret-shaped string in a tool call</strong><br><code>sk_live_… · ghp_… · AKIA…</code></td>
+          <tr><td><strong>Secret-shaped string in a tool call</strong><br><code>sk_live_… · ghp_…&nbsp;·&nbsp;AKIA…</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">A credential-shaped value appeared verbatim in a tool call. Even if the call was benign, the value is now in the transcript.</td></tr>
-          <tr><td><strong>Package or release published</strong><br><code>npm publish · twine upload · docker push</code></td>
+          <tr><td><strong>Package or release published</strong><br><code>npm&nbsp;publish · twine&nbsp;upload · docker&nbsp;push</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">Something reached a registry other people install from. Supply-chain reach, usually irreversible.</td></tr>
-          <tr><td><strong>Cloud resource destroyed or modified</strong><br><code>terraform destroy · kubectl delete · aws iam attach-…</code></td>
+          <tr><td><strong>Cloud resource destroyed or modified</strong><br><code>terraform&nbsp;destroy · kubectl&nbsp;delete · aws&nbsp;iam&nbsp;attach-…</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">A write or delete against live infrastructure, including IAM changes, <span class="icode">terraform apply -auto-approve</span> and <span class="icode">DROP TABLE</span>.</td></tr>
-          <tr><td><strong>Financial API called</strong><br><code>stripe charges · refunds</code></td>
+          <tr><td><strong>Financial API called</strong><br><code>stripe&nbsp;charges&nbsp;·&nbsp;refunds</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">With a live key, each of these moves real money.</td></tr>
-          <tr><td><strong>Log or history tampering</strong><br><code>history -c · cloudtrail stop</code></td>
+          <tr><td><strong>Log or history tampering</strong><br><code>history&nbsp;-c · cloudtrail&nbsp;stop</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">An action whose effect is removing the record of other actions.</td></tr>
-          <tr><td><strong>Destructive git</strong><br><code>push --force · reset --hard</code></td>
+          <tr><td><strong>Destructive git</strong><br><code>push&nbsp;--force · reset&nbsp;--hard</code></td>
               <td data-label="Severity"><span class="chip high">High</span></td>
               <td data-label="Why it's on the list">History rewriting. The class of action that destroys the record of what else happened.</td></tr>
-          <tr><td><strong>Recursive deletion</strong><br><code>rm -rf · find -delete</code></td>
+          <tr><td><strong>Recursive deletion</strong><br><code>rm&nbsp;-rf · find&nbsp;-delete</code></td>
               <td data-label="Severity"><span class="chip high">High</span></td>
               <td data-label="Why it's on the list"><a href="/guides/claude-code-deleted-files">Recoverable only if something else was backing it up</a>. Severity follows the target: <span class="icode">rm -rf build</span> is not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical.</td></tr>
-          <tr><td><strong>Local file sent to the network</strong><br><code>curl -d @file · curl -F file=@…</code></td>
+          <tr><td><strong>Local file sent to the network</strong><br><code>curl&nbsp;-d&nbsp;@file · curl&nbsp;-F&nbsp;file=@…</code></td>
               <td data-label="Severity"><span class="chip high">High</span></td>
               <td data-label="Why it's on the list">File contents sent outbound in one command. That shape, whatever the intent.</td></tr>
         </tbody>

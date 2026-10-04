@@ -204,6 +204,15 @@ section{border-top:1px solid var(--rule)}
 h2{font-size:clamp(25px,3.1vw,34px);line-height:1.15;letter-spacing:-.022em;
    margin:0 0 14px;font-weight:600;text-wrap:balance}
 h3{font-size:17px;letter-spacing:-.012em;margin:0 0 6px;font-weight:600}
+/* No paragraph ends on a line holding one word: "cry / wolf." and "because
+   of / it." each left a word alone on a line. Chrome, Edge and Safari
+   rebalance the last lines; Firefox wraps as before. */
+p,li,dd,dt,h3,figcaption,blockquote,summary,.v{text-wrap:pretty}
+/* A table cell is a phrase or two in a narrow column, where pretty leaves
+   "Nothing on your / machine"; balance evens its lines out instead. */
+td,th{text-wrap:balance}
+/* Words that must stay on one line together: a code span and what follows it. */
+.nowrap{white-space:nowrap}
 .lede{color:var(--muted);font-size:17px;max-width:62ch;margin:0 0 30px}
 p{margin:0 0 16px;max-width:66ch}
 
