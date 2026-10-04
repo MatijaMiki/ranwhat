@@ -4,9 +4,10 @@
     python3 scripts/feed_token.py revoke rw_...
 
 The feed server keeps only a SHA-256 of each token, so the token itself is
-printed here once and stored nowhere: give it to the subscriber, then run the
-command printed under it, which adds its hash to the Worker's D1 database.
-Nothing is sent anywhere by this script.
+printed here once and stored nowhere: give it to the subscriber, then switch
+it on by adding its hash to the Worker's D1 database, either by pasting the
+printed SQL into the database's console in the Cloudflare dashboard or by
+running the printed wrangler command. Nothing is sent anywhere by this script.
 
 Until checkout exists this is how a token is issued. Stripe's webhook will
 do the same insert.
@@ -35,6 +36,15 @@ def command(sql):
             % (DATABASE, sql))
 
 
+def switch_on(sql):
+    print("Run it on the feed's database, either way:\n")
+    print("  a) Cloudflare dashboard > Storage & databases > D1 > %s > Console," % DATABASE)
+    print("     paste:\n")
+    print("     %s\n" % sql)
+    print("  b) or, with wrangler logged in, from the repository root:\n")
+    print("     %s\n" % command(sql))
+
+
 def main(argv):
     if len(argv) == 3 and argv[1] == "new":
         # The note lands inside SQL and a shell's double quotes: kept to
@@ -47,8 +57,7 @@ def main(argv):
             TABLE, token_hash(token), note, int(time.time()))
         print("Token (give it to the subscriber; it is not stored anywhere):\n")
         print("  %s\n" % token)
-        print("Then switch it on, from the repository root:\n")
-        print("  %s\n" % command(sql))
+        switch_on(sql)
         print("They use it with:  RANWHAT_TOKEN=... uvx ranwhat update --save-token")
         return 0
     if len(argv) == 3 and argv[1] == "revoke":
@@ -57,8 +66,7 @@ def main(argv):
             sys.exit("That does not look like a feed token (rw_...).")
         sql = "UPDATE tokens SET revoked_at = %d WHERE hash = '%s'" % (
             int(time.time()), token_hash(token))
-        print("Run, from the repository root:\n")
-        print("  %s" % command(sql))
+        switch_on(sql)
         return 0
     sys.exit(__doc__.strip().split("\n\n")[0])
 
