@@ -18,9 +18,13 @@
  * gets the same challenge check first. A signup waits in D1 until it is
  * confirmed, Resend keeps the confirmed list and sends the mail, and a cron
  * trigger sends each new release in /rss.xml as one broadcast.
+ *
+ * GET feed.ranwhat.com/v1/catalogue: the subscription feed `ranwhat update`
+ * reads, in feed.js. Routed here from its own hostname.
  */
 import { EmailMessage } from "cloudflare:email";
 import { announce, confirm, subscribe, switchedOn } from "./list.js";
+import { catalogue } from "./feed.js";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TO = "ranwhatcom@gmail.com";
@@ -235,6 +239,7 @@ const ROUTES = {
   "/api/contact": [handleContact, ["POST"]],
   "/api/subscribe": [handleSubscribe, ["POST"]],
   "/api/confirm": [confirm, ["GET", "POST"]],
+  "/v1/catalogue": [catalogue, ["GET"]],
 };
 
 export default {

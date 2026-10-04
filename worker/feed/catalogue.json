@@ -1,0 +1,760 @@
+{
+ "catalogue": {
+  "atlassian": {
+   "delete:comment:jira": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Delete comments",
+    "reversible": false,
+    "why": "Comment deletion is how an actor removes the discussion that would explain a change, while leaving the change in place."
+   },
+   "delete:issue:jira": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Delete issues",
+    "reversible": false,
+    "why": "Deletes the ticket and its history. If the agent's own work was tracked there, this removes the record of what it was asked to do."
+   },
+   "delete:project:jira": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Delete entire projects",
+    "reversible": false,
+    "why": "Removes every issue, attachment and worklog in a project at once. Recovery depends on a backup nobody has tested."
+   },
+   "delete:webhook:jira": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Delete webhooks",
+    "reversible": false,
+    "why": "Webhooks are often what feeds an external audit trail. Deleting one silences the downstream record without touching Jira itself."
+   },
+   "manage:jira-configuration": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Administer site-wide Jira configuration",
+    "reversible": false,
+    "why": "Site-wide authority including workflows and schemes. The broadest Jira scope short of full site admin."
+   },
+   "manage:jira-project": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Administer projects, roles and permissions",
+    "reversible": false,
+    "why": "Can grant itself or others access to projects it could not previously read. Permission changes are rarely alerted on."
+   },
+   "read:jira-user": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Read user profiles and groups",
+    "reversible": true,
+    "why": "Enumerates the org chart: who exists, which teams they are in, who reports where. Useful reconnaissance for a social attack."
+   },
+   "read:jira-work": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read all issues, comments and attachments",
+    "reversible": true,
+    "why": "Issue trackers hold incident write-ups, customer names and credentials pasted into comments by people in a hurry."
+   },
+   "write:jira-work": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Create and edit issues, comments and worklogs",
+    "reversible": true,
+    "why": "Comments notify watchers by email, so a write here reaches people outside the tool."
+   }
+  },
+  "aws": {
+   "*": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Full AWS administrator",
+    "reversible": false,
+    "why": "Unrestricted control of the account including IAM, billing and deletion."
+   },
+   "iam:*": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Full IAM control",
+    "reversible": false,
+    "why": "Can grant itself any other permission. This makes every other scope limit on this credential decorative."
+   },
+   "lambda:InvokeFunction": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Invoke functions",
+    "reversible": true,
+    "why": "Arbitrary invocation of deployed code."
+   },
+   "s3:*": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Full S3 control",
+    "reversible": false,
+    "why": "Read, write, make-public and delete every bucket. Covers both the egress path and the destruction of the logs that would record it."
+   },
+   "s3:DeleteObject": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Delete objects",
+    "reversible": false,
+    "why": "Irreversible unless versioning is on."
+   },
+   "s3:GetObject": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read objects",
+    "reversible": true,
+    "why": "Object read."
+   },
+   "s3:PutObject": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Write objects",
+    "reversible": true,
+    "why": "Object write."
+   },
+   "ses:SendEmail": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Send email",
+    "reversible": false,
+    "why": "Outbound email from your verified domain."
+   }
+  },
+  "discord": {
+   "applications.commands": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Add slash commands to a server",
+    "reversible": true,
+    "why": "Commands appear to members as a legitimate part of the server."
+   },
+   "bot": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Install a bot into a server",
+    "reversible": false,
+    "why": "The bot then acts under its own permission set, which is granted separately and is frequently far broader than this scope suggests."
+   },
+   "email": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Read the user's email address",
+    "reversible": true,
+    "why": "Turns a pseudonymous Discord identity into a contactable person."
+   },
+   "guilds": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "List the servers the user belongs to",
+    "reversible": true,
+    "why": "Server membership maps someone's employer, communities and interests. Useful for targeting, harmless-looking on a consent screen."
+   },
+   "guilds.join": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Add the user to servers",
+    "reversible": true,
+    "why": "Places a real account into a server without a further prompt. Whatever that server can see, it can now see about them."
+   },
+   "identify": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Read the user's account",
+    "reversible": true,
+    "why": "Baseline identity: user id, username and avatar, without email."
+   },
+   "messages.read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read messages in channels the user can see",
+    "reversible": true,
+    "why": "Private conversation history, and a delivery route for prompt injection from anyone who can post in those channels."
+   },
+   "role_connections.write": {
+    "authority": "write",
+    "blast": "identity",
+    "label": "Update the user's connection metadata",
+    "reversible": true,
+    "why": "Metadata other servers use to grant roles, so writing it can change access the user has elsewhere."
+   },
+   "webhook.incoming": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Create a webhook that posts into a channel",
+    "reversible": false,
+    "why": "A standing, unauthenticated URL that posts messages to a channel. It keeps working after the token is revoked and is rarely audited."
+   }
+  },
+  "generic": {},
+  "github": {
+   "admin:org": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Full organisation administration",
+    "reversible": false,
+    "why": "Can add and remove org members, i.e. can grant persistence to an attacker."
+   },
+   "delete_repo": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Delete repositories",
+    "reversible": false,
+    "why": "Irreversible destruction of a repository. Almost never needed by an agent."
+   },
+   "gist": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Create gists",
+    "reversible": false,
+    "why": "A public gist is a one-call exfiltration primitive."
+   },
+   "public_repo": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Write access to public repositories",
+    "reversible": false,
+    "why": "Can publish to public repos. A misdirected commit is a permanent public disclosure."
+   },
+   "read:org": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Read org membership",
+    "reversible": true,
+    "why": "Low risk on its own."
+   },
+   "repo": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Full control of private repositories",
+    "reversible": false,
+    "why": "Read and write all private source. Includes force-push, which can rewrite history and destroy the audit trail."
+   },
+   "workflow": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Update GitHub Actions workflows",
+    "reversible": false,
+    "why": "Can modify CI. A workflow edit is arbitrary code execution with your CI secrets attached."
+   },
+   "write:packages": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Publish packages",
+    "reversible": false,
+    "why": "Can publish artifacts consumed downstream. Supply-chain reach."
+   }
+  },
+  "gitlab": {
+   "admin_mode": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Perform administrative API actions",
+    "reversible": false,
+    "why": "Instance administration on self-managed GitLab: users, groups, settings and the audit configuration itself."
+   },
+   "ai_features": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Use GitLab Duo APIs",
+    "reversible": true,
+    "why": "Sends source code to a model endpoint for completion and chat."
+   },
+   "api": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Complete read and write API access",
+    "reversible": false,
+    "why": "The broadest GitLab token scope. Includes deleting projects, rewriting CI configuration and reading every variable a pipeline holds, which is where deployment credentials live."
+   },
+   "read_api": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read-only API access",
+    "reversible": true,
+    "why": "Reads source, issues and pipeline configuration across everything the token's owner can reach."
+   },
+   "read_registry": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Pull container images",
+    "reversible": true,
+    "why": "Built images routinely contain baked-in configuration and, too often, the credentials used at build time."
+   },
+   "read_repository": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Clone repositories",
+    "reversible": true,
+    "why": "Full source history. Secrets committed and later removed are still present in the history this can read."
+   },
+   "sudo": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Act as any user on the instance",
+    "reversible": false,
+    "why": "Impersonation. Every action is attributed to the impersonated user, so the audit trail names the wrong person."
+   },
+   "write_registry": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Push container images",
+    "reversible": false,
+    "why": "Overwriting a tag changes what deploys next, with no source change to review."
+   },
+   "write_repository": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Push to repositories",
+    "reversible": false,
+    "why": "A push can alter CI configuration, and CI runs with credentials the pusher may not otherwise hold. Force-push destroys history."
+   }
+  },
+  "google": {
+   "https://mail.google.com/": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Full mailbox control including permanent delete",
+    "reversible": false,
+    "why": "Total mailbox authority including irreversible deletion. This is the broadest Gmail scope that exists."
+   },
+   "https://www.googleapis.com/auth/calendar": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Read/write calendar",
+    "reversible": true,
+    "why": "Can create events that email external attendees."
+   },
+   "https://www.googleapis.com/auth/calendar.readonly": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read calendar",
+    "reversible": true,
+    "why": "Reveals meeting topics, attendees and internal org structure."
+   },
+   "https://www.googleapis.com/auth/cloud-platform": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Full Google Cloud control",
+    "reversible": false,
+    "why": "Complete control of the GCP project including billing, IAM and resource deletion."
+   },
+   "https://www.googleapis.com/auth/contacts": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Read/write contacts",
+    "reversible": true,
+    "why": "Contact list is the target list for any outbound abuse."
+   },
+   "https://www.googleapis.com/auth/drive": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Full Drive access",
+    "reversible": false,
+    "why": "Read, write, share and permanently delete any file. Sharing is an egress path that leaves no trace in most DLP tooling."
+   },
+   "https://www.googleapis.com/auth/drive.file": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Drive access limited to files the app created",
+    "reversible": true,
+    "why": "Correctly scoped. This is what most Drive integrations should use."
+   },
+   "https://www.googleapis.com/auth/drive.readonly": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read all Drive files",
+    "reversible": true,
+    "why": "Full document corpus is readable, and therefore summarisable into any outbound channel the agent also holds."
+   },
+   "https://www.googleapis.com/auth/gmail.modify": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Read, send, modify and label mail",
+    "reversible": false,
+    "why": "Superset of read+send. Can also hide its own activity by relabelling or archiving the evidence."
+   },
+   "https://www.googleapis.com/auth/gmail.readonly": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read all mail",
+    "reversible": true,
+    "why": "Full mailbox read. Every message the agent can see is exfiltratable by a prompt injection delivered in any one of them."
+   },
+   "https://www.googleapis.com/auth/gmail.send": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Send mail as the user",
+    "reversible": false,
+    "why": "Can email any external party as the user. Sent mail cannot be recalled."
+   }
+  },
+  "hubspot": {
+   "crm.objects.companies.read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read company records",
+    "reversible": true,
+    "why": "Reveals the customer list, which for most B2B companies is the single most commercially sensitive dataset they hold."
+   },
+   "crm.objects.companies.write": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Create and modify companies",
+    "reversible": true,
+    "why": "Ownership and lifecycle changes reroute who is alerted about an account and which automations fire."
+   },
+   "crm.objects.contacts.read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read contact records",
+    "reversible": true,
+    "why": "The contact database is the company's relationship list: names, emails, phone numbers and every logged interaction."
+   },
+   "crm.objects.contacts.write": {
+    "authority": "write",
+    "blast": "identity",
+    "label": "Create and modify contacts",
+    "reversible": false,
+    "why": "Can change the email address on a contact, which redirects every subsequent automated message to an address of its choosing."
+   },
+   "crm.objects.deals.read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read deals",
+    "reversible": true,
+    "why": "Deal records carry contract values and close dates: the pipeline numbers a competitor would most like to have."
+   },
+   "crm.objects.deals.write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and modify deals",
+    "reversible": true,
+    "why": "Deal amounts and stages drive forecasting and commission. Editing them changes what the business believes about its own revenue."
+   },
+   "crm.objects.line_items.write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and modify line items",
+    "reversible": true,
+    "why": "Line items are what a deal is actually charging for, so this is price authority one level below the deal total."
+   },
+   "crm.objects.quotes.read": {
+    "authority": "read",
+    "blast": "monetary",
+    "label": "Read quotes",
+    "reversible": true,
+    "why": "Quotes are priced offers, including any discount given."
+   },
+   "crm.objects.quotes.write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and modify quotes",
+    "reversible": false,
+    "why": "A quote is a priced offer sent to a customer. Once delivered it has been seen, whatever is edited afterwards."
+   },
+   "files": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Read and write files",
+    "reversible": false,
+    "why": "HubSpot-hosted files are served from public URLs by default, so an upload here is a publishing action."
+   },
+   "settings.billing.write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Change billing settings",
+    "reversible": false,
+    "why": "Alters the subscription the company is charged for."
+   },
+   "settings.users.write": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Create and modify portal users",
+    "reversible": false,
+    "why": "Can add users and change permissions, including granting access broader than the integration itself holds."
+   }
+  },
+  "microsoft": {
+   "Calendars.ReadWrite": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Full access to the user's calendars",
+    "reversible": true,
+    "why": "Creating an event emails every attendee, including external ones, so a calendar write is an outbound message."
+   },
+   "Directory.ReadWrite.All": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Read and write directory data",
+    "reversible": false,
+    "why": "Entra ID write. Can create accounts, change group membership and alter who has access to everything else in the tenant."
+   },
+   "Files.ReadWrite.All": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Read and write all files the user can access",
+    "reversible": false,
+    "why": "Covers OneDrive and every SharePoint site the user can reach. Includes sharing, which is an egress path most DLP misses."
+   },
+   "Mail.Read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read the user's mail",
+    "reversible": true,
+    "why": "Full mailbox read. Every message is a possible prompt-injection carrier and every attachment is exfiltratable."
+   },
+   "Mail.ReadWrite": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Read, write and delete the user's mail",
+    "reversible": false,
+    "why": "Superset of read and send that can also delete. An agent can remove the message that shows what it was told to do."
+   },
+   "Mail.Send": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Send mail as the user",
+    "reversible": false,
+    "why": "Sends as a real person to any external party. Sent mail cannot be recalled once it leaves the tenant."
+   },
+   "Sites.FullControl.All": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Full control of all SharePoint sites",
+    "reversible": false,
+    "why": "Total authority over every site collection in the tenant, including permissions and retention settings."
+   },
+   "User.Read": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Sign in and read the user's profile",
+    "reversible": true,
+    "why": "The baseline sign-in scope. Low authority on its own."
+   }
+  },
+  "sentry": {
+   "event:admin": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Delete issues and their events",
+    "reversible": false,
+    "why": "Events are immutable, so this deletes whole issues. An agent that caused errors can erase the trace of having caused them."
+   },
+   "event:read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read captured events",
+    "reversible": true,
+    "why": "Error events routinely contain request bodies, headers and tokens that were live at the moment of the exception."
+   },
+   "member:admin": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Add, change and remove members",
+    "reversible": false,
+    "why": "Can grant access to whoever it likes, including itself."
+   },
+   "org:admin": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Administer and delete the organisation",
+    "reversible": false,
+    "why": "The broadest Sentry authority. Includes deleting the organisation and every project and event inside it."
+   },
+   "org:read": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Read organisation settings and membership",
+    "reversible": true,
+    "why": "Reveals projects, teams and who belongs to them."
+   },
+   "project:admin": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Delete projects",
+    "reversible": false,
+    "why": "Deletes a project and all its history. This is deletion of the observability record itself."
+   },
+   "project:read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read project settings",
+    "reversible": true,
+    "why": "Includes DSNs and configuration that describe your deployment."
+   },
+   "project:write": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Modify project settings",
+    "reversible": true,
+    "why": "Can change alert rules and data-scrubbing settings, so it can turn off the filtering that keeps secrets out of captured events."
+   }
+  },
+  "shopify": {
+   "read_all_orders": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read orders beyond the 60-day window",
+    "reversible": true,
+    "why": "Shopify gates this behind approval because it exposes the full historical customer record rather than recent activity."
+   },
+   "read_customer_payment_methods": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Read stored customer payment methods",
+    "reversible": true,
+    "why": "Approval-gated by Shopify. Reveals which payment instruments a customer has on file."
+   },
+   "read_customers": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read customer records",
+    "reversible": true,
+    "why": "The customer list is usually the most valuable personal data a shop holds, and the most regulated."
+   },
+   "read_orders": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read orders",
+    "reversible": true,
+    "why": "Orders carry names, addresses, contact details and what people bought. A customer-data breach in one call."
+   },
+   "write_customers": {
+    "authority": "write",
+    "blast": "identity",
+    "label": "Create and modify customer records",
+    "reversible": false,
+    "why": "Can alter the email address an order confirmation is sent to, which redirects both goods and correspondence."
+   },
+   "write_draft_orders": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and modify draft orders",
+    "reversible": true,
+    "why": "Draft orders can be turned into invoices emailed to customers, so this both creates a financial document and sends it outward."
+   },
+   "write_orders": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and modify orders",
+    "reversible": false,
+    "why": "Editing an order moves money and changes what gets shipped. Refunds and cancellations are not reversible by re-editing."
+   },
+   "write_products": {
+    "authority": "write",
+    "blast": "monetary",
+    "label": "Create and modify products",
+    "reversible": true,
+    "why": "Includes price. A wrong price is a real loss for as long as it is live, and the orders taken at it are already binding."
+   }
+  },
+  "slack": {
+   "admin": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Workspace administration",
+    "reversible": false,
+    "why": "Full workspace control."
+   },
+   "channels:history": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read public channel history",
+    "reversible": true,
+    "why": "Full public conversation history is readable."
+   },
+   "chat:write": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Post messages",
+    "reversible": false,
+    "why": "Can post as the app into any channel it is in. Messages are seen before they can be deleted."
+   },
+   "files:read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read files",
+    "reversible": true,
+    "why": "All shared files including exports and credentials pasted as snippets."
+   },
+   "groups:history": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read private channel history",
+    "reversible": true,
+    "why": "Private channel content. Usually the most sensitive text in a company."
+   },
+   "im:history": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read direct messages",
+    "reversible": true,
+    "why": "DM content. Rarely justifiable for an agent."
+   },
+   "users:read.email": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Read user email addresses",
+    "reversible": true,
+    "why": "Directory of addressable humans."
+   }
+  },
+  "stripe": {
+   "all": {
+    "authority": "destructive",
+    "blast": "monetary",
+    "label": "Unrestricted secret key",
+    "reversible": false,
+    "why": "A live secret key with no restrictions. Every Stripe capability, including payouts, is available to whatever holds this."
+   },
+   "charges:write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and capture charges",
+    "reversible": false,
+    "why": "Can move customer money. Settled charges are reversible only via refund, which is a separate, slower, partially-fee-bearing action."
+   },
+   "customers:read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read customer records",
+    "reversible": true,
+    "why": "PII and payment metadata for the full customer base."
+   },
+   "customers:write": {
+    "authority": "write",
+    "blast": "identity",
+    "label": "Modify customer records",
+    "reversible": true,
+    "why": "Can change the email on a customer record, which is an account-takeover primitive in most billing flows."
+   },
+   "payment_intents:write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create payment intents",
+    "reversible": true,
+    "why": "Initiates payment flows."
+   },
+   "refunds:write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Issue refunds",
+    "reversible": false,
+    "why": "Can pay money out. This is the single most commonly abused agent capability in reported incidents."
+   },
+   "transfers:write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Move money to connected accounts",
+    "reversible": false,
+    "why": "Outbound transfer authority. Effectively irreversible once settled."
+   }
+  }
+ },
+ "digest": "474668e50a4b099d46b945bb070facfd904fd186a9c2729f6c9ee0388e23b556",
+ "schema": 1,
+ "version": "0.5.0+474668e5"
+}

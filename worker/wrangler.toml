@@ -23,6 +23,13 @@ previews = {}
 pattern = "ranwhat.com/api/*"
 zone_name = "ranwhat.com"
 
+# The subscription feed (src/feed.js), at the address ranwhat/feed.py asks.
+# A route, not a custom domain, so a deploy needs no DNS permission: the
+# hostname needs a proxied DNS record of its own (AAAA feed -> 100::).
+[[routes]]
+pattern = "feed.ranwhat.com/v1/*"
+zone_name = "ranwhat.com"
+
 # TURNSTILE_SECRET, X_PIXEL_TOKEN, RESEND_API_KEY and LIST_SECRET are
 # encrypted secrets, set with `npx wrangler secret put <NAME>`, never here.
 # RESEND_API_KEY: a Full access key (the list makes contacts, a segment and
