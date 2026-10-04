@@ -41,9 +41,7 @@
     <a class="wordmark" href="/">ran<i>what</i></a>
     <nav id="site-nav">
       <a href="/">Home</a>
-      <a href="/watch">Watch</a>
-      <a href="/clean">Clean</a>
-      <a href="/scan">Scan</a>
+      <a href="/commands">Commands</a>
       <a href="/guides">Guides</a>
       <a href="/pricing">Pricing</a>
       <a href="/about">About</a>
@@ -258,9 +256,9 @@ claude --permission-mode default   <span class="c-mut">Manual mode: ask before e
       </p>
       <div class="rows">
         <div class="row"><span class="k">2.1.64</span>
-          <span class="v">A symlink made by a sandboxed command led Claude Code's own process to write outside the workspace (CVE-2026-39861).</span></div>
+          <span class="v">A symlink made by a sandboxed command led Claude Code's own process to write outside the workspace&nbsp;(CVE-2026-39861).</span></div>
         <div class="row"><span class="k">2.1.84</span>
-          <span class="v">A repository could skip the trust dialog, and run its hooks, through a spoofed git worktree <span class="icode">commondir</span> (CVE-2026-40068).</span></div>
+          <span class="v">A repository could skip the trust dialog, and run its hooks, through a spoofed git worktree <span class="nowrap"><span class="icode">commondir</span>&nbsp;(CVE-2026-40068).</span></span></div>
         <div class="row"><span class="k">2.1.163</span>
           <span class="v">A worktree named <span class="icode">.git</span>, symlinks and git fsmonitor let a repository overwrite files such as <span class="icode">~/.zshenv</span> outside the sandbox (CVE-2026-55607).</span></div>
         <div class="row"><span class="k">2.1.247</span>
@@ -534,33 +532,33 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
       </p>
       <ol class="rows" style="list-style:none;margin:0;padding:0">
         <li class="row"><span class="k">01</span>
-          <span class="v">Run <span class="icode">claude --version</span>: 2.1.260 or later. Organisations: set <span class="icode">requiredMinimumVersion</span>. <a href="#boundary">Boundary</a></span></li>
+          <span class="v">Run <span class="icode">claude --version</span>: 2.1.260 or later. Organisations: set <span class="icode">requiredMinimumVersion</span>.&nbsp;<a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">02</span>
-          <span class="v">Start Claude Code in the project directory, not in <span class="icode">~</span>. <a href="#reach">Reach</a></span></li>
+          <span class="v">Start Claude Code in the project directory, not in <span class="icode">~</span>.&nbsp;<a href="#reach">Reach</a></span></li>
         <li class="row"><span class="k">03</span>
-          <span class="v">Review <span class="icode">/permissions</span>, and which settings file each rule comes from. <a href="#reach">Reach</a></span></li>
+          <span class="v">Review <span class="icode">/permissions</span>, and which settings file each rule comes from.&nbsp;<a href="#reach">Reach</a></span></li>
         <li class="row"><span class="k">04</span>
-          <span class="v">Deny preapproved WebFetch domains you do not use, or set <span class="icode">CLAUDE_CODE_DISABLE_WEB_FETCH=1</span> where nothing needs the web. <a href="#reach">Reach</a></span></li>
+          <span class="v">Deny preapproved WebFetch domains you do not use, or set <span class="icode">CLAUDE_CODE_DISABLE_WEB_FETCH=1</span> where nothing needs the web.&nbsp;<a href="#reach">Reach</a></span></li>
         <li class="row"><span class="k">05</span>
-          <span class="v"><a href="/guides/claude-code-env-secrets">Deny reads of <span class="icode">.env</span> files</a> and secrets directories. <a href="#boundary">Boundary</a></span></li>
+          <span class="v"><a href="/guides/claude-code-env-secrets">Deny reads of <span class="icode">.env</span> files</a> and secrets directories.&nbsp;<a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">06</span>
-          <span class="v">Turn on the sandbox and list your credential files and variables in <span class="icode">sandbox.credentials</span>. <a href="#boundary">Boundary</a></span></li>
+          <span class="v">Turn on the sandbox and list your credential files and variables in <span class="icode">sandbox.credentials</span>.&nbsp;<a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">07</span>
-          <span class="v">Set <span class="icode">CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</span>. <a href="#boundary">Boundary</a></span></li>
+          <span class="v">Set <span class="icode">CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</span>.&nbsp;<a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">08</span>
-          <span class="v">Read a new clone's <span class="icode">.claude/</span> and <span class="icode">.mcp.json</span> before you accept trust, and run its setup yourself. <a href="#boundary">Boundary</a></span></li>
+          <span class="v">Read a new clone's <span class="icode">.claude/</span> and <span class="icode">.mcp.json</span> before you accept trust, and run its setup yourself.&nbsp;<a href="#boundary">Boundary</a></span></li>
         <li class="row"><span class="k">09</span>
-          <span class="v">Check who can read <span class="icode">~/.claude</span>. <a href="#disk">Disk</a></span></li>
+          <span class="v">Check who can read <span class="icode">~/.claude</span>.&nbsp;<a href="#disk">Disk</a></span></li>
         <li class="row"><span class="k">10</span>
-          <span class="v">Set <span class="icode">cleanupPeriodDays</span> on purpose: <a href="/guides/claude-code-history">how long Claude Code keeps history</a>. <a href="#disk">Disk</a></span></li>
+          <span class="v">Set <span class="icode">cleanupPeriodDays</span> on purpose: <a href="/guides/claude-code-history">how long Claude Code keeps history</a>.&nbsp;<a href="#disk">Disk</a></span></li>
         <li class="row"><span class="k">11</span>
-          <span class="v">Run <span class="icode">uvx ranwhat check</span> now, and again after anything odd. <a href="#audit">Audit</a></span></li>
+          <span class="v">Run <span class="icode">uvx ranwhat check</span> now, and again after anything odd.&nbsp;<a href="#audit">Audit</a></span></li>
         <li class="row"><span class="k">12</span>
-          <span class="v"><a href="/guides/claude-code-audit-log">Log commands from now on</a>, with a hook or OpenTelemetry. <a href="#audit">Audit</a></span></li>
+          <span class="v"><a href="/guides/claude-code-audit-log">Log commands from now on</a>, with a hook or OpenTelemetry.&nbsp;<a href="#audit">Audit</a></span></li>
         <li class="row"><span class="k">13</span>
-          <span class="v"><a href="/guides/ai-agent-token-scopes">Replace broad tokens</a> with fine-grained, restricted or agent-tagged ones. <a href="#tokens">Tokens</a></span></li>
+          <span class="v"><a href="/guides/ai-agent-token-scopes">Replace broad tokens</a> with fine-grained, restricted or agent-tagged ones.&nbsp;<a href="#tokens">Tokens</a></span></li>
         <li class="row"><span class="k">14</span>
-          <span class="v">Rotate anything found in a transcript, then mask it. <a href="#leaks">Leaks</a></span></li>
+          <span class="v">Rotate anything found in a transcript, then mask it.&nbsp;<a href="#leaks">Leaks</a></span></li>
       </ol>
     </div>
   </div>
@@ -655,6 +653,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
           <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
         </ul>
       </div>
       <div>

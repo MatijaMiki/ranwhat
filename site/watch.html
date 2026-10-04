@@ -33,17 +33,15 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Watch","item":"https://ranwhat.com/watch"}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Commands","item":"https://ranwhat.com/commands"},{"@type":"ListItem","position":3,"name":"Watch","item":"https://ranwhat.com/watch"}]}</script>
 </head>
-<body>
+<body class="in-commands">
 <header>
   <div class="shell nav">
     <a class="wordmark" href="/">ran<i>what</i></a>
     <nav id="site-nav">
       <a href="/">Home</a>
-      <a href="/watch" aria-current="page">Watch</a>
-      <a href="/clean">Clean</a>
-      <a href="/scan">Scan</a>
+      <a href="/commands">Commands</a>
       <a href="/guides">Guides</a>
       <a href="/pricing">Pricing</a>
       <a href="/about">About</a>
@@ -62,7 +60,32 @@
 </header>
 
 <main id="top">
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Watch</span></nav>
+<div class="docs">
+<aside class="docnav" aria-label="Commands">
+  <a class="docnav-title" href="/commands"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 8l4 4-4 4M12 17h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Commands</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/install">Install</a></li>
+    <li><a href="/commands">Overview</a></li>
+  </ul>
+  <p class="docnav-h">Every command</p>
+  <ul>
+    <li><a class="cmdname" href="/commands#check">check</a></li>
+    <li><a class="cmdname" href="/watch" aria-current="page">watch</a></li>
+    <li><a class="cmdname" href="/clean">clean</a></li>
+    <li><a class="cmdname" href="/commands#sources">sources</a></li>
+    <li><a class="cmdname" href="/scan">scan</a></li>
+    <li><a class="cmdname" href="/commands#live">live</a></li>
+    <li><a class="cmdname" href="/commands#demo">demo</a></li>
+    <li><a class="cmdname" href="/commands#update">update</a></li>
+  </ul>
+  <p class="docnav-h">Reference</p>
+  <ul>
+    <li><a href="/commands#flags">Every flag</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/commands">Commands</a> <span aria-hidden="true">/</span> <span aria-current="page">Watch</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">ranwhat watch</p>
@@ -97,31 +120,31 @@
       <table class="stack">
         <thead><tr><th>Rule</th><th>Severity</th><th>Why it's on the list</th></tr></thead>
         <tbody>
-          <tr><td><strong>Credential access</strong><br><code>.env · ~/.aws/credentials · id_rsa</code></td>
+          <tr><td><strong>Credential access</strong><br><code>.env · ~/.aws/credentials&nbsp;·&nbsp;id_rsa</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">Read a file whose only purpose is holding secrets. The contents are now in a context you don't control, and in the transcript too: <a href="/clean">find and mask them with ranwhat clean</a>. Then <a href="/guides/claude-code-env-secrets">block the next read</a>.</td></tr>
-          <tr><td><strong>Secret-shaped string in a tool call</strong><br><code>sk_live_… · ghp_… · AKIA…</code></td>
+          <tr><td><strong>Secret-shaped string in a tool call</strong><br><code>sk_live_… · ghp_…&nbsp;·&nbsp;AKIA…</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">A credential-shaped value appeared verbatim in a tool call. Even if the call was benign, the value is now in the transcript.</td></tr>
-          <tr><td><strong>Package or release published</strong><br><code>npm publish · twine upload · docker push</code></td>
+          <tr><td><strong>Package or release published</strong><br><code>npm&nbsp;publish · twine&nbsp;upload · docker&nbsp;push</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">Something reached a registry other people install from. Supply-chain reach, usually irreversible.</td></tr>
-          <tr><td><strong>Cloud resource destroyed or modified</strong><br><code>terraform destroy · kubectl delete · aws iam attach-…</code></td>
+          <tr><td><strong>Cloud resource destroyed or modified</strong><br><code>terraform&nbsp;destroy · kubectl&nbsp;delete · aws&nbsp;iam&nbsp;attach-…</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">A write or delete against live infrastructure, including IAM changes, <span class="icode">terraform apply -auto-approve</span> and <span class="icode">DROP TABLE</span>.</td></tr>
-          <tr><td><strong>Financial API called</strong><br><code>stripe charges · refunds</code></td>
+          <tr><td><strong>Financial API called</strong><br><code>stripe&nbsp;charges&nbsp;·&nbsp;refunds</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">With a live key, each of these moves real money.</td></tr>
-          <tr><td><strong>Log or history tampering</strong><br><code>history -c · cloudtrail stop</code></td>
+          <tr><td><strong>Log or history tampering</strong><br><code>history&nbsp;-c · cloudtrail&nbsp;stop</code></td>
               <td data-label="Severity"><span class="chip crit">Critical</span></td>
               <td data-label="Why it's on the list">An action whose effect is removing the record of other actions.</td></tr>
-          <tr><td><strong>Destructive git</strong><br><code>push --force · reset --hard</code></td>
+          <tr><td><strong>Destructive git</strong><br><code>push&nbsp;--force · reset&nbsp;--hard</code></td>
               <td data-label="Severity"><span class="chip high">High</span></td>
               <td data-label="Why it's on the list">History rewriting. The class of action that destroys the record of what else happened.</td></tr>
-          <tr><td><strong>Recursive deletion</strong><br><code>rm -rf · find -delete</code></td>
+          <tr><td><strong>Recursive deletion</strong><br><code>rm&nbsp;-rf · find&nbsp;-delete</code></td>
               <td data-label="Severity"><span class="chip high">High</span></td>
               <td data-label="Why it's on the list"><a href="/guides/claude-code-deleted-files">Recoverable only if something else was backing it up</a>. Severity follows the target: <span class="icode">rm -rf build</span> is not reported, <span class="icode">rm -rf ~/Documents</span> is high, <span class="icode">rm -rf "$HOME"</span> is critical.</td></tr>
-          <tr><td><strong>Local file sent to the network</strong><br><code>curl -d @file · curl -F file=@…</code></td>
+          <tr><td><strong>Local file sent to the network</strong><br><code>curl&nbsp;-d&nbsp;@file · curl&nbsp;-F&nbsp;file=@…</code></td>
               <td data-label="Severity"><span class="chip high">High</span></td>
               <td data-label="Why it's on the list">File contents sent outbound in one command. That shape, whatever the intent.</td></tr>
         </tbody>
@@ -143,14 +166,14 @@
       <div class="grid3">
         <div class="cell">
           <h3 class="mono" style="font-size:13px">grep "rm -rf" src/</h3>
-          <p>Searching for a string isn't running it. Search tools without an action flag are suppressed.</p>
+          <p>Searching for a string isn't running it. Search tools without an action flag are&nbsp;suppressed.</p>
         </div>
         <div class="cell">
-          <h3 class="mono" style="font-size:13px">python3 -c "…rm -rf…"</h3>
+          <h3 class="mono" style="font-size:13px">python3&nbsp;-c&nbsp;"…rm&nbsp;-rf…"</h3>
           <p>The payload is Python source. <code class="icode">bash -c</code> is the exception: that really is shell, so it recurses in.</p>
         </div>
         <div class="cell">
-          <h3 class="mono" style="font-size:13px">cat &gt; f.sh &lt;&lt;'EOF'</h3>
+          <h3 class="mono" style="font-size:13px">cat&nbsp;&gt;&nbsp;f.sh&nbsp;&lt;&lt;'EOF'</h3>
           <p>A heredoc body is data being written. Writing a script that contains a command isn't running it.</p>
         </div>
       </div>
@@ -184,7 +207,7 @@
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Codex</strong></td>
               <td data-label="Location"><code>~/.codex/sessions/</code> and <code>archived_sessions/</code> (<code>$CODEX_HOME</code>); its prompt history, shell snapshots and thread index searched for secrets</td>
-              <td data-label="Format">JSONL; SQLite read only; <code>.jsonl.zst</code> read only, on Python 3.14 or with the <code>zstd</code> command</td>
+              <td data-label="Format">JSONL; SQLite read only; <code>.jsonl.zst</code> read only, on Python 3.14 or with the <code>zstd</code>&nbsp;command</td>
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Gemini CLI</strong></td>
               <td data-label="Location"><code>~/.gemini/tmp/&lt;project&gt;/chats/</code> (<code>$GEMINI_CLI_HOME</code>)</td>
@@ -299,6 +322,8 @@
     </div>
   </div>
 </section>
+</div>
+</div>
 </main>
 
 <footer>
@@ -318,6 +343,7 @@
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
           <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
         </ul>
       </div>
       <div>

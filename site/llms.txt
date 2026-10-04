@@ -25,6 +25,7 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 
 ## Docs
 
+- [Commands](https://ranwhat.com/commands): every command and every flag, what each reads and what it sends
 - [watch](https://ranwhat.com/watch): the nine rules, their severities, the false positives it suppresses, and where it reads from
 - [clean](https://ranwhat.com/clean): how secrets are found, why masking is not remediation, and the review session
 - [scan](https://ranwhat.com/scan): the three scores, evidence states, and the providers the catalogue covers
