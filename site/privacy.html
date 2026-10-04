@@ -197,6 +197,25 @@
             <a href="https://resend.com/legal/privacy-policy">Resend&rsquo;s privacy
             policy</a>. The <a href="/rss.xml">RSS feed</a> carries the same news
             and asks nothing of you.</span></div>
+        <div class="row" id="payments"><span class="k">Payments</span>
+          <span class="v">If you subscribe to <a href="/pricing#plus">Plus</a>,
+            you pay on Stripe&rsquo;s checkout page, not ours. Stripe collects
+            your card, your email address, your billing address and, if you
+            give it, your VAT number, and keeps them with the subscription and
+            its invoices. We never see your card. Our Worker keeps the Stripe
+            IDs of your subscription and customer record, the
+            subscription&rsquo;s status and a hash of your feed token, in the
+            same Cloudflare database, so the feed knows whether to answer:
+            not your name, address or card. It reads your email address from
+            Stripe to send you the token through Resend, and does not keep it.
+            We keep those IDs for as long as the subscription exists, and
+            afterwards as the record of a sale. The legal basis is the contract
+            you enter by subscribing (GDPR art.&nbsp;6(1)(b)), and keeping
+            records of sales is a legal obligation under Croatian accounting
+            and tax law (art.&nbsp;6(1)(c)). Stripe may process this in the
+            United States. Stripe&rsquo;s handling is described in
+            <a href="https://stripe.com/privacy">Stripe&rsquo;s privacy
+            policy</a>, and the <a href="/terms">terms</a> cover the rest.</span></div>
         <div class="row"><span class="k">Server logs</span>
           <span class="v">Cloudflare hosts and serves the site. It logs request
             metadata, including your IP address, to deliver pages and absorb
@@ -219,7 +238,8 @@
             signup form: the challenge that keeps the forms from being used by
             bots. It loads from challenges.cloudflare.com and reads signals from
             your browser to tell a person from a script. Resend, only if you
-            sign up for release emails (Release emails, above). Google Analytics and X, each only if you allow
+            sign up for release emails or subscribe to Plus (above). Stripe,
+            only if you subscribe to Plus (Payments, above). Google Analytics and X, each only if you allow
             it (above). Maidensail, on the home page only: the "Featured on
             Maidensail" badge is an image from maidensail.com, so your browser
             asks maidensail.com for it, which sees your IP address and browser
@@ -290,6 +310,7 @@
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
           <li><a href="/faq">FAQ</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
         </ul>

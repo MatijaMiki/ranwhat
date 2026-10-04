@@ -21,10 +21,14 @@
  *
  * GET feed.ranwhat.com/v1/catalogue: the subscription feed `ranwhat update`
  * reads, in feed.js. Routed here from its own hostname.
+ *
+ * /api/checkout, /api/welcome, /api/stripe and /api/billing: buying Plus
+ * through Stripe, in stripe.js. Paying issues the token the feed accepts.
  */
 import { EmailMessage } from "cloudflare:email";
 import { announce, confirm, subscribe, switchedOn } from "./list.js";
 import { catalogue } from "./feed.js";
+import { billing, checkout, webhook, welcome } from "./stripe.js";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TO = "ranwhatcom@gmail.com";
@@ -234,12 +238,17 @@ async function handleSubscribe(request, env) {
 }
 
 /* Path: [handler, methods it answers]. The confirmation link is opened with
-   GET, and the button on the page it shows POSTs. */
+   GET, and the button on the page it shows POSTs. The pricing page's form
+   POSTs to checkout, and Stripe sends the browser back to welcome. */
 const ROUTES = {
   "/api/contact": [handleContact, ["POST"]],
   "/api/subscribe": [handleSubscribe, ["POST"]],
   "/api/confirm": [confirm, ["GET", "POST"]],
   "/v1/catalogue": [catalogue, ["GET"]],
+  "/api/checkout": [checkout, ["POST"]],
+  "/api/welcome": [welcome, ["GET"]],
+  "/api/stripe": [webhook, ["POST"]],
+  "/api/billing": [billing, ["GET"]],
 };
 
 export default {

@@ -185,7 +185,7 @@ Read locally. Nothing was transmitted.</span></pre></div>
         <div class="faq"><h3>Which agents does it read?</h3><p>Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, Grok Build, Droid, Kimi Code, Kimi CLI, Pi, Muse Code and OpenClaw, from the history each writes to disk. <span class="icode">check</span>, <span class="icode">watch</span> and <span class="icode">clean</span> read all twelve by default, and <span class="icode">ranwhat sources</span> says where it looked for each. OpenClaw keeps its history in a database, so <span class="icode">clean</span> finds its secrets but only reads them. Meta Muse, Grok Bot and the current Amp keep theirs in their vendor's cloud, so there is nothing on your machine to read. Cursor is next. It reads files the agent already wrote, so there is no wrapper, no proxy and nothing in your critical path.</p></div>
         <div class="faq"><h3>Does it read everything Claude Code writes?</h3><p>Not yet. It reads the session transcripts, <span class="icode">~/.claude/projects/*/*.jsonl</span>, and the transcripts their subagents write, for the last 30 days by default. The large tool outputs Claude Code stores in separate files, and <span class="icode">~/.claude/history.jsonl</span>, are not read yet. If <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead, and <span class="icode">--root PATH</span> points it at any other directory. A run that reads nothing says that nothing was checked, rather than that nothing was found. The <a href="/guides/claude-code-history">Claude Code history guide</a> lists what each of those files holds and how long it stays.</p></div>
         <div class="faq"><h3>If I mask a secret, is it safe now?</h3><p>No, and the tool says so. The value was already written to disk in plaintext and already sat in a model context you do not control. Masking stops it leaking a second time. Rotating it is the actual fix, which is why the report leads with what to rotate and where.</p></div>
-        <div class="faq"><h3>What does it cost?</h3><p>Nothing on your own machine, forever, and the code is MIT licensed with no dependencies. Paid tiers, being built now, are for collecting records across machines and for evidence retention. We never charge per finding, because a tool paid by the alert has a reason to cry wolf.</p></div>
+        <div class="faq"><h3>What does it cost?</h3><p>Nothing on your own machine, forever, and the code is MIT licensed with no dependencies. Plus is €12 a month, or €120 a year, per organisation, and keeps the capability catalogue current; collecting records across machines and evidence retention are being built. We never charge per finding, because a tool paid by the alert has a reason to cry wolf.</p></div>
       </div>
       <p class="more" style="margin-top:18px"><a href="/faq">All questions about ranwhat →</a></p>
     </div>
@@ -278,6 +278,7 @@ Read locally. Nothing was transmitted.</span></pre></div>
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
           <li><a href="/faq">FAQ</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
         </ul>

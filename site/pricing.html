@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ranwhat pricing: free locally, Plus at $12 a month</title>
-<meta name="description" content="Free forever on your own machine, with every rule and every source. Plus is $12 a month per organisation and Team is annual. Both paid tiers are being built.">
+<title>ranwhat pricing: free locally, Plus at €12 a month</title>
+<meta name="description" content="Free forever on your own machine, with every rule and every source. Plus is €12 a month or €120 a year per organisation, and its catalogue feed is live now.">
 <link rel="canonical" href="https://ranwhat.com/pricing">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
@@ -18,8 +18,8 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/pricing">
-<meta property="og:title" content="ranwhat pricing: free locally, Plus at $12 a month">
-<meta property="og:description" content="Free forever on your own machine, with every rule and every source. Plus is $12 a month per organisation and Team is annual. Both paid tiers are being built.">
+<meta property="og:title" content="ranwhat pricing: free locally, Plus at €12 a month">
+<meta property="og:description" content="Free forever on your own machine, with every rule and every source. Plus is €12 a month or €120 a year per organisation, and its catalogue feed is live now.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,8 +27,8 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="ranwhat pricing: free locally, Plus at $12 a month">
-<meta name="twitter:description" content="Free forever on your own machine, with every rule and every source. Plus is $12 a month per organisation and Team is annual. Both paid tiers are being built.">
+<meta name="twitter:title" content="ranwhat pricing: free locally, Plus at €12 a month">
+<meta name="twitter:description" content="Free forever on your own machine, with every rule and every source. Plus is €12 a month or €120 a year per organisation, and its catalogue feed is live now.">
 
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
@@ -94,25 +94,33 @@
         <a class="act" href="/install">Install</a>
       </div>
 
-      <div class="plan feature">
+      <form class="plan feature" id="plus" method="post" action="/api/checkout">
         <div class="tier">Plus</div>
-        <div class="price">$12<small> / month</small></div>
-        <p class="state">Being built. Not available yet.</p>
+        <fieldset class="cycle">
+          <legend>Billing</legend>
+          <label><input type="radio" name="plan" value="monthly" checked> Monthly</label>
+          <label><input type="radio" name="plan" value="annual"> Yearly <em>2 months free</em></label>
+        </fieldset>
+        <div class="price p-monthly">&euro;12<small> / month</small></div>
+        <div class="price p-annual">&euro;10<small> / month, &euro;120 a year</small></div>
+        <p class="state">Live now: the catalogue feed. The rest is being built,
+           and comes at the same price as it ships.</p>
         <p class="who">One price for the whole team, however many agents or people you run.</p>
         <ul>
           <li>Everything in Free</li>
           <li><strong>A current capability catalogue</strong>, pulled as
               providers add scopes, rather than whatever shipped with your
               version</li>
-          <li><strong>One view across every machine and CI runner</strong>,
+          <li class="soon"><strong>One view across every machine and CI runner</strong>,
               instead of a report per laptop</li>
-          <li>13-month retention, kept by us rather than by your backups</li>
-          <li>Slack or email by severity, deduplicated across agents</li>
-          <li>Authority drift alerts when an agent's scopes widen</li>
-          <li>Payloads hashed before they leave your network</li>
+          <li class="soon">13-month retention, kept by us rather than by your backups</li>
+          <li class="soon">Slack or email by severity, deduplicated across agents</li>
+          <li class="soon">Authority drift alerts when an agent's scopes widen</li>
+          <li class="soon">Payloads hashed before they leave your network</li>
         </ul>
-        <a class="act" href="/contact?about=plus">Get in touch</a>
-      </div>
+        <button class="act" type="submit">Subscribe</button>
+        <p class="fine">Paid through Stripe. Cancel any time; refund in the first 14 days.</p>
+      </form>
 
       <div class="plan">
         <div class="tier">Team</div>
@@ -194,7 +202,7 @@
         </div>
         <div class="cell">
           <h3>We have two hundred agents.</h3>
-          <p>Then you pay the same $12 as someone with two. The price is per
+          <p>Then you pay the same &euro;12 as someone with two. The price is per
              organisation, so scale is not a reason to talk to us. Needing
              records a third party will accept is.</p>
         </div>
@@ -207,20 +215,33 @@
              will run in your network is yours; the chain is deliberately
              not.</p>
         </div>
+        <div class="cell">
+          <h3>How do we cancel?</h3>
+          <p>From the <a href="/api/billing">billing page</a>, any time. The feed
+             keeps working to the end of the period you paid for. Changed your
+             mind in the first 14 days? Write to us and the first payment is
+             refunded in full. The <a href="/terms">terms</a> have the rest.</p>
+        </div>
+        <div class="cell">
+          <h3>Where does the token go?</h3>
+          <p>It is on the page you land on after paying, and in an email. Run
+             <span class="icode">ranwhat update --save-token</span> with it once
+             on each machine; after that <span class="icode">ranwhat update</span>
+             needs nothing more.</p>
+        </div>
       </div>
       <div class="note" style="margin-top:22px">
         <h3>Honest status</h3>
-        <p>Free ships today and is what the GitHub repository contains. Plus
-           and Team are being built. The Plus catalogue feed is in development
-           and not available yet: <span class="icode">ranwhat update</span> is
-           in the CLI, but <span class="icode">feed.ranwhat.com</span>, which
-           it fetches from, is not live. The cross-machine collector, the
-           retention store and the hash-chained records are not written yet.
-           Everything listed under Free is, and you can read it on GitHub
-           today. These prices are
-           what the paid tiers will launch at. If you want either now, you'd
-           be an early customer shaping them, and you should expect to be
-           treated like one.</p>
+        <p>Free ships today and is what the GitHub repository contains. Of
+           Plus, the catalogue feed is live: subscribe, and
+           <span class="icode">ranwhat update</span> keeps your catalogue
+           current from <span class="icode">feed.ranwhat.com</span> as
+           providers add scopes. The cross-machine view, retention and alerts
+           are not written yet, and nor are Team's hash-chained records. Plus
+           subscribers get each of them at the same price as it ships, and
+           Team is not for sale until its records exist. If you want Team now,
+           write to us: you'd be an early customer shaping it, and you should
+           expect to be treated like one.</p>
       </div>
     </div>
   </div>
@@ -253,6 +274,7 @@
         <ul>
           <li><a href="/install">Install</a></li>
           <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
           <li><a href="/faq">FAQ</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
         </ul>
