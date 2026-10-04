@@ -45,6 +45,22 @@ class BranchBuildsCanRun(unittest.TestCase):
         self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL"])
         self.assertEqual([r["pattern"] for r in config["routes"]], ["ranwhat.com/api/*"])
 
+    @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
+    def test_the_contact_binding_reaches_one_inbox(self):
+        # The release list sends through Resend's API, not a binding, so the
+        # only binding that can send mail still reaches one address.
+        with WRANGLER.open("rb") as fh:
+            self.assertEqual(tomllib.load(fh)["send_email"],
+                             [{"name": "CONTACT_EMAIL", "destination_address": "ranwhatcom@gmail.com"}])
+
+    @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
+    def test_the_list_has_its_database_and_its_cron(self):
+        with WRANGLER.open("rb") as fh:
+            config = tomllib.load(fh)
+        # No database_id: Wrangler creates the database on the first deploy.
+        self.assertEqual(config["d1_databases"], [{"binding": "LIST", "database_name": "ranwhat-list"}])
+        self.assertEqual(len(config["triggers"]["crons"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

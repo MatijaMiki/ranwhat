@@ -34,6 +34,9 @@
 /theme.js
   Cache-Control: public, max-age=31536000, immutable
 
+/subscribe.js
+  Cache-Control: public, max-age=31536000, immutable
+
 /favicon-16.png
   Cache-Control: public, max-age=86400
 
@@ -53,6 +56,9 @@
   Cache-Control: public, max-age=3600
 
 /sitemap.xml
+  Cache-Control: public, max-age=3600
+
+/rss.xml
   Cache-Control: public, max-age=3600
 
 /fonts/*

@@ -12,6 +12,7 @@
 <link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
 <link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
 <meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
@@ -224,16 +225,29 @@ Read locally. Nothing was transmitted.</span></pre></div>
         <a class="featured" href="https://maidensail.com/startup/ranwhat" rel="dofollow"><img src="https://maidensail.com/badge/ranwhat.svg" alt="Featured on Maidensail" width="190" height="44"></a>
       </div>
       <p class="lede follow-lede">
-        New sources and rules ship regularly, and the commit history carries the
-        reasoning, including the things the tool got wrong and what changed
-        because of it.
+        New sources and rules ship regularly, and the
+        <a href="https://github.com/MatijaMiki/ranwhat/commits/main">commit history</a>
+        carries the reasoning, including the things the tool got wrong and what
+        changed because of it.
       </p>
       <ul class="follow">
         <li><a href="https://github.com/MatijaMiki/ranwhat">GitHub<span>watch the repo for releases</span></a></li>
         <li><a href="https://x.com/ranwhatcom">X<span>@ranwhatcom</span></a></li>
-        <li><a href="https://github.com/MatijaMiki/ranwhat/commits/main">Changelog<span>every change, with the reasoning</span></a></li>
+        <li><a href="/updates">Updates<span>every release, by email or RSS</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues<span>tell us what it got wrong</span></a></li>
       </ul>
+      <form class="form subscribe" data-subscribe novalidate>
+        <label for="sub-email">Get each release by email</label>
+        <div class="subrow">
+          <input id="sub-email" name="email" type="email" autocomplete="email"
+                 placeholder="you@example.com" required>
+          <button class="act" type="submit">Subscribe &rarr;</button>
+        </div>
+        <div class="sub-check"></div>
+        <p class="fnote" role="status" aria-live="polite">
+          One email per release. Nothing is sent until you confirm.
+        </p>
+      </form>
     </div>
   </div>
 </section>
@@ -286,6 +300,7 @@ Read locally. Nothing was transmitted.</span></pre></div>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
           <li><a href="https://x.com/ranwhatcom">X</a></li>
@@ -303,6 +318,7 @@ Read locally. Nothing was transmitted.</span></pre></div>
   </div>
 </footer>
 <script src="/copy.js" defer></script>
+<script src="/subscribe.js" defer></script>
 <script src="/consent.js" defer></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
-/* POST /api/contact
+/* POST /api/contact and POST /api/subscribe
  *
+ * /api/contact:
  * Verifies the Turnstile token server-side, then emails the message to the
  * address verified in Email Routing. Cloudflare's send_email binding can only
  * deliver to addresses already verified on this account, which is exactly the
@@ -12,8 +13,14 @@
  *
  * A Turnstile token that is never verified is decoration. This is the call that
  * makes the widget mean anything.
+ *
+ * /api/subscribe and /api/confirm: the release list, in list.js. The signup
+ * gets the same challenge check first. A signup waits in D1 until it is
+ * confirmed, Resend keeps the confirmed list and sends the mail, and a cron
+ * trigger sends each new release in /rss.xml as one broadcast.
  */
 import { EmailMessage } from "cloudflare:email";
+import { announce, confirm, subscribe, switchedOn } from "./list.js";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TO = "ranwhatcom@gmail.com";
@@ -53,6 +60,37 @@ const json = (status, body) =>
 /* Header injection: a newline in a header value lets someone append headers of
    their own, e.g. a Bcc. Strip CR and LF from anything that lands in one. */
 const header = (s) => String(s || "").replace(/[\r\n]+/g, " ").trim();
+
+/* Asks Cloudflare whether a Turnstile token is good for this site, and, when
+   an action is given, for this form: a token solved on the signup form is not
+   a pass for the contact form, or the other way round. Returns null when it
+   is, or the Response to send back when it is not. */
+async function refuseChallenge(request, env, token, action) {
+  if (!token) return json(400, { error: "Complete the challenge and try again." });
+
+  /* If siteverify is down or answers with something other than JSON, say so
+     in the same shape as every other error rather than throwing a bare 500. */
+  let outcome;
+  try {
+    const verify = await fetch(SITEVERIFY, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret: env.TURNSTILE_SECRET,
+        response: token,
+        remoteip: request.headers.get("cf-connecting-ip") || undefined,
+      }),
+    });
+    outcome = await verify.json();
+  } catch {
+    return json(502, { error: "The challenge could not be checked just now. Try again in a minute." });
+  }
+  if (!outcome.success || !HOSTNAMES.has(outcome.hostname) ||
+      (action && outcome.action !== action)) {
+    return json(403, { error: "That challenge did not verify. Reload and try again." });
+  }
+  return null;
+}
 
 /* Tells X a contact message was sent, so an ad can be credited with it. Only
    when the visitor allowed ad measurement on the page, and never with the
@@ -103,29 +141,8 @@ async function handleContact(request, env, ctx) {
     return json(400, { error: "Expected JSON." });
   }
 
-  const token = form["cf-turnstile-response"];
-  if (!token) return json(400, { error: "Complete the challenge and try again." });
-
-  /* If siteverify is down or answers with something other than JSON, say so
-     in the same shape as every other error rather than throwing a bare 500. */
-  let outcome;
-  try {
-    const verify = await fetch(SITEVERIFY, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        secret: env.TURNSTILE_SECRET,
-        response: token,
-        remoteip: request.headers.get("cf-connecting-ip") || undefined,
-      }),
-    });
-    outcome = await verify.json();
-  } catch {
-    return json(502, { error: "The challenge could not be checked just now. Try again in a minute." });
-  }
-  if (!outcome.success || !HOSTNAMES.has(outcome.hostname)) {
-    return json(403, { error: "That challenge did not verify. Reload and try again." });
-  }
+  const refused = await refuseChallenge(request, env, form["cf-turnstile-response"]);
+  if (refused) return refused;
 
   const topic = SUBJECTS[form.about] ? form.about : "other";
   const message = String(form.message || "").trim();
@@ -179,16 +196,64 @@ async function handleContact(request, env, ctx) {
   return json(200, { ok: true });
 }
 
+async function handleSubscribe(request, env) {
+  /* Until the list's bindings and secret are in place the form says so. */
+  if (!switchedOn(env)) {
+    return json(503, { error: "Email updates are not switched on yet. The RSS feed at ranwhat.com/rss.xml has every release." });
+  }
+
+  let form;
+  try {
+    form = await request.json();
+  } catch {
+    return json(400, { error: "Expected JSON." });
+  }
+
+  const address = String(form.email || "").trim();
+  if (!address || address.length > LIMITS.email || !EMAIL.test(address)) {
+    return json(400, { error: "That email address does not look right." });
+  }
+
+  const refused = await refuseChallenge(request, env, form["cf-turnstile-response"], "subscribe");
+  if (refused) return refused;
+
+  /* The same answer whether the address is new, waiting to confirm or
+     already on the list, so the form cannot tell anyone who subscribes. */
+  let result;
+  try {
+    result = await subscribe(env, address);
+  } catch {
+    return json(502, { error: "The confirmation email could not be sent just now. Try again in a minute." });
+  }
+  /* queued: the day's sending limit is used up, and the cron sends it later. */
+  return json(200, result.queued ? { ok: true, queued: true } : { ok: true });
+}
+
+/* Path: [handler, methods it answers]. The confirmation link is opened with
+   GET, and the button on the page it shows POSTs. */
+const ROUTES = {
+  "/api/contact": [handleContact, ["POST"]],
+  "/api/subscribe": [handleSubscribe, ["POST"]],
+  "/api/confirm": [confirm, ["GET", "POST"]],
+};
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/contact") return json(404, { error: "Not found." });
-    if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "POST only." }), {
+    const route = ROUTES[url.pathname];
+    if (!route) return json(404, { error: "Not found." });
+    const [handle, methods] = route;
+    if (!methods.includes(request.method)) {
+      return new Response(JSON.stringify({ error: `${methods.join(" or ")} only.` }), {
         status: 405,
-        headers: { "content-type": "application/json; charset=utf-8", allow: "POST" },
+        headers: { "content-type": "application/json; charset=utf-8", allow: methods.join(", ") },
       });
     }
-    return handleContact(request, env, ctx);
+    return handle(request, env, ctx);
+  },
+
+  /* The cron trigger in wrangler.toml: send any new release to the list. */
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(announce(env));
   },
 };
