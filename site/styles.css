@@ -227,10 +227,11 @@ header{
   white-space:nowrap;
 }
 .ghost:hover{background:var(--ink);color:var(--ground)}
-/* Six links plus a button do not fit one phone line, and hiding pages is
-   worse than a taller bar. The GitHub button is a sibling of <nav> rather
-   than inside it, so it can sit up beside the wordmark and the links get a
-   full row of their own: two rows instead of three. */
+/* Eight links plus a button do not fit one phone line. With script they
+   fold into the phone menu below; without it, hiding pages would be worse
+   than a taller bar. The GitHub button is a sibling of <nav> rather than
+   inside it, so it can sit up beside the wordmark and the links get a full
+   row of their own: two rows instead of three. */
 @media(max-width:760px){
   .nav{flex-wrap:wrap;height:auto;padding-block:10px;gap:10px 16px}
   .nav > .ghost{order:2;margin-left:0}
@@ -598,3 +599,32 @@ ul.follow a span{color:var(--muted);font-size:13px;font-weight:400;
   :root:not([data-theme="light"]) .theme .icon-moon{display:none}
 }
 @media(max-width:760px){ .theme{margin-right:0} }
+
+/* ---------- phone menu ---------- */
+/* On a phone the eight links fold into a panel under the bar, opened by
+   the button after GitHub (theme.js). Only once theme.js has marked the
+   page html.js: without script the links stay in their two open rows
+   above, so every page is still one tap away. The desktop bar is as it
+   was: there the links fit one line. */
+.menu{display:none;align-items:center;justify-content:center;width:32px;height:32px;
+  padding:0;border:1px solid var(--rule);background:transparent;color:var(--muted);
+  cursor:pointer}
+.menu:hover{color:var(--ink);border-color:var(--ink)}
+.menu:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.menu svg{display:block}
+.menu .icon-close,.nav.open .menu .icon-bars{display:none}
+.nav.open .menu .icon-close{display:block}
+@media(max-width:760px){
+  html.js .nav{flex-wrap:nowrap;height:58px;padding-block:0;gap:10px}
+  html.js .nav > .theme{order:0;margin-left:auto}
+  html.js .nav > .ghost{order:0}
+  html.js .menu{display:inline-flex}
+  html.js .nav nav{display:none;position:absolute;top:calc(100% + 1px);left:0;right:0;
+    order:0;width:auto;margin:0;flex-direction:column;align-items:stretch;gap:0;
+    padding:4px 20px 12px;background:var(--ground);border-bottom:1px solid var(--rule);
+    box-shadow:0 14px 24px -18px rgb(0 0 0 / .45)}
+  html.js .nav.open nav{display:flex}
+  html.js .nav nav a{font-size:15px;padding:13px 0;border-top:1px solid var(--rule)}
+  html.js .nav nav a:first-child{border-top:0}
+  html.js .nav nav a[aria-current]{color:var(--ink);font-weight:600}
+}
