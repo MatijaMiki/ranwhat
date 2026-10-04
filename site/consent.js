@@ -163,7 +163,8 @@
         "<p><strong>Two questions.</strong> May we count visits with Google " +
         "Analytics, and may X’s pixel measure whether our posts on X bring " +
         "people here? Each sets cookies and sends your visit to that company. " +
-        "Nothing else on this site tracks you. " +
+        "Cloudflare, which hosts this site, counts page views without " +
+        "cookies; nothing else tracks you. " +
         '<a href="/privacy#stats">What each sends</a></p>' +
         '<div class="consent-acts">' +
         '<button type="button" data-answer="all">Allow all</button>' +
