@@ -42,22 +42,16 @@ class BranchBuildsCanRun(unittest.TestCase):
             config = tomllib.load(fh)
         self.assertEqual(config["previews"], {})
         self.assertEqual(config["name"], "ranwhat-contact")
-        self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL", "LIST_EMAIL"])
+        self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL"])
         self.assertEqual([r["pattern"] for r in config["routes"]], ["ranwhat.com/api/*"])
 
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
-    def test_each_email_binding_is_held_to_its_job(self):
-        # The contact form's binding reaches one inbox and nothing else. The
-        # release list's reaches anyone, so it may send only from the one
-        # address list.js sends from.
+    def test_the_contact_binding_reaches_one_inbox(self):
+        # The release list sends through Resend's API, not a binding, so the
+        # only binding that can send mail still reaches one address.
         with WRANGLER.open("rb") as fh:
-            bindings = {b["name"]: b for b in tomllib.load(fh)["send_email"]}
-        self.assertEqual(bindings["CONTACT_EMAIL"],
-                         {"name": "CONTACT_EMAIL", "destination_address": "ranwhatcom@gmail.com"})
-        lst = (WRANGLER.parent / "src" / "list.js").read_text(encoding="utf-8")
-        sender = re.search(r'^export const FROM = "([^"]+)";', lst, re.M).group(1)
-        self.assertEqual(bindings["LIST_EMAIL"],
-                         {"name": "LIST_EMAIL", "allowed_sender_addresses": [sender]})
+            self.assertEqual(tomllib.load(fh)["send_email"],
+                             [{"name": "CONTACT_EMAIL", "destination_address": "ranwhatcom@gmail.com"}])
 
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
     def test_the_list_has_its_database_and_its_cron(self):

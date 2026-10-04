@@ -14,14 +14,13 @@
  * A Turnstile token that is never verified is decoration. This is the call that
  * makes the widget mean anything.
  *
- * /api/subscribe, /api/confirm and /api/unsubscribe: the release list, in
- * list.js. The signup gets the same challenge check first. The list is this
- * account's D1 database, the mail goes out through Cloudflare Email Service,
- * and a cron trigger sends each new release in /rss.xml to everyone who
- * confirmed.
+ * /api/subscribe and /api/confirm: the release list, in list.js. The signup
+ * gets the same challenge check first. A signup waits in D1 until it is
+ * confirmed, Resend keeps the confirmed list and sends the mail, and a cron
+ * trigger sends each new release in /rss.xml as one broadcast.
  */
 import { EmailMessage } from "cloudflare:email";
-import { announce, confirm, subscribe, switchedOn, unsubscribe } from "./list.js";
+import { announce, confirm, subscribe, switchedOn } from "./list.js";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TO = "ranwhatcom@gmail.com";
@@ -220,21 +219,22 @@ async function handleSubscribe(request, env) {
 
   /* The same answer whether the address is new, waiting to confirm or
      already on the list, so the form cannot tell anyone who subscribes. */
+  let result;
   try {
-    await subscribe(env, address);
+    result = await subscribe(env, address);
   } catch {
     return json(502, { error: "The confirmation email could not be sent just now. Try again in a minute." });
   }
-  return json(200, { ok: true });
+  /* queued: the day's sending limit is used up, and the cron sends it later. */
+  return json(200, result.queued ? { ok: true, queued: true } : { ok: true });
 }
 
-/* Path: [handler, methods it answers]. The links in the list's emails are
-   opened with GET, and their buttons POST. */
+/* Path: [handler, methods it answers]. The confirmation link is opened with
+   GET, and the button on the page it shows POSTs. */
 const ROUTES = {
   "/api/contact": [handleContact, ["POST"]],
   "/api/subscribe": [handleSubscribe, ["POST"]],
   "/api/confirm": [confirm, ["GET", "POST"]],
-  "/api/unsubscribe": [unsubscribe, ["GET", "POST"]],
 };
 
 export default {

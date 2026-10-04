@@ -6,11 +6,7 @@ compatibility_date = "2026-09-23"
 # Routing on this account, so this binding cannot be turned into an open relay
 # even if the Worker itself were compromised.
 send_email = [
-  { name = "CONTACT_EMAIL", destination_address = "ranwhatcom@gmail.com" },
-  # The release list (src/list.js): any recipient, but only ever from this
-  # one address. Sending to addresses outside the account needs Email
-  # Sending, on the Workers Paid plan, with ranwhat.com onboarded for it.
-  { name = "LIST_EMAIL", allowed_sender_addresses = ["updates@ranwhat.com"] }
+  { name = "CONTACT_EMAIL", destination_address = "ranwhatcom@gmail.com" }
 ]
 
 # Workers Builds runs `npx wrangler preview` for every branch other than main,
@@ -27,24 +23,30 @@ previews = {}
 pattern = "ranwhat.com/api/*"
 zone_name = "ranwhat.com"
 
-# TURNSTILE_SECRET, X_PIXEL_TOKEN and LIST_SECRET are encrypted secrets, set
-# with `npx wrangler secret put <NAME>`, never here. LIST_SECRET signs the
-# confirm and unsubscribe links: 32 characters or more, e.g. the output of
-# `openssl rand -base64 32`. Until it is set the signup answers that email
-# updates are not switched on yet, and the cron sends nothing.
+# TURNSTILE_SECRET, X_PIXEL_TOKEN, RESEND_API_KEY and LIST_SECRET are
+# encrypted secrets, set with `npx wrangler secret put <NAME>`, never here.
+# RESEND_API_KEY: a Full access key (the list makes contacts, a segment and
+# broadcasts, not only emails), for a Resend account with ranwhat.com
+# verified. LIST_SECRET signs the confirmation links: 32 characters or more,
+# e.g. the output of `openssl rand -base64 32`. Until both are set the
+# signup answers that email updates are not switched on yet, and the cron
+# sends nothing.
 
 # The X lead event's ID, from X Events Manager. Not a secret: the same ID is in
 # site/consent.js. Remove it and the Worker reports nothing to X.
 [vars]
 X_EVENT_LEAD = "tw-rfz6t-rfz7z"
 
-# The release list's addresses. No database_id on purpose: the first deploy
-# creates the database (Wrangler's automatic provisioning, which also works
-# for a deploy from GitHub) and list.js creates its tables on first use.
+# Signups waiting to be confirmed, and which releases went out. No
+# database_id on purpose: the first deploy creates the database (Wrangler's
+# automatic provisioning, which also works for a deploy from GitHub) and
+# list.js creates its tables on first use. D1 and cron triggers are on the
+# Workers free plan.
 [[d1_databases]]
 binding = "LIST"
 database_name = "ranwhat-list"
 
-# Reads /rss.xml and sends a release nobody has had yet, in batches.
+# Reads /rss.xml and sends a new release as one broadcast; also sends the
+# confirmation emails the free plan's daily limit held back.
 [triggers]
 crons = ["7,22,37,52 * * * *"]

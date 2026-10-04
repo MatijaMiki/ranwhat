@@ -1,6 +1,7 @@
 /* The email signup: posts an address to /api/subscribe, which checks the
  * Turnstile token, stores the address and mails it a confirmation link
- * (worker/src/list.js). Nobody is on the list until they confirm.
+ * through Resend (worker/src/list.js). Nobody is on the list until they
+ * confirm.
  *
  * Turnstile loads only once someone starts on the form, so a page that
  * carries one, the home page among them, asks nothing of Cloudflare's
@@ -102,7 +103,10 @@
         var data = await res.json().catch(function () { return {}; });
         if (res.ok && data.ok) {
           input.value = "";
-          say("Check your inbox for a link to confirm. If you were already " +
+          say(data.queued
+            ? "Thanks. Today\u2019s emails are used up, so the link to confirm " +
+              "comes tomorrow. If you were already subscribed, there is nothing more to do."
+            : "Check your inbox for a link to confirm. If you were already " +
               "subscribed, there is nothing more to do.", "sent");
           sent = true;
           return;

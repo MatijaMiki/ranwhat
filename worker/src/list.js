@@ -1,68 +1,63 @@
 /* The release list: who asked for an email when ranwhat ships, and the
- * emails themselves. The addresses live in this account's D1 database and
- * the mail goes out through Cloudflare Email Service, so no mailing-list
- * company holds a copy.
+ * emails themselves, on free tiers only. Cloudflare D1 holds a signup until
+ * it is confirmed; Resend holds the confirmed list, sends the mail, and runs
+ * the unsubscribe link in every release email.
  *
  * On (double opt-in):
  *   POST /api/subscribe     index.js checks the challenge, then subscribe()
  *                           stores the address unconfirmed and mails it a
- *                           signed link.
+ *                           signed link (Resend's email API).
  *   GET  /api/confirm       A page with one button. Mail scanners open every
  *                           link in a message, and one must not confirm on
  *                           the reader's behalf, so only the button's POST
  *                           does.
- *   POST /api/confirm       Marks the address confirmed.
- * Off:
- *   GET  /api/unsubscribe   A page with one button, for the same reason.
- *   POST /api/unsubscribe   Deletes the address. Mail clients with one-click
- *                           unsubscribe (RFC 8058) POST here straight from
- *                           the List-Unsubscribe header.
+ *   POST /api/confirm       Adds the address to the Resend segment the
+ *                           releases go to, then deletes it here: from then
+ *                           on Resend is the only place it is kept.
+ * Off: the unsubscribe link Resend puts in every release email.
  *
- * Releases: a cron trigger reads /rss.xml. A release it has not seen goes to
- * every address confirmed before it appeared, a batch per run, and each
- * delivery is recorded as it goes, so a run that stops halfway resumes
- * without sending anyone the same release twice. The first run only notes
- * what the feed already holds: old releases are never sent.
+ * Releases: a cron trigger reads /rss.xml. A release it has not seen goes
+ * out as one Resend broadcast to the segment. Broadcasts are not counted
+ * against the free plan's 100 emails a day; confirmation emails are, so one
+ * that hits the daily limit waits here and the cron sends it once the limit
+ * resets. The first run only notes what the feed already holds: old releases
+ * are never sent.
  *
- * Links carry a random id, never the address, with an HMAC over it, so an id
- * alone confirms or removes nobody.
+ * The confirmation link carries a random id, never the address, with an
+ * HMAC over it, so an id alone confirms nobody.
  */
 
 const ORIGIN = "https://ranwhat.com";
 const FEED = `${ORIGIN}/rss.xml`;
+const API = "https://api.resend.com";
 export const FROM = "updates@ranwhat.com";
-const SENDER = { email: FROM, name: "ranwhat" };
+const SENDER = `ranwhat <${FROM}>`;
 const REPLY_TO = "hello@ranwhat.com";
-const LIST_ID = "ranwhat releases <releases.ranwhat.com>";
+export const SEGMENT = "ranwhat releases";
 
 const DAY = 24 * 3600;
 const CONFIRM_FOR = 7 * DAY;     // a confirmation link works this long
 const RESEND_AFTER = 15 * 60;    // at most one confirmation email per address per 15 minutes
 const FORGET_AFTER = 7 * DAY;    // an address nobody confirmed is deleted after this
 const FRESH_FOR = 14 * DAY;      // a release older than this when first seen is never sent
-export const BATCH = 200;        // release emails per run, well inside a run's subrequest limit
-
-/* Sending stops for the run on these and resumes on the next; anything else
-   is about one address, which is skipped so it cannot hold up the rest. */
-const STOP = new Set(["E_DAILY_LIMIT_EXCEEDED", "E_RATE_LIMIT_EXCEEDED",
-  "E_INTERNAL_SERVER_ERROR", "E_SENDER_NOT_VERIFIED", "E_SENDER_DOMAIN_NOT_AVAILABLE"]);
+export const QUEUE_BATCH = 20;   // queued confirmations a run sends, inside the free plan's 50 subrequests
 
 const SCHEMA = [
+  /* Only signups waiting to be confirmed. mailed_at 0: not mailed yet. */
   `CREATE TABLE IF NOT EXISTS subscribers (
      id TEXT PRIMARY KEY,
      email TEXT NOT NULL UNIQUE,
      created_at INTEGER NOT NULL,
-     mailed_at INTEGER NOT NULL,
-     confirmed_at INTEGER)`,
+     mailed_at INTEGER NOT NULL)`,
+  /* started_at without done_at: a broadcast call that never reported back.
+     It is not retried, because it may have gone out. */
   `CREATE TABLE IF NOT EXISTS releases (
      guid TEXT PRIMARY KEY,
      seen_at INTEGER NOT NULL,
-     done_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS deliveries (
-     guid TEXT NOT NULL,
-     subscriber_id TEXT NOT NULL,
-     sent_at INTEGER NOT NULL,
-     PRIMARY KEY (guid, subscriber_id))`,
+     started_at INTEGER,
+     done_at INTEGER,
+     broadcast TEXT)`,
+  `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 ];
 
 /* The tables are made on first use rather than by a migration step, so a
@@ -74,13 +69,50 @@ async function schema(db) {
   made.add(db);
 }
 
-export const switchedOn = (env) => Boolean(env.LIST && env.LIST_EMAIL &&
+export const switchedOn = (env) => Boolean(env.LIST && env.RESEND_API_KEY &&
   typeof env.LIST_SECRET === "string" && env.LIST_SECRET.length >= 32);
+const now = () => Math.floor(Date.now() / 1000);
 
 const OFF = () => page("Not switched on", `<h1>Release emails are not switched on yet.</h1>
   <p>Every release is on the <a href="/updates">updates page</a> and in its
      <a href="/rss.xml">RSS feed</a>.</p>`, 503);
-const now = () => Math.floor(Date.now() / 1000);
+
+/* ---------- Resend ---------- */
+
+/* One API call. Throws an Error whose code is Resend's error name
+   (daily_quota_exceeded, validation_error, ...) or the HTTP status. */
+async function resend(env, method, path, body) {
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw Object.assign(new Error("Resend unreachable"), { code: "unreachable", status: 0 });
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const code = typeof data.name === "string" ? data.name : String(res.status);
+    throw Object.assign(new Error(`Resend ${res.status}`), { code, status: res.status });
+  }
+  return data;
+}
+
+const limited = (err) => err && err.status === 429;
+
+/* The segment releases go to, found or made by name and kept in settings. */
+async function segment(env) {
+  const db = env.LIST;
+  const kept = await db.prepare("SELECT value FROM settings WHERE key = 'segment'").first();
+  if (kept) return kept.value;
+  const { data = [] } = await resend(env, "GET", "/segments");
+  let id = (data.find((s) => s.name === SEGMENT) || {}).id;
+  if (!id) id = (await resend(env, "POST", "/segments", { name: SEGMENT })).id;
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('segment', ?)").bind(id).run();
+  return id;
+}
 
 /* ---------- signed links ---------- */
 
@@ -115,79 +147,75 @@ async function confirmLink(env, id, at) {
   return `${ORIGIN}/api/confirm?id=${id}&at=${at}&t=${t}`;
 }
 
-export async function unsubscribeLink(env, id) {
-  const t = await sign(env, `unsubscribe:${id}`);
-  return `${ORIGIN}/api/unsubscribe?id=${id}&t=${t}`;
-}
-
-/* The id, when the link's signature holds and, for a confirmation, it has
-   not expired; otherwise null. */
-async function checked(env, url, purpose) {
+/* The id, when the link's signature holds and it has not expired. */
+async function checked(env, url) {
   const id = url.searchParams.get("id") || "";
+  const at = url.searchParams.get("at") || "";
   const t = url.searchParams.get("t") || "";
-  if (!/^[0-9a-f-]{36}$/.test(id)) return null;
-  if (purpose === "confirm") {
-    const at = url.searchParams.get("at") || "";
-    if (!/^\d{1,12}$/.test(at) || now() - Number(at) > CONFIRM_FOR) return null;
-    return same(t, await sign(env, `confirm:${id}:${at}`)) ? id : null;
-  }
-  return same(t, await sign(env, `unsubscribe:${id}`)) ? id : null;
+  if (!/^[0-9a-f-]{36}$/.test(id) || !/^\d{1,12}$/.test(at)) return null;
+  if (now() - Number(at) > CONFIRM_FOR) return null;
+  return same(t, await sign(env, `confirm:${id}:${at}`)) ? id : null;
 }
 
 /* ---------- on ---------- */
 
+async function mailConfirmation(env, email, id) {
+  const link = await confirmLink(env, id, now());
+  await resend(env, "POST", "/emails", {
+    from: SENDER,
+    to: [email],
+    reply_to: REPLY_TO,
+    subject: "Confirm ranwhat release emails",
+    text: [
+      "Someone, hopefully you, asked ranwhat.com for an email each time a new",
+      "release of ranwhat ships. To confirm, open this link and press the button:",
+      "",
+      link,
+      "",
+      "If it was not you, ignore this. Nothing more will be sent, and the",
+      "address is deleted in a week.",
+      "",
+      "ranwhat.com",
+    ].join("\n"),
+    html: mail(`
+      <p>Someone, hopefully you, asked ranwhat.com for an email each time a new
+         release of ranwhat ships.</p>
+      <p style="margin:26px 0"><a href="${link}" style="${BUTTON}">Confirm release emails</a></p>
+      <p style="color:#5a6672">If it was not you, ignore this. Nothing more will be sent, and
+         the address is deleted in a week.</p>`),
+  });
+}
+
 /* Stores the address unconfirmed and mails it a confirmation link. An
-   address already confirmed, or mailed in the last few minutes, gets
-   nothing more, so the form cannot be used to flood anyone's inbox. The
-   caller answers the same either way: whether an address is on the list is
-   nobody else's business. Throws when the confirmation could not be sent. */
+   address mailed in the last few minutes gets nothing more, so the form
+   cannot flood an inbox. Returns { queued: true } when the day's sending
+   limit is used up: the cron mails it once the limit resets. Throws when
+   the email could not be sent for any other reason. */
 export async function subscribe(env, address) {
   const db = env.LIST;
   await schema(db);
   const email = address.toLowerCase();
   const t = now();
-  let row = await db.prepare("SELECT id, mailed_at, confirmed_at FROM subscribers WHERE email = ?")
-    .bind(email).first();
-  if (row && (row.confirmed_at || t - row.mailed_at < RESEND_AFTER)) return;
+  let row = await db.prepare("SELECT id, mailed_at FROM subscribers WHERE email = ?").bind(email).first();
+  if (row && row.mailed_at === 0) return { queued: true };
+  if (row && t - row.mailed_at < RESEND_AFTER) return {};
   if (row) {
     await db.prepare("UPDATE subscribers SET mailed_at = ? WHERE id = ?").bind(t, row.id).run();
   } else {
-    const id = crypto.randomUUID();
+    row = { id: crypto.randomUUID() };
     const added = await db.prepare(
       "INSERT INTO subscribers (id, email, created_at, mailed_at) VALUES (?, ?, ?, ?) ON CONFLICT(email) DO NOTHING")
-      .bind(id, email, t, t).run();
-    if (!added.meta.changes) return;   // the same address, signed up a moment ago in another request
-    row = { id };
+      .bind(row.id, email, t, t).run();
+    if (!added.meta.changes) return {};   // the same address, signed up a moment ago in another request
   }
   try {
-    const link = await confirmLink(env, row.id, t);
-    await env.LIST_EMAIL.send({
-      to: email,
-      from: SENDER,
-      replyTo: REPLY_TO,
-      subject: "Confirm ranwhat release emails",
-      text: [
-        "Someone, hopefully you, asked ranwhat.com for an email each time a new",
-        "release of ranwhat ships. To confirm, open this link and press the button:",
-        "",
-        link,
-        "",
-        "If it was not you, ignore this. Nothing more will be sent, and the",
-        "address is deleted in a week.",
-        "",
-        "ranwhat.com",
-      ].join("\n"),
-      html: mail(`
-        <p>Someone, hopefully you, asked ranwhat.com for an email each time a new
-           release of ranwhat ships.</p>
-        <p style="margin:26px 0"><a href="${link}" style="${BUTTON}">Confirm release emails</a></p>
-        <p style="color:#5a6672">If it was not you, ignore this. Nothing more will be sent, and
-           the address is deleted in a week.</p>`),
-    });
+    await mailConfirmation(env, email, row.id);
+    return {};
   } catch (err) {
-    /* Let a retry through at once rather than making them wait out the gap. */
+    /* Unsent: 0 lets a retry, or the cron when it is the daily limit, through at once. */
     await db.prepare("UPDATE subscribers SET mailed_at = 0 WHERE id = ?").bind(row.id).run();
-    console.log(`list confirm mail: ${err && err.code ? err.code : "failed"}`);
+    console.log(`list confirm mail: ${err.code}`);
+    if (limited(err)) return { queued: true };
     throw err;
   }
 }
@@ -195,7 +223,7 @@ export async function subscribe(env, address) {
 export async function confirm(request, env) {
   if (!switchedOn(env)) return OFF();
   const url = new URL(request.url);
-  const id = await checked(env, url, "confirm");
+  const id = await checked(env, url);
   if (!id) {
     return page("Link expired", `<h1>This link has expired.</h1>
       <p>Confirmation links work for a week. Sign up again on the
@@ -208,45 +236,42 @@ export async function confirm(request, env) {
         <button type="submit">Confirm release emails</button></form>`);
   }
   await schema(env.LIST);
-  const done = await env.LIST.prepare(
-    "UPDATE subscribers SET confirmed_at = COALESCE(confirmed_at, ?) WHERE id = ?").bind(now(), id).run();
-  if (!done.meta.changes) {
-    return page("Not found", `<h1>That address is not on the list.</h1>
-      <p>It may have unsubscribed since. Sign up again on the
-         <a href="/updates#follow">updates page</a>.</p>`, 404);
+  const row = await env.LIST.prepare("SELECT email FROM subscribers WHERE id = ?").bind(id).first();
+  if (!row) {
+    /* Confirmed already (the row goes once Resend has it), or a week passed. */
+    return page("Confirmed", `<h1>You are on the list.</h1>
+      <p>If you confirmed earlier, there is nothing more to do. If the
+         address was deleted after a week, sign up again on the
+         <a href="/updates#follow">updates page</a>.</p>`);
   }
+  try {
+    await addContact(env, row.email);
+  } catch (err) {
+    console.log(`list confirm: ${err.code}`);
+    return page("Try again", `<h1>That did not go through.</h1>
+      <p>Nothing is wrong with your link. Press the button in the email again
+         in a minute.</p>`, 502);
+  }
+  await env.LIST.prepare("DELETE FROM subscribers WHERE id = ?").bind(id).run();
   return page("Confirmed", `<h1>You are on the list.</h1>
     <p>The next release comes to your inbox, with what changed. Every email has
        a link to stop.</p><p><a href="/updates">Every release so far</a></p>`);
 }
 
-/* ---------- off ---------- */
-
-export async function unsubscribe(request, env) {
-  if (!switchedOn(env)) return OFF();
-  const url = new URL(request.url);
-  const id = await checked(env, url, "unsubscribe");
-  if (!id) {
-    return page("Link not valid", `<h1>This link is not valid.</h1>
-      <p>Use the link at the bottom of a release email, or write to
-         <a href="mailto:hello@ranwhat.com">hello@ranwhat.com</a> and we will take you off.</p>`, 400);
+/* On the releases segment and subscribed, whether the address is new to
+   Resend or unsubscribed earlier and has now asked again. */
+async function addContact(env, email) {
+  const seg = await segment(env);
+  try {
+    await resend(env, "POST", "/contacts", { email, unsubscribed: false, segments: [{ id: seg }] });
+    return;
+  } catch (err) {
+    if (limited(err) || err.status === 401 || err.status === 403 || err.status === 0) throw err;
   }
-  if (request.method !== "POST") {
-    return page("Unsubscribe", `<h1>Stop release emails?</h1>
-      <p>Press the button and the address is deleted from the list at once.</p>
-      <form method="post" action="${escape(url.pathname + url.search)}">
-        <button type="submit">Unsubscribe</button></form>`);
-  }
-  await schema(env.LIST);
-  await env.LIST.batch([
-    env.LIST.prepare("DELETE FROM deliveries WHERE subscriber_id = ?").bind(id),
-    env.LIST.prepare("DELETE FROM subscribers WHERE id = ?").bind(id),
-  ]);
-  /* A one-click POST from a mail client reads no page. */
-  const oneClick = (await request.clone().text()).trim() === "List-Unsubscribe=One-Click";
-  if (oneClick) return new Response("Unsubscribed.", { status: 200 });
-  return page("Unsubscribed", `<h1>You are off the list.</h1>
-    <p>The address is deleted. Nothing more will be sent to it.</p>`);
+  /* Most likely known to Resend already. */
+  const who = encodeURIComponent(email);
+  await resend(env, "PATCH", `/contacts/${who}`, { unsubscribed: false });
+  await resend(env, "POST", `/contacts/${who}/segments/${seg}`);
 }
 
 /* ---------- releases ---------- */
@@ -277,8 +302,8 @@ export async function announce(env, fetcher = fetch) {
   const db = env.LIST;
   await schema(db);
   const t = now();
-  await db.prepare("DELETE FROM subscribers WHERE confirmed_at IS NULL AND created_at < ?")
-    .bind(t - FORGET_AFTER).run();
+  await db.prepare("DELETE FROM subscribers WHERE created_at < ?").bind(t - FORGET_AFTER).run();
+  await sendQueued(env);
 
   let items;
   try {
@@ -290,7 +315,7 @@ export async function announce(env, fetcher = fetch) {
   }
   if (!items.length) return;
 
-  const { results } = await db.prepare("SELECT guid, seen_at, done_at FROM releases").all();
+  const { results } = await db.prepare("SELECT guid, started_at, done_at FROM releases").all();
   const known = new Map(results.map((r) => [r.guid, r]));
   if (!known.size) {
     /* First run: what is published already was news before the list existed. */
@@ -300,67 +325,68 @@ export async function announce(env, fetcher = fetch) {
   }
 
   for (const item of items.slice().reverse()) {          // oldest first
-    let release = known.get(item.guid);
-    if (release && release.done_at) continue;
+    const release = known.get(item.guid);
+    if (release && (release.done_at || release.started_at)) continue;
     if (!release) {
       const stale = t - item.published > FRESH_FOR;
       await db.prepare("INSERT OR IGNORE INTO releases (guid, seen_at, done_at) VALUES (?, ?, ?)")
         .bind(item.guid, t, stale ? t : null).run();
       if (stale) continue;
-      release = { guid: item.guid, seen_at: t };
     }
-    if (!(await sendRelease(env, item, release.seen_at))) return;   // more next run
-    await db.prepare("UPDATE releases SET done_at = ? WHERE guid = ?").bind(now(), item.guid).run();
-  }
-}
-
-/* One batch of one release. True when everyone due it has had it. */
-async function sendRelease(env, item, since) {
-  const db = env.LIST;
-  const { results } = await db.prepare(
-    `SELECT s.id, s.email FROM subscribers s
-      WHERE s.confirmed_at IS NOT NULL AND s.confirmed_at <= ?
-        AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.guid = ? AND d.subscriber_id = s.id)
-      ORDER BY s.confirmed_at LIMIT ?`).bind(since, item.guid, BATCH).all();
-  for (const s of results) {
+    /* Marked before the call: if the Worker dies after Resend has sent it but
+       before this is recorded, the next run must not send it again. */
+    await db.prepare("UPDATE releases SET started_at = ? WHERE guid = ?").bind(now(), item.guid).run();
     try {
-      await env.LIST_EMAIL.send(await releaseMail(env, item, s));
+      const sent = await resend(env, "POST", "/broadcasts", await broadcast(env, item));
+      await db.prepare("UPDATE releases SET done_at = ?, broadcast = ? WHERE guid = ?")
+        .bind(now(), String(sent.id || ""), item.guid).run();
     } catch (err) {
-      const code = err && err.code ? String(err.code) : "failed";
-      console.log(`list release mail: ${code}`);
-      if (STOP.has(code) || code === "failed") return false;
-      /* Suppressed after a bounce or complaint, or refused: skip this one. */
+      /* Resend answered with an error, so nothing went out: try again next run. */
+      console.log(`list release: ${err.code}`);
+      await db.prepare("UPDATE releases SET started_at = NULL WHERE guid = ?").bind(item.guid).run();
+      return;
     }
-    await db.prepare("INSERT OR IGNORE INTO deliveries (guid, subscriber_id, sent_at) VALUES (?, ?, ?)")
-      .bind(item.guid, s.id, now()).run();
   }
-  return results.length < BATCH;
 }
 
-export async function releaseMail(env, item, subscriber) {
-  const off = await unsubscribeLink(env, subscriber.id);
+/* Confirmation emails the daily limit held back. */
+async function sendQueued(env) {
+  const { results } = await env.LIST.prepare(
+    "SELECT id, email FROM subscribers WHERE mailed_at = 0 ORDER BY created_at LIMIT ?").bind(QUEUE_BATCH).all();
+  for (const row of results) {
+    try {
+      await mailConfirmation(env, row.email, row.id);
+    } catch (err) {
+      console.log(`list queued confirm: ${err.code}`);
+      if (limited(err)) return;
+      continue;
+    }
+    await env.LIST.prepare("UPDATE subscribers SET mailed_at = ? WHERE id = ?").bind(now(), row.id).run();
+  }
+}
+
+export async function broadcast(env, item) {
   /* The feed's notes mark commands with a class no mail client styles. */
   const notes = item.html.replace(/<span class="icode">([\s\S]*?)<\/span>/g, `<code style="${CODE}">$1</code>`)
     .replace(/<a href="/g, '<a style="color:#b8482d" href="');
   const text = notes.replace(/<li>/g, "\n- ").replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ").replace(/&rsquo;/g, "’").replace(/&amp;/g, "&").replace(/[ \t]+/g, " ").trim();
+  /* Resend fills in each reader's own unsubscribe link here. */
+  const OFF_LINK = "{{{RESEND_UNSUBSCRIBE_URL}}}";
   return {
-    to: subscriber.email,
+    segment_id: await segment(env),
     from: SENDER,
-    replyTo: REPLY_TO,
+    reply_to: REPLY_TO,
     subject: item.title,
-    headers: {
-      "List-Unsubscribe": `<${off}>`,
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      "List-Id": LIST_ID,
-    },
+    name: item.title,
+    send: true,
     text: [
       item.title, "", text, "",
       `Read it on ranwhat.com: ${item.link}`,
       "Run the newest: uvx ranwhat@latest check",
       "", "--",
       "You get this because you asked ranwhat.com for release emails.",
-      `Unsubscribe: ${off}`,
+      `Unsubscribe: ${OFF_LINK}`,
     ].join("\n"),
     html: mail(`
       <h1 style="font-size:21px;line-height:1.3;margin:0 0 14px">${escape(item.title)}</h1>
@@ -369,7 +395,7 @@ export async function releaseMail(env, item, subscriber) {
          &middot; run the newest with <code style="${CODE}">uvx ranwhat@latest check</code></p>
       <p style="margin:30px 0 0;padding-top:14px;border-top:1px solid #d5dae0;font-size:12.5px;color:#5a6672">
          You get this because you asked ranwhat.com for release emails.
-         <a href="${off}" style="color:#5a6672">Unsubscribe</a> and the address is deleted.</p>`),
+         <a href="${OFF_LINK}" style="color:#5a6672">Unsubscribe</a>.</p>`),
   };
 }
 
@@ -391,9 +417,8 @@ ${body}
 </div></body></html>`;
 }
 
-/* The pages behind the links in the emails. Served by the Worker, so
-   Pages' _headers do not reach them: the policy is set here, and allows no
-   script at all. */
+/* The page behind the confirmation link. Served by the Worker, so Pages'
+   _headers do not reach it: the policy is set here, and allows no script. */
 const PAGE_CSS = `
 :root{--ground:#edeff1;--surface:#fff;--ink:#12171c;--muted:#5a6672;--rule:#d5dae0;--brand:#b8482d}
 @media(prefers-color-scheme:dark){:root{--ground:#0E1318;--surface:#151C23;--ink:#e9edf0;--muted:#8e99a4;--rule:#242C34;--brand:#d0603f}}

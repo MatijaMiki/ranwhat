@@ -1,8 +1,9 @@
 /* The release list end to end: the Worker's own fetch and scheduled handlers,
- * over a real SQLite database (node:sqlite, which is what D1 runs) and a
- * stand-in for the email binding that records what it was asked to send.
+ * over a real SQLite database (node:sqlite, which is what D1 runs), with
+ * Turnstile and Resend's API answered by stand-ins that record what they
+ * were asked.
  *
- *     node --test worker/test/
+ *     node --test worker/test/list.test.mjs
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -49,31 +50,75 @@ function d1() {
   };
 }
 
-function mailer() {
-  const m = { sent: [], failWith: null, failAfter: Infinity };
-  m.send = async (message) => {
-    if (m.failWith && m.sent.length >= m.failAfter) {
-      throw Object.assign(new Error("refused"), { code: m.failWith });
-    }
-    m.sent.push(message);
-    return { messageId: `m${m.sent.length}` };
+/* Resend's API as far as the list uses it, plus Turnstile's siteverify. */
+function services({ action = "subscribe", success = true } = {}) {
+  const s = {
+    emails: [], broadcasts: [], contacts: new Map(), segments: [], calls: [],
+    fail: {},           // path prefix -> { status, name } to answer with instead
+    turnstile: { action, success },
   };
+  const reply = (status, body) => new Response(JSON.stringify(body), { status });
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(String(url));
+    const method = init.method || "GET";
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    if (u.hostname === "challenges.cloudflare.com") {
+      return reply(200, { success: s.turnstile.success, hostname: "ranwhat.com", action: s.turnstile.action });
+    }
+    assert.equal(u.hostname, "api.resend.com");
+    assert.match(init.headers.authorization, /^Bearer re_test/);
+    const path = u.pathname;
+    s.calls.push(`${method} ${path}`);
+    for (const [prefix, err] of Object.entries(s.fail)) {
+      if (`${method} ${path}`.startsWith(prefix)) return reply(err.status, { statusCode: err.status, name: err.name });
+    }
+    if (method === "POST" && path === "/emails") {
+      s.emails.push(body);
+      return reply(200, { id: `e${s.emails.length}` });
+    }
+    if (method === "GET" && path === "/segments") return reply(200, { object: "list", data: s.segments });
+    if (method === "POST" && path === "/segments") {
+      const seg = { id: crypto.randomUUID(), name: body.name };
+      s.segments.push(seg);
+      return reply(201, { object: "segment", ...seg });
+    }
+    if (method === "POST" && path === "/contacts") {
+      if (s.contacts.has(body.email)) return reply(422, { statusCode: 422, name: "validation_error" });
+      s.contacts.set(body.email, { unsubscribed: body.unsubscribed, segments: new Set(body.segments.map((x) => x.id)) });
+      return reply(201, { object: "contact", id: crypto.randomUUID() });
+    }
+    let m = path.match(/^\/contacts\/([^/]+)$/);
+    if (method === "PATCH" && m) {
+      const c = s.contacts.get(decodeURIComponent(m[1]));
+      if (!c) return reply(404, { statusCode: 404, name: "not_found" });
+      c.unsubscribed = body.unsubscribed;
+      return reply(200, { object: "contact", id: "c" });
+    }
+    m = path.match(/^\/contacts\/([^/]+)\/segments\/([^/]+)$/);
+    if (method === "POST" && m) {
+      s.contacts.get(decodeURIComponent(m[1])).segments.add(m[2]);
+      return reply(200, { id: m[2] });
+    }
+    if (method === "POST" && path === "/broadcasts") {
+      s.broadcasts.push(body);
+      return reply(201, { object: "broadcast", id: `b${s.broadcasts.length}` });
+    }
+    return reply(404, { statusCode: 404, name: "not_found" });
+  };
+  return s;
+}
+
+function mailer() {
+  const m = { sent: [] };
+  m.send = async (message) => { m.sent.push(message); return {}; };
   return m;
 }
 
 const SECRET = "a-test-secret-that-is-long-enough-1234567890";
 
 function env(extra = {}) {
-  return { LIST: d1(), LIST_EMAIL: mailer(), CONTACT_EMAIL: mailer(),
+  return { LIST: d1(), CONTACT_EMAIL: mailer(), RESEND_API_KEY: "re_test_key",
            LIST_SECRET: SECRET, TURNSTILE_SECRET: "ts", ...extra };
-}
-
-/* siteverify, answering for whichever action the test says the token is for */
-function challenge(action = "subscribe", success = true) {
-  globalThis.fetch = async (url) => {
-    assert.match(String(url), /challenges\.cloudflare\.com/);
-    return new Response(JSON.stringify({ success, hostname: "ranwhat.com", action }));
-  };
 }
 
 const ctx = { waitUntil() {} };
@@ -86,21 +131,20 @@ async function post(e, path, body, type = "application/json") {
 }
 
 const get = (e, url) => worker.fetch(new Request(url), e, ctx);
-const linkIn = (text, path) => text.match(new RegExp(`https://ranwhat\\.com${path}\\?[^\\s"<]+`))[0];
-const rows = (e) => e.LIST.sql.prepare("SELECT * FROM subscribers").all();
+const linkIn = (text) => text.match(/https:\/\/ranwhat\.com\/api\/confirm\?[^\s"<]+/)[0];
+const pending = (e) => e.LIST.sql.prepare("SELECT * FROM subscribers").all();
+const pathOf = (link) => { const u = new URL(link); return u.pathname + u.search; };
 
 async function signUp(e, address = "Reader@Example.com") {
-  challenge("subscribe");
   const res = await post(e, "/api/subscribe", { email: address, "cf-turnstile-response": "tok" });
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true });
+  return res.json();
 }
 
-async function signUpAndConfirm(e, address) {
-  const before = e.LIST_EMAIL.sent.length;
+async function signUpAndConfirm(e, s, address) {
+  const before = s.emails.length;
   await signUp(e, address);
-  const link = linkIn(e.LIST_EMAIL.sent[before].text, "/api/confirm");
-  const res = await post(e, new URL(link).pathname + new URL(link).search, "", "application/x-www-form-urlencoded");
+  const res = await post(e, pathOf(linkIn(s.emails[before].text)), "", "application/x-www-form-urlencoded");
   assert.equal(res.status, 200);
 }
 
@@ -117,72 +161,91 @@ function feed(items) {
 }
 
 const now = () => Math.floor(Date.now() / 1000);
+const OLD = { id: "v0-5-0", title: "ranwhat 0.5.0: Twelve coding agents", at: now() - 3600 };
+const NEW = { id: "v0-6-0", title: "ranwhat 0.6.0: Cursor", at: now() };
 
 /* ---------- switched off ---------- */
 
-test("without the secret, the signup says so and no link is ever signed", async () => {
-  for (const secret of [undefined, "short"]) {
-    const e = env({ LIST_SECRET: secret });
-    challenge();
+test("without the API key or the secret, the signup says so and nothing is signed or sent", async () => {
+  for (const extra of [{ RESEND_API_KEY: undefined }, { LIST_SECRET: undefined }, { LIST_SECRET: "short" }]) {
+    const s = services();
+    const e = env(extra);
     const res = await post(e, "/api/subscribe", { email: "a@example.com", "cf-turnstile-response": "tok" });
     assert.equal(res.status, 503);
     assert.match((await res.json()).error, /not switched on/);
     assert.equal((await get(e, "https://ranwhat.com/api/confirm?id=x&at=1&t=y")).status, 503);
-    assert.equal((await get(e, "https://ranwhat.com/api/unsubscribe?id=x&t=y")).status, 503);
-    await list.announce(e, feed([{ id: "v9", title: "x", at: now() }]));
-    assert.equal(e.LIST_EMAIL.sent.length, 0);
+    await list.announce(e, feed([NEW]));
+    assert.deepEqual(s.calls, []);
   }
 });
 
 /* ---------- on ---------- */
 
 test("a signup is stored unconfirmed and gets one confirmation email", async () => {
+  const s = services();
   const e = env();
-  await signUp(e);
-  const [row] = rows(e);
+  assert.deepEqual(await signUp(e), { ok: true });
+  const [row] = pending(e);
   assert.equal(row.email, "reader@example.com");
-  assert.equal(row.confirmed_at, null);
-  const [mail] = e.LIST_EMAIL.sent;
-  assert.equal(mail.to, "reader@example.com");
-  assert.deepEqual(mail.from, { email: "updates@ranwhat.com", name: "ranwhat" });
-  const link = linkIn(mail.text, "/api/confirm");
+  const [mail] = s.emails;
+  assert.deepEqual(mail.to, ["reader@example.com"]);
+  assert.equal(mail.from, "ranwhat <updates@ranwhat.com>");
+  const link = linkIn(mail.text);
   assert.ok(!link.includes("example.com"), "the link carries an id, not the address");
-  assert.equal(linkIn(mail.html, "/api/confirm"), link);
+  assert.equal(linkIn(mail.html), link);
+  assert.equal(s.contacts.size, 0, "nobody is on the list before confirming");
 
   // Again at once: same answer, no second email, one row.
   await signUp(e, "reader@example.com");
-  assert.equal(e.LIST_EMAIL.sent.length, 1);
-  assert.equal(rows(e).length, 1);
+  assert.equal(s.emails.length, 1);
+  assert.equal(pending(e).length, 1);
 });
 
-test("a confirmation link shows a button, and only the button confirms", async () => {
+test("the link shows a button; only the button adds the address to the list", async () => {
+  const s = services();
   const e = env();
   await signUp(e);
-  const link = linkIn(e.LIST_EMAIL.sent[0].text, "/api/confirm");
+  const link = linkIn(s.emails[0].text);
 
   const page = await get(e, link);
   assert.equal(page.status, 200);
-  const html = await page.text();
-  assert.match(html, /<form method="post"/);
-  assert.equal(rows(e)[0].confirmed_at, null, "opening the link confirms nothing");
+  assert.match(await page.text(), /<form method="post"/);
+  assert.equal(s.contacts.size, 0, "opening the link confirms nothing");
   assert.match(page.headers.get("content-security-policy"), /default-src 'none'/);
   assert.equal(page.headers.get("referrer-policy"), "no-referrer");
 
-  const u = new URL(link);
-  const res = await post(e, u.pathname + u.search, "", "application/x-www-form-urlencoded");
+  const res = await post(e, pathOf(link), "", "application/x-www-form-urlencoded");
   assert.equal(res.status, 200);
   assert.match(await res.text(), /on the list/);
-  assert.ok(rows(e)[0].confirmed_at > 0);
+  const [seg] = s.segments;
+  assert.equal(seg.name, "ranwhat releases");
+  assert.deepEqual([...s.contacts.get("reader@example.com").segments], [seg.id]);
+  assert.equal(s.contacts.get("reader@example.com").unsubscribed, false);
+  assert.equal(pending(e).length, 0, "once Resend has it, it is not kept here");
 
-  // Confirmed: signing up again sends nothing.
-  await signUp(e);
-  assert.equal(e.LIST_EMAIL.sent.length, 1);
+  // The button again: still fine, nothing doubled, the segment looked up once.
+  assert.equal((await post(e, pathOf(link), "")).status, 200);
+  assert.equal(s.contacts.size, 1);
+  assert.equal(s.calls.filter((c) => c.endsWith("/segments")).length, 2);  // one GET, one POST
 });
 
-test("a tampered, foreign or expired confirmation link confirms nobody", async () => {
+test("someone who unsubscribed and signs up again is subscribed again", async () => {
+  const s = services();
+  const e = env();
+  await signUpAndConfirm(e, s, "back@example.com");
+  s.contacts.get("back@example.com").unsubscribed = true;
+  s.contacts.get("back@example.com").segments.clear();
+  await signUpAndConfirm(e, s, "back@example.com");
+  const c = s.contacts.get("back@example.com");
+  assert.equal(c.unsubscribed, false);
+  assert.equal(c.segments.size, 1);
+});
+
+test("a tampered, foreign or expired link confirms nobody", async () => {
+  const s = services();
   const e = env();
   await signUp(e);
-  const link = new URL(linkIn(e.LIST_EMAIL.sent[0].text, "/api/confirm"));
+  const link = new URL(linkIn(s.emails[0].text));
 
   const tampered = new URL(link);
   tampered.searchParams.set("t", link.searchParams.get("t").replace(/^./, (c) => (c === "A" ? "B" : "A")));
@@ -191,10 +254,9 @@ test("a tampered, foreign or expired confirmation link confirms nobody", async (
   const other = env({ LIST_SECRET: SECRET.replace("test", "else") });
 
   for (const [where, url] of [[e, tampered], [e, later], [other, link]]) {
-    const res = await post(where, url.pathname + url.search, "", "application/x-www-form-urlencoded");
-    assert.equal(res.status, 400);
+    assert.equal((await post(where, url.pathname + url.search, "")).status, 400);
   }
-  assert.equal(rows(e)[0].confirmed_at, null);
+  assert.equal(s.contacts.size, 0);
 
   const realNow = Date.now;
   Date.now = () => realNow() + 8 * 24 * 3600 * 1000;
@@ -206,166 +268,144 @@ test("a tampered, foreign or expired confirmation link confirms nobody", async (
 });
 
 test("the signup checks the challenge, for this form, before storing anything", async () => {
+  const s = services({ action: "contact" });
   const e = env();
-  challenge("contact");
   let res = await post(e, "/api/subscribe", { email: "a@example.com", "cf-turnstile-response": "tok" });
   assert.equal(res.status, 403);
-  challenge("subscribe", false);
+  s.turnstile = { action: "subscribe", success: false };
   res = await post(e, "/api/subscribe", { email: "a@example.com", "cf-turnstile-response": "tok" });
   assert.equal(res.status, 403);
   res = await post(e, "/api/subscribe", { email: "a@example.com" });
   assert.equal(res.status, 400);
   res = await post(e, "/api/subscribe", { email: "not an address", "cf-turnstile-response": "tok" });
   assert.equal(res.status, 400);
-  assert.equal(e.LIST_EMAIL.sent.length, 0);
-  assert.equal(e.LIST.sql.prepare("SELECT name FROM sqlite_master WHERE name = 'subscribers'").all().length
-    ? rows(e).length : 0, 0);
+  assert.deepEqual(s.calls, []);
 });
 
-test("a confirmation email that fails lets the next try through at once", async () => {
+test("past the day's sending limit a confirmation waits, and the cron sends it", async () => {
+  const s = services();
   const e = env();
-  e.LIST_EMAIL.failWith = "E_INTERNAL_SERVER_ERROR";
-  e.LIST_EMAIL.failAfter = 0;
-  challenge();
+  s.fail["POST /emails"] = { status: 429, name: "daily_quota_exceeded" };
+  assert.deepEqual(await signUp(e, "a@example.com"), { ok: true, queued: true });
+  assert.deepEqual(await signUp(e, "a@example.com"), { ok: true, queued: true });
+  assert.equal(s.emails.length, 0);
+
+  await list.announce(e, feed([OLD]));          // still limited: nothing, and no error
+  assert.equal(s.emails.length, 0);
+
+  delete s.fail["POST /emails"];
+  await list.announce(e, feed([OLD]));
+  assert.deepEqual(s.emails.map((m) => m.to[0]), ["a@example.com"]);
+  await list.announce(e, feed([OLD]));
+  assert.equal(s.emails.length, 1, "sent once");
+});
+
+test("any other failed confirmation email says so, and the next try goes through at once", async () => {
+  const s = services();
+  const e = env();
+  s.fail["POST /emails"] = { status: 500, name: "application_error" };
   const res = await post(e, "/api/subscribe", { email: "a@example.com", "cf-turnstile-response": "tok" });
   assert.equal(res.status, 502);
-  e.LIST_EMAIL.failWith = null;
-  await signUp(e, "a@example.com");
-  assert.equal(e.LIST_EMAIL.sent.length, 1);
+  delete s.fail["POST /emails"];
+  assert.deepEqual(await signUp(e, "a@example.com"), { ok: true, queued: true },
+    "a row left unsent is the cron's to send");
+  await list.announce(e, feed([OLD]));
+  assert.equal(s.emails.length, 1);
+});
+
+test("a confirmation Resend cannot take shows a retry page and keeps the signup", async () => {
+  const s = services();
+  const e = env();
+  await signUp(e);
+  s.fail["POST /contacts"] = { status: 429, name: "rate_limit_exceeded" };
+  const res = await post(e, pathOf(linkIn(s.emails[0].text)), "");
+  assert.equal(res.status, 502);
+  assert.equal(pending(e).length, 1);
+  delete s.fail["POST /contacts"];
+  assert.equal((await post(e, pathOf(linkIn(s.emails[0].text)), "")).status, 200);
+  assert.equal(s.contacts.size, 1);
 });
 
 /* ---------- releases ---------- */
 
-test("the first run sends nothing; a new release goes to everyone confirmed, once", async () => {
+test("the first run sends nothing; a new release goes out once, as one broadcast", async () => {
+  const s = services();
   const e = env();
-  await signUpAndConfirm(e, "one@example.com");
-  await signUpAndConfirm(e, "two@example.com");
-  await signUp(e, "pending@example.com");
-  const confirmations = e.LIST_EMAIL.sent.length;
+  await signUpAndConfirm(e, s, "one@example.com");
 
-  const old = [{ id: "v0-5-0", title: "ranwhat 0.5.0: Twelve coding agents", at: now() - 3600 }];
-  await list.announce(e, feed(old));
-  assert.equal(e.LIST_EMAIL.sent.length, confirmations, "what was already published is not news");
+  await list.announce(e, feed([OLD]));
+  assert.equal(s.broadcasts.length, 0, "what was already published is not news");
 
-  const fresh = [{ id: "v0-6-0", title: "ranwhat 0.6.0: Cursor", at: now() }, ...old];
-  await list.announce(e, feed(fresh));
-  const sent = e.LIST_EMAIL.sent.slice(confirmations);
-  assert.deepEqual(sent.map((m) => m.to).sort(), ["one@example.com", "two@example.com"]);
-  for (const m of sent) {
-    assert.equal(m.subject, "ranwhat 0.6.0: Cursor");
-    assert.match(m.headers["List-Unsubscribe"], /^<https:\/\/ranwhat\.com\/api\/unsubscribe\?id=[0-9a-f-]{36}&t=[\w-]+>$/);
-    assert.equal(m.headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
-    assert.match(m.html, /<code style="[^"]+">check<\/code>/);
-    assert.match(m.text, /- check got faster/);
-  }
+  await list.announce(e, feed([NEW, OLD]));
+  assert.equal(s.broadcasts.length, 1);
+  const [b] = s.broadcasts;
+  assert.equal(b.segment_id, s.segments[0].id);
+  assert.equal(b.send, true);
+  assert.equal(b.subject, "ranwhat 0.6.0: Cursor");
+  assert.equal(b.from, "ranwhat <updates@ranwhat.com>");
+  assert.match(b.html, /\{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}/);
+  assert.match(b.text, /Unsubscribe: \{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}/);
+  assert.match(b.html, /<code style="[^"]+">check<\/code>/);
+  assert.match(b.text, /- check got faster/);
 
-  await list.announce(e, feed(fresh));
-  assert.equal(e.LIST_EMAIL.sent.length, confirmations + 2, "nobody gets it twice");
-
-  // Someone who confirms after the release appeared does not get it.
-  await signUpAndConfirm(e, "late@example.com");
-  const count = e.LIST_EMAIL.sent.length;
-  await list.announce(e, feed(fresh));
-  assert.equal(e.LIST_EMAIL.sent.length, count);
+  await list.announce(e, feed([NEW, OLD]));
+  assert.equal(s.broadcasts.length, 1, "nobody gets it twice");
 });
 
-test("a long list goes out a batch per run, and a stopped run resumes", async () => {
+test("a broadcast Resend refuses is tried again next run; one that may have gone out is not", async () => {
+  const s = services();
   const e = env();
-  e.LIST.sql.exec(`CREATE TABLE IF NOT EXISTS subscribers (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE,
-    created_at INTEGER NOT NULL, mailed_at INTEGER NOT NULL, confirmed_at INTEGER)`);
-  const insert = e.LIST.sql.prepare("INSERT INTO subscribers VALUES (?, ?, 1, 1, 1)");
-  const n = 2 * list.BATCH + 7;
-  for (let i = 0; i < n; i++) insert.run(crypto.randomUUID(), `r${i}@example.com`);
+  await list.announce(e, feed([OLD]));
+  s.fail["POST /broadcasts"] = { status: 500, name: "application_error" };
+  await list.announce(e, feed([NEW, OLD]));
+  assert.equal(s.broadcasts.length, 0);
+  delete s.fail["POST /broadcasts"];
+  await list.announce(e, feed([NEW, OLD]));
+  assert.equal(s.broadcasts.length, 1);
 
-  const old = [{ id: "v1", title: "old", at: now() - 60 }];
-  await list.announce(e, feed(old));
-  const items = [{ id: "v2", title: "new", at: now() }, ...old];
-
-  e.LIST_EMAIL.failWith = "E_DAILY_LIMIT_EXCEEDED";
-  e.LIST_EMAIL.failAfter = 50;
-  await list.announce(e, feed(items));
-  assert.equal(e.LIST_EMAIL.sent.length, 50, "stops at the daily limit");
-
-  e.LIST_EMAIL.failWith = null;
-  await list.announce(e, feed(items));
-  assert.equal(e.LIST_EMAIL.sent.length, 50 + list.BATCH, "one batch a run");
-  await list.announce(e, feed(items));
-  assert.equal(e.LIST_EMAIL.sent.length, n, "the rest");
-  assert.equal(new Set(e.LIST_EMAIL.sent.map((m) => m.to)).size, n, "each address once");
-  await list.announce(e, feed(items));
-  assert.equal(e.LIST_EMAIL.sent.length, n);
-});
-
-test("a suppressed address is skipped rather than holding up the rest", async () => {
-  const e = env();
-  await signUpAndConfirm(e, "a@example.com");
-  await signUpAndConfirm(e, "b@example.com");
-  const before = e.LIST_EMAIL.sent.length;
-  await list.announce(e, feed([{ id: "v1", title: "old", at: now() - 60 }]));
-  const real = e.LIST_EMAIL.send;
-  e.LIST_EMAIL.send = async (m) => {
-    if (m.to === "a@example.com") throw Object.assign(new Error("suppressed"), { code: "E_RECIPIENT_SUPPRESSED" });
-    return real(m);
-  };
-  const items = [{ id: "v2", title: "new", at: now() }, { id: "v1", title: "old", at: now() - 60 }];
-  await list.announce(e, feed(items));
-  assert.deepEqual(e.LIST_EMAIL.sent.slice(before).map((m) => m.to), ["b@example.com"]);
-  const done = e.LIST.sql.prepare("SELECT done_at FROM releases WHERE guid LIKE '%v2'").get();
-  assert.ok(done.done_at > 0);
+  // A run that died between Resend's answer and the record of it.
+  const NEWER = { id: "v0-7-0", title: "ranwhat 0.7.0", at: now() };
+  e.LIST.sql.prepare("INSERT INTO releases (guid, seen_at, started_at) VALUES (?, ?, ?)")
+    .run("https://ranwhat.com/updates#v0-7-0", now(), now());
+  await list.announce(e, feed([NEWER, NEW, OLD]));
+  assert.equal(s.broadcasts.length, 1);
 });
 
 test("a release that first appears weeks after it was published is not sent", async () => {
+  const s = services();
   const e = env();
-  await signUpAndConfirm(e, "a@example.com");
-  const before = e.LIST_EMAIL.sent.length;
-  await list.announce(e, feed([{ id: "v1", title: "old", at: now() - 60 }]));
-  await list.announce(e, feed([{ id: "v0", title: "backfilled", at: now() - 30 * 24 * 3600 },
-                               { id: "v1", title: "old", at: now() - 60 }]));
-  assert.equal(e.LIST_EMAIL.sent.length, before);
+  await list.announce(e, feed([OLD]));
+  await list.announce(e, feed([{ id: "v0-1-0", title: "backfilled", at: now() - 30 * 24 * 3600 }, OLD]));
+  assert.equal(s.broadcasts.length, 0);
 });
 
-/* ---------- off ---------- */
-
-test("unsubscribing shows a button; the button, or a one-click POST, deletes the address", async () => {
-  for (const oneClick of [false, true]) {
-    const e = env();
-    await signUpAndConfirm(e, "a@example.com");
-    await list.announce(e, feed([{ id: "v1", title: "old", at: now() - 60 }]));
-    await list.announce(e, feed([{ id: "v2", title: "new", at: now() }, { id: "v1", title: "old", at: now() - 60 }]));
-    const mail = e.LIST_EMAIL.sent.at(-1);
-    const link = mail.headers["List-Unsubscribe"].slice(1, -1);
-    assert.equal(linkIn(mail.text, "/api/unsubscribe"), link);
-
-    const page = await get(e, link);
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /<form method="post"/);
-    assert.equal(rows(e).length, 1, "opening the link removes nobody");
-
-    const u = new URL(link);
-    const res = await post(e, u.pathname + u.search, oneClick ? "List-Unsubscribe=One-Click" : "",
-      "application/x-www-form-urlencoded");
-    assert.equal(res.status, 200);
-    assert.equal(rows(e).length, 0);
-    assert.equal(e.LIST.sql.prepare("SELECT * FROM deliveries").all().length, 0);
-
-    const bad = new URL(link);
-    bad.searchParams.set("id", crypto.randomUUID());
-    assert.equal((await post(e, bad.pathname + bad.search, "")).status, 400);
+test("an address nobody confirms is deleted after a week", async () => {
+  services();
+  const e = env();
+  await signUp(e);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 8 * 24 * 3600 * 1000;
+  try {
+    await list.announce(e, feed([OLD]));
+  } finally {
+    Date.now = realNow;
   }
+  assert.equal(pending(e).length, 0);
 });
 
 /* ---------- the rest of the Worker ---------- */
 
 test("the contact form still sends, and the routes answer only their methods", async () => {
+  const s = services({ action: undefined });
   const e = env();
-  challenge(undefined);
   const res = await post(e, "/api/contact", { email: "w@example.com", message: "hello", about: "bug",
                                               "cf-turnstile-response": "tok" });
   assert.equal(res.status, 200);
   assert.equal(e.CONTACT_EMAIL.sent.length, 1);
   assert.equal((await get(e, "https://ranwhat.com/api/subscribe")).status, 405);
   assert.equal((await get(e, "https://ranwhat.com/api/contact")).status, 405);
-  assert.equal((await get(e, "https://ranwhat.com/api/nothing")).status, 404);
+  assert.equal((await get(e, "https://ranwhat.com/api/unsubscribe")).status, 404);
+  assert.deepEqual(s.calls, []);
 });
 
 test("nothing the list logs carries an address", async () => {
@@ -373,14 +413,15 @@ test("nothing the list logs carries an address", async () => {
   const real = console.log;
   console.log = (...a) => lines.push(a.join(" "));
   try {
+    const s = services();
     const e = env();
-    e.LIST_EMAIL.failWith = "E_INTERNAL_SERVER_ERROR";
-    e.LIST_EMAIL.failAfter = 0;
-    challenge();
+    s.fail["POST /emails"] = { status: 500, name: "application_error" };
     await post(e, "/api/subscribe", { email: "secret.person@example.com", "cf-turnstile-response": "tok" });
+    s.fail["POST /emails"] = { status: 429, name: "daily_quota_exceeded" };
+    await list.announce(e, feed([OLD]));
   } finally {
     console.log = real;
   }
-  assert.ok(lines.length > 0);
+  assert.ok(lines.length >= 2);
   for (const line of lines) assert.doesNotMatch(line, /@|secret\.person/);
 });
