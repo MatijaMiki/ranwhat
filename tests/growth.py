@@ -44,9 +44,18 @@ SCALE = 4          # the larger size over the smaller
 LIMIT = 8          # a linear cost grows SCALE times, a quadratic SCALE ** 2
 TRIES = 5
 CEILING = 10.0     # seconds at the larger size, whatever the growth
-# A time under this is mostly noise, and is read as this much: a case too
-# fast to measure cannot fail on its growth.
-FLOOR = 0.002
+# A time under this is read as this much: a case too fast to measure cannot
+# fail on its growth. It is longer than a scheduler's time slice. On a core
+# something else wants too, a call shorter than a slice can run to its end
+# before it is made to share, and a longer one is shared all the way: the
+# best of five tries then pits the short call's one quiet run against the
+# long call's every run. Pinned to a core with two busy processes, a case
+# that grows 3.8 times ran its 3.1ms quarter size untouched in a try, and
+# never its 12ms full size in under 36: 11.6 times. A Linux runner read
+# 0.004s against 0.038s in all five tries. Under the same load, 6ms of work
+# never ran in under 9.8: from 10ms up, both sizes share the core alike.
+# A quadratic still fails where its quarter size takes 5ms or more.
+FLOOR = 0.01
 
 QUARTER = ((1.0, 1.0 / SCALE),)
 
