@@ -12,6 +12,7 @@
 <link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
 <link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
 <meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
@@ -174,7 +175,26 @@
             and your message to a Cloudflare Worker on this domain, which
             checks the challenge and forwards the message to our mailbox. The
             Worker keeps no copy. What arrives is kept as described under
-            Email below.</span></div>
+            Email below. The signup for release emails is described in the
+            next row.</span></div>
+        <div class="row" id="updates"><span class="k">Release emails</span>
+          <span class="v">If you sign up for release emails, on the
+            <a href="/updates">updates page</a> or the home page, your address
+            goes to the same Worker, which checks the challenge and passes the
+            address, with the IP address you sent it from, to Buttondown.
+            Buttondown keeps the list and sends the emails, and uses the IP
+            address to spot fake sign-ups. You are on the list only once you
+            click the link in the confirmation email, and every email has a
+            link to unsubscribe, which takes you off at once. We use the list
+            to announce releases and nothing else, we do not track whether you
+            open the emails or click their links, and we never sell or share
+            the list. Buttondown may store it in the United States. The legal
+            basis is your consent (GDPR art.&nbsp;6(1)(a)); withdraw it with
+            the unsubscribe link or by writing to us. Buttondown&rsquo;s
+            handling is described in
+            <a href="https://buttondown.com/legal/privacy">Buttondown&rsquo;s
+            privacy policy</a>. The <a href="/rss.xml">RSS feed</a> carries the
+            same news and asks nothing of you.</span></div>
         <div class="row"><span class="k">Server logs</span>
           <span class="v">Cloudflare hosts and serves the site. It logs request
             metadata, including your IP address, to deliver pages and absorb
@@ -192,10 +212,12 @@
             knowing which pages are read, and it is not used to profile
             anyone.</span></div>
         <div class="row"><span class="k">Third parties</span>
-          <span class="v">Cloudflare Turnstile, on the contact page only: the
-            challenge that keeps the form from being used by bots. It loads from
-            challenges.cloudflare.com and reads signals from your browser to tell
-            a person from a script. Google Analytics and X, each only if you allow
+          <span class="v">Cloudflare Turnstile, on the contact page, and on the
+            home and updates pages once you start typing an address into the
+            signup form: the challenge that keeps the forms from being used by
+            bots. It loads from challenges.cloudflare.com and reads signals from
+            your browser to tell a person from a script. Buttondown, only if
+            you sign up for release emails (Release emails, above). Google Analytics and X, each only if you allow
             it (above). Maidensail, on the home page only: the "Featured on
             Maidensail" badge is an image from maidensail.com, so your browser
             asks maidensail.com for it, which sees your IP address and browser
@@ -208,8 +230,8 @@
           <span class="v">Mail, whether written directly or sent through the form,
             is kept in a Gmail mailbox, so Google holds it too and may store it
             outside the EU. We keep the message and your address for as long as
-            the conversation is useful, and delete it when it is not. We do not
-            add you to any list.</span></div>
+            the conversation is useful, and delete it when it is not. Writing to
+            us does not add you to any list.</span></div>
       </div>
 
       <div class="grid2" style="margin-top:30px">
@@ -288,6 +310,7 @@
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
           <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
           <li><a href="https://x.com/ranwhatcom">X</a></li>

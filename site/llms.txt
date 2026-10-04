@@ -47,6 +47,7 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 
 - [Pricing](https://ranwhat.com/pricing): free on your own machine; Plus is $12 a month per organisation; Team is annual, by contact. Plus and Team are being built.
 - [About](https://ranwhat.com/about): who builds it and why
+- [Updates](https://ranwhat.com/updates): every release, newest first, with an [RSS feed](https://ranwhat.com/rss.xml) and email signup
 - [Source](https://github.com/MatijaMiki/ranwhat): MIT licensed
 - [PyPI](https://pypi.org/project/ranwhat/)
 

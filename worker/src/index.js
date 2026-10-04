@@ -1,5 +1,6 @@
-/* POST /api/contact
+/* POST /api/contact and POST /api/subscribe
  *
+ * /api/contact:
  * Verifies the Turnstile token server-side, then emails the message to the
  * address verified in Email Routing. Cloudflare's send_email binding can only
  * deliver to addresses already verified on this account, which is exactly the
@@ -12,10 +13,16 @@
  *
  * A Turnstile token that is never verified is decoration. This is the call that
  * makes the widget mean anything.
+ *
+ * /api/subscribe: the same check, then the address goes to Buttondown, which
+ * keeps the list and sends the email. Buttondown asks the address to confirm
+ * before it is on the list (double opt-in), so a stranger's address typed
+ * here gets one email and nothing more. Nothing is kept here.
  */
 import { EmailMessage } from "cloudflare:email";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const BUTTONDOWN = "https://api.buttondown.com/v1/subscribers";
 const TO = "ranwhatcom@gmail.com";
 const FROM = "form@ranwhat.com";
 
@@ -53,6 +60,37 @@ const json = (status, body) =>
 /* Header injection: a newline in a header value lets someone append headers of
    their own, e.g. a Bcc. Strip CR and LF from anything that lands in one. */
 const header = (s) => String(s || "").replace(/[\r\n]+/g, " ").trim();
+
+/* Asks Cloudflare whether a Turnstile token is good for this site, and, when
+   an action is given, for this form: a token solved on the signup form is not
+   a pass for the contact form, or the other way round. Returns null when it
+   is, or the Response to send back when it is not. */
+async function refuseChallenge(request, env, token, action) {
+  if (!token) return json(400, { error: "Complete the challenge and try again." });
+
+  /* If siteverify is down or answers with something other than JSON, say so
+     in the same shape as every other error rather than throwing a bare 500. */
+  let outcome;
+  try {
+    const verify = await fetch(SITEVERIFY, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret: env.TURNSTILE_SECRET,
+        response: token,
+        remoteip: request.headers.get("cf-connecting-ip") || undefined,
+      }),
+    });
+    outcome = await verify.json();
+  } catch {
+    return json(502, { error: "The challenge could not be checked just now. Try again in a minute." });
+  }
+  if (!outcome.success || !HOSTNAMES.has(outcome.hostname) ||
+      (action && outcome.action !== action)) {
+    return json(403, { error: "That challenge did not verify. Reload and try again." });
+  }
+  return null;
+}
 
 /* Tells X a contact message was sent, so an ad can be credited with it. Only
    when the visitor allowed ad measurement on the page, and never with the
@@ -103,29 +141,8 @@ async function handleContact(request, env, ctx) {
     return json(400, { error: "Expected JSON." });
   }
 
-  const token = form["cf-turnstile-response"];
-  if (!token) return json(400, { error: "Complete the challenge and try again." });
-
-  /* If siteverify is down or answers with something other than JSON, say so
-     in the same shape as every other error rather than throwing a bare 500. */
-  let outcome;
-  try {
-    const verify = await fetch(SITEVERIFY, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        secret: env.TURNSTILE_SECRET,
-        response: token,
-        remoteip: request.headers.get("cf-connecting-ip") || undefined,
-      }),
-    });
-    outcome = await verify.json();
-  } catch {
-    return json(502, { error: "The challenge could not be checked just now. Try again in a minute." });
-  }
-  if (!outcome.success || !HOSTNAMES.has(outcome.hostname)) {
-    return json(403, { error: "That challenge did not verify. Reload and try again." });
-  }
+  const refused = await refuseChallenge(request, env, form["cf-turnstile-response"]);
+  if (refused) return refused;
 
   const topic = SUBJECTS[form.about] ? form.about : "other";
   const message = String(form.message || "").trim();
@@ -179,16 +196,96 @@ async function handleContact(request, env, ctx) {
   return json(200, { ok: true });
 }
 
+/* Same answer whether the address is new or already on the list, so the form
+   cannot be used to find out who subscribes. */
+const SUBSCRIBED = { ok: true };
+const KNOWN = new Set(["email_already_exists", "subscriber_already_exists", "subscriber_suppressed"]);
+const BLOCKED = new Set(["email_blocked", "subscriber_blocked", "ip_address_spammy"]);
+
+async function handleSubscribe(request, env) {
+  /* Until the key is set the form says so, rather than failing at Buttondown. */
+  if (!env.BUTTONDOWN_API_KEY) {
+    return json(503, { error: "Email updates are not switched on yet. The RSS feed at ranwhat.com/rss.xml has every release." });
+  }
+
+  let form;
+  try {
+    form = await request.json();
+  } catch {
+    return json(400, { error: "Expected JSON." });
+  }
+
+  const address = String(form.email || "").trim();
+  if (!address || address.length > LIMITS.email || !EMAIL.test(address)) {
+    return json(400, { error: "That email address does not look right." });
+  }
+
+  const refused = await refuseChallenge(request, env, form["cf-turnstile-response"], "subscribe");
+  if (refused) return refused;
+
+  /* The visitor's IP address goes along because Buttondown checks sign-ups
+     against it. Without it every request comes from Cloudflare's addresses,
+     which its firewall may read as one sender signing up many people. No
+     type is given, so Buttondown's double opt-in applies. */
+  let res;
+  try {
+    res = await fetch(BUTTONDOWN, {
+      method: "POST",
+      headers: {
+        authorization: `Token ${env.BUTTONDOWN_API_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        email_address: address,
+        ip_address: request.headers.get("cf-connecting-ip") || undefined,
+      }),
+    });
+  } catch {
+    return json(502, { error: "The list could not be reached just now. Try again in a minute." });
+  }
+
+  if (res.status === 201) return json(200, SUBSCRIBED);
+
+  /* Status and Buttondown's error code only: `wrangler tail` shows what went
+     wrong, never the address. */
+  let code = "";
+  try {
+    code = String((await res.json()).code || "");
+  } catch { /* no body worth reading */ }
+  console.log(`buttondown: ${res.status} ${code.replace(/[^\w-]/g, "").slice(0, 60)}`);
+
+  /* Already on the list, or unsubscribed earlier: the same answer as a new
+     address. Someone who unsubscribed and wants back can write to us. The
+     codes are Buttondown's ValidationErrorCode, from its OpenAPI schema. */
+  if (KNOWN.has(code) || res.status === 409) return json(200, SUBSCRIBED);
+  if (code === "email_invalid" || code === "email_empty" || res.status === 422) {
+    return json(400, { error: "That email address does not look right." });
+  }
+  if (code === "rate_limited" || res.status === 429) {
+    return json(429, { error: "Too many sign-ups at once. Try again in a few minutes." });
+  }
+  if (BLOCKED.has(code)) {
+    return json(403, { error: "That address could not be added. If that is a mistake, write to hello@ranwhat.com." });
+  }
+  return json(502, { error: "Signing up failed on our side. Write to hello@ranwhat.com and we will add you." });
+}
+
+const ROUTES = {
+  "/api/contact": handleContact,
+  "/api/subscribe": handleSubscribe,
+};
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/contact") return json(404, { error: "Not found." });
+    const handle = ROUTES[url.pathname];
+    if (!handle) return json(404, { error: "Not found." });
     if (request.method !== "POST") {
       return new Response(JSON.stringify({ error: "POST only." }), {
         status: 405,
         headers: { "content-type": "application/json; charset=utf-8", allow: "POST" },
       });
     }
-    return handleContact(request, env, ctx);
+    return handle(request, env, ctx);
   },
 };

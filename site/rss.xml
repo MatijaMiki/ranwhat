@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+  <title>ranwhat releases</title>
+  <link>https://ranwhat.com/updates</link>
+  <atom:link href="https://ranwhat.com/rss.xml" rel="self" type="application/rss+xml"/>
+  <description>What each release of ranwhat added and fixed: the coding agents it reads, the rules it gained, and what it got wrong before.</description>
+  <language>en</language>
+  <lastBuildDate>Sun, 04 Oct 2026 00:17:46 +0000</lastBuildDate>
+  <item>
+    <title>ranwhat 0.5.0: Twelve coding agents</title>
+    <link>https://ranwhat.com/updates#v0-5-0</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-5-0</guid>
+    <pubDate>Sun, 04 Oct 2026 00:17:46 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;&lt;span class="icode"&gt;check&lt;/span&gt;, &lt;span class="icode"&gt;watch&lt;/span&gt; and &lt;span class="icode"&gt;clean&lt;/span&gt; read twelve coding agents, each from where it keeps its history: Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, Grok Build, Droid, Kimi Code, Kimi CLI, Pi, Muse Code and OpenClaw.&lt;/li&gt;&lt;li&gt;New: &lt;a href="https://ranwhat.com/commands#sources"&gt;ranwhat sources&lt;/a&gt; lists every agent and where it looked. &lt;span class="icode"&gt;--source ID&lt;/span&gt; reads one agent, and &lt;span class="icode"&gt;--path ID=PATH&lt;/span&gt; reads one from somewhere else.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;clean&lt;/span&gt; knows each value by a salted fingerprint, so masking it once masks every copy, including one another program wrote with different escaping.&lt;/li&gt;&lt;li&gt;Agents&amp;rsquo; databases, such as Codex&amp;rsquo;s thread index and OpenClaw&amp;rsquo;s, are searched for secrets read only, and the report says how to remove one in the agent itself.&lt;/li&gt;&lt;li&gt;On Windows, suggested commands are quoted to paste into cmd or PowerShell.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
+  <item>
+    <title>ranwhat 0.4.0: Sharper watch and clean</title>
+    <link>https://ranwhat.com/updates#v0-4-0</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-4-0</guid>
+    <pubDate>Sat, 03 Oct 2026 02:16:54 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;&lt;span class="icode"&gt;watch&lt;/span&gt; spots a local file sent off the machine: piped or posted to curl, wget or nc, including through head, gzip, jq or sed.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;watch&lt;/span&gt; reads what the shell really runs inside quotes, &lt;span class="icode"&gt;$'...'&lt;/span&gt; and a wrapped shell, and ranks deleting your home directory critical however it is spelled, &lt;span class="icode"&gt;\rm&lt;/span&gt; included.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;watch&lt;/span&gt; masks the secrets in the commands it quotes, and &lt;span class="icode"&gt;check&lt;/span&gt; masks in its watch section every secret its clean section found.&lt;/li&gt;&lt;li&gt;Reads the transcripts that subagents write.&lt;/li&gt;&lt;li&gt;Fewer false alarms: placeholders, settings constants and AWS ARNs read as what they are, not as secrets.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;clean&lt;/span&gt; and &lt;span class="icode"&gt;watch&lt;/span&gt; stay linear in time on hostile input, such as a megabyte of crafted text or one enormous shell command.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
+  <item>
+    <title>ranwhat 0.3.0: One command for both, and a faster clean</title>
+    <link>https://ranwhat.com/updates#v0-3-0</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-3-0</guid>
+    <pubDate>Sat, 26 Sep 2026 01:38:18 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;New: &lt;a href="https://ranwhat.com/commands#check"&gt;ranwhat check&lt;/a&gt; runs &lt;span class="icode"&gt;watch&lt;/span&gt; and &lt;span class="icode"&gt;clean&lt;/span&gt; in one read-only pass. It changes nothing; masking stays a choice you make in &lt;span class="icode"&gt;clean&lt;/span&gt;.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;clean&lt;/span&gt; went from 89 seconds to 2.1 on a 39&amp;nbsp;MB transcript, with the same findings. It no longer searches pasted screenshots, which cannot hold a credential.&lt;/li&gt;&lt;li&gt;Output fits your terminal&amp;rsquo;s width, and &lt;span class="icode"&gt;NO_COLOR&lt;/span&gt; is honoured.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
+  <item>
+    <title>ranwhat 0.2.1: Commands you can run</title>
+    <link>https://ranwhat.com/updates#v0-2-1</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-2-1</guid>
+    <pubDate>Sat, 26 Sep 2026 01:19:09 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;Run through &lt;span class="icode"&gt;uvx&lt;/span&gt;, the overview suggests &lt;span class="icode"&gt;uvx ranwhat demo&lt;/span&gt;, because a bare &lt;span class="icode"&gt;ranwhat&lt;/span&gt; is not on your PATH there.&lt;/li&gt;&lt;li&gt;The capability catalogue covers HubSpot, Discord, GitLab, Atlassian, Microsoft Graph, Sentry and Shopify.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
+  <item>
+    <title>ranwhat 0.2.0: A catalogue that can be refreshed</title>
+    <link>https://ranwhat.com/updates#v0-2-0</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-2-0</guid>
+    <pubDate>Sat, 26 Sep 2026 01:04:00 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;&lt;span class="icode"&gt;ranwhat update&lt;/span&gt; refreshes the capability catalogue from ranwhat&amp;rsquo;s feed, for Plus subscribers once Plus opens. It sends the subscription token and nothing else.&lt;/li&gt;&lt;li&gt;Without a feed every command still runs on the catalogue bundled with the release, and a damaged cache falls back to it.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
+  <item>
+    <title>ranwhat 0.1.1: A first run that answers</title>
+    <link>https://ranwhat.com/updates#v0-1-1</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-1-1</guid>
+    <pubDate>Wed, 23 Sep 2026 17:31:06 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;A bare &lt;span class="icode"&gt;ranwhat&lt;/span&gt; prints what each command does and where to start, instead of a usage error.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
+  <item>
+    <title>ranwhat 0.1.0: First release</title>
+    <link>https://ranwhat.com/updates#v0-1-0</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-1-0</guid>
+    <pubDate>Wed, 23 Sep 2026 17:26:13 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;&lt;span class="icode"&gt;watch&lt;/span&gt; reads what Claude Code and OpenClaw ran and surfaces the irreversible actions worth knowing about.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;clean&lt;/span&gt; finds credentials left in Claude Code&amp;rsquo;s transcripts and masks them when you ask.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;scan&lt;/span&gt; and &lt;span class="icode"&gt;live&lt;/span&gt; score what an agent&amp;rsquo;s credentials allow, and &lt;span class="icode"&gt;demo&lt;/span&gt; shows a scan on an example.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
+</channel>
+</rss>

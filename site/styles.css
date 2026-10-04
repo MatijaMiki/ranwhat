@@ -614,6 +614,33 @@ ul.follow a span{color:var(--muted);font-size:13px;font-weight:400;
   ul.follow a span{margin-left:0;text-align:left}
 }
 
+/* ---------- the email signup ----------
+   The contact form's fields and states, laid out as one row: the address
+   and the button side by side, stacked on a phone. Turnstile draws into
+   .sub-check only if it needs the visitor to do something, so it holds no
+   space of its own. */
+.form.subscribe{margin-top:18px}
+.form.subscribe label{margin-top:0}
+.subrow{display:flex;gap:10px;align-items:stretch}
+.subrow input{flex:1;min-width:0}
+.form.subscribe .subrow .act{margin-top:0;align-self:stretch;white-space:nowrap}
+.form.subscribe .fnote{margin-top:10px}
+.sub-check:not(:empty){margin-top:12px}
+@media(max-width:560px){.subrow{flex-direction:column}}
+.feedhead{margin:34px 0 10px}
+.cmd.feedurl{max-width:460px}
+
+/* ---------- updates: one release after another ---------- */
+.releases{margin-top:26px;border-top:1px solid var(--rule-2)}
+.release{padding:24px 0 22px;border-bottom:1px solid var(--rule-2);scroll-margin-top:80px}
+.release .rel-meta{display:flex;align-items:baseline;gap:14px;margin:0 0 6px;
+  font-family:"IBM Plex Mono",Menlo,monospace;font-size:12.5px;color:var(--faint)}
+.release .rel-v{color:var(--mark,var(--brand));font-weight:600;font-size:14px}
+.release h3{margin:0 0 10px}
+.release ul{margin:0;padding-left:20px;max-width:72ch;color:var(--ink-2);font-size:15px;line-height:1.6}
+.release li{margin:6px 0}
+.release li .icode{overflow-wrap:anywhere}
+
 /* ---------- ad-measurement consent ---------- */
 /* Two equal buttons on purpose: declining has to be as easy as agreeing, so
    neither is styled as the one you are meant to press. */

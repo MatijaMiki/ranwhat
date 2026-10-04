@@ -23,8 +23,10 @@ previews = {}
 pattern = "ranwhat.com/api/*"
 zone_name = "ranwhat.com"
 
-# TURNSTILE_SECRET and X_PIXEL_TOKEN are encrypted secrets, set with
-# `npx wrangler secret put <NAME>`, never here.
+# TURNSTILE_SECRET, X_PIXEL_TOKEN and BUTTONDOWN_API_KEY are encrypted
+# secrets, set with `npx wrangler secret put <NAME>`, never here. Until
+# BUTTONDOWN_API_KEY is set, /api/subscribe answers that email updates are
+# not switched on yet.
 
 # The X lead event's ID, from X Events Manager. Not a secret: the same ID is in
 # site/consent.js. Remove it and the Worker reports nothing to X.

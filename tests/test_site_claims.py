@@ -1008,5 +1008,90 @@ class ThemeSwitch(unittest.TestCase):
         self.assertLess(text.index("data-theme-toggle"), text.index('class="ghost"'))
 
 
+
+# ---------------------------------------------------------------------------
+# Updates: the release notes on /updates, the RSS feed made from them, and
+# the email signup that announces them.
+# ---------------------------------------------------------------------------
+
+def _rss_script():
+    spec = importlib.util.spec_from_file_location(
+        "rss_script", SITE.parent / "scripts" / "rss.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class ReleaseNotesAndFeed(unittest.TestCase):
+
+    def test_the_feed_is_what_the_script_makes_from_the_page(self):
+        # To refresh it after adding a release: python3 scripts/rss.py
+        self.assertEqual(read(SITE / "rss.xml"), _rss_script().build())
+
+    def test_the_feed_parses_and_each_item_lands_on_its_release(self):
+        import xml.etree.ElementTree as ET
+        channel = ET.fromstring(read(SITE / "rss.xml")).find("channel")
+        items = channel.findall("item")
+        ids = refs(SITE / "updates.html").ids
+        self.assertEqual(len(items), len(_rss_script().releases(read(SITE / "updates.html"))))
+        for item in items:
+            link = item.find("link").text
+            self.assertTrue(link.startswith(ORIGIN + "/updates#"), link)
+            self.assertIn(link.split("#", 1)[1], ids)
+            # A reader shows the item off the site, where /watch goes nowhere.
+            self.assertNotIn('href="/', item.find("description").text)
+
+    def test_the_newest_release_is_the_version_that_ships(self):
+        # Bumping the version means saying on /updates what changed.
+        rels = _rss_script().releases(read(SITE / "updates.html"))
+        self.assertEqual(rels[0][1], ranwhat.__version__)
+        versions = [tuple(int(n) for n in r[1].split(".")) for r in rels]
+        self.assertEqual(versions, sorted(versions, reverse=True))
+        self.assertEqual(len(versions), len(set(versions)))
+        for rid, version, *_ in rels:
+            self.assertEqual(rid, "v" + version.replace(".", "-"))
+
+    def test_every_page_in_the_site_chrome_points_feed_readers_at_it(self):
+        tag = ('<link rel="alternate" type="application/rss+xml" '
+               'title="ranwhat releases" href="https://ranwhat.com/rss.xml">')
+        for page in all_pages():
+            text = read(page)
+            if 'class="fbase"' in text:
+                self.assertIn(tag, text.split("</head>", 1)[0], page.name)
+
+
+class EmailSignup(unittest.TestCase):
+    """The signup hands an address to Buttondown. What must hold: the
+    challenge is checked, for this form, before anything is sent; the address
+    reaches nothing but Buttondown; and Buttondown's double opt-in is not
+    switched off."""
+
+    def setUp(self):
+        src = read(SITE.parent / "worker" / "src" / "index.js")
+        self.body = src[src.index("async function handleSubscribe"):src.index("const ROUTES")]
+
+    def test_the_challenge_is_checked_before_buttondown_is_asked(self):
+        check = self.body.index('refuseChallenge(request, env, form["cf-turnstile-response"], "subscribe")')
+        self.assertLess(check, self.body.index("fetch(BUTTONDOWN"))
+        self.assertIn('action: "subscribe"', read(SITE / "subscribe.js"))
+
+    def test_double_opt_in_stays_on(self):
+        # A type of "regular" skips Buttondown's confirmation email.
+        self.assertNotIn("type:", self.body)
+        self.assertNotIn("Bypass-Firewall", self.body)
+
+    def test_the_address_is_never_logged(self):
+        for line in re.findall(r"console\.log\((.*)\);", self.body):
+            self.assertNotIn("address", line)
+            self.assertNotIn("form", line)
+
+    def test_the_forms_load_the_script_and_turnstile_waits_for_them(self):
+        for name in ("index.html", "updates.html"):
+            text = read(SITE / name)
+            self.assertIn("data-subscribe", text, name)
+            self.assertIn('src="/subscribe.js"', text, name)
+            # Loaded from subscribe.js on first use, not by the page.
+            self.assertNotIn("challenges.cloudflare.com/turnstile", text, name)
+
 if __name__ == "__main__":
     unittest.main()
