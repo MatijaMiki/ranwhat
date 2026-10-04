@@ -50,4 +50,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - run: node --check worker/src/index.js && node --check functions/_middleware.js
+      - run: node --check worker/src/index.js && node --check worker/src/list.js && node --check functions/_middleware.js
+      # The release list end to end, over node:sqlite (Node 22.13 and later).
+      - run: node --test worker/test/list.test.mjs

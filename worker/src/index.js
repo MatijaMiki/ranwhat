@@ -14,15 +14,16 @@
  * A Turnstile token that is never verified is decoration. This is the call that
  * makes the widget mean anything.
  *
- * /api/subscribe: the same check, then the address goes to Buttondown, which
- * keeps the list and sends the email. Buttondown asks the address to confirm
- * before it is on the list (double opt-in), so a stranger's address typed
- * here gets one email and nothing more. Nothing is kept here.
+ * /api/subscribe, /api/confirm and /api/unsubscribe: the release list, in
+ * list.js. The signup gets the same challenge check first. The list is this
+ * account's D1 database, the mail goes out through Cloudflare Email Service,
+ * and a cron trigger sends each new release in /rss.xml to everyone who
+ * confirmed.
  */
 import { EmailMessage } from "cloudflare:email";
+import { announce, confirm, subscribe, switchedOn, unsubscribe } from "./list.js";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-const BUTTONDOWN = "https://api.buttondown.com/v1/subscribers";
 const TO = "ranwhatcom@gmail.com";
 const FROM = "form@ranwhat.com";
 
@@ -196,15 +197,9 @@ async function handleContact(request, env, ctx) {
   return json(200, { ok: true });
 }
 
-/* Same answer whether the address is new or already on the list, so the form
-   cannot be used to find out who subscribes. */
-const SUBSCRIBED = { ok: true };
-const KNOWN = new Set(["email_already_exists", "subscriber_already_exists", "subscriber_suppressed"]);
-const BLOCKED = new Set(["email_blocked", "subscriber_blocked", "ip_address_spammy"]);
-
 async function handleSubscribe(request, env) {
-  /* Until the key is set the form says so, rather than failing at Buttondown. */
-  if (!env.BUTTONDOWN_API_KEY) {
+  /* Until the list's bindings and secret are in place the form says so. */
+  if (!switchedOn(env)) {
     return json(503, { error: "Email updates are not switched on yet. The RSS feed at ranwhat.com/rss.xml has every release." });
   }
 
@@ -223,69 +218,42 @@ async function handleSubscribe(request, env) {
   const refused = await refuseChallenge(request, env, form["cf-turnstile-response"], "subscribe");
   if (refused) return refused;
 
-  /* The visitor's IP address goes along because Buttondown checks sign-ups
-     against it. Without it every request comes from Cloudflare's addresses,
-     which its firewall may read as one sender signing up many people. No
-     type is given, so Buttondown's double opt-in applies. */
-  let res;
+  /* The same answer whether the address is new, waiting to confirm or
+     already on the list, so the form cannot tell anyone who subscribes. */
   try {
-    res = await fetch(BUTTONDOWN, {
-      method: "POST",
-      headers: {
-        authorization: `Token ${env.BUTTONDOWN_API_KEY}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        email_address: address,
-        ip_address: request.headers.get("cf-connecting-ip") || undefined,
-      }),
-    });
+    await subscribe(env, address);
   } catch {
-    return json(502, { error: "The list could not be reached just now. Try again in a minute." });
+    return json(502, { error: "The confirmation email could not be sent just now. Try again in a minute." });
   }
-
-  if (res.status === 201) return json(200, SUBSCRIBED);
-
-  /* Status and Buttondown's error code only: `wrangler tail` shows what went
-     wrong, never the address. */
-  let code = "";
-  try {
-    code = String((await res.json()).code || "");
-  } catch { /* no body worth reading */ }
-  console.log(`buttondown: ${res.status} ${code.replace(/[^\w-]/g, "").slice(0, 60)}`);
-
-  /* Already on the list, or unsubscribed earlier: the same answer as a new
-     address. Someone who unsubscribed and wants back can write to us. The
-     codes are Buttondown's ValidationErrorCode, from its OpenAPI schema. */
-  if (KNOWN.has(code) || res.status === 409) return json(200, SUBSCRIBED);
-  if (code === "email_invalid" || code === "email_empty" || res.status === 422) {
-    return json(400, { error: "That email address does not look right." });
-  }
-  if (code === "rate_limited" || res.status === 429) {
-    return json(429, { error: "Too many sign-ups at once. Try again in a few minutes." });
-  }
-  if (BLOCKED.has(code)) {
-    return json(403, { error: "That address could not be added. If that is a mistake, write to hello@ranwhat.com." });
-  }
-  return json(502, { error: "Signing up failed on our side. Write to hello@ranwhat.com and we will add you." });
+  return json(200, { ok: true });
 }
 
+/* Path: [handler, methods it answers]. The links in the list's emails are
+   opened with GET, and their buttons POST. */
 const ROUTES = {
-  "/api/contact": handleContact,
-  "/api/subscribe": handleSubscribe,
+  "/api/contact": [handleContact, ["POST"]],
+  "/api/subscribe": [handleSubscribe, ["POST"]],
+  "/api/confirm": [confirm, ["GET", "POST"]],
+  "/api/unsubscribe": [unsubscribe, ["GET", "POST"]],
 };
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const handle = ROUTES[url.pathname];
-    if (!handle) return json(404, { error: "Not found." });
-    if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "POST only." }), {
+    const route = ROUTES[url.pathname];
+    if (!route) return json(404, { error: "Not found." });
+    const [handle, methods] = route;
+    if (!methods.includes(request.method)) {
+      return new Response(JSON.stringify({ error: `${methods.join(" or ")} only.` }), {
         status: 405,
-        headers: { "content-type": "application/json; charset=utf-8", allow: "POST" },
+        headers: { "content-type": "application/json; charset=utf-8", allow: methods.join(", ") },
       });
     }
     return handle(request, env, ctx);
+  },
+
+  /* The cron trigger in wrangler.toml: send any new release to the list. */
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(announce(env));
   },
 };

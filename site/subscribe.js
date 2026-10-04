@@ -1,6 +1,6 @@
 /* The email signup: posts an address to /api/subscribe, which checks the
- * Turnstile token and asks Buttondown to send a confirmation link. Nobody is
- * on the list until they click it.
+ * Turnstile token, stores the address and mails it a confirmation link
+ * (worker/src/list.js). Nobody is on the list until they confirm.
  *
  * Turnstile loads only once someone starts on the form, so a page that
  * carries one, the home page among them, asks nothing of Cloudflare's

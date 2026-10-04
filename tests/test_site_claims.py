@@ -1061,29 +1061,33 @@ class ReleaseNotesAndFeed(unittest.TestCase):
 
 
 class EmailSignup(unittest.TestCase):
-    """The signup hands an address to Buttondown. What must hold: the
-    challenge is checked, for this form, before anything is sent; the address
-    reaches nothing but Buttondown; and Buttondown's double opt-in is not
-    switched off."""
+    """The signup feeds our own list (worker/src/list.js), which
+    worker/test/list.test.mjs runs end to end. What these pin from here: the
+    challenge is checked, for this form, before the address is stored; no
+    log line can carry an address; and CI runs those tests."""
 
     def setUp(self):
-        src = read(SITE.parent / "worker" / "src" / "index.js")
-        self.body = src[src.index("async function handleSubscribe"):src.index("const ROUTES")]
+        self.index = read(SITE.parent / "worker" / "src" / "index.js")
+        self.list = read(SITE.parent / "worker" / "src" / "list.js")
+        self.body = self.index[self.index.index("async function handleSubscribe"):
+                               self.index.index("const ROUTES")]
 
-    def test_the_challenge_is_checked_before_buttondown_is_asked(self):
+    def test_the_challenge_is_checked_before_the_address_is_stored(self):
         check = self.body.index('refuseChallenge(request, env, form["cf-turnstile-response"], "subscribe")')
-        self.assertLess(check, self.body.index("fetch(BUTTONDOWN"))
+        self.assertLess(check, self.body.index("await subscribe(env, address)"))
         self.assertIn('action: "subscribe"', read(SITE / "subscribe.js"))
 
-    def test_double_opt_in_stays_on(self):
-        # A type of "regular" skips Buttondown's confirmation email.
-        self.assertNotIn("type:", self.body)
-        self.assertNotIn("Bypass-Firewall", self.body)
-
     def test_the_address_is_never_logged(self):
-        for line in re.findall(r"console\.log\((.*)\);", self.body):
-            self.assertNotIn("address", line)
-            self.assertNotIn("form", line)
+        for name, src in (("index.js", self.body), ("list.js", self.list)):
+            for line in re.findall(r"console\.log\((.*)\);", src):
+                with self.subTest(file=name, line=line):
+                    for word in ("email", "address", "subscriber", "row", "form"):
+                        self.assertNotIn(word, line)
+
+    def test_ci_runs_the_worker_tests(self):
+        ci = "".join(read(p) for p in sorted((SITE.parent / ".github" / "workflows").glob("*.yml")))
+        self.assertIn("node --test worker/test/", ci)
+        self.assertIn("node --check worker/src/list.js", ci)
 
     def test_the_forms_load_the_script_and_turnstile_waits_for_them(self):
         for name in ("index.html", "updates.html"):

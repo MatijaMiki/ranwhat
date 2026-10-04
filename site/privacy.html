@@ -180,21 +180,24 @@
         <div class="row" id="updates"><span class="k">Release emails</span>
           <span class="v">If you sign up for release emails, on the
             <a href="/updates">updates page</a> or the home page, your address
-            goes to the same Worker, which checks the challenge and passes the
-            address, with the IP address you sent it from, to Buttondown.
-            Buttondown keeps the list and sends the emails, and uses the IP
-            address to spot fake sign-ups. You are on the list only once you
-            click the link in the confirmation email, and every email has a
-            link to unsubscribe, which takes you off at once. We use the list
-            to announce releases and nothing else, we do not track whether you
-            open the emails or click their links, and we never sell or share
-            the list. Buttondown may store it in the United States. The legal
-            basis is your consent (GDPR art.&nbsp;6(1)(a)); withdraw it with
-            the unsubscribe link or by writing to us. Buttondown&rsquo;s
-            handling is described in
-            <a href="https://buttondown.com/legal/privacy">Buttondown&rsquo;s
-            privacy policy</a>. The <a href="/rss.xml">RSS feed</a> carries the
-            same news and asks nothing of you.</span></div>
+            goes to the same Worker, which checks the challenge and stores the
+            address, with the time you signed up, in a database on our
+            Cloudflare account. It then sends you one email, through
+            Cloudflare&rsquo;s email service, with a link to confirm: you are on
+            the list only once you press the button that link leads to, and an
+            address nobody confirms is deleted after a week. For a confirmed
+            address we also keep when you confirmed, and which release emails
+            were sent to it, so nobody gets one twice. Every release email has
+            a link to unsubscribe, which deletes your address and that record
+            at once; mail apps that offer one-click unsubscribe use the same
+            link. Nothing in the emails reports back when you open one or follow
+            a link in it. We use the list to announce releases and nothing else, and never sell
+            or share it. No mailing-list company is involved; Cloudflare, which
+            hosts the site, stores and sends, and may do so outside the EU under
+            the EU&ndash;US Data Privacy Framework. The legal basis is your
+            consent (GDPR art.&nbsp;6(1)(a)); withdraw it with the unsubscribe
+            link or by writing to us. The <a href="/rss.xml">RSS feed</a>
+            carries the same news and asks nothing of you.</span></div>
         <div class="row"><span class="k">Server logs</span>
           <span class="v">Cloudflare hosts and serves the site. It logs request
             metadata, including your IP address, to deliver pages and absorb
@@ -216,8 +219,7 @@
             home and updates pages once you start typing an address into the
             signup form: the challenge that keeps the forms from being used by
             bots. It loads from challenges.cloudflare.com and reads signals from
-            your browser to tell a person from a script. Buttondown, only if
-            you sign up for release emails (Release emails, above). Google Analytics and X, each only if you allow
+            your browser to tell a person from a script. Google Analytics and X, each only if you allow
             it (above). Maidensail, on the home page only: the "Featured on
             Maidensail" badge is an image from maidensail.com, so your browser
             asks maidensail.com for it, which sees your IP address and browser
