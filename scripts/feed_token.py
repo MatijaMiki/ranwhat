@@ -9,8 +9,9 @@ it on by adding its hash to the Worker's D1 database, either by pasting the
 printed SQL into the database's console in the Cloudflare dashboard or by
 running the printed wrangler command. Nothing is sent anywhere by this script.
 
-Until checkout exists this is how a token is issued. Stripe's webhook will
-do the same insert.
+Paid tokens come from Stripe checkout (worker/src/stripe.js) and stop when
+the subscription does. This is for the ones given by hand: early access,
+press, a replacement. They work until revoked.
 """
 import hashlib
 import re

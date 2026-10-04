@@ -584,7 +584,7 @@ class _Refs(html.parser.HTMLParser):
 
     def __init__(self):
         super().__init__()
-        self.refs, self.ids = [], set()
+        self.refs, self.ids, self.forms = [], set(), []
 
     def handle_starttag(self, tag, attrs):
         for name, value in attrs:
@@ -592,6 +592,9 @@ class _Refs(html.parser.HTMLParser):
                 self.refs.append((self.getpos()[0], value))
             if name == "id" and value:
                 self.ids.add(value)
+        if tag == "form" and dict(attrs).get("action"):
+            self.forms.append((self.getpos()[0], dict(attrs)["action"],
+                               (dict(attrs).get("method") or "get").upper()))
 
 
 def refs(page):
@@ -614,6 +617,16 @@ def resolve(path):
         return target
     page = SITE / (path.lstrip("/") + ".html")
     return page if page.is_file() else None
+
+
+def worker_routes():
+    """{path: methods} the Worker answers on ranwhat.com: /api/* is routed
+    to it ahead of Pages (worker/wrangler.toml), so nothing in site/ is."""
+    index = (SITE.parent / "worker" / "src" / "index.js").read_text(encoding="utf-8")
+    table = index[index.index("const ROUTES = {"):]
+    table = table[:table.index("};")]
+    return {path: set(re.findall(r'"([A-Z]+)"', methods))
+            for path, methods in re.findall(r'"(/api/[a-z]+)": \[\w+, \[([^\]]+)\]\]', table)}
 
 
 def stamped_assets():
@@ -642,6 +655,10 @@ class InternalLinksResolve(unittest.TestCase):
                                     "not root-relative")
                     path, _, fragment = ref.partition("#")
                     path = path.split("?", 1)[0]
+                    if path.startswith("/api/"):
+                        self.assertIn("GET", worker_routes().get(path, ()),
+                                      "the Worker does not answer GET there")
+                        continue
                     self.assertFalse(path.endswith(".html"),
                                      "Pages redirects .html; link the extensionless path")
                     target = resolve(path)
@@ -650,8 +667,19 @@ class InternalLinksResolve(unittest.TestCase):
                         self.assertIn(fragment, refs(target).ids,
                                       "%s has no id %r" % (path, fragment))
 
+    def test_every_form_posts_where_the_worker_takes_it(self):
+        found = [(page.name, form) for page in all_pages() for form in refs(page).forms]
+        self.assertTrue(found, "the pricing page's checkout form")
+        for name, (line, action, method) in found:
+            with self.subTest(page=name, line=line, action=action):
+                self.assertIn(method, worker_routes().get(action, ()))
+
     def test_the_resolver_sees_what_it_is_looking_for(self):
         """Or the test above would pass for the wrong reason."""
+        routes = worker_routes()
+        self.assertEqual(routes["/api/checkout"], {"POST"})
+        self.assertEqual(routes["/api/billing"], {"GET"})
+        self.assertEqual(routes["/api/confirm"], {"GET", "POST"})
         self.assertEqual(resolve("/"), SITE / "index.html")
         self.assertEqual(resolve("/guides"), SITE / "guides.html")
         self.assertEqual(resolve("/guides/claude-code-history"),

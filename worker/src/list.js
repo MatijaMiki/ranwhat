@@ -31,8 +31,8 @@ const ORIGIN = "https://ranwhat.com";
 const FEED = `${ORIGIN}/rss.xml`;
 const API = "https://api.resend.com";
 export const FROM = "updates@ranwhat.com";
-const SENDER = `ranwhat <${FROM}>`;
-const REPLY_TO = "hello@ranwhat.com";
+export const SENDER = `ranwhat <${FROM}>`;
+export const REPLY_TO = "hello@ranwhat.com";
 export const SEGMENT = "ranwhat releases";
 
 const DAY = 24 * 3600;
@@ -81,7 +81,7 @@ const OFF = () => page("Not switched on", `<h1>Release emails are not switched o
 
 /* One API call. Throws an Error whose code is Resend's error name
    (daily_quota_exceeded, validation_error, ...) or the HTTP status. */
-async function resend(env, method, path, body) {
+export async function resend(env, method, path, body) {
   let res;
   try {
     res = await fetch(`${API}${path}`, {
@@ -124,7 +124,7 @@ function b64url(bytes) {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function sign(env, text) {
+export async function sign(env, text) {
   /* Never sign with a missing or guessable key: every link would be forgeable. */
   if (typeof env.LIST_SECRET !== "string" || env.LIST_SECRET.length < 32) {
     throw new Error("LIST_SECRET is not set, or shorter than 32 characters");
@@ -135,7 +135,7 @@ async function sign(env, text) {
 }
 
 /* Compares in time that does not depend on where the strings differ. */
-function same(a, b) {
+export function same(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -401,14 +401,14 @@ export async function broadcast(env, item) {
 
 /* ---------- markup ---------- */
 
-const escape = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+export const escape = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
   .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const BUTTON = "display:inline-block;background:#12171c;color:#ffffff;text-decoration:none;" +
   "font-family:Menlo,Consolas,monospace;font-size:14px;padding:12px 18px";
-const CODE = "font-family:Menlo,Consolas,monospace;font-size:13px;background:#f1f3f5;padding:1px 4px";
+export const CODE = "font-family:Menlo,Consolas,monospace;font-size:13px;background:#f1f3f5;padding:1px 4px";
 
-function mail(body) {
+export function mail(body) {
   return `<!doctype html><html><body style="margin:0;background:#edeff1">
 <div style="max-width:560px;margin:0 auto;padding:28px 24px;background:#ffffff;color:#12171c;
   font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55">
@@ -430,7 +430,10 @@ main{max-width:520px;margin:12vh auto 0;padding:32px 28px;background:var(--surfa
 h1{font-size:28px;line-height:1.15;letter-spacing:-.02em;margin:26px 0 10px}
 p{color:var(--muted);margin:0 0 14px}a{color:var(--ink)}
 button{margin-top:10px;font:13px Menlo,Consolas,monospace;padding:11px 16px;background:transparent;color:var(--ink);border:1px solid var(--ink);cursor:pointer}
-button:hover{background:var(--ink);color:var(--surface)}`;
+button:hover{background:var(--ink);color:var(--surface)}
+pre{font:13px/1.55 Menlo,Consolas,monospace;color:var(--ink);background:var(--ground);border:1px solid var(--rule);
+  padding:11px 13px;margin:0 0 16px;white-space:pre-wrap;word-break:break-all;user-select:all}
+h2{font-size:15px;margin:22px 0 8px}`;
 
 export function page(title, body, status = 200) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">

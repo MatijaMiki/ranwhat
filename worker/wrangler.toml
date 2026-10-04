@@ -38,11 +38,21 @@ zone_name = "ranwhat.com"
 # e.g. the output of `openssl rand -base64 32`. Until both are set the
 # signup answers that email updates are not switched on yet, and the cron
 # sends nothing.
+#
+# STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET sell Plus (src/stripe.js).
+# scripts/stripe_setup.py sets Stripe up and prints the webhook's secret,
+# test mode first. Until both are set, with the two above, checkout says it
+# is not open yet. LIST_SECRET also derives each subscriber's feed token:
+# change it and tokens already issued keep working, but a subscriber's
+# welcome page would then show a new one.
 
 # The X lead event's ID, from X Events Manager. Not a secret: the same ID is in
 # site/consent.js. Remove it and the Worker reports nothing to X.
 [vars]
 X_EVENT_LEAD = "tw-rfz6t-rfz7z"
+# "automatic" adds Stripe Tax to checkout, once the account's tax
+# registrations are entered in the Stripe dashboard. "off" leaves it out.
+STRIPE_TAX = "off"
 
 # Signups waiting to be confirmed, and which releases went out. No
 # database_id on purpose: the first deploy creates the database (Wrangler's
