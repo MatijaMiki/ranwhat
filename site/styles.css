@@ -546,6 +546,48 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 .form .act[disabled]{opacity:.55;cursor:default}
 .form .act[disabled]:hover{background:transparent;color:var(--ink)}
 
+/* ---------- commands: the section's sidebar ----------
+   Install, watch, clean, scan and /commands share it. On a desktop it runs
+   down the left of the page under the header; under 860px it is one row of
+   links under the header, scrolled sideways, so it never pushes the page
+   down. The header's Commands link is lit on every page of the section. */
+.docs{max-width:1400px;margin:0 auto;display:grid;
+  grid-template-columns:232px minmax(0,1fr);align-items:start}
+.docmain{min-width:0;border-left:1px solid var(--rule)}
+.docnav{position:sticky;top:58px;max-height:calc(100vh - 58px);overflow-y:auto;
+  box-sizing:border-box;padding:30px 18px 40px 24px}
+.docnav-title{display:flex;align-items:center;gap:10px;color:var(--ink);
+  text-decoration:none;font-weight:600;font-size:16px;margin-bottom:8px}
+.docnav-title svg{flex:none;color:var(--brand)}
+.docnav-h{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--faint);margin:22px 0 6px}
+.docnav ul{list-style:none;margin:0;padding:0}
+.docnav li a{display:block;padding:6px 0 6px 12px;border-left:2px solid transparent;
+  color:var(--muted);text-decoration:none;font-size:14.5px}
+.docnav li a.cmdname{font-family:"IBM Plex Mono",monospace;font-size:14px}
+.docnav li a:hover{color:var(--ink)}
+.docnav li a[aria-current]{color:var(--ink);font-weight:600;border-left-color:var(--brand)}
+.in-commands .nav nav a[href="/commands"]{color:var(--ink)}
+@media(max-width:860px){
+  .docs{display:block}
+  .docmain{border-left:0}
+  .docnav{position:static;max-height:none;display:flex;gap:6px;overflow-x:auto;
+    padding:12px 20px;border-bottom:1px solid var(--rule);scrollbar-width:none}
+  .docnav::-webkit-scrollbar{display:none}
+  .docnav-title,.docnav-h{display:none}
+  .docnav ul,.docnav li{display:contents}
+  .docnav li a{flex:none;white-space:nowrap;padding:6px 12px;border:1px solid var(--rule);
+    border-radius:999px;font-size:14px}
+  .docnav li a[aria-current]{border-color:var(--ink);background:var(--surface)}
+}
+@media(max-width:760px){html.js .in-commands .nav nav a[href="/commands"]{font-weight:600}}
+/* /commands: what follows a command's example, and the flags it takes */
+.cmdnote{margin:18px 0 0;font-size:15px;color:var(--muted);max-width:68ch}
+.flaglist{margin:14px 0 0;font-size:14px;color:var(--muted)}
+.flaglist a{text-decoration:none}
+.flaglist a:hover .icode{border-color:var(--ink)}
+table.flags td:first-child code{white-space:normal}
+
 /* ---------- follow ---------- */
 /* The heading, with Maidensail's badge at its right; the badge drops under
    it where the two do not fit one line. The paragraph under them is one

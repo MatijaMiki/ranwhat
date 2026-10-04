@@ -33,17 +33,15 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Watch","item":"https://ranwhat.com/watch"}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Commands","item":"https://ranwhat.com/commands"},{"@type":"ListItem","position":3,"name":"Watch","item":"https://ranwhat.com/watch"}]}</script>
 </head>
-<body>
+<body class="in-commands">
 <header>
   <div class="shell nav">
     <a class="wordmark" href="/">ran<i>what</i></a>
     <nav id="site-nav">
       <a href="/">Home</a>
-      <a href="/watch" aria-current="page">Watch</a>
-      <a href="/clean">Clean</a>
-      <a href="/scan">Scan</a>
+      <a href="/commands">Commands</a>
       <a href="/guides">Guides</a>
       <a href="/pricing">Pricing</a>
       <a href="/about">About</a>
@@ -62,7 +60,32 @@
 </header>
 
 <main id="top">
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Watch</span></nav>
+<div class="docs">
+<aside class="docnav" aria-label="Commands">
+  <a class="docnav-title" href="/commands"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 8l4 4-4 4M12 17h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Commands</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/install">Install</a></li>
+    <li><a href="/commands">Overview</a></li>
+  </ul>
+  <p class="docnav-h">Every command</p>
+  <ul>
+    <li><a class="cmdname" href="/commands#check">check</a></li>
+    <li><a class="cmdname" href="/watch" aria-current="page">watch</a></li>
+    <li><a class="cmdname" href="/clean">clean</a></li>
+    <li><a class="cmdname" href="/commands#sources">sources</a></li>
+    <li><a class="cmdname" href="/scan">scan</a></li>
+    <li><a class="cmdname" href="/commands#live">live</a></li>
+    <li><a class="cmdname" href="/commands#demo">demo</a></li>
+    <li><a class="cmdname" href="/commands#update">update</a></li>
+  </ul>
+  <p class="docnav-h">Reference</p>
+  <ul>
+    <li><a href="/commands#flags">Every flag</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/commands">Commands</a> <span aria-hidden="true">/</span> <span aria-current="page">Watch</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">ranwhat watch</p>
@@ -143,14 +166,14 @@
       <div class="grid3">
         <div class="cell">
           <h3 class="mono" style="font-size:13px">grep "rm -rf" src/</h3>
-          <p>Searching for a string isn't running it. Search tools without an action flag are suppressed.</p>
+          <p>Searching for a string isn't running it. Search tools without an action flag are&nbsp;suppressed.</p>
         </div>
         <div class="cell">
-          <h3 class="mono" style="font-size:13px">python3 -c "…rm -rf…"</h3>
+          <h3 class="mono" style="font-size:13px">python3&nbsp;-c&nbsp;"…rm&nbsp;-rf…"</h3>
           <p>The payload is Python source. <code class="icode">bash -c</code> is the exception: that really is shell, so it recurses in.</p>
         </div>
         <div class="cell">
-          <h3 class="mono" style="font-size:13px">cat &gt; f.sh &lt;&lt;'EOF'</h3>
+          <h3 class="mono" style="font-size:13px">cat&nbsp;&gt;&nbsp;f.sh&nbsp;&lt;&lt;'EOF'</h3>
           <p>A heredoc body is data being written. Writing a script that contains a command isn't running it.</p>
         </div>
       </div>
@@ -184,7 +207,7 @@
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Codex</strong></td>
               <td data-label="Location"><code>~/.codex/sessions/</code> and <code>archived_sessions/</code> (<code>$CODEX_HOME</code>); its prompt history, shell snapshots and thread index searched for secrets</td>
-              <td data-label="Format">JSONL; SQLite read only; <code>.jsonl.zst</code> read only, on Python 3.14 or with the <code>zstd</code> command</td>
+              <td data-label="Format">JSONL; SQLite read only; <code>.jsonl.zst</code> read only, on Python 3.14 or with the <code>zstd</code>&nbsp;command</td>
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Gemini CLI</strong></td>
               <td data-label="Location"><code>~/.gemini/tmp/&lt;project&gt;/chats/</code> (<code>$GEMINI_CLI_HOME</code>)</td>
@@ -299,6 +322,8 @@
     </div>
   </div>
 </section>
+</div>
+</div>
 </main>
 
 <footer>
@@ -318,6 +343,7 @@
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
           <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
         </ul>
       </div>
       <div>

@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ranwhat commands: check, watch, clean, scan and every flag</title>
+<meta name="description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<link rel="canonical" href="https://ranwhat.com/commands">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/commands">
+<meta property="og:title" content="ranwhat commands: check, watch, clean, scan and every flag">
+<meta property="og:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="ranwhat commands: check, watch, clean, scan and every flag">
+<meta name="twitter:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Commands","item":"https://ranwhat.com/commands"}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands" aria-current="page">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Commands">
+  <a class="docnav-title" href="/commands"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 8l4 4-4 4M12 17h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Commands</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/install">Install</a></li>
+    <li><a href="/commands" aria-current="page">Overview</a></li>
+  </ul>
+  <p class="docnav-h">Every command</p>
+  <ul>
+    <li><a class="cmdname" href="/commands#check">check</a></li>
+    <li><a class="cmdname" href="/watch">watch</a></li>
+    <li><a class="cmdname" href="/clean">clean</a></li>
+    <li><a class="cmdname" href="/commands#sources">sources</a></li>
+    <li><a class="cmdname" href="/scan">scan</a></li>
+    <li><a class="cmdname" href="/commands#live">live</a></li>
+    <li><a class="cmdname" href="/commands#demo">demo</a></li>
+    <li><a class="cmdname" href="/commands#update">update</a></li>
+  </ul>
+  <p class="docnav-h">Reference</p>
+  <ul>
+    <li><a href="/commands#flags">Every flag</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Commands</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Commands</p>
+    <h1>Every ranwhat command</h1>
+    <p class="lede">
+      Eight commands in one tool, and no account for any of them. Start
+      with <span class="icode">check</span>: it reads what your agents ran and what they left
+      on disk, and changes nothing.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1" id="overview">
+  <div class="shell band split">
+    <div class="marginal">01 / Overview</div>
+    <div>
+      <h2>A bare ranwhat lists them all.</h2>
+      <p class="lede">
+        <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
+        page of their own. The other five are below, and every flag is at the end.
+      </p>
+      <div class="term" aria-label="What a bare ranwhat prints">
+        <div class="term-bar"><span>uvx ranwhat</span></div>
+        <div class="term-body"><pre>  ranwhat  · find out what your AI agents actually did
+
+  <span class="c-b">check</span>    watch and clean in one pass, changing nothing
+  <span class="c-b">watch</span>    what your agents already ran on this machine
+  <span class="c-b">clean</span>    credentials sitting in plaintext in agent transcripts
+  <span class="c-b">sources</span>  every agent ranwhat reads, and where it looked
+  <span class="c-b">scan</span>     the authority a set of credentials carries
+  <span class="c-b">live</span>     the same, asked of each token's own provider
+  <span class="c-b">demo</span>     see the output without setting anything up
+  <span class="c-b">update</span>   refresh the capability catalogue (needs a subscription)
+
+  Start here:
+    uvx ranwhat check
+    uvx ranwhat demo
+
+<span class="c-mut">  No account needed. live and --pull-usage ask only the provider that
+  issued each token, and update only fetches the catalogue. Everything
+  else reads locally and sends nothing.
+  Full options: uvx ranwhat --help</span></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2" id="check">
+  <div class="shell band split">
+    <div class="marginal">02 / check</div>
+    <div>
+      <h2>check: watch and clean in one pass.</h2>
+      <p class="lede">
+        The one to start with. It reads every agent's history for the last 30
+        days and reports both halves: the actions <a href="/watch">watch</a> flags, and
+        the secrets <a href="/clean">clean</a> finds. Every secret it finds is hidden in
+        what it prints.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="run-check">uvx ranwhat check</span>
+        <button class="copy" data-copy="#run-check">Copy</button>
+      </div>
+      <p class="cmdnote">
+        It never changes a file: <span class="icode">check --apply</span> is refused, and
+        masking is left to <span class="icode">clean</span>. <span class="icode">--json</span> prints the actions and the
+        secrets as one document. It exits with status 2 when it found no history to
+        read, so a script can tell a machine with nothing on it from a clean one.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-days"><span class="icode">--days N</span></a>, <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-root"><span class="icode">--root PATH</span></a>, <a href="#flag-state-dir"><span class="icode">--state-dir PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3" id="sources">
+  <div class="shell band split">
+    <div class="marginal">03 / sources</div>
+    <div>
+      <h2>sources: every agent it reads, and where it looked.</h2>
+      <p class="lede">
+        Twelve agents, each from where it keeps its history. <span class="icode">sources</span>
+        says which it found on this machine, the folders it checked, and whether
+        <span class="icode">clean</span> can mask secrets there or only read them.
+      </p>
+      <div class="term" aria-label="Part of what ranwhat sources prints">
+        <div class="term-bar"><span>ranwhat sources</span></div>
+        <div class="term-body"><pre>  <span class="c-b">ranwhat sources</span>  <span class="c-mut">· the agents ranwhat reads</span>
+
+  Claude Code (claude-code): found, 1 transcript
+<span class="c-mut">    ~/.claude/projects (default)
+    clean can mask it</span>
+
+  Codex (codex): found, 1 session
+<span class="c-mut">    ~/.codex (default)
+    clean can mask it</span>
+
+  GitHub Copilot CLI (copilot-cli): not found
+<span class="c-mut">    ~/.copilot (default)</span>
+<span class="c-mut">  …</span>
+
+<span class="c-mut">  Point an agent elsewhere with --path ID=PATH; --source ID reads only
+  that one.</span></pre></div>
+      </div>
+      <p class="cmdnote">
+        <span class="icode">check</span>, <span class="icode">watch</span> and <span class="icode">clean</span> read them all by
+        default. <span class="icode">--source ID</span> reads only that agent, and
+        <span class="icode">--path ID=PATH</span> reads one from somewhere else, a backup or a
+        copy from another machine. The <a href="/watch">watch page</a> lists every agent.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4" id="live">
+  <div class="shell band split">
+    <div class="marginal">04 / live</div>
+    <div>
+      <h2>live: the same scan, asked of each token's provider.</h2>
+      <p class="lede">
+        <a href="/scan">scan</a> scores the credentials a profile file describes.
+        <span class="icode">live</span> asks the tokens themselves: each one goes to the provider
+        that issued it, for read-only introspection, and nowhere else.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="run-live">uvx ranwhat live</span>
+        <button class="copy" data-copy="#run-live">Copy</button>
+      </div>
+      <p class="cmdnote">
+        It reads GitHub, Google, Slack and Stripe tokens from the environment:
+        <span class="icode">RANWHAT_GITHUB_TOKEN</span>, <span class="icode">RANWHAT_GOOGLE_TOKEN</span>,
+        <span class="icode">RANWHAT_SLACK_TOKEN</span> and <span class="icode">RANWHAT_STRIPE_TOKEN</span>. The
+        matching flags work too, but a token on the command line is visible to
+        every user on the machine through <span class="icode">ps</span>, and lands in your
+        shell history. <span class="icode">--pull-usage</span> also reads which grants were
+        used, from each provider's own record.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-pull-usage"><span class="icode">--pull-usage</span></a>, <a href="#flag-github-org"><span class="icode">--github-org ORG</span></a>, <a href="#flag-window-days"><span class="icode">--window-days N</span></a>, <a href="#flag-controls"><span class="icode">--controls PATH</span></a>, <a href="#flag-html"><span class="icode">--html PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="demo">
+  <div class="shell band split">
+    <div class="marginal">05 / demo</div>
+    <div>
+      <h2>demo: a whole report, with nothing to set up.</h2>
+      <p class="lede">
+        <span class="icode">demo</span> runs <a href="/scan">scan</a> on a profile that ships with
+        ranwhat: an agent called support-copilot, holding Google, GitHub, AWS,
+        Slack and Stripe credentials. Read a report before you point ranwhat
+        at anything of yours.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="run-demo">uvx ranwhat demo</span>
+        <button class="copy" data-copy="#run-demo">Copy</button>
+      </div>
+      <p class="cmdnote">
+        <span class="icode">--html report.html</span> writes it as a page as well:
+        <a href="/example-report">the example report</a> is that file, published as it
+        comes out. Nothing goes online.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-html"><span class="icode">--html PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1" id="update">
+  <div class="shell band split">
+    <div class="marginal">06 / update</div>
+    <div>
+      <h2>update: a newer capability catalogue.</h2>
+      <p class="lede">
+        <span class="icode">scan</span>, <span class="icode">live</span> and <span class="icode">demo</span> rate each scope
+        against a catalogue of what it allows, and one ships with ranwhat.
+        <span class="icode">update</span> fetches a newer one for a Plus subscription, and Plus
+        is <a href="/pricing">not available yet</a>.
+      </p>
+      <div class="term" aria-label="What ranwhat update --status prints">
+        <div class="term-bar"><span>ranwhat update</span></div>
+        <div class="term-body"><pre><span class="c-mut">$</span> uvx ranwhat update --status
+  No feed cached. The bundled catalogue is in use.
+  A subscription adds providers as they ship new scopes:
+  https://ranwhat.com/pricing</pre></div>
+      </div>
+      <p class="cmdnote">
+        It is the only command that talks to ranwhat's own server, and it sends
+        the subscription token and nothing else. Keep the token in
+        <span class="icode">RANWHAT_TOKEN</span>, or pass <span class="icode">--token</span> once with
+        <span class="icode">--save-token</span>. <span class="icode">--status</span> stays offline.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-token"><span class="icode">--token TOKEN</span></a>, <a href="#flag-save-token"><span class="icode">--save-token</span></a>, <a href="#flag-status"><span class="icode">--status</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2" id="flags">
+  <div class="shell band split">
+    <div class="marginal">07 / Flags</div>
+    <div>
+      <h2>Every flag, and the commands that take it.</h2>
+      <p class="lede">
+        Flags go before or after the command. A flag a command does not take
+        is refused, not ignored.
+      </p>
+      <table class="stack flags">
+        <thead><tr><th>Flag</th><th>Commands</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code id="flag-days">--days N</code></td>
+              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="What it does">How far back to read each agent's history, in days. 30 by default.</td></tr>
+          <tr><td><code id="flag-source">--source ID</code></td>
+              <td data-label="Commands">check, watch, clean,&nbsp;sources</td>
+              <td data-label="What it does">Read only this agent, and repeat it for more; every agent by default. IDs: <span class="icode">claude-code</span>, <span class="icode">codex</span>, <span class="icode">gemini</span>, <span class="icode">copilot-cli</span>, <span class="icode">qwen</span>, <span class="icode">grok</span>, <span class="icode">droid</span>, <span class="icode">kimi-code</span>, <span class="icode">kimi</span>, <span class="icode">pi</span>, <span class="icode">muse-code</span>, <span class="icode">openclaw</span>.</td></tr>
+          <tr><td><code id="flag-path">--path ID=PATH</code></td>
+              <td data-label="Commands">check, watch, clean,&nbsp;sources</td>
+              <td data-label="What it does">Read this agent's history from PATH instead of its default place, one per agent. <span class="icode">sources</span> says what each PATH is.</td></tr>
+          <tr><td><code id="flag-root">--root PATH</code></td>
+              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="What it does">Claude Code's transcript directory, <span class="icode">~/.claude/projects</span> by default. The same as <span class="icode">--path claude-code=PATH</span>.</td></tr>
+          <tr><td><code id="flag-state-dir">--state-dir PATH</code></td>
+              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="What it does">OpenClaw's state directory, <span class="icode">~/.openclaw</span> by default. The same as <span class="icode">--path openclaw=PATH</span>.</td></tr>
+          <tr><td><code id="flag-json">--json</code></td>
+              <td data-label="Commands">every command but update</td>
+              <td data-label="What it does">Print the result as JSON instead of the report.</td></tr>
+          <tr><td><code id="flag-apply">--apply</code></td>
+              <td data-label="Commands">clean</td>
+              <td data-label="What it does">Mask everything found without asking, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">check</span> refuses it.</td></tr>
+          <tr><td><code id="flag-no-interactive">--no-interactive</code></td>
+              <td data-label="Commands">clean</td>
+              <td data-label="What it does">Report and exit, instead of opening the review session.</td></tr>
+          <tr><td><code id="flag-html">--html PATH</code></td>
+              <td data-label="Commands">demo, scan, live</td>
+              <td data-label="What it does">Write the report as a page to PATH as well.</td></tr>
+          <tr><td><code id="flag-pull-usage">--pull-usage</code></td>
+              <td data-label="Commands">scan, live</td>
+              <td data-label="What it does">Read which grants were used from each provider's own record, read only: AWS, GitHub, Google and Stripe. Slack has no usage pull.</td></tr>
+          <tr><td><code id="flag-aws-profile">--aws-profile NAME</code></td>
+              <td data-label="Commands">scan, <span class="nowrap">with --pull-usage</span></td>
+              <td data-label="What it does">The AWS CLI profile to read usage with. It needs the <span class="icode">aws</span> command on your PATH.</td></tr>
+          <tr><td><code id="flag-github-org">--github-org ORG</code></td>
+              <td data-label="Commands">scan and live, <span class="nowrap">with --pull-usage</span></td>
+              <td data-label="What it does">The GitHub organisation whose audit log holds the usage. GitHub's pull needs it.</td></tr>
+          <tr><td><code id="flag-window-days">--window-days N</code></td>
+              <td data-label="Commands">scan and live, <span class="nowrap">with --pull-usage</span></td>
+              <td data-label="What it does">How far back to read usage, in days. 90 by default.</td></tr>
+          <tr><td><code id="flag-github">--github, --google, --slack, --stripe TOKEN</code></td>
+              <td data-label="Commands">live, <span class="nowrap">and --pull-usage</span></td>
+              <td data-label="What it does">A token for that provider. Prefer <span class="icode">RANWHAT_GITHUB_TOKEN</span> and the like: a value given as a flag is visible to every user on the machine through <span class="icode">ps</span>, and lands in your shell history.</td></tr>
+          <tr><td><code id="flag-controls">--controls PATH</code></td>
+              <td data-label="Commands">live</td>
+              <td data-label="What it does">A controls JSON to pair with what the tokens report.</td></tr>
+          <tr><td><code id="flag-token">--token TOKEN</code></td>
+              <td data-label="Commands">update</td>
+              <td data-label="What it does">The subscription token. Prefer <span class="icode">RANWHAT_TOKEN</span>, or save it once with <span class="icode">--save-token</span>.</td></tr>
+          <tr><td><code id="flag-save-token">--save-token</code></td>
+              <td data-label="Commands">update</td>
+              <td data-label="What it does">Write the token to <span class="icode">~/.ranwhat/token</span>, readable by you alone, so later runs need no flag.</td></tr>
+          <tr><td><code id="flag-status">--status</code></td>
+              <td data-label="Commands">update</td>
+              <td data-label="What it does">Report the cached catalogue and exit, without going online.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+</div>
+</div>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <span>cenner</span></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <span>cenner</span>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

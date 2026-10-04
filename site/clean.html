@@ -33,17 +33,15 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Clean","item":"https://ranwhat.com/clean"}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Commands","item":"https://ranwhat.com/commands"},{"@type":"ListItem","position":3,"name":"Clean","item":"https://ranwhat.com/clean"}]}</script>
 </head>
-<body>
+<body class="in-commands">
 <header>
   <div class="shell nav">
     <a class="wordmark" href="/">ran<i>what</i></a>
     <nav id="site-nav">
       <a href="/">Home</a>
-      <a href="/watch">Watch</a>
-      <a href="/clean" aria-current="page">Clean</a>
-      <a href="/scan">Scan</a>
+      <a href="/commands">Commands</a>
       <a href="/guides">Guides</a>
       <a href="/pricing">Pricing</a>
       <a href="/about">About</a>
@@ -62,7 +60,32 @@
 </header>
 
 <main id="top">
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <span aria-current="page">Clean</span></nav>
+<div class="docs">
+<aside class="docnav" aria-label="Commands">
+  <a class="docnav-title" href="/commands"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 8l4 4-4 4M12 17h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Commands</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/install">Install</a></li>
+    <li><a href="/commands">Overview</a></li>
+  </ul>
+  <p class="docnav-h">Every command</p>
+  <ul>
+    <li><a class="cmdname" href="/commands#check">check</a></li>
+    <li><a class="cmdname" href="/watch">watch</a></li>
+    <li><a class="cmdname" href="/clean" aria-current="page">clean</a></li>
+    <li><a class="cmdname" href="/commands#sources">sources</a></li>
+    <li><a class="cmdname" href="/scan">scan</a></li>
+    <li><a class="cmdname" href="/commands#live">live</a></li>
+    <li><a class="cmdname" href="/commands#demo">demo</a></li>
+    <li><a class="cmdname" href="/commands#update">update</a></li>
+  </ul>
+  <p class="docnav-h">Reference</p>
+  <ul>
+    <li><a href="/commands#flags">Every flag</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/commands">Commands</a> <span aria-hidden="true">/</span> <span aria-current="page">Clean</span></nav>
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">ranwhat clean</p>
@@ -223,6 +246,8 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
     </div>
   </div>
 </section>
+</div>
+</div>
 </main>
 
 <footer>
@@ -242,6 +267,7 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
           <li><a href="/watch">watch: what it did</a></li>
           <li><a href="/clean">clean: secrets on disk</a></li>
           <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
         </ul>
       </div>
       <div>
