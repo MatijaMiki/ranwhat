@@ -1,4 +1,5 @@
-/* Light or dark, the visitor's choice, and the header's phone menu.
+/* Light or dark, the visitor's choice, the header's phone menu, and which
+ * section of /commands its sidebar marks.
  *
  * The stylesheet follows the system setting on its own; this only adds a
  * manual override, kept in localStorage. It loads in <head> without defer,
@@ -82,5 +83,59 @@
       var link = e.target.closest && e.target.closest("nav a");
       if (!bar.contains(e.target) || link) open(false);
     });
+  });
+
+  // The commands sidebar. On a page whose own sections it links to
+  // (/commands), it marks the section being read rather than the page: the
+  // last one whose top has passed under the header. Without script the
+  // page's own link stays marked. On a phone the sidebar is one row of
+  // links, scrolled sideways to keep the marked one in sight.
+  document.addEventListener("DOMContentLoaded", function () {
+    var nav = document.querySelector(".docnav");
+    if (!nav) return;
+    var here = location.pathname.replace(/\.html$/, "");
+    var links = [], sections = [];      // a null section: the top of the page
+    var all = nav.querySelectorAll("li a[href]");
+    for (var i = 0; i < all.length; i++) {
+      var url = new URL(all[i].getAttribute("href"), location.href);
+      if (url.pathname.replace(/\.html$/, "") !== here) continue;
+      var section = url.hash ? document.getElementById(url.hash.slice(1)) : null;
+      if (url.hash && !section) continue;
+      links.push(all[i]);
+      sections.push(section);
+    }
+    if (links.length < 2) return;
+    var current = -1, LINE = 120;       // the 58px header and the anchors' scroll padding, with room
+    function mark(n) {
+      if (n === current) return;
+      current = n;
+      for (var j = 0; j < links.length; j++) {
+        if (j === n) links[j].setAttribute("aria-current", sections[j] ? "location" : "page");
+        else links[j].removeAttribute("aria-current");
+      }
+      if (nav.scrollWidth > nav.clientWidth) {
+        nav.scrollLeft = links[n].offsetLeft - (nav.clientWidth - links[n].offsetWidth) / 2;
+      }
+    }
+    function update() {
+      var n = 0, last = 0;
+      for (var j = 0; j < sections.length; j++) {
+        if (!sections[j]) continue;
+        last = j;
+        if (sections[j].getBoundingClientRect().top <= LINE) n = j;
+      }
+      // scrolled to the end, the last section is the one being read, however short
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) n = last;
+      mark(n);
+    }
+    var queued = false;
+    window.addEventListener("scroll", function () {
+      if (queued) return;
+      queued = true;
+      window.requestAnimationFrame(function () { queued = false; update(); });
+    }, { passive: true });
+    window.addEventListener("hashchange", update);
+    window.addEventListener("load", update);
+    update();
   });
 })();
