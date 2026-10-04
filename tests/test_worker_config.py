@@ -42,8 +42,30 @@ class BranchBuildsCanRun(unittest.TestCase):
             config = tomllib.load(fh)
         self.assertEqual(config["previews"], {})
         self.assertEqual(config["name"], "ranwhat-contact")
-        self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL"])
+        self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL", "LIST_EMAIL"])
         self.assertEqual([r["pattern"] for r in config["routes"]], ["ranwhat.com/api/*"])
+
+    @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
+    def test_each_email_binding_is_held_to_its_job(self):
+        # The contact form's binding reaches one inbox and nothing else. The
+        # release list's reaches anyone, so it may send only from the one
+        # address list.js sends from.
+        with WRANGLER.open("rb") as fh:
+            bindings = {b["name"]: b for b in tomllib.load(fh)["send_email"]}
+        self.assertEqual(bindings["CONTACT_EMAIL"],
+                         {"name": "CONTACT_EMAIL", "destination_address": "ranwhatcom@gmail.com"})
+        lst = (WRANGLER.parent / "src" / "list.js").read_text(encoding="utf-8")
+        sender = re.search(r'^export const FROM = "([^"]+)";', lst, re.M).group(1)
+        self.assertEqual(bindings["LIST_EMAIL"],
+                         {"name": "LIST_EMAIL", "allowed_sender_addresses": [sender]})
+
+    @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
+    def test_the_list_has_its_database_and_its_cron(self):
+        with WRANGLER.open("rb") as fh:
+            config = tomllib.load(fh)
+        # No database_id: Wrangler creates the database on the first deploy.
+        self.assertEqual(config["d1_databases"], [{"binding": "LIST", "database_name": "ranwhat-list"}])
+        self.assertEqual(len(config["triggers"]["crons"]), 1)
 
 
 if __name__ == "__main__":
