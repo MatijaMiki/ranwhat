@@ -50,9 +50,12 @@ zone_name = "ranwhat.com"
 # site/consent.js. Remove it and the Worker reports nothing to X.
 [vars]
 X_EVENT_LEAD = "tw-rfz6t-rfz7z"
-# "automatic" adds Stripe Tax to checkout, once the account's tax
-# registrations are entered in the Stripe dashboard. "off" leaves it out.
-STRIPE_TAX = "off"
+# Who answers for VAT on Plus (src/stripe.js). "managed": Stripe's Managed
+# Payments, merchant of record, which collects and files it; the account must
+# have accepted its terms. "automatic": Stripe Tax calculates it and we file
+# it. "off": no tax in checkout. site/terms.html and privacy.html describe
+# "managed": change them with it.
+STRIPE_TAX = "managed"
 
 # Signups waiting to be confirmed, and which releases went out. No
 # database_id on purpose: the first deploy creates the database (Wrangler's

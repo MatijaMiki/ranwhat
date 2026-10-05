@@ -168,6 +168,8 @@ test("each plan opens Stripe Checkout for its own price, marked as Plus", async 
     assert.equal(form.cancel_url, "https://ranwhat.com/pricing#plus");
     assert.match(form["custom_text[submit][message]"], /14 days/);
     assert.equal(form["automatic_tax[enabled]"], undefined, "tax stays off until STRIPE_TAX says");
+    assert.equal(form["managed_payments[enabled]"], undefined);
+    assert.equal(form["tax_id_collection[enabled]"], "true");
   }
   const lookups = s.calls.filter((c) => c.key === "GET /v1/prices").map((c) => c.form["lookup_keys[0]"]);
   assert.deepEqual(lookups, ["ranwhat_plus_monthly", "ranwhat_plus_annual"]);
@@ -176,7 +178,23 @@ test("each plan opens Stripe Checkout for its own price, marked as Plus", async 
 test("STRIPE_TAX=automatic turns on Stripe Tax in Checkout", async () => {
   const s = services();
   await buy(env({ STRIPE_TAX: "automatic" }));
-  assert.equal(s.calls.pop().form["automatic_tax[enabled]"], "true");
+  const { form } = s.calls.pop();
+  assert.equal(form["automatic_tax[enabled]"], "true");
+  assert.equal(form["tax_id_collection[enabled]"], "true");
+});
+
+test("STRIPE_TAX=managed hands tax to Managed Payments, and leaves out what it refuses", async () => {
+  const s = services();
+  const res = await buy(env({ STRIPE_TAX: "managed" }));
+  assert.equal(res.status, 303);
+  const { form } = s.calls.pop();
+  assert.equal(form["managed_payments[enabled]"], "true");
+  // Stripe's list of parameters a Managed Payments session must not carry.
+  for (const refused of ["automatic_tax[enabled]", "tax_id_collection[enabled]", "adaptive_pricing[enabled]",
+                         "payment_method_types[0]", "invoice_creation[enabled]"]) {
+    assert.equal(form[refused], undefined, refused);
+  }
+  assert.equal(form["metadata[product]"], "ranwhat-plus");
 });
 
 test("a plan that is not one of the two, or a missing price, opens nothing", async () => {
@@ -223,6 +241,24 @@ test("an event without Stripe's signature, with another secret's, or an old one 
     body: good.body.replace("buyer@example.com", "thief@example.com") });
   assert.equal(res.status, 400);
   assert.equal(s.emails.length, 0);
+});
+
+test("a validly signed event cannot send the token anywhere Stripe does not say", async () => {
+  // As if the signing secret had leaked: the event is signed, but its
+  // contents are the sender's. The Worker asks Stripe for the session.
+  const s = services();
+  const e = env();
+  const { id } = await bought(s, e);
+  const forged = completedEvent(s, id);
+  forged.data.object = { ...forged.data.object, customer_details: { email: "thief@example.com" } };
+  assert.equal((await deliver(e, forged)).status, 200);
+  assert.deepEqual(s.emails.map((m) => m.to[0]), ["buyer@example.com"]);
+  assert.ok(s.calls.some((c) => c.key === `GET /v1/checkout/sessions/${id}`));
+
+  // A session Stripe never made: acknowledged, nothing issued, no retry asked for.
+  const made = { ...forged.data.object, id: "cs_test_neverexisted1" };
+  assert.equal((await deliver(e, { type: "checkout.session.completed", data: { object: made } })).status, 200);
+  assert.equal(s.emails.length, 1);
 });
 
 test("paying emails a token once, and the feed takes it", async () => {

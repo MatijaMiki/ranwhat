@@ -93,10 +93,20 @@ async function stripe(env, method, path, params) {
   return data;
 }
 
-/* STRIPE_TAX, in wrangler.toml: "automatic" turns on Stripe Tax, which
-   needs the account's tax registrations entered in the dashboard first.
-   Anything else leaves tax out of Checkout. */
-const tax = (env) => (env.STRIPE_TAX === "automatic" ? { automatic_tax: { enabled: true } } : {});
+/* STRIPE_TAX, in wrangler.toml, says who answers for VAT:
+     "managed"    Stripe's Managed Payments: Stripe (as Link) is the
+                  merchant of record, and collects and files the tax itself.
+                  It sets tax and tax IDs on its own, so Checkout must not
+                  ask for either.
+     "automatic"  Stripe Tax calculates it and we file it, which needs the
+                  account's tax registrations entered in the dashboard.
+     otherwise    no tax in Checkout. A tax ID is still asked for, so a
+                  business gets it on its invoice. */
+function tax(env) {
+  if (env.STRIPE_TAX === "managed") return { managed_payments: { enabled: true } };
+  const ids = { tax_id_collection: { enabled: true } };
+  return env.STRIPE_TAX === "automatic" ? { ...ids, automatic_tax: { enabled: true } } : ids;
+}
 
 /* ---------- tokens ---------- */
 
@@ -165,7 +175,6 @@ export async function checkout(request, env) {
       subscription_data: { metadata: { product: PRODUCT } },
       allow_promotion_codes: true,
       billing_address_collection: "required",
-      tax_id_collection: { enabled: true },
       custom_text: { submit: { message: TERMS } },
       ...tax(env),
     });
@@ -278,13 +287,21 @@ export async function webhook(request, env) {
   const object = (event.data && event.data.object) || {};
   try {
     if (type === "checkout.session.completed" || type === "checkout.session.async_payment_succeeded") {
-      await completed(env, object);
+      /* The session as Stripe has it, not as the event tells it: whoever
+         held a leaked signing secret could sign an event, but could not
+         make Stripe send a token to an address of their own. Another
+         site's sessions cost no call. */
+      if (object.metadata && object.metadata.product === PRODUCT && SESSION.test(String(object.id))) {
+        await completed(env, await stripe(env, "GET", `/checkout/sessions/${object.id}`));
+      }
     } else if (type.startsWith("customer.subscription.")) {
       /* Checked on the event first, so another site's subscriptions on the
          same account cost no call to Stripe. */
       if (object.metadata && object.metadata.product === PRODUCT) await sync(env, object.id);
     }
   } catch (err) {
+    /* A session or subscription Stripe does not know: nothing to retry. */
+    if (err.status === 404) return json(200, { received: true });
     /* A 500 makes Stripe deliver it again, for up to three days. */
     console.log(`stripe ${type}: ${err.code || "error"}`);
     return json(500, { error: "Not handled yet." });

@@ -14,7 +14,7 @@ exists (a price's amount cannot be changed in Stripe), and says so when one
 differs from what is below.
 
 What it makes, and what worker/src/stripe.js expects to find:
-  product   id ranwhat_plus
+  product   id ranwhat_plus, tax code SaaS for business use
   prices    EUR 12 a month (lookup key ranwhat_plus_monthly) and
             EUR 120 a year (ranwhat_plus_annual), tax-inclusive
   webhook   https://ranwhat.com/api/stripe, for the events in EVENTS
@@ -33,6 +33,10 @@ import urllib.request
 
 API = os.environ.get("STRIPE_API_BASE", "https://api.stripe.com")
 PRODUCT_ID = "ranwhat_plus"
+# Software as a service, business use: what Stripe Tax and Managed Payments
+# tax it as. Managed Payments refuses a product without an eligible code, and
+# the business/personal split only matters for sales in the US.
+TAX_CODE = "txcd_10103001"
 TAG = {"product": "ranwhat-plus"}
 ORIGIN = "https://ranwhat.com"
 WEBHOOK = ORIGIN + "/api/stripe"
@@ -99,15 +103,22 @@ class Stripe:
 def product(stripe):
     try:
         found = stripe("GET", "/v1/products/" + PRODUCT_ID)
-        print("  product   %s (already there)" % found["id"])
-        return found["id"]
     except StripeError as exc:
         if exc.status != 404:
             raise
+        found = None
+    if found:
+        if found.get("tax_code") != TAX_CODE:
+            stripe("POST", "/v1/products/" + PRODUCT_ID, {"tax_code": TAX_CODE})
+            print("  product   %s (already there; tax code set to %s)" % (found["id"], TAX_CODE))
+        else:
+            print("  product   %s (already there)" % found["id"])
+        return found["id"]
     made = stripe("POST", "/v1/products", {
         "id": PRODUCT_ID,
         "name": "ranwhat Plus",
         "description": "The current capability catalogue for ranwhat, as providers add scopes.",
+        "tax_code": TAX_CODE,
         "metadata": TAG,
     })
     print("  product   %s (made)" % made["id"])

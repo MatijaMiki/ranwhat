@@ -64,8 +64,12 @@ class FakeStripe(http.server.BaseHTTPRequestHandler):
                 return self._reply(200, s["products"][pid])
             return self._reply(404, {"error": {"type": "invalid_request_error", "code": "resource_missing"}})
         if method == "POST" and path == "/v1/products":
-            s["products"][form["id"]] = {"id": form["id"], "name": form["name"]}
+            s["products"][form["id"]] = {"id": form["id"], "name": form["name"], "tax_code": form.get("tax_code")}
             return self._reply(200, s["products"][form["id"]])
+        if method == "POST" and path.startswith("/v1/products/"):
+            prod = s["products"][path.rsplit("/", 1)[1]]
+            prod.update(form)
+            return self._reply(200, prod)
         if method == "GET" and path == "/v1/prices":
             keys = lists("lookup_keys")
             return self._reply(200, {"data": [p for p in s["prices"] if p["lookup_key"] in keys and p["active"]]})
@@ -142,6 +146,8 @@ class SetupScript(unittest.TestCase):
         out = self.run_tool()
         s = FakeStripe.state
         self.assertEqual(list(s["products"]), ["ranwhat_plus"])
+        # Managed Payments only sells a product with an eligible digital tax code.
+        self.assertEqual(s["products"]["ranwhat_plus"]["tax_code"], "txcd_10103001")
         self.assertEqual(sorted((p["lookup_key"], p["unit_amount"], p["currency"], p["recurring"]["interval"])
                                 for p in s["prices"]),
                          [("ranwhat_plus_annual", 12000, "eur", "year"),
@@ -170,6 +176,14 @@ class SetupScript(unittest.TestCase):
         made = [c for c in s["calls"][len(s["calls"]) // 2:] if c["method"] == "POST"
                 and c["path"] in ("/v1/products", "/v1/prices", "/v1/webhook_endpoints")]
         self.assertEqual(made, [])
+
+    def test_a_product_made_without_a_tax_code_gets_one(self):
+        FakeStripe.state["products"]["ranwhat_plus"] = {"id": "ranwhat_plus", "name": "ranwhat Plus", "tax_code": None}
+        out = self.run_tool()
+        self.assertEqual(FakeStripe.state["products"]["ranwhat_plus"]["tax_code"], "txcd_10103001")
+        self.assertIn("tax code set to txcd_10103001", out)
+        out = self.run_tool()
+        self.assertIn("ranwhat_plus (already there)\n", out)
 
     def test_a_price_that_differs_is_reported_and_left_alone(self):
         FakeStripe.state["prices"].append({"id": "price_old", "lookup_key": "ranwhat_plus_monthly", "active": True,
@@ -209,6 +223,16 @@ class ScriptAndWorkerAgree(unittest.TestCase):
             handled = ('type === "%s"' % event) in WORKER or (
                 event.startswith("customer.subscription.") and 'type.startsWith("customer.subscription.")' in WORKER)
             self.assertTrue(handled, event)
+
+    def test_the_terms_describe_who_answers_for_vat(self):
+        # STRIPE_TAX="managed" makes Stripe the seller of record, which the
+        # terms and the privacy page have to say; any other mode, they must not.
+        toml = (ROOT / "worker" / "wrangler.toml").read_text(encoding="utf-8")
+        managed = re.search(r'^STRIPE_TAX = "(\w+)"', toml, re.M).group(1) == "managed"
+        for page in ("terms.html", "privacy.html"):
+            text = " ".join((ROOT / "site" / page).read_text(encoding="utf-8").split())
+            self.assertEqual("merchant of record" in text, managed, page)
+        self.assertIn('env.STRIPE_TAX === "managed"', WORKER)
 
     def test_the_prices_are_the_ones_on_the_pricing_page(self):
         page = (ROOT / "site" / "pricing.html").read_text(encoding="utf-8")
