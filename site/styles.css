@@ -627,7 +627,7 @@ table.flags td:first-child code{white-space:normal}
   justify-content:space-between;gap:12px 24px;margin-bottom:14px}
 .follow-head h2{margin:0}
 .follow-head .badges{display:flex;flex-wrap:wrap;gap:12px}
-.follow-head .featured{display:block;flex:none;line-height:0}
+.follow-head .badges a{display:block;flex:none;line-height:0}
 .lede.follow-lede{max-width:none}
 ul.follow{list-style:none;margin:20px 0 0;padding:0;display:flex;
   flex-direction:column;gap:1px;background:var(--rule-2);
