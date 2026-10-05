@@ -199,10 +199,11 @@
             and asks nothing of you.</span></div>
         <div class="row" id="payments"><span class="k">Payments</span>
           <span class="v">If you subscribe to <a href="/pricing#plus">Plus</a>,
-            you pay on Stripe&rsquo;s checkout page, not ours. Stripe collects
-            your card, your email address, your billing address and, if you
-            give it, your VAT number, and keeps them with the subscription and
-            its invoices. We never see your card. Our Worker keeps the Stripe
+            you pay on Stripe&rsquo;s checkout page, not ours. Stripe sells you
+            the subscription as merchant of record, through Link: it collects
+            your card, your name, your email address and your billing address,
+            keeps them with the subscription and its invoices, and may offer
+            you a Link account to manage it. We never see your card. Our Worker keeps the Stripe
             IDs of your subscription and customer record, the
             subscription&rsquo;s status and a hash of your feed token, in the
             same Cloudflare database, so the feed knows whether to answer:
@@ -215,7 +216,8 @@
             and tax law (art.&nbsp;6(1)(c)). Stripe may process this in the
             United States. Stripe&rsquo;s handling is described in
             <a href="https://stripe.com/privacy">Stripe&rsquo;s privacy
-            policy</a>, and the <a href="/terms">terms</a> cover the rest.</span></div>
+            policy</a>, Link&rsquo;s in <a href="https://link.com/privacy">Link&rsquo;s</a>,
+            and the <a href="/terms">terms</a> cover the rest.</span></div>
         <div class="row"><span class="k">Server logs</span>
           <span class="v">Cloudflare hosts and serves the site. It logs request
             metadata, including your IP address, to deliver pages and absorb

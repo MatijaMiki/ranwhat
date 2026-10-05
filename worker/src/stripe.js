@@ -93,10 +93,20 @@ async function stripe(env, method, path, params) {
   return data;
 }
 
-/* STRIPE_TAX, in wrangler.toml: "automatic" turns on Stripe Tax, which
-   needs the account's tax registrations entered in the dashboard first.
-   Anything else leaves tax out of Checkout. */
-const tax = (env) => (env.STRIPE_TAX === "automatic" ? { automatic_tax: { enabled: true } } : {});
+/* STRIPE_TAX, in wrangler.toml, says who answers for VAT:
+     "managed"    Stripe's Managed Payments: Stripe (as Link) is the
+                  merchant of record, and collects and files the tax itself.
+                  It sets tax and tax IDs on its own, so Checkout must not
+                  ask for either.
+     "automatic"  Stripe Tax calculates it and we file it, which needs the
+                  account's tax registrations entered in the dashboard.
+     otherwise    no tax in Checkout. A tax ID is still asked for, so a
+                  business gets it on its invoice. */
+function tax(env) {
+  if (env.STRIPE_TAX === "managed") return { managed_payments: { enabled: true } };
+  const ids = { tax_id_collection: { enabled: true } };
+  return env.STRIPE_TAX === "automatic" ? { ...ids, automatic_tax: { enabled: true } } : ids;
+}
 
 /* ---------- tokens ---------- */
 
@@ -165,7 +175,6 @@ export async function checkout(request, env) {
       subscription_data: { metadata: { product: PRODUCT } },
       allow_promotion_codes: true,
       billing_address_collection: "required",
-      tax_id_collection: { enabled: true },
       custom_text: { submit: { message: TERMS } },
       ...tax(env),
     });

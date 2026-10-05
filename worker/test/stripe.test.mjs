@@ -168,6 +168,8 @@ test("each plan opens Stripe Checkout for its own price, marked as Plus", async 
     assert.equal(form.cancel_url, "https://ranwhat.com/pricing#plus");
     assert.match(form["custom_text[submit][message]"], /14 days/);
     assert.equal(form["automatic_tax[enabled]"], undefined, "tax stays off until STRIPE_TAX says");
+    assert.equal(form["managed_payments[enabled]"], undefined);
+    assert.equal(form["tax_id_collection[enabled]"], "true");
   }
   const lookups = s.calls.filter((c) => c.key === "GET /v1/prices").map((c) => c.form["lookup_keys[0]"]);
   assert.deepEqual(lookups, ["ranwhat_plus_monthly", "ranwhat_plus_annual"]);
@@ -176,7 +178,23 @@ test("each plan opens Stripe Checkout for its own price, marked as Plus", async 
 test("STRIPE_TAX=automatic turns on Stripe Tax in Checkout", async () => {
   const s = services();
   await buy(env({ STRIPE_TAX: "automatic" }));
-  assert.equal(s.calls.pop().form["automatic_tax[enabled]"], "true");
+  const { form } = s.calls.pop();
+  assert.equal(form["automatic_tax[enabled]"], "true");
+  assert.equal(form["tax_id_collection[enabled]"], "true");
+});
+
+test("STRIPE_TAX=managed hands tax to Managed Payments, and leaves out what it refuses", async () => {
+  const s = services();
+  const res = await buy(env({ STRIPE_TAX: "managed" }));
+  assert.equal(res.status, 303);
+  const { form } = s.calls.pop();
+  assert.equal(form["managed_payments[enabled]"], "true");
+  // Stripe's list of parameters a Managed Payments session must not carry.
+  for (const refused of ["automatic_tax[enabled]", "tax_id_collection[enabled]", "adaptive_pricing[enabled]",
+                         "payment_method_types[0]", "invoice_creation[enabled]"]) {
+    assert.equal(form[refused], undefined, refused);
+  }
+  assert.equal(form["metadata[product]"], "ranwhat-plus");
 });
 
 test("a plan that is not one of the two, or a missing price, opens nothing", async () => {
