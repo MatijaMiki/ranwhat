@@ -619,13 +619,14 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 table.flags td:first-child code{white-space:normal}
 
 /* ---------- follow ---------- */
-/* The heading, with Maidensail's badge at its right; the badge drops under
-   it where the two do not fit one line. The paragraph under them is one
+/* The heading, with the directory badges at its right; they drop under it
+   where they do not fit one line, and under each other on a phone. The paragraph under them is one
    sentence, and at the usual measure its last word wrapped onto a third
    line, so it takes the column's width. */
 .follow-head{display:flex;flex-wrap:wrap;align-items:center;
   justify-content:space-between;gap:12px 24px;margin-bottom:14px}
 .follow-head h2{margin:0}
+.follow-head .badges{display:flex;flex-wrap:wrap;gap:12px}
 .follow-head .featured{display:block;flex:none;line-height:0}
 .lede.follow-lede{max-width:none}
 ul.follow{list-style:none;margin:20px 0 0;padding:0;display:flex;
