@@ -93,19 +93,30 @@ async function stripe(env, method, path, params) {
   return data;
 }
 
-/* STRIPE_TAX, in wrangler.toml, says who answers for VAT:
+/* STRIPE_TAX, in wrangler.toml, says who answers for VAT, and with it how
+   much of the checkout page is ours to set:
      "managed"    Stripe's Managed Payments: Stripe (as Link) is the
-                  merchant of record, and collects and files the tax itself.
-                  It sets tax and tax IDs on its own, so Checkout must not
-                  ask for either.
+                  merchant of record. It runs the page, collects the tax and
+                  files it, so the session carries only what Stripe's own
+                  Managed Payments guide shows. Its list of parameters it
+                  refuses is not complete: it turned down custom_text, which
+                  the list does not name. The terms and privacy links on the
+                  page come from the dashboard's Checkout settings instead.
      "automatic"  Stripe Tax calculates it and we file it, which needs the
                   account's tax registrations entered in the dashboard.
-     otherwise    no tax in Checkout. A tax ID is still asked for, so a
-                  business gets it on its invoice. */
-function tax(env) {
+     otherwise    no tax in Checkout.
+   In the last two, the page asks for the billing address and a tax ID, so a
+   business gets both on its invoice, takes promotion codes, and shows the
+   cancellation and refund terms under the pay button. */
+function seller(env) {
   if (env.STRIPE_TAX === "managed") return { managed_payments: { enabled: true } };
-  const ids = { tax_id_collection: { enabled: true } };
-  return env.STRIPE_TAX === "automatic" ? { ...ids, automatic_tax: { enabled: true } } : ids;
+  return {
+    allow_promotion_codes: true,
+    billing_address_collection: "required",
+    tax_id_collection: { enabled: true },
+    custom_text: { submit: { message: TERMS } },
+    ...(env.STRIPE_TAX === "automatic" ? { automatic_tax: { enabled: true } } : {}),
+  };
 }
 
 /* ---------- tokens ---------- */
@@ -173,10 +184,7 @@ export async function checkout(request, env) {
       cancel_url: `${ORIGIN}/pricing#plus`,
       metadata: { product: PRODUCT },
       subscription_data: { metadata: { product: PRODUCT } },
-      allow_promotion_codes: true,
-      billing_address_collection: "required",
-      custom_text: { submit: { message: TERMS } },
-      ...tax(env),
+      ...seller(env),
     });
   } catch (err) {
     console.log(`stripe checkout: ${err.code}`);

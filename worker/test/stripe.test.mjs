@@ -183,18 +183,19 @@ test("STRIPE_TAX=automatic turns on Stripe Tax in Checkout", async () => {
   assert.equal(form["tax_id_collection[enabled]"], "true");
 });
 
-test("STRIPE_TAX=managed hands tax to Managed Payments, and leaves out what it refuses", async () => {
+test("STRIPE_TAX=managed sends Managed Payments only what Stripe's guide shows", async () => {
+  // Stripe's list of refused parameters is not complete (it turned down
+  // custom_text, which the list does not name), so the session is pinned
+  // to exactly the keys its guide uses, plus our own metadata.
   const s = services();
   const res = await buy(env({ STRIPE_TAX: "managed" }));
   assert.equal(res.status, 303);
   const { form } = s.calls.pop();
+  assert.deepEqual(Object.keys(form).sort(), [
+    "cancel_url", "line_items[0][price]", "line_items[0][quantity]", "managed_payments[enabled]",
+    "metadata[product]", "mode", "subscription_data[metadata][product]", "success_url",
+  ]);
   assert.equal(form["managed_payments[enabled]"], "true");
-  // Stripe's list of parameters a Managed Payments session must not carry.
-  for (const refused of ["automatic_tax[enabled]", "tax_id_collection[enabled]", "adaptive_pricing[enabled]",
-                         "payment_method_types[0]", "invoice_creation[enabled]"]) {
-    assert.equal(form[refused], undefined, refused);
-  }
-  assert.equal(form["metadata[product]"], "ranwhat-plus");
 });
 
 test("a plan that is not one of the two, or a missing price, opens nothing", async () => {
