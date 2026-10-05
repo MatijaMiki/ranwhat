@@ -243,6 +243,24 @@ test("an event without Stripe's signature, with another secret's, or an old one 
   assert.equal(s.emails.length, 0);
 });
 
+test("a validly signed event cannot send the token anywhere Stripe does not say", async () => {
+  // As if the signing secret had leaked: the event is signed, but its
+  // contents are the sender's. The Worker asks Stripe for the session.
+  const s = services();
+  const e = env();
+  const { id } = await bought(s, e);
+  const forged = completedEvent(s, id);
+  forged.data.object = { ...forged.data.object, customer_details: { email: "thief@example.com" } };
+  assert.equal((await deliver(e, forged)).status, 200);
+  assert.deepEqual(s.emails.map((m) => m.to[0]), ["buyer@example.com"]);
+  assert.ok(s.calls.some((c) => c.key === `GET /v1/checkout/sessions/${id}`));
+
+  // A session Stripe never made: acknowledged, nothing issued, no retry asked for.
+  const made = { ...forged.data.object, id: "cs_test_neverexisted1" };
+  assert.equal((await deliver(e, { type: "checkout.session.completed", data: { object: made } })).status, 200);
+  assert.equal(s.emails.length, 1);
+});
+
 test("paying emails a token once, and the feed takes it", async () => {
   const s = services();
   const e = env();

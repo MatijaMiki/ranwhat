@@ -287,13 +287,21 @@ export async function webhook(request, env) {
   const object = (event.data && event.data.object) || {};
   try {
     if (type === "checkout.session.completed" || type === "checkout.session.async_payment_succeeded") {
-      await completed(env, object);
+      /* The session as Stripe has it, not as the event tells it: whoever
+         held a leaked signing secret could sign an event, but could not
+         make Stripe send a token to an address of their own. Another
+         site's sessions cost no call. */
+      if (object.metadata && object.metadata.product === PRODUCT && SESSION.test(String(object.id))) {
+        await completed(env, await stripe(env, "GET", `/checkout/sessions/${object.id}`));
+      }
     } else if (type.startsWith("customer.subscription.")) {
       /* Checked on the event first, so another site's subscriptions on the
          same account cost no call to Stripe. */
       if (object.metadata && object.metadata.product === PRODUCT) await sync(env, object.id);
     }
   } catch (err) {
+    /* A session or subscription Stripe does not know: nothing to retry. */
+    if (err.status === 404) return json(200, { received: true });
     /* A 500 makes Stripe deliver it again, for up to three days. */
     console.log(`stripe ${type}: ${err.code || "error"}`);
     return json(500, { error: "Not handled yet." });
