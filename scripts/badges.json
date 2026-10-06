@@ -1,0 +1,25 @@
+{
+  "badges": [
+    {
+      "name": "Cyber Vendor Guide",
+      "added": "2026-10-06",
+      "snippet": "<a href=\"https://www.cybervendorguide.com/tools/ranwhat\"><img src=\"https://www.cybervendorguide.com/badge/listed-light.svg\" alt=\"Listed on Cyber Vendor Guide\" width=\"240\" height=\"56\"></a>",
+      "sha256": "5f4eb39732b539282123a1f1f53d9824c2087ae3c9961aa95d7d086bae094946",
+      "checked": "2026-10-06"
+    },
+    {
+      "name": "MarketingDB",
+      "added": "2026-10-05",
+      "snippet": "<a href=\"https://marketingdb.live\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\"><img src=\"https://marketingdb.live/badge.svg\" alt=\"Launched on MarketingDB\" width=\"190\" height=\"44\"/></a>",
+      "sha256": "32e7f3a67b8afbd430fe17fefbee15c6cbc50c86369068c1dfdee751d6659167",
+      "checked": "2026-10-06"
+    },
+    {
+      "name": "Maidensail",
+      "added": "2026-10-04",
+      "snippet": "<a href=\"https://maidensail.com/startup/ranwhat\" rel=\"dofollow\"><img src=\"https://maidensail.com/badge/ranwhat.svg\" alt=\"Featured on Maidensail\" width=\"190\" height=\"44\"></a>",
+      "sha256": "a3c466bfb490ae08a9237e507dc20cfab5b63226c8e877cbe21a28a8bdde902b",
+      "checked": "2026-10-06"
+    }
+  ]
+}

@@ -242,16 +242,20 @@
             your browser to tell a person from a script. Resend, only if you
             sign up for release emails or subscribe to Plus (above). Stripe,
             only if you subscribe to Plus (Payments, above). Google Analytics and X, each only if you allow
-            it (above). Maidensail and MarketingDB, on the home page only: the
-            "Featured on Maidensail" and "Launched on MarketingDB" badges are
-            images from maidensail.com and marketingdb.live, so your browser
-            asks each of them for its badge, and each sees your IP address and
-            browser like any website you load something from. Neither sets
-            cookies, and each is told only that the request came from
-            ranwhat.com, not which page.
+            it (above). The directories that list ranwhat, on the home page
+            only (Directory badges, below).
             Cloudflare Web Analytics, on every page (Page views, above).
             Nothing else loads from anywhere else. Typefaces are served from this
             domain rather than Google Fonts.</span></div>
+        <div class="row" id="badges"><span class="k">Directory badges</span>
+          <span class="v">The home page shows a badge for each directory that
+            lists ranwhat. Each badge is an image served by or for that
+            directory, from the host named after it below, so your browser
+            asks that host for it, and the host sees your IP address and
+            browser like any website you load something from. It is told only
+            that the request came from ranwhat.com, not which page. Each badge
+            was checked for cookies when it was added, and none sets one.
+            <!-- badges:privacy:start -->The directories are Cyber Vendor Guide (www.cybervendorguide.com), Maidensail (maidensail.com) and MarketingDB (marketingdb.live).<!-- badges:privacy:end --></span></div>
         <div class="row"><span class="k">Email</span>
           <span class="v">Mail, whether written directly or sent through the form,
             is kept in a Gmail mailbox, so Google holds it too and may store it
@@ -329,6 +333,7 @@
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
         </ul>
       </div>
       <div>

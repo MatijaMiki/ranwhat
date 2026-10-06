@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI coding agent security: a practical checklist | ranwhat</title>
-<meta name="description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.">
+<title>AI agent security: a checklist for coding agents | ranwhat</title>
+<meta name="description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.">
 <link rel="canonical" href="https://ranwhat.com/guides/ai-coding-agent-security">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -18,8 +18,8 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/ai-coding-agent-security">
-<meta property="og:title" content="AI coding agent security: a practical checklist | ranwhat">
-<meta property="og:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.">
+<meta property="og:title" content="AI agent security: a checklist for coding agents | ranwhat">
+<meta property="og:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,14 +27,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="AI coding agent security: a practical checklist | ranwhat">
-<meta name="twitter:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.">
+<meta name="twitter:title" content="AI agent security: a checklist for coding agents | ranwhat">
+<meta name="twitter:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"AI coding agent security: a checklist for your own machine","description":"What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to scope the tokens it holds.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-security"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent security","item":"https://ranwhat.com/guides/ai-coding-agent-security"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"AI coding agent security: a checklist for your own machine","description":"What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.","datePublished":"2026-10-02","dateModified":"2026-10-06","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-security","about":[{"@type":"Thing","name":"AI agent security"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent security","item":"https://ranwhat.com/guides/ai-coding-agent-security"}]}]}</script>
 </head>
 <body>
 <header>
@@ -68,14 +68,15 @@
     <h1>AI coding agent security: a checklist for your own machine</h1>
     <p class="lede">
       A coding agent runs commands on your machine, next to your files and the
-      tokens in your environment. This checklist covers what it can reach, what
-      it writes down, how to check what it did, and how to shrink what it could
-      do next. Claude Code is the worked example.
+      tokens in your environment. For one developer, AI agent security comes
+      down to that: what the agent can reach, what it writes down, how to
+      check what it did, and how to shrink what it could do next. This
+      checklist covers each, with Claude Code as the worked example.
     </p>
     <p style="margin:18px 0 0;font-size:14px;color:var(--muted)">
       Checked against the Claude Code, GitHub, Stripe, AWS and MCP
       documentation, and the advisories and research under Sources.
-      Published <time datetime="2026-10-02">2 October 2026</time>.
+      Published 2 October 2026, updated <time datetime="2026-10-06">6 October 2026</time>.
     </p>
   </div>
 </section>
@@ -372,6 +373,7 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in your ag
         <span class="icode">history.jsonl</span> yet.
       </p>
       <p class="more" style="margin-top:14px"><a href="/guides/claude-code-history">Where Claude Code keeps its history, and for how long &rarr;</a></p>
+      <p class="more"><a href="/guides/developer-opsec">Developer OPSEC: what the rest of your laptop keeps &rarr;</a></p>
     </div>
   </div>
 </section>
@@ -579,6 +581,8 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
           <span class="v"><span class="icode">watch</span>: risky actions in the history of Claude Code and eleven other coding agents. <span class="icode">clean</span>: credentials in their transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries.</span></div>
         <div class="row"><span class="k">Does not</span>
           <span class="v">Block anything while the agent works: Claude Code's permission rules, hooks and sandbox do that. It does not scan MCP servers or skills for malicious content. It flags a WebFetch call only when a secret-shaped value is in it, and does not flag a setup command that fetches its payload at run time.</span></div>
+        <div class="row"><span class="k">OWASP</span>
+          <span class="v">The <a href="https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html">OWASP AI Agent Security Cheat Sheet</a> lists, among its key risks, sensitive data exposure (credentials in agent context or logs), tool abuse through overly permissive tools, and irreversible or financial actions taken without validation. Sections 03 to 06 are the after-the-fact side of those three. Prompt injection is first on the same list, and ranwhat does not detect it.</span></div>
         <div class="row"><span class="k">Network</span>
           <span class="v">Reads locally. <span class="icode">live</span> and <span class="icode">--pull-usage</span> ask only the provider that issued each token.</span></div>
       </div>
@@ -625,6 +629,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
         <li><a href="https://web.archive.org/web/20251226221836/https://www.koi.ai/blog/phantomraven-npm-malware-hidden-in-invisible-dependencies">Koi Security: PhantomRaven<span>archived copy</span></a></li>
         <li><a href="https://docs.npmjs.com/cli/v11/using-npm/config#ignore-scripts">npm: ignore-scripts<span>docs.npmjs.com</span></a></li>
         <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices">MCP: Security best practices<span>modelcontextprotocol.io</span></a></li>
+        <li><a href="https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html">OWASP: AI Agent Security Cheat Sheet<span>key risks</span></a></li>
         <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">GitHub: Managing personal access tokens<span>docs.github.com</span></a></li>
         <li><a href="https://docs.stripe.com/mcp">Stripe: Model Context Protocol<span>docs.stripe.com</span></a></li>
         <li><a href="https://docs.stripe.com/keys">Stripe: API keys<span>docs.stripe.com</span></a></li>
@@ -677,6 +682,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
         </ul>
       </div>
       <div>

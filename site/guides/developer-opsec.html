@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Developer OPSEC: what laptops and AI agents leak | ranwhat</title>
+<meta name="description" content="OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.">
+<link rel="canonical" href="https://ranwhat.com/guides/developer-opsec">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/developer-opsec">
+<meta property="og:title" content="Developer OPSEC: what laptops and AI agents leak | ranwhat">
+<meta property="og:description" content="OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Developer OPSEC: what laptops and AI agents leak | ranwhat">
+<meta name="twitter:description" content="OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Developer OPSEC: what your laptop and your AI agents give away","description":"OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.","datePublished":"2026-10-06","dateModified":"2026-10-06","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/developer-opsec","about":[{"@type":"Thing","name":"Operations security (OPSEC)"},{"@type":"Thing","name":"AI agent security"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Developer OPSEC","item":"https://ranwhat.com/guides/developer-opsec"}]}]}</script>
+</head>
+<body>
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Developer OPSEC</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Developer OPSEC: what your laptop and your AI agents give away</h1>
+    <p class="lede">
+      Operations security, OPSEC, is knowing which of your information would
+      help an attacker and keeping it out of their reach. For a developer,
+      that information is mostly credentials. A laptop keeps many of them in
+      plaintext, and AI coding agents add copies of their own.
+    </p>
+    <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
+      Checked against NIST, OWASP, the Claude Code, AWS, npm, Docker, GitHub CLI, OpenSSH and 1Password documentation, and the research under Sources. Published <time datetime="2026-10-06">6 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1" id="meaning">
+  <div class="shell band split">
+    <div class="marginal">01 / Meaning</div>
+    <div>
+      <h2>What OPSEC means for a developer</h2>
+      <p class="lede">
+        NIST's glossary defines OPSEC as a process that denies potential
+        adversaries information about your capabilities and intentions, in
+        five steps. On one laptop, they look like this.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Critical information</span>
+          <span class="v">The credentials that let someone act as you: cloud keys, API tokens, SSH keys, package registry tokens, and the sessions AI tools keep. Then the code and data those reach.</span></div>
+        <div class="row"><span class="k">Threats</span>
+          <span class="v">Malware running as you, such as an infostealer. A dependency or repository whose setup runs code. A lost or shared machine. And an agent that runs a command because a file or a web page told it to.</span></div>
+        <div class="row"><span class="k">Vulnerabilities</span>
+          <span class="v">Credentials in plaintext files that any process you start can read, and the copies of them in shell history and agent transcripts.</span></div>
+        <div class="row"><span class="k">Risk</span>
+          <span class="v">What each credential could do in the wrong hands, and for how long. A read-only token that expires tomorrow is a small risk. An admin key with no expiry is not.</span></div>
+        <div class="row"><span class="k">Countermeasures</span>
+          <span class="v">Fewer copies, narrower tokens, shorter lives, and a check of what is already on disk: the rest of this guide.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2" id="laptop">
+  <div class="shell band split">
+    <div class="marginal">02 / Laptop</div>
+    <div>
+      <h2>Where credentials sit on a developer laptop</h2>
+      <p class="lede">
+        The usual places. Unless a tool keeps its secret in the system
+        keychain, any process running as you can read it.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Where</th><th>What it holds</th></tr></thead>
+        <tbody>
+          <tr><td><code>~/.aws/<wbr>credentials</code></td>
+              <td data-label="What it holds">The AWS access keys you gave <span class="icode">aws configure</span>, for each profile.</td></tr>
+          <tr><td><code>~/.ssh/</code></td>
+              <td data-label="What it holds">Private keys. A key with no passphrase works for whoever copies the file; <span class="icode">ssh-keygen -p</span> sets one on an existing key.</td></tr>
+          <tr><td><code>~/.npmrc</code></td>
+              <td data-label="What it holds">Registry tokens, as <span class="icode">_authToken</span> lines scoped to each registry.</td></tr>
+          <tr><td><code>~/.docker/<wbr>config.json</code></td>
+              <td data-label="What it holds">Registry credentials, base64-encoded rather than encrypted, unless a credential store is set up.</td></tr>
+          <tr><td>GitHub CLI</td>
+              <td data-label="What it holds">Its token goes to the system credential store, or to a plain text file when it cannot use one or you pass <span class="icode">--insecure-storage</span>. <span class="icode">gh auth status</span> says which.</td></tr>
+          <tr><td><code>.env</code></td>
+              <td data-label="What it holds">Each project's application secrets, in plaintext beside the code.</td></tr>
+          <tr><td><code>~/.bash_history</code>, <code>~/.zsh_history</code></td>
+              <td data-label="What it holds">Any token typed or pasted into a command line.</td></tr>
+          <tr><td><code>~/.claude.json</code>, <code>.mcp.json</code></td>
+              <td data-label="What it holds">MCP servers, with any API key written into their configuration. A project's <span class="icode">.mcp.json</span> is meant to be committed.</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The last row is not hypothetical. GitGuardian's State of Secrets
+        Sprawl 2026 found 24,008 unique secrets in public MCP configuration
+        files, 2,117 of them valid. And on 8 September 2026 Gen Digital
+        reported that infostealers have added AI tools to what they collect:
+        access tokens, MCP configurations and prompt histories. One of them,
+        CallbackBeaver, added Cursor and Claude to its collection scope, and
+        Gen Digital saw more than 5,000 samples of it in 30 days.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>ls -la ~/.aws ~/.ssh ~/.docker     <span class="c-mut">what is there, and who can read it</span>
+grep -l _authToken ~/.npmrc        <span class="c-mut">an npm token on disk</span>
+gh auth status                     <span class="c-mut">where the GitHub CLI keeps its token</span></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3" id="agents">
+  <div class="shell band split">
+    <div class="marginal">03 / Agents</div>
+    <div>
+      <h2>What AI coding agents add</h2>
+      <p class="lede">
+        An agent runs commands as you, so it can read every file above. And it
+        keeps its own record of what it read.
+      </p>
+      <p style="font-size:15px;color:var(--ink-2)">
+        Claude Code writes every message, tool call and tool result to a
+        transcript under <span class="icode">~/.claude/projects</span>. Its
+        documentation is plain about it: transcripts are not encrypted at
+        rest, file permissions are the only protection, and if a tool reads a
+        <span class="icode">.env</span> file or a command prints a credential,
+        that value is written to the transcript. Claude Code deletes them after
+        30 days by default. Codex, Gemini CLI, GitHub Copilot CLI and others
+        keep their own, each in its own folder:
+        <a href="/guides/claude-code-history">the history guide</a> lists where.
+      </p>
+      <p style="font-size:15px;color:var(--ink-2)">
+        So one <span class="icode">cat .env</span> leaves the value in two
+        places it was not before: the model's context, and a file in your home
+        folder. The OWASP AI Agent Security Cheat Sheet lists this among its
+        key risks, as credentials included in agent context or logs. Claude
+        Code's Bash commands also inherit the environment it was started in,
+        secrets included, so a token exported in that shell is in reach of
+        every command it runs.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        Agents leak into commits too. GitGuardian measured a 3.2% secret-leak
+        rate in public commits made with Claude Code's help, against 1.5%
+        across all public GitHub commits, and says the figure does not put the
+        cause on the tool alone.
+      </p>
+      <p class="more" style="margin-top:14px"><a href="/guides/claude-code-history">Where Claude Code and the other agents keep their history &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4" id="check">
+  <div class="shell band split">
+    <div class="marginal">04 / Check</div>
+    <div>
+      <h2>See what is already there</h2>
+      <p class="lede">
+        Start with what takes a minute: which agents kept history here, what
+        they ran, and which credentials they left in it.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="run-check">uvx ranwhat check</span>
+        <button class="copy" data-copy="#run-check">Copy</button>
+      </div>
+      <div class="term" style="margin-top:22px">
+        <div class="term-body"><pre>ranwhat sources                  <span class="c-mut">which agents left history on this machine</span>
+ranwhat check                    <span class="c-mut">what they ran, and the secrets they left; changes nothing</span>
+ranwhat clean --no-interactive   <span class="c-mut">the secrets alone, with what to rotate</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        ranwhat reads the agents' history only. For your code and the rest of
+        your home folder, run a general secret scanner as well:
+        <span class="icode">gitleaks dir</span> scans a directory, and
+        <span class="icode">trufflehog filesystem</span> scans files and
+        directories. TruffleHog tests what it finds against each provider's
+        API to mark it verified; <span class="icode">--no-verification</span>
+        turns that off.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>gitleaks dir -v ~/code
+trufflehog filesystem ~/code --no-verification</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="rotate">
+  <div class="shell band split">
+    <div class="marginal">05 / Rotate</div>
+    <div>
+      <h2>Rotate first, then clean up</h2>
+      <p class="lede">
+        A credential found in a transcript or a history file has already been
+        readable. Masking the copy does not change that.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Rotate</span>
+          <span class="v">Create the replacement, move what uses the old key to it, then revoke the old one. <a href="/guides/ai-coding-agent-security#leaks">The checklist</a> has AWS's and Stripe's sequences.</span></div>
+        <div class="row"><span class="k">Check use</span>
+          <span class="v">Look in the provider's own record for use you do not recognise: CloudTrail and last-used data on AWS, the audit log on GitHub, request logs on Stripe.</span></div>
+        <div class="row"><span class="k">Then mask</span>
+          <span class="v"><a href="/clean">ranwhat clean</a> masks the copies in agent transcripts after a backup. The backups still hold the values, so delete them once the transcripts look right.</span></div>
+        <div class="row"><span class="k">After malware</span>
+          <span class="v">Gen Digital's advice after an infostealer infection: from a clean device, revoke AI-service sessions, rotate API keys and the credentials MCP connections use, and review connected applications and account activity.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="keep">
+  <div class="shell band split">
+    <div class="marginal">06 / Keep out</div>
+    <div>
+      <h2>Keep secrets out of files the agent can read</h2>
+      <p class="lede">
+        Every plaintext copy you do not make is one less to find, rotate and
+        mask later.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">References</span>
+          <span class="v">1Password's <span class="icode">op run</span> reads a <span class="icode">.env</span> file whose values are secret references, and passes the real values only to the command it runs, as environment variables, for as long as that command runs. An agent that reads the file sees references.</span></div>
+        <div class="row"><span class="k">Not the agent</span>
+          <span class="v">Run it around the command that needs the secret, not around the agent: a secret in the agent's environment is in reach of every command it runs.</span></div>
+        <div class="row"><span class="k">MCP configs</span>
+          <span class="v">Claude Code expands <span class="icode">${VAR}</span> in <span class="icode">.mcp.json</span>, so an API key need not be written into a file that is shared or committed.</span></div>
+        <div class="row"><span class="k">Rules</span>
+          <span class="v">Deny Claude Code's reads of <span class="icode">.env</span> files, turn on the sandbox, and list your credential files in <span class="icode">sandbox.credentials</span> with mode <span class="icode">deny</span>. Put them in your user settings so they cover every project. A project's settings can add deny entries, but Claude Code honours mask entries only from user or managed settings, or a file passed with <span class="icode">--settings</span>.</span></div>
+        <div class="row"><span class="k">Typing one</span>
+          <span class="v"><span class="icode">read -rs NAME</span> takes a pasted token without echoing it or writing it to shell history.</span></div>
+      </div>
+      <div class="term" style="margin-top:30px">
+        <div class="term-bar"><span>app.env</span></div>
+        <div class="term-body"><pre>AWS_ACCESS_KEY_ID="op://development/aws/Access Keys/access_key_id"
+AWS_SECRET_ACCESS_KEY="op://development/aws/Access Keys/secret_access_key"</pre></div>
+      </div>
+      <div class="term">
+        <div class="term-body"><pre>op run --env-file="./app.env" -- aws s3 ls   <span class="c-mut">the values exist only for this command</span></pre></div>
+      </div>
+      <p class="more" style="margin-top:22px"><a href="/guides/claude-code-env-secrets">Deny rules and the sandbox for .env files, in full &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="tokens">
+  <div class="shell band split">
+    <div class="marginal">07 / Tokens</div>
+    <div>
+      <h2>Shrink what each token can do</h2>
+      <p class="lede">
+        A credential you cannot keep secret should at least be worth little to
+        whoever copies it.
+      </p>
+      <p style="font-size:15px;color:var(--ink-2)">
+        The OWASP Non-Human Identities Top 10 names the failures: secret
+        leakage (NHI2), over-privileged identities (NHI5) and long-lived
+        secrets (NHI7). Give each agent its own tokens, scoped to its task and
+        with an expiry, rather than your own.
+        <a href="/scan">ranwhat scan</a> scores what a set of credentials
+        allows, read-only, and marks the grants that were never used wherever
+        the provider keeps a record.
+      </p>
+      <p class="more" style="margin-top:14px"><a href="/guides/ai-agent-token-scopes">AI agent token scopes, provider by provider &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="checklist">
+  <div class="shell band split">
+    <div class="marginal">08 / Checklist</div>
+    <div>
+      <h2>The checklist.</h2>
+      <p class="lede">
+        One line each, in the order worth doing them. Each points back to its
+        section.
+      </p>
+      <ol class="rows" style="list-style:none;margin:0;padding:0">
+        <li class="row"><span class="k">01</span>
+          <span class="v">Run <span class="icode">uvx ranwhat sources</span> to see which agents kept history here.&nbsp;<a href="#check">Check</a></span></li>
+        <li class="row"><span class="k">02</span>
+          <span class="v">Run <span class="icode">uvx ranwhat check</span>, and rotate anything it finds before you mask it.&nbsp;<a href="#rotate">Rotate</a></span></li>
+        <li class="row"><span class="k">03</span>
+          <span class="v">Scan your code and home folder with Gitleaks or TruffleHog.&nbsp;<a href="#check">Check</a></span></li>
+        <li class="row"><span class="k">04</span>
+          <span class="v">Look through <span class="icode">~/.aws</span>, <span class="icode">~/.ssh</span>, <span class="icode">~/.npmrc</span>, <span class="icode">~/.docker</span> and your MCP configs: what is in plaintext, and who can read it.&nbsp;<a href="#laptop">Laptop</a></span></li>
+        <li class="row"><span class="k">05</span>
+          <span class="v">Put a passphrase on every SSH private key.&nbsp;<a href="#laptop">Laptop</a></span></li>
+        <li class="row"><span class="k">06</span>
+          <span class="v">Replace <span class="icode">.env</span> values with secret references, and inline MCP keys with <span class="icode">${VAR}</span>.&nbsp;<a href="#keep">Keep out</a></span></li>
+        <li class="row"><span class="k">07</span>
+          <span class="v"><a href="/guides/claude-code-env-secrets">Deny agent reads of <span class="icode">.env</span></a> and turn on the sandbox.&nbsp;<a href="#keep">Keep out</a></span></li>
+        <li class="row"><span class="k">08</span>
+          <span class="v">Set <a href="/guides/claude-code-history">how long Claude Code keeps history</a> on purpose.&nbsp;<a href="#agents">Agents</a></span></li>
+        <li class="row"><span class="k">09</span>
+          <span class="v">Give each agent its own scoped, expiring tokens.&nbsp;<a href="#tokens">Tokens</a></span></li>
+        <li class="row"><span class="k">10</span>
+          <span class="v">After any suspected malware, rotate from a clean device, AI-service sessions and MCP credentials included.&nbsp;<a href="#rotate">Rotate</a></span></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="scope">
+  <div class="shell band split">
+    <div class="marginal">09 / Scope</div>
+    <div>
+      <h2>What ranwhat covers, and what it does not.</h2>
+      <p class="lede">
+        <a href="/">ranwhat</a> covers the agents' side of the laptop, after
+        the fact.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Covers</span>
+          <span class="v"><span class="icode">sources</span>: which coding agents kept history here. <span class="icode">watch</span>: what they ran. <span class="icode">clean</span>: the credentials in their transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: what a set of credentials allows.</span></div>
+        <div class="row"><span class="k">Does not</span>
+          <span class="v">Search your shell history, <span class="icode">~/.aws</span>, <span class="icode">~/.ssh</span> or the rest of the disk for secrets, manage secrets, or block anything while an agent works. A general secret scanner, a secrets manager and the agent's own rules and sandbox do those.</span></div>
+        <div class="row"><span class="k">Network</span>
+          <span class="v">Reads locally. <span class="icode">live</span> and <span class="icode">--pull-usage</span> ask only the provider that issued each token. <span class="icode">update</span> fetches the capability catalogue for Plus subscribers and sends only the subscription token.</span></div>
+      </div>
+      <div class="cmdrow" style="margin-top:30px">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="run-check-2">uvx ranwhat check</span>
+          <button class="copy" data-copy="#run-check-2">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="sources">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Where each fact comes from.</h2>
+      <ul class="follow">
+        <li><a href="https://csrc.nist.gov/glossary/term/operations_security">NIST: operations security (OPSEC)<span>the definition and its five steps</span></a></li>
+        <li><a href="https://owasp.github.io/www-project-non-human-identities-top-10/2025/top-10-2025/">OWASP Non-Human Identities Top 10<span>NHI2, NHI5, NHI7</span></a></li>
+        <li><a href="https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html">OWASP: AI Agent Security Cheat Sheet<span>key risks</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/claude-directory#plaintext-storage">Claude Code: The .claude directory<span>plaintext storage, retention, ~/.claude.json</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/sandboxing">Claude Code: Sandboxed Bash tool<span>inherited environment, sandbox.credentials</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/mcp">Claude Code: MCP<span>variable expansion in .mcp.json</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html">AWS CLI: configuration and credential files<span>~/.aws/credentials</span></a></li>
+        <li><a href="https://docs.npmjs.com/cli/v11/configuring-npm/npmrc">npm: npmrc<span>_authToken, scoped to a registry</span></a></li>
+        <li><a href="https://docs.docker.com/reference/cli/docker/login/">Docker: docker login<span>credential stores, base64 in config.json</span></a></li>
+        <li><a href="https://cli.github.com/manual/gh_auth_login">GitHub CLI: gh auth login<span>credential store, plain text fallback</span></a></li>
+        <li><a href="https://man.openbsd.org/ssh-keygen">OpenSSH: ssh-keygen<span>-p</span></a></li>
+        <li><a href="https://www.1password.dev/cli/secrets-environment-variables/">1Password CLI: load secrets into the environment<span>op run, secret references</span></a></li>
+        <li><a href="https://github.com/gitleaks/gitleaks">Gitleaks<span>gitleaks dir</span></a></li>
+        <li><a href="https://github.com/trufflesecurity/trufflehog">TruffleHog<span>filesystem, verification</span></a></li>
+        <li><a href="https://blog.gitguardian.com/ai-coding-agents-credential-security/">GitGuardian: AI coding agents are leaking credentials on endpoints<span>25 September 2026</span></a></li>
+        <li><a href="https://www.gendigital.com/blog/insights/research/infostealers-your-ai-agent">Gen Digital: infostealers and your AI agent<span>8 September 2026</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>sources/, watch.py, clean.py</span></a></li>
+      </ul>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the full checklist</span></a></li>
+        <li><a href="/guides/claude-code-env-secrets">Claude Code and .env secrets<span>deny rules and the sandbox</span></a></li>
+        <li><a href="/guides/ai-agent-token-scopes">AI agent token scopes<span>least privilege, provider by provider</span></a></li>
+        <li><a href="/guides">All guides<span>everything in this section</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>
