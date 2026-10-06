@@ -1428,7 +1428,8 @@ RULES = [
          "A write or delete against cloud infrastructure. What it touched "
          "depends on the account its credentials belong to.",
          [r"aws\s+[\w-]+\s+delete-[\w-]+", r"aws\s+[\w-]+\s+terminate-[\w-]+",
-          r"aws\s+s3\s+rm\b", r"aws\s+iam\s+(?:put|attach|create)-[\w-]+",
+          r"aws\s+s3\s+rm\b", r"aws\s+s3\s+rb\b",
+          r"aws\s+iam\s+(?:put|attach|create)-[\w-]+",
           r"kubectl\s+delete", r"gcloud\s+[\w-]+\s+delete",
           r"terraform\s+(?:destroy|apply\s+-auto-approve)",
           r"drop\s+(?:table|database)\s"]),
