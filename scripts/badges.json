@@ -42,10 +42,10 @@
     },
     {
       "name": "MarketingDB",
-      "added": "2026-10-05",
-      "snippet": "<a href=\"https://marketingdb.live\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\"><img src=\"https://marketingdb.live/badge.svg\" alt=\"Launched on MarketingDB\" width=\"190\" height=\"44\"/></a>",
-      "sha256": "32e7f3a67b8afbd430fe17fefbee15c6cbc50c86369068c1dfdee751d6659167",
-      "checked": "2026-10-06"
+      "added": "2026-10-07",
+      "snippet": "<a href=\"https://marketingdb.live\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\"><img src=\"https://marketingdb.live/badges/classic-light.svg\" alt=\"Launched on MarketingDB\" width=\"200\" height=\"48\"/></a>",
+      "sha256": "45b242c15be694546bae9e31b926eaaf9f9d0ec3501c55ffd17d790206a75b8d",
+      "checked": "2026-10-07"
     },
     {
       "name": "Maidensail",
