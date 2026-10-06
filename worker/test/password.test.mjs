@@ -1,11 +1,13 @@
 /* Passwords: how one is hashed, verified and judged (password.js), and
- * making an account with one on account.ranwhat.com, end to end through
- * the Worker over a real SQLite database. PBKDF2 runs at 1,000 iterations
- * here, and Have I Been Pwned and Resend are stand-ins.
+ * making an account with one, signing in with it, resetting, changing and
+ * removing it on account.ranwhat.com, end to end through the Worker over a
+ * real SQLite database. PBKDF2 runs at 1,000 iterations here, and Have I
+ * Been Pwned and Resend are stand-ins.
  *
- * The case this file is for: someone signs up with another person's
- * address and a password of their own. They must gain nothing, now or
- * after the address's owner turns up.
+ * The cases this file is for: someone signs up with another person's
+ * address and a password of their own, and must gain nothing, now or after
+ * the address's owner turns up; and someone guessing passwords, who must
+ * learn nothing about which addresses have accounts and get few guesses.
  *
  *     node --test --test-timeout=20000 worker/test/password.test.mjs
  */
@@ -15,11 +17,11 @@ import { createHash, pbkdf2Sync } from "node:crypto";
 import { d1 } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
-const { sweep } = await import("../src/accounts.js");
-const { CODE_FOR } = await import("../src/session.js");
+const { AUTH_MAIL_PER_DAY, sweep } = await import("../src/accounts.js");
+const { CODE_FOR, FRESH_FOR, formToken } = await import("../src/session.js");
 const {
-  ITERATIONS, MAX_LENGTH, MIN_LENGTH, hashPassword, isPasswordHash, iterations, needsRehash, passwordProblem,
-  verifyPassword,
+  ITERATIONS, LOCKOUT, MAX_LENGTH, MIN_LENGTH, TRIES_PER_ADDRESS, WRONG_EVERYWHERE, hashPassword, isPasswordHash,
+  iterations, needsRehash, passwordProblem, verifyPassword,
 } = await import("../src/password.js");
 
 const ORIGIN = "https://account.ranwhat.com";
@@ -42,6 +44,7 @@ Date.now = () => realNow() + skew * 1000;
 const later = (seconds) => { skew += seconds; };
 
 const sha1 = (text) => createHash("sha1").update(text).digest("hex").toUpperCase();
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
 /* ---------- stand-ins ---------- */
 
@@ -558,4 +561,502 @@ test("a 'verify' attempt that holds no usable hash attaches nothing", async () =
   assert.equal(count(e, "credentials"), 0);
   assert.equal(count(e, "users"), 0);
   assert.ok(!b.jar.has(SESSION));
+});
+
+/* ---------- signing in with one ---------- */
+
+async function withPassword(b, email, password) {
+  const form = await b.get("/signin/password");
+  assert.equal(form.status, 200, form.text);
+  return b.post("/signin/password", { form: tokenFor(form.text, "/signin/password"), email, password, next: "/" });
+}
+
+/* An account with a password, made by signing up, its browser signed in. */
+async function account(e, s, email, password, ip = "198.51.100.7") {
+  const b = new Browser(e, { ip });
+  assert.equal((await signUp(b, email, password)).status, 303);
+  assert.equal((await typeCode(b, codeIn(s.emails.at(-1)))).status, 303);
+  return b;
+}
+
+/* The iteration count of every PBKDF2 run while fn runs. */
+async function derived(fn) {
+  const counts = [];
+  const real = crypto.subtle.deriveBits;
+  crypto.subtle.deriveBits = (algorithm, ...rest) => {
+    counts.push(algorithm.iterations);
+    return real.call(crypto.subtle, algorithm, ...rest);
+  };
+  try {
+    return { result: await fn(), counts };
+  } finally {
+    delete crypto.subtle.deriveBits;
+  }
+}
+
+/* A page with its address and its form tokens taken out, to compare two. */
+const plain = (text, email) => text.replaceAll(email, "ADDRESS").replace(/name="form" value="[^"]+"/g, "");
+
+const sessionsOf = (e, email) => rows(e, `SELECT s.* FROM sessions s JOIN users u ON u.id = s.user_id
+                                          WHERE u.email = ?`, email);
+
+test("a password signs in as a code does, in place of the browser's old session, but not as a fresh code", async () => {
+  const s = services();
+  const e = env();
+  await account(e, s, "ana@example.com", ANA_PASSWORD);
+  later(MINUTE + 1);
+  const bo = await account(e, s, "bo@example.com", "bo has a passphrase too", "203.0.113.5");
+  const [{ signed_in_at: before }] = rows(e, "SELECT signed_in_at FROM users WHERE email = 'ana@example.com'");
+  later(MINUTE);
+
+  const b = new Browser(e, { ip: "192.0.2.10" });
+  const form = await b.get("/signin/password");
+  assert.match(form.text, /autocomplete="username"/);
+  assert.match(form.text, /type="password" autocomplete="current-password"/);
+  assert.match(form.text, /href="\/reset"/);
+  assert.doesNotMatch(form.text, /<script|\son[a-z]+=/i);
+  assert.match((await b.get("/signin")).text, /href="\/signin\/password"/);
+  b.jar.set(SESSION, bo.jar.get(SESSION));                      // the browser had another session
+  const r = await b.post("/signin/password", { form: tokenFor(form.text, "/signin/password"),
+                                               email: "Ana@Example.com", password: ANA_PASSWORD, next: "/" });
+  assert.equal(r.status, 303, r.text);
+  assert.equal(r.location, "/");
+  assert.notEqual(b.jar.get(SESSION), bo.jar.get(SESSION));
+  assert.ok(!b.jar.has(SIGNIN));
+  assert.equal(sessionsOf(e, "bo@example.com").length, 0, "the session the browser had is over");
+  const [session] = rows(e, "SELECT * FROM sessions WHERE id = ?", sha256(b.jar.get(SESSION)));
+  assert.equal(session.user_id, rows(e, "SELECT id FROM users WHERE email = 'ana@example.com'")[0].id);
+  assert.equal(session.authed_at, 0, "a password is not a fresh code");
+  assert.ok(rows(e, "SELECT signed_in_at FROM users WHERE email = 'ana@example.com'")[0].signed_in_at > before);
+  assert.equal(eventsOf(e, "ana@example.com").at(-1), "signin_password");
+
+  const home = await b.get("/");
+  assert.equal(home.status, 200);
+  assert.match(home.text, /Signed in with your password/);
+  assert.match(home.text, /id="current-password"/, "changing it asks for the current one");
+  assert.equal((await b.get("/signin/password")).location, "/", "signed in already");
+  assert.ok(!everything(e).includes(ANA_PASSWORD));
+});
+
+test("a wrong password, an address with no password and one with no account get one answer, after one PBKDF2 run", async () => {
+  const s = services();
+  const e = env();
+  await account(e, s, "ana@example.com", ANA_PASSWORD);
+  const bo = new Browser(e, { ip: "203.0.113.5" });
+  await askCode(bo, "bo@example.com");
+  await typeCode(bo, codeIn(s.emails.at(-1)));
+
+  const b = new Browser(e, { ip: "192.0.2.10" });
+  const answers = [];
+  for (const [email, password] of [["ana@example.com", "not ana's password at all"],
+                                   ["bo@example.com", ANA_PASSWORD],
+                                   ["cy@example.com", ANA_PASSWORD]]) {
+    const { result, counts } = await derived(() => withPassword(b, email, password));
+    assert.deepEqual(counts, [1000], `${email}: one run at the current count`);
+    assert.equal(result.status, 400, email);
+    assert.match(result.text, /That email and password do not match/);
+    assert.ok(!result.text.includes(password), "never shown back");
+    assert.deepEqual(result.headers.getSetCookie(), []);
+    answers.push(plain(result.text, email));
+  }
+  assert.equal(answers[1], answers[0]);
+  assert.equal(answers[2], answers[0]);
+  assert.ok(!b.jar.has(SESSION));
+  assert.equal(count(e, "users"), 2, "no account is made");
+  assert.equal(rows(e, "SELECT count(*) AS n FROM auth_events WHERE event = 'signin_password'")[0].n, 0);
+
+  /* The decoy runs at whatever count is set now, as a real hash would. */
+  e.PBKDF2_ITERATIONS = "3000";
+  const { counts } = await derived(() => withPassword(b, "dee@example.com", ANA_PASSWORD));
+  assert.deepEqual(counts, [3000]);
+
+  /* The form is refused from another site or without its token, before any hashing. */
+  const form = await b.get("/signin/password");
+  const body = { form: tokenFor(form.text, "/signin/password"), email: "ana@example.com", password: ANA_PASSWORD };
+  const refused = await derived(async () => [
+    (await b.post("/signin/password", body, { "sec-fetch-site": "same-site", origin: "https://ranwhat.com" })).status,
+    (await b.post("/signin/password", { ...body, form: "forged" })).status,
+    (await b.post("/signin/password", { ...body, form: tokenFor((await b.get("/signin")).text, "/signin") })).status,
+  ]);
+  assert.deepEqual(refused.result, [403, 403, 403]);
+  assert.deepEqual(refused.counts, []);
+  assert.ok(!b.jar.has(SESSION));
+});
+
+test("an address gets five password tries in fifteen minutes, then only a code signs it in, and the code gives them back", async () => {
+  const s = services();
+  const e = env();
+  await account(e, s, "ana@example.com", ANA_PASSWORD);
+  assert.equal(TRIES_PER_ADDRESS, 5);
+  assert.equal(LOCKOUT, 15 * MINUTE);
+  const m = new Browser(e, { ip: "203.0.113.66" });
+  for (let i = 1; i < TRIES_PER_ADDRESS; i++) {
+    assert.equal((await withPassword(m, "ana@example.com", `wrong guess number ${i}`)).status, 400);
+  }
+  const fifth = await withPassword(m, "ana@example.com", "the fifth wrong guess");
+  assert.equal(fifth.status, 429);
+  assert.match(fifth.text, /password sign-in\s+is paused/);
+
+  /* Now even the right password, from another network, does not sign in,
+     and is not hashed. */
+  const ana = new Browser(e, { ip: "198.51.100.9" });
+  const { result: held, counts } = await derived(() => withPassword(ana, "ana@example.com", ANA_PASSWORD));
+  assert.equal(held.status, 429);
+  assert.deepEqual(counts, []);
+  assert.ok(!ana.jar.has(SESSION));
+
+  /* An address with no account locks the same way, with the same page. */
+  for (let i = 0; i < TRIES_PER_ADDRESS; i++) await withPassword(m, "nobody@example.com", `guess ${i} for nobody`);
+  const nobody = await withPassword(m, "nobody@example.com", "one guess more");
+  assert.equal(nobody.status, 429);
+  assert.equal(plain(nobody.text, "nobody@example.com"), plain(held.text, "ana@example.com"));
+
+  /* The page offers the code for that address, and typing it gives the
+     address its tries back. */
+  assert.match(held.text, /name="email" value="ana@example.com"/);
+  later(MINUTE + 1);
+  const sent = await ana.post("/signin", { form: tokenFor(held.text, "/signin"), email: "ana@example.com", next: "/" });
+  assert.equal(sent.location, "/signin/code");
+  assert.equal((await typeCode(ana, codeIn(s.emails.at(-1)))).status, 303);
+  assert.equal((await withPassword(new Browser(e, { ip: "198.51.100.10" }), "ana@example.com", ANA_PASSWORD)).status, 303);
+
+  /* The other address's tries come back when the window ends. */
+  assert.equal((await withPassword(m, "nobody@example.com", "still guessing")).status, 429);
+  later(LOCKOUT + 1);
+  assert.equal((await withPassword(m, "nobody@example.com", "still guessing")).status, 400);
+  assert.ok(!everything(e).includes("nobody@example.com"), "kept only as an HMAC");
+});
+
+test("a right password gives the address its tries back", async () => {
+  const s = services();
+  const e = env();
+  await account(e, s, "ana@example.com", ANA_PASSWORD);
+  const b = new Browser(e, { ip: "203.0.113.70" });
+  for (let i = 1; i < TRIES_PER_ADDRESS; i++) await withPassword(b, "ana@example.com", `a typo number ${i}`);
+  assert.equal((await withPassword(b, "ana@example.com", ANA_PASSWORD)).status, 303);
+  const c = new Browser(e, { ip: "203.0.113.71" });
+  for (let i = 1; i < TRIES_PER_ADDRESS; i++) {
+    assert.equal((await withPassword(c, "ana@example.com", `a typo number ${i}`)).status, 400);
+  }
+  assert.equal((await withPassword(c, "ana@example.com", ANA_PASSWORD)).status, 303);
+});
+
+test("a hundred wrong passwords across every address pause password sign-in for everyone, while the code still works", async () => {
+  const s = services();
+  const e = env();
+  await account(e, s, "ana@example.com", ANA_PASSWORD);
+  assert.equal(WRONG_EVERYWHERE, 100);
+  const bots = Array.from({ length: 5 }, (_, i) => new Browser(e, { ip: `192.0.2.${i + 1}` }));
+  for (let i = 0; i < WRONG_EVERYWHERE; i++) {
+    const r = await withPassword(bots[i % 5], `person${i % 25}@example.com`, `stuffed password ${i}`);
+    assert.equal(r.status, 400, `try ${i}`);
+  }
+  const ana = new Browser(e, { ip: "198.51.100.9" });
+  const { result, counts } = await derived(() => withPassword(ana, "ana@example.com", ANA_PASSWORD));
+  assert.equal(result.status, 429);
+  assert.deepEqual(counts, []);
+
+  later(MINUTE + 1);
+  await askCode(ana, "ana@example.com");
+  assert.equal((await typeCode(ana, codeIn(s.emails.at(-1)))).status, 303, "the code still signs in");
+  assert.equal((await withPassword(new Browser(e, { ip: "198.51.100.10" }), "ana@example.com", ANA_PASSWORD)).status,
+    429, "a code gives one address its tries back, not everyone's");
+  later(LOCKOUT);
+  assert.equal((await withPassword(new Browser(e, { ip: "198.51.100.11" }), "ana@example.com", ANA_PASSWORD)).status, 303);
+});
+
+test("one network has twenty password hashes an hour, sign-ins among them", async () => {
+  services();
+  const e = env();
+  const b = new Browser(e, { ip: "203.0.113.80" });
+  for (let i = 0; i < 20; i++) {
+    assert.equal((await withPassword(b, `someone${i}@example.com`, ANA_PASSWORD)).status, 400, `try ${i}`);
+  }
+  const { result, counts } = await derived(() => withPassword(b, "one-more@example.com", ANA_PASSWORD));
+  assert.equal(result.status, 429);
+  assert.match(result.text, /from your network/);
+  assert.deepEqual(counts, []);
+});
+
+test("signing in hashes the password again when the count has been raised, and only then", async () => {
+  const s = services();
+  const e = env();
+  await account(e, s, "ana@example.com", ANA_PASSWORD);
+  const first = passwordOf(e, "ana@example.com");
+  assert.match(first, /^pbkdf2-sha256\$1000\$/);
+
+  const same = await derived(() => withPassword(new Browser(e, { ip: "203.0.113.30" }), "ana@example.com", ANA_PASSWORD));
+  assert.equal(same.result.status, 303);
+  assert.deepEqual(same.counts, [1000]);
+  assert.equal(passwordOf(e, "ana@example.com"), first, "kept as it was");
+
+  e.PBKDF2_ITERATIONS = "2000";
+  const raised = await derived(() => withPassword(new Browser(e, { ip: "203.0.113.31" }), "ana@example.com", ANA_PASSWORD));
+  assert.equal(raised.result.status, 303);
+  assert.deepEqual(raised.counts, [1000, 2000], "verified at its own count, hashed again at the new one");
+  const second = passwordOf(e, "ana@example.com");
+  assert.match(second, /^pbkdf2-sha256\$2000\$/);
+  assert.equal(await verifyPassword(second, ANA_PASSWORD), true);
+
+  e.PBKDF2_ITERATIONS = "3000";
+  const wrong = await withPassword(new Browser(e, { ip: "203.0.113.32" }), "ana@example.com", "not the password at all");
+  assert.equal(wrong.status, 400);
+  assert.equal(passwordOf(e, "ana@example.com"), second, "a wrong password changes nothing");
+  assert.deepEqual(eventsOf(e, "ana@example.com"), ["signup", "password_added", "signin_password", "signin_password"]);
+});
+
+/* ---------- a forgotten one ---------- */
+
+async function askReset(b, email) {
+  const form = await b.get("/reset");
+  assert.equal(form.status, 200, form.text);
+  return b.post("/reset", { form: tokenFor(form.text, "/reset"), email });
+}
+
+test("asking for a reset answers the same for every address, and takes from the day's mail", async () => {
+  const s = services();
+  const e = env();
+  await account(e, s, "ana@example.com", ANA_PASSWORD);
+  const shape = async (email, ip) => {
+    const b = new Browser(e, { ip });
+    const r = await askReset(b, email);
+    return { status: r.status, location: r.location, text: r.text, cookies: [...b.jar.keys()].sort() };
+  };
+  later(MINUTE + 1);
+  const known = await shape("ana@example.com", "203.0.113.1");
+  const unknown = await shape("nobody@example.com", "203.0.113.2");
+  assert.equal(known.status, 303);
+  assert.equal(known.location, "/signin/code");
+  assert.deepEqual(unknown, known);
+  assert.equal(s.emails.length, 3, "a code goes to both, after the reply");
+  assert.deepEqual(s.emails[1].to, ["ana@example.com"]);
+  assert.equal(s.emails[1].subject, "Your ranwhat password reset code");
+  assert.match(s.emails[1].text, /replaces this account's password and signs it out everywhere else/);
+  assert.deepEqual(rows(e, "SELECT sent FROM mail_counts WHERE kind = 'auth'"), [{ sent: 3 }]);
+
+  e.LIST.sql.prepare("UPDATE mail_counts SET sent = ? WHERE kind = 'auth'").run(AUTH_MAIL_PER_DAY);
+  later(MINUTE + 1);
+  const spentKnown = await shape("ana@example.com", "203.0.113.3");
+  const spentUnknown = await shape("nobody@example.com", "203.0.113.4");
+  assert.equal(spentKnown.status, 503);
+  assert.match(spentKnown.text, /No more codes today/);
+  assert.deepEqual(spentUnknown, spentKnown);
+  assert.equal(s.emails.length, 3);
+
+  const bad = await askReset(new Browser(e, { ip: "203.0.113.5" }), "not an address");
+  assert.equal(bad.status, 400);
+  assert.match(bad.text, /does not look right/);
+});
+
+test("a reset code sets the new password, ends every session of the account but this one, and is logged", async () => {
+  const s = services({ breached: ["password123456"] });
+  const e = env();
+  const laptop = await account(e, s, "ana@example.com", ANA_PASSWORD);
+  const phone = new Browser(e, { ip: "198.51.100.20" });
+  assert.equal((await withPassword(phone, "ana@example.com", ANA_PASSWORD)).status, 303);
+  assert.equal(sessionsOf(e, "ana@example.com").length, 2);
+
+  later(MINUTE + 1);
+  const b = new Browser(e, { ip: "203.0.113.40" });
+  await askReset(b, "ana@example.com");
+  const code = codeIn(s.emails.at(-1));
+  const page = await b.get("/signin/code");
+  assert.match(page.text, /type="password" autocomplete="new-password"/);
+  assert.match(page.text, /Set password and sign in/);
+  assert.match(page.text, /href="\/reset">Use a different email/);
+  const token = tokenFor(page.text, "/signin/code");
+
+  /* A refused password costs the attempt no try, and changes nothing. */
+  for (const [password, says] of [["too short", /at least 12/], ["password123456", /known data breach/]]) {
+    const r = await b.post("/signin/code", { form: token, code, password });
+    assert.equal(r.status, 400);
+    assert.match(r.text, says);
+    assert.ok(!r.text.includes(password) && !r.text.includes(code), "neither is shown back");
+  }
+  assert.equal(rows(e, "SELECT tries FROM signins WHERE purpose = 'reset'")[0].tries, 0);
+
+  /* A wrong code changes nothing either. */
+  const wrong = await b.post("/signin/code", { form: token, code: wrongFor(code), password: "a fresh new passphrase" });
+  assert.equal(wrong.status, 400);
+  assert.match(wrong.text, /That code is not right. 4 tries left/);
+  assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), ANA_PASSWORD), true);
+  assert.equal(sessionsOf(e, "ana@example.com").length, 2);
+
+  const held = b.jar.get(SIGNIN);
+  const done = await b.post("/signin/code", { form: token, code, password: "a fresh new passphrase" });
+  assert.equal(done.status, 303, done.text);
+  assert.equal(done.location, "/");
+  assert.ok(b.jar.has(SESSION));
+  assert.ok(!b.jar.has(SIGNIN));
+  assert.deepEqual(sessionsOf(e, "ana@example.com").map((x) => x.id), [sha256(b.jar.get(SESSION))]);
+  assert.equal((await laptop.get("/")).location, "/signin");
+  assert.equal((await phone.get("/")).location, "/signin");
+  const kept = passwordOf(e, "ana@example.com");
+  assert.equal(await verifyPassword(kept, "a fresh new passphrase"), true);
+  assert.equal(await verifyPassword(kept, ANA_PASSWORD), false);
+  assert.equal(eventsOf(e, "ana@example.com").at(-1), "password_reset");
+  assert.match((await b.get("/")).text, /Password reset with an emailed code, and every other session signed out/);
+  assert.equal(rows(e, "SELECT count(*) AS n FROM signins WHERE used_at IS NULL")[0].n, 0, "the code is used");
+  assert.ok(!everything(e).includes("a fresh new passphrase"));
+
+  assert.equal((await withPassword(new Browser(e, { ip: "203.0.113.41" }), "ana@example.com", ANA_PASSWORD)).status, 400);
+  assert.equal((await withPassword(new Browser(e, { ip: "203.0.113.42" }), "ana@example.com", "a fresh new passphrase")).status, 303);
+
+  /* A used reset code does nothing more, and is not hashed for, even in a
+     browser that kept its cookie. */
+  assert.equal((await b.post("/signin/code", { form: token, code, password: "and yet another one" })).status, 403);
+  b.jar.set(SIGNIN, held);
+  const again = await derived(() => b.post("/signin/code", { form: token, code, password: "and yet another one" }));
+  assert.equal(again.result.status, 400);
+  assert.match(again.result.text, /expired or was already used/);
+  assert.deepEqual(again.counts, []);
+  assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), "a fresh new passphrase"), true);
+});
+
+test("a reset for an address with no account makes one with that password, as sign-up would", async () => {
+  const s = services();
+  const e = env();
+  const b = new Browser(e);
+  await askReset(b, "new@example.com");
+  assert.equal(count(e, "users"), 0);
+  const page = await b.get("/signin/code");
+  const r = await b.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: codeIn(s.emails.at(-1)),
+                                           password: ANA_PASSWORD });
+  assert.equal(r.status, 303);
+  assert.equal(await verifyPassword(passwordOf(e, "new@example.com"), ANA_PASSWORD), true);
+  assert.deepEqual(eventsOf(e, "new@example.com"), ["signup", "password_added"]);
+});
+
+/* ---------- changing and removing one, signed in ---------- */
+
+test("changing the password needs the current one, and ends every other session", async () => {
+  const s = services();
+  const e = env();
+  const first = await account(e, s, "ana@example.com", ANA_PASSWORD);
+  const b = new Browser(e, { ip: "198.51.100.30" });
+  await withPassword(b, "ana@example.com", ANA_PASSWORD);
+  const other = new Browser(e, { ip: "198.51.100.31" });
+  await withPassword(other, "ana@example.com", ANA_PASSWORD);
+  const home = await b.get("/");
+  assert.match(home.text, /<h2>Sign-in methods<\/h2>/);
+  assert.match(home.text, /Password<\/strong> <span class="tag">set/);
+  const token = tokenFor(home.text, "/password");
+  const NEW = "a brand new passphrase";
+
+  assert.equal((await b.post("/password", { form: "forged", current: ANA_PASSWORD, password: NEW })).status, 403);
+  assert.equal((await b.post("/password", { form: await formToken(e, sha256(b.jar.get(SESSION)), "org"),
+                                            current: ANA_PASSWORD, password: NEW })).status, 403, "another form's token");
+  assert.equal((await b.post("/password", { form: token, current: ANA_PASSWORD, password: NEW },
+    { "sec-fetch-site": "same-site", origin: "https://ranwhat.com" })).status, 403);
+  for (const current of [undefined, "not my password at all"]) {
+    const r = await b.post("/password", { form: token, password: NEW, ...(current ? { current } : {}) });
+    assert.equal(r.status, 400);
+    assert.match(r.text, /Your current password is not right/);
+  }
+  const short = await b.post("/password", { form: token, current: ANA_PASSWORD, password: "too short" });
+  assert.equal(short.status, 400);
+  assert.match(short.text, /at least 12/);
+  assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), ANA_PASSWORD), true);
+  assert.equal(sessionsOf(e, "ana@example.com").length, 3);
+
+  const r = await b.post("/password", { form: token, current: ANA_PASSWORD, password: NEW });
+  assert.equal(r.status, 303, r.text);
+  assert.equal(r.location, "/");
+  const kept = passwordOf(e, "ana@example.com");
+  assert.equal(await verifyPassword(kept, NEW), true);
+  assert.equal(await verifyPassword(kept, ANA_PASSWORD), false);
+  assert.equal((await b.get("/")).status, 200, "this session stays");
+  assert.equal((await first.get("/")).location, "/signin");
+  assert.equal((await other.get("/")).location, "/signin");
+  assert.deepEqual(sessionsOf(e, "ana@example.com").map((x) => x.id), [sha256(b.jar.get(SESSION))]);
+  assert.equal(eventsOf(e, "ana@example.com").at(-1), "password_changed");
+  assert.match((await b.get("/")).text, /Password changed, and every other session signed out/);
+  assert.ok(!everything(e).includes(NEW));
+});
+
+test("with a code typed in the last 15 minutes the current password is not asked for, and wrong ones lock as sign-in does", async () => {
+  const s = services();
+  const e = env();
+  const b = await account(e, s, "ana@example.com", ANA_PASSWORD);
+  let home = await b.get("/");
+  assert.doesNotMatch(home.text, /id="current-password"/);
+  assert.match(home.text, /You typed an emailed code in the last 15 minutes/);
+  assert.equal((await b.post("/password", { form: tokenFor(home.text, "/password"), password: "changed with a code" })).status,
+    303);
+  assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), "changed with a code"), true);
+
+  later(FRESH_FOR + 1);
+  home = await b.get("/");
+  assert.match(home.text, /id="current-password"/);
+  const token = tokenFor(home.text, "/password");
+  for (let i = 1; i < TRIES_PER_ADDRESS; i++) {
+    assert.equal((await b.post("/password", { form: token, current: `guess ${i}`, password: "a stolen session's pick" })).status, 400);
+  }
+  const fifth = await b.post("/password", { form: token, current: "guess 5", password: "a stolen session's pick" });
+  assert.equal(fifth.status, 429);
+  assert.match(fifth.text, /Too many tries with a password/);
+  const right = await b.post("/password", { form: token, current: "changed with a code", password: "a stolen session's pick" });
+  assert.equal(right.status, 429, "locked for the right one too");
+  assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), "changed with a code"), true);
+
+  /* A fresh code is the way through, and gives the address its tries back. */
+  const asked = await b.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" });
+  assert.equal(asked.location, "/signin/code");
+  assert.equal((await typeCode(b, codeIn(s.emails.at(-1)))).status, 303);
+  home = await b.get("/");
+  assert.doesNotMatch(home.text, /id="current-password"/);
+  assert.equal((await b.post("/password", { form: tokenFor(home.text, "/password"), password: "changed with a code again" })).status,
+    303);
+  assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), "changed with a code again"), true);
+  assert.equal((await withPassword(new Browser(e, { ip: "203.0.113.90" }), "ana@example.com", "changed with a code again")).status,
+    303);
+});
+
+test("the sign-in methods: the code always, a password added with a fresh code and removed, the rest coming", async () => {
+  const s = services();
+  const e = env();
+  const b = new Browser(e);
+  await askCode(b, "ana@example.com");
+  await typeCode(b, codeIn(s.emails.at(-1)));
+  let home = await b.get("/");
+  assert.doesNotMatch(home.text, /<script|\son[a-z]+=/i);
+  assert.match(home.text, /data-method="code"><strong>Emailed code<\/strong> <span class="tag">always on/);
+  assert.match(home.text, /data-method="password"><strong>Password<\/strong> <span class="tag">not set/);
+  for (const [key, name] of [["google", "Google"], ["github", "GitHub"], ["passkeys", "Passkeys"]]) {
+    assert.match(home.text, new RegExp(`data-method="${key}"><strong>${name}</strong> <span class="tag">coming`));
+  }
+  assert.doesNotMatch(home.text, /action="\/password\/remove"/);
+
+  const added = await b.post("/password", { form: tokenFor(home.text, "/password"), password: ANA_PASSWORD });
+  assert.equal(added.status, 303);
+  assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), ANA_PASSWORD), true);
+  assert.equal(eventsOf(e, "ana@example.com").at(-1), "password_added");
+  home = await b.get("/");
+  assert.match(home.text, /data-method="password"><strong>Password<\/strong> <span class="tag">set/);
+  assert.match(home.text, /action="\/password\/remove"/);
+
+  later(FRESH_FOR + 1);
+  home = await b.get("/");
+  const remove = tokenFor(home.text, "/password/remove");
+  assert.match(home.text, /id="current-password-remove"/);
+  const refused = await b.post("/password/remove", { form: remove, current: "not the password" });
+  assert.equal(refused.status, 400);
+  assert.ok(passwordOf(e, "ana@example.com"));
+  const removed = await b.post("/password/remove", { form: remove, current: ANA_PASSWORD });
+  assert.equal(removed.status, 303);
+  assert.equal(passwordOf(e, "ana@example.com"), null);
+  assert.equal(eventsOf(e, "ana@example.com").at(-1), "password_removed");
+  assert.equal((await withPassword(new Browser(e, { ip: "203.0.113.91" }), "ana@example.com", ANA_PASSWORD)).status, 400);
+
+  /* Without a password and without a fresh code, adding one needs the code. */
+  home = await b.get("/");
+  assert.match(home.text, /tag">not set/);
+  assert.match(home.text, /Adding one needs an emailed code typed in the last 15 minutes/);
+  assert.doesNotMatch(home.text, /action="\/password"/);
+  assert.match(home.text, /action="\/stepup"/);
+  const late = await b.post("/password", { form: await formToken(e, sha256(b.jar.get(SESSION)), "password"),
+                                          password: "slipped in without a code" });
+  assert.equal(late.status, 403);
+  assert.equal(passwordOf(e, "ana@example.com"), null);
+  assert.equal((await b.post("/password/remove", { form: remove })).status, 303, "nothing to remove");
 });

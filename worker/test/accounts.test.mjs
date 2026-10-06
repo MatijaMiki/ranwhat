@@ -149,7 +149,8 @@ test("with ACCOUNTS_ON unset, the account host answers 404 to everything, as an 
     const b = new Browser(e);
     const elsewhere = await b.send("/no-such-page", { origin: "https://ranwhat.com" });
     assert.equal(elsewhere.status, 404);
-    for (const path of ["/", "/signin", "/signin/code", "/signout", "/org", "/stepup", "/api/contact", "/v1/catalogue"]) {
+    for (const path of ["/", "/signin", "/signin/code", "/signin/password", "/signup", "/reset", "/password",
+                        "/password/remove", "/signout", "/org", "/stepup", "/api/contact", "/v1/catalogue"]) {
       for (const r of [await b.get(path), await b.post(path, { email: "ana@example.com" })]) {
         assert.equal(r.status, 404, path);
         assert.equal(r.text, elsewhere.text);
@@ -179,7 +180,8 @@ test("account pages answer only on the account host, and the site's routes never
   const e = env();
   const b = new Browser(e);
   for (const origin of ["https://ranwhat.com", "https://feed.ranwhat.com"]) {
-    for (const path of ["/", "/signin", "/signin/code", "/signin/again", "/signout", "/signout-all", "/org", "/stepup"]) {
+    for (const path of ["/", "/signin", "/signin/code", "/signin/again", "/signin/password", "/signup", "/reset",
+                        "/password", "/password/remove", "/signout", "/signout-all", "/org", "/stepup"]) {
       for (const method of ["GET", "POST"]) {
         const r = await b.send(path, { method, origin, headers: FROM_PAGE, body: method === "POST" ? {} : undefined });
         assert.equal(r.status, 404, `${method} ${origin}${path}`);

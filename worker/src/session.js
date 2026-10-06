@@ -153,11 +153,13 @@ export async function formOk(env, form, binding, action) {
 
 /* ---------- limits ---------- */
 
+const throttleKey = async (env, kind, who) => `${kind}:${await mac(env, `throttle:${kind}:${who}`)}`;
+
 /* Counts one more in a fixed window, and returns the count. One statement,
    so concurrent requests cannot both read the old count. */
 export async function bump(env, kind, who, window) {
   const t = now();
-  const key = `${kind}:${await mac(env, `throttle:${kind}:${who}`)}`;
+  const key = await throttleKey(env, kind, who);
   const row = await env.LIST.prepare(
     `INSERT INTO throttle (key, window_start, count) VALUES (?, ?, 1)
      ON CONFLICT(key) DO UPDATE SET
@@ -167,11 +169,18 @@ export async function bump(env, kind, who, window) {
   return row.count;
 }
 
-async function peek(env, kind, who, window) {
-  const key = `${kind}:${await mac(env, `throttle:${kind}:${who}`)}`;
+/* The count so far in the window, without adding to it. */
+export async function peek(env, kind, who, window) {
+  const key = await throttleKey(env, kind, who);
   const row = await env.LIST.prepare("SELECT count FROM throttle WHERE key = ? AND window_start > ?")
     .bind(key, now() - window).first();
   return row ? row.count : 0;
+}
+
+/* The statement that starts a count again from nothing, for the caller's
+   batch. */
+export async function forget(env, kind, who) {
+  return env.LIST.prepare("DELETE FROM throttle WHERE key = ?").bind(await throttleKey(env, kind, who));
 }
 
 /* ---------- asking for a code ---------- */
@@ -247,10 +256,11 @@ const FROM = "ranwhat <account@ranwhat.com>";
    one knows what ignoring it prevents. */
 async function mailCode(env, email, code, purpose) {
   const shown = `${code.slice(0, 4)}-${code.slice(4)}`;
-  const what = purpose === "signin" ? "sign-in code" : "confirmation code";
-  const sets = purpose === "verify"
-    ? "Typing it confirms this address and sets the password chosen on that page."
-    : "";
+  const what = { signin: "sign-in code", reset: "password reset code" }[purpose] || "confirmation code";
+  const sets = {
+    verify: "Typing it confirms this address and sets the password chosen on that page.",
+    reset: "Typing it, with a new password, on that page replaces this account's password and signs it out everywhere else.",
+  }[purpose] || "";
   await resend(env, "POST", "/emails", {
     from: FROM,
     to: [email],
@@ -339,18 +349,23 @@ const burn = (env, emailMac) => env.LIST.prepare(
 
 /* ---------- sessions ---------- */
 
-/* A new session for someone who has just typed a code, ending the one the
+/* A new session for someone who has just signed in, ending the one the
    browser had. Returns the cookie's value, which is kept nowhere. The
    statements come back unrun so the caller writes its event in the same
-   batch. */
-export async function openSession(env, { user, org, previous = null }) {
+   batch.
+
+   coded: whether a code was typed to open it, which makes it fresh. A
+   password alone is not a fresh code (authed_at 0): what needs one still
+   needs one, so a password that leaked opens the account but cannot
+   approve a terminal, mint a token or do anything else fresh() guards. */
+export async function openSession(env, { user, org, previous = null, coded = true }) {
   const db = env.LIST;
   const t = now();
   const value = randomToken();
   const statements = [
     db.prepare(`INSERT INTO sessions (id, user_id, org_id, created_at, seen_at, authed_at, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .bind(await sha256(value), user, org, t, t, t, t + SESSION_MAX),
+      .bind(await sha256(value), user, org, t, t, coded ? t : 0, t + SESSION_MAX),
   ];
   if (previous) statements.push(db.prepare("DELETE FROM sessions WHERE id = ?").bind(await sha256(previous)));
   return { value, statements };

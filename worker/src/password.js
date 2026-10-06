@@ -26,9 +26,21 @@
  * nothing: the code goes to the address, and without it no password is
  * attached. The address's owner signs in, or chooses a password, in their
  * own browser, whose attempt never holds anyone else's hash.
+ *
+ * Signing in with one. checkPassword() gives one answer for a wrong
+ * password, an address with no password and an address with no account,
+ * after the same work: an address without a hash is checked against a
+ * decoy, one PBKDF2 run at the current count, as a real one would be. An
+ * address gets five tries in fifteen minutes, counted before the hash so
+ * that tries at once cannot slip past, and started again by a right
+ * password or a typed code. A hundred wrong passwords across every
+ * address in those fifteen minutes pause password sign-in for everyone.
+ * Either way the emailed code still works, and is then the way in. Both
+ * counts are kept per address or overall, whether or not an account
+ * exists, so neither says anything about one.
  */
 import { HOUR, event, now } from "./accounts.js";
-import { b64url, bump } from "./session.js";
+import { b64url, bump, forget, peek } from "./session.js";
 
 /* OWASP's 2023 count for PBKDF2-HMAC-SHA256. PBKDF2_ITERATIONS sets
    another, for two limits on Workers:
@@ -187,14 +199,94 @@ export async function hashAllowed(request, env) {
   return await bump(env, "hash-ip", ip, HOUR) <= HASHES_PER_NETWORK;
 }
 
+/* ---------- signing in with one ---------- */
+
+export const LOCKOUT = 15 * 60;          // the window both counts below are kept over
+export const TRIES_PER_ADDRESS = 5;      // password tries for one address in it
+export const WRONG_EVERYWHERE = 100;     // wrong passwords for all addresses together in it
+
+/* What a password is checked against when the address has none: the
+   current count, and a salt and hash of zero bytes. Never accepted, even
+   in the impossible case that a password derives to it. */
+const decoy = (env) => `pbkdf2-sha256$${iterations(env)}$${"A".repeat(22)}$${"A".repeat(43)}`;
+
+/* The account an address belongs to, with its password hash if it has a
+   usable one. */
+async function holder(env, email) {
+  return env.LIST.prepare(
+    `SELECT u.id, c.hash FROM users u
+     LEFT JOIN credentials c ON c.user_id = u.id AND c.kind = 'password'
+     WHERE u.email = ?`).bind(email).first();
+}
+
+export async function passwordOf(env, user) {
+  const row = await env.LIST.prepare("SELECT hash FROM credentials WHERE user_id = ? AND kind = 'password'")
+    .bind(user).first();
+  return row && isPasswordHash(row.hash) ? row.hash : null;
+}
+
+/* Whether `typed` is the password of the account at `email`, under the
+   limits. { ok: true, user, stored } or { ok: false, why }:
+     "locked"       this address's tries, or everyone's wrong passwords, are
+                    used up for now: an emailed code is the way in;
+     "network"      the request's network has asked for its hashes;
+     "unavailable"  the runtime refused to hash (PBKDF2_ITERATIONS);
+     "wrong"        anything else, the same whatever the reason.
+   A right one starts the address's tries again; a wrong one counts
+   towards everyone's. */
+export async function checkPassword(request, env, email, typed) {
+  if (await peek(env, "pw-wrong", "everyone", LOCKOUT) >= WRONG_EVERYWHERE) return { ok: false, why: "locked" };
+  const tries = await bump(env, "pw-tries", email, LOCKOUT);
+  if (tries > TRIES_PER_ADDRESS) return { ok: false, why: "locked" };
+  if (!await hashAllowed(request, env)) return { ok: false, why: "network" };
+  const row = await holder(env, email);
+  const real = Boolean(row) && isPasswordHash(row.hash);
+  let right;
+  try {
+    right = await verifyPassword(real ? row.hash : decoy(env), typeof typed === "string" ? typed : "");
+  } catch (err) {
+    console.log(`account password check: ${err.name || "error"}`);
+    return { ok: false, why: "unavailable" };
+  }
+  if (real && right) {
+    await (await unlock(env, email)).run();
+    return { ok: true, user: row.id, stored: row.hash };
+  }
+  await bump(env, "pw-wrong", "everyone", LOCKOUT);
+  return { ok: false, why: tries >= TRIES_PER_ADDRESS ? "locked" : "wrong" };
+}
+
+/* The statement that gives an address its password tries back: after a
+   right password, and after a typed code, which is how a locked address
+   gets in. */
+export const unlock = (env, email) => forget(env, "pw-tries", email);
+
+/* The statement that keeps a just-verified password hashed again at the
+   current count, when its hash was made with fewer (needsRehash). The new
+   hash is written only if the stored one is still the one verified. */
+export async function rehashed(env, { user, stored, typed }) {
+  if (!needsRehash(env, stored)) return [];
+  let hash;
+  try {
+    hash = await hashPassword(env, typed);
+  } catch (err) {
+    console.log(`account password rehash: ${err.name || "error"}`);
+    return [];
+  }
+  return [env.LIST.prepare(
+    "UPDATE credentials SET hash = ?, updated_at = ? WHERE user_id = ? AND kind = 'password' AND hash = ?")
+    .bind(hash, now(), user, stored)];
+}
+
 /* ---------- attaching one ---------- */
 
 /* The statements that make `hash` the account's password, with the event
-   that records it, for the caller's batch. Called only once the browser
-   whose attempt held the hash has typed that attempt's code, so the
-   address's owner chose it. A password the account already had is
-   replaced, as a reset by code would replace it. */
-export async function attachPassword(env, { user, org = null, hash }) {
+   that records it, for the caller's batch. Called only once the person
+   has shown the address is theirs (a code typed in the browser that chose
+   the password) or that the account is (a fresh code or the current
+   password). A password the account already had is replaced: with
+   `reset`, the event says it was reset by code. */
+export async function attachPassword(env, { user, org = null, hash, reset = false }) {
   const db = env.LIST;
   const t = now();
   const had = await db.prepare("SELECT 1 AS yes FROM credentials WHERE user_id = ? AND kind = 'password'")
@@ -203,6 +295,25 @@ export async function attachPassword(env, { user, org = null, hash }) {
     db.prepare(`INSERT INTO credentials (user_id, kind, hash, created_at, updated_at) VALUES (?, 'password', ?, ?, ?)
                 ON CONFLICT(user_id, kind) DO UPDATE SET hash = excluded.hash, updated_at = excluded.updated_at`)
       .bind(user, hash, t, t),
-    event(db, { org, user, what: had ? "password_changed" : "password_added" }),
+    event(db, { org, user, what: !had ? "password_added" : reset ? "password_reset" : "password_changed" }),
   ];
+}
+
+/* The statements that take an account's password away, with the event. */
+export function detachPassword(env, { user, org = null }) {
+  const db = env.LIST;
+  return [
+    db.prepare("DELETE FROM credentials WHERE user_id = ? AND kind = 'password'").bind(user),
+    event(db, { org, user, what: "password_removed" }),
+  ];
+}
+
+/* How many ways into an account there are besides its password. The
+   emailed code is always one, so today a password can always go; Google,
+   GitHub and passkeys add to it as they arrive. */
+export async function otherWaysIn(env, user) {
+  const row = await env.LIST.prepare(
+    `SELECT (SELECT count(*) FROM identities WHERE user_id = ? AND provider != 'email')
+          + (SELECT count(*) FROM passkeys WHERE user_id = ?) AS n`).bind(user, user).first();
+  return 1 + row.n;
 }

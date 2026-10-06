@@ -1,24 +1,34 @@
-/* account.ranwhat.com: signing in with an emailed code, making an account
- * with a password, and the account page behind both. index.js sends every
- * request for this host here, and only once ACCOUNTS_ON is set.
+/* account.ranwhat.com: signing in with an emailed code or a password,
+ * making an account with a password, resetting one, and the account page
+ * behind them. index.js sends every request for this host here, and only
+ * once ACCOUNTS_ON is set.
  *
  *   GET  /              The account: who you are, your organisation, its
- *                       plan and what each plan has (features.js), what
- *                       happened lately, and signing out.
+ *                       plan and what each plan has (features.js), how you
+ *                       sign in, what happened lately, and signing out.
  *                       Without a session it sends you to /signin.
  *   GET  /signin        The email form.
  *   POST /signin        Mails a code; the same answer for every address.
- *   GET  /signin/code   The box to type the code in. Never filled in.
+ *   GET  /signin/code   The box to type the code in (with a new password,
+ *                       for a reset). Never filled in.
  *   POST /signin/code   Checks it, makes the account on first use, sets
- *                       the password a sign-up chose, and opens a new
- *                       session.
+ *                       the password a sign-up or a reset chose, and opens
+ *                       a new session.
  *   POST /signin/again  A new code for the same address (and password).
- *   GET  /signup        The email and password form.
+ *   GET  /signin/password  The email and password form.
+ *   POST /signin/password  Checks them under password.js's limits; one
+ *                       answer for every way they can be wrong.
+ *   GET  /signup        The email and password form for a new account.
  *   POST /signup        Judges the password, then mails a code as /signin
  *                       does; the password is set only once it is typed
  *                       (password.js says why that is the whole defence).
+ *   GET  /reset         The email form for a forgotten password.
+ *   POST /reset         Mails a reset code, as /signin mails its code.
  *   POST /stepup        A fresh code for someone signed in, for the actions
  *                       that need one.
+ *   POST /password      Adds or changes the password: the current one or a
+ *                       fresh code, then every other session ends.
+ *   POST /password/remove  Takes it away, on the same terms.
  *   POST /signout       Ends this session.
  *   POST /signout-all   Ends every session of this account.
  *   POST /org           Renames the organisation (owner or admin).
@@ -33,11 +43,14 @@ import {
   SESSION_MAX, canManage, event, history, now, orgFor, orgName, ready, schema, userForVerifiedEmail,
 } from "./accounts.js";
 import {
-  CODE_FOR, CODE_TRIES, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, checkCode, clearCookie,
-  current, formOk, formToken, nextPath, openSession, randomToken, readCookie, requestCode,
+  CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, checkCode,
+  clearCookie, current, formOk, formToken, fresh, nextPath, openSession, randomToken, readCookie, requestCode,
   sameOrigin, setCookie,
 } from "./session.js";
-import { attachPassword, hashAllowed, hashPassword, isPasswordHash, passwordProblem } from "./password.js";
+import {
+  LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
+  otherWaysIn, passwordOf, passwordProblem, rehashed, unlock,
+} from "./password.js";
 import { form, notFound, page, redirect, refused, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
@@ -58,6 +71,20 @@ const signedOut = (request) =>
   redirect("/signin", readCookie(request, SESSION_COOKIE) ? [clearCookie(SESSION_COOKIE)] : []);
 
 const problem = (text) => (text ? `<p class="bad">${escape(text)}</p>` : "");
+
+/* PBKDF2_ITERATIONS above what the runtime allows (password.js). */
+const unavailable = () => page("Not available", `<h1>Passwords are not available just now.</h1>
+  <p>You can still <a href="/signin">sign in with an emailed code</a>, which
+     makes the account too.</p>`, { status: 503 });
+
+/* password.js's limit on hashes from one network. */
+const tooManyHashes = () => page("Too many tries", `<h1>Too many tries.</h1>
+  <p>More passwords were tried from your network in the last hour than we
+     check. Try again in an hour, or <a href="/signin">sign in with an emailed
+     code</a>.</p>`, { status: 429 });
+
+const NEW_PASSWORD = `<p><small>At least ${MIN_LENGTH} characters, of any kind, spaces too: a few unrelated
+   words work well. Passwords known from data breaches are refused.</small></p>`;
 
 /* ---------- signing in ---------- */
 
@@ -88,7 +115,8 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
              value="${escape(email)}">
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
-    <p>Want a password as well? <a href="/signup">Make an account with a password</a></p>
+    <p>Have a password? <a href="/signin/password">Sign in with it</a>.
+       Want one? <a href="/signup">Make an account with a password</a></p>
     <p><small>The address is used to send the code, and kept only once the code
        is typed, as your account. This page sets two cookies, both only to sign
        you in, and nothing on it tracks you. <a href="${PRIVACY}">Privacy</a></small></p>`,
@@ -137,21 +165,29 @@ async function codePage(request, env) {
 const startOver = (row) => ({
   stepup: `<a href="/">Back to your account</a>`,
   verify: `<a href="/signup">Use a different email</a>`,
+  reset: `<a href="/reset">Use a different email</a>`,
 }[row.purpose] || `<a href="/signin">Use a different email</a>`);
 
+/* With 'reset', the new password goes in the same form as the code, and is
+   judged before the code is checked, so a refused password costs no try. */
 async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
   const stepup = row.purpose === "stepup";
   const verify = row.purpose === "verify";
-  return page(stepup ? "Confirm it is you" : "Check your email", `<h1>Check your email.</h1>
+  const reset = row.purpose === "reset";
+  return page(stepup ? "Confirm it is you" : reset ? "Reset your password" : "Check your email", `<h1>Check your email.</h1>
     <p>A code is on its way to <strong>${escape(row.email)}</strong>. Type it here:
        it works for ${CODE_FOR / 60} minutes, in this browser only.</p>
     ${verify ? "<p>Your password is set when the code is typed, and not before.</p>" : ""}
+    ${reset ? "<p>Type it with the password you want now. Setting it signs your account out everywhere else.</p>" : ""}
     ${form("/signin/code", await formToken(env, token, "code"), `
       <label for="code">Code</label>
       <input id="code" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters"
              spellcheck="false" maxlength="12" required autofocus>
+      ${reset ? `<label for="password">New password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="${MIN_LENGTH}" required>
+      ${NEW_PASSWORD}` : ""}
       ${problem(error)}
-      <button type="submit">${stepup ? "Confirm" : verify ? "Confirm and sign in" : "Sign in"}</button>`)}
+      <button type="submit">${stepup ? "Confirm" : verify ? "Confirm and sign in" : reset ? "Set password and sign in" : "Sign in"}</button>`)}
     <p>Nothing after a minute? Look in spam, then ask again.</p>
     ${form("/signin/again", await formToken(env, token, "again"), `<button type="submit">Send a new code</button>`, "row")}
     <p>${startOver(row)}</p>`,
@@ -175,8 +211,15 @@ async function codePost(request, env) {
   const f = await fields(request);
   const token = readCookie(request, SIGNIN_COOKIE);
   if (!await formOk(env, f, token, "code")) return refused();
+  const held = await attempt(env, token);
+  if (held && held.purpose === "reset") return resetCode(request, env, token, held, f);
   const result = await checkCode(env, token, f.get("code"));
   if (result.ok) return signedIn(request, env, result.row);
+  return notTaken(env, token, result);
+}
+
+/* The answer to a code checkCode() turned down. */
+async function notTaken(env, token, result) {
   const row = await attempt(env, token);
   if (!row) return redirect("/signin");
   if (result.why === "wrong") {
@@ -186,11 +229,27 @@ async function codePost(request, env) {
   return spent(env, token, row, result.why);
 }
 
+/* Someone just signed in as `user`: a new session in place of whatever the
+   browser had, written in one batch with `before` (run first) and what
+   `after(org)` returns, and the browser sent on. The organisation is the
+   one the browser was looking at, if it was already this person's. */
+async function enter(request, env, { user, next = "/", coded = true, before = [], after }) {
+  const was = await current(request, env);
+  const org = await orgFor(env, user, was && was.user === user ? was.org.id : null);
+  const orgId = org ? org.id : null;
+  const { value, statements } = await openSession(env, {
+    user, org: orgId, previous: readCookie(request, SESSION_COOKIE), coded,
+  });
+  await env.LIST.batch([...before, ...statements, ...await after(orgId)]);
+  return redirect(nextPath(next), [setCookie(SESSION_COOKIE, value, SESSION_MAX), clearCookie(SIGNIN_COOKIE)]);
+}
+
 /* A code was typed: the account (made now if this is its first sign-in), a
    new session in place of whatever the browser had, and the events, in one
    batch. With 'verify', the password this browser chose becomes the
    account's in the same batch: the row is the attempt this browser holds
-   and has just typed the code for, so the hash is the one it sent. */
+   and has just typed the code for, so the hash is the one it sent. A code
+   also gives the address back its password tries (password.js). */
 async function signedIn(request, env, row) {
   const db = env.LIST;
   let user, what;
@@ -209,17 +268,50 @@ async function signedIn(request, env, row) {
     user = known.id;
     what = "stepup";
   } else {
-    /* 'reset' comes with password sign-in, on its own pages. */
+    /* 'reset' never gets here: codePost sends it to resetCode. */
     return redirect("/signin", [clearCookie(SIGNIN_COOKIE)]);
   }
-  const was = await current(request, env);
-  const org = await orgFor(env, user, was && was.user === user ? was.org.id : null);
-  const { value, statements } = await openSession(env, {
-    user, org: org ? org.id : null, previous: readCookie(request, SESSION_COOKIE),
+  return enter(request, env, { user, next: row.next, after: async (org) => [
+    event(db, { org, user, what }),
+    ...(password ? await attachPassword(env, { user, org, hash: password }) : []),
+    await unlock(env, row.email),
+  ] });
+}
+
+/* A reset code, typed with the new password. The password is judged and
+   hashed first, so a refused one costs the attempt nothing; then the code
+   is checked as any code is. Once it is right the address is proven, as a
+   sign-in code proves it (an address with no account gets one, as /signin
+   would give it), and in one batch: every session of the account ends,
+   the password is replaced, and this browser gets the one new session. */
+async function resetCode(request, env, token, row, f) {
+  if (row.used_at || row.expires_at <= now()) return spent(env, token, row, "expired");
+  if (row.tries >= CODE_TRIES) return spent(env, token, row, "burned");
+  if (!await hashAllowed(request, env)) return tooManyHashes();
+  const password = f.get("password");
+  const wrong = await passwordProblem(env, password);
+  if (wrong) return codeForm(env, token, row, { error: wrong, status: 400 });
+  let hash;
+  try {
+    hash = await hashPassword(env, password);
+  } catch (err) {
+    console.log(`account password hash: ${err.name || "error"}`);
+    return unavailable();
+  }
+  const result = await checkCode(env, token, f.get("code"));
+  if (!result.ok) return notTaken(env, token, result);
+  const db = env.LIST;
+  const found = await userForVerifiedEmail(env, { email: row.email });
+  const user = found.id;
+  return enter(request, env, {
+    user, next: row.next,
+    before: [db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user)],
+    after: async (org) => [
+      ...(found.created ? [event(db, { org, user, what: "signup" })] : []),
+      ...await attachPassword(env, { user, org, hash, reset: true }),
+      await unlock(env, row.email),
+    ],
   });
-  const credential = password ? await attachPassword(env, { user, org: org ? org.id : null, hash: password }) : [];
-  await db.batch([...statements, event(db, { org: org ? org.id : null, user, what }), ...credential]);
-  return redirect(nextPath(row.next), [setCookie(SESSION_COOKIE, value, SESSION_MAX), clearCookie(SIGNIN_COOKIE)]);
 }
 
 async function again(request, env, ctx) {
@@ -295,13 +387,123 @@ async function signupPost(request, env, ctx) {
   try {
     hash = await hashPassword(env, password);
   } catch (err) {
-    /* PBKDF2_ITERATIONS above what the runtime allows (password.js). */
     console.log(`account password hash: ${err.name || "error"}`);
-    return page("Not available", `<h1>Passwords are not available just now.</h1>
-      <p>You can still <a href="/signin">sign in with an emailed code</a>, which
-         makes the account too.</p>`, { status: 503 });
+    return unavailable();
   }
   return sendCode(request, env, ctx, { email, purpose: "verify", next, previous: binding, passwordHash: hash });
+}
+
+/* ---------- signing in with a password ---------- */
+
+async function passwordPage(request, env, ctx, url) {
+  const next = nextPath(url.searchParams.get("next"));
+  if (await current(request, env)) return redirect(next);
+  return passwordForm(env, readCookie(request, SIGNIN_COOKIE), { next });
+}
+
+/* Never filled in with the password. */
+async function passwordForm(env, browser, { next = "/", email = "", error = "", status = 200 } = {}) {
+  const { binding, cookies } = bound(browser);
+  return page("Sign in with a password", `<h1>Sign in</h1>
+    ${form("/signin/password", await formToken(env, binding, "password"), `
+      <input type="hidden" name="next" value="${escape(next)}">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="username" maxlength="200" required${email ? "" : " autofocus"}
+             value="${escape(email)}">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096"
+             required${email ? " autofocus" : ""}>
+      ${problem(error)}
+      <button type="submit">Sign in</button>`)}
+    <p>Forgot it? <a href="/reset">Reset it with an emailed code</a></p>
+    <p>No password? <a href="/signin">Sign in with an emailed code</a>; it makes the account too.</p>
+    <p><small>This page sets a cookie only to sign you in, and nothing on it tracks
+       you. <a href="${PRIVACY}">Privacy</a></small></p>`,
+  { status, cookies });
+}
+
+/* One answer for a wrong password, an address with no password and an
+   address with no account, after the same work (password.js). Signing in
+   then goes exactly as a code does, except that the session is not fresh:
+   a password is not a code typed just now. */
+async function passwordPost(request, env) {
+  const f = await fields(request);
+  const binding = readCookie(request, SIGNIN_COOKIE);
+  if (!await formOk(env, f, binding, "password")) return refused();
+  const next = nextPath(f.get("next"));
+  const email = address(f.get("email"));
+  if (!email) {
+    return passwordForm(env, binding, { next, email: String(f.get("email") ?? "").slice(0, 200),
+      error: "That email address does not look right.", status: 400 });
+  }
+  const typed = f.get("password");
+  const result = await checkPassword(request, env, email, typed);
+  if (result.ok) {
+    const db = env.LIST;
+    const user = result.user;
+    return enter(request, env, { user, next, coded: false, after: async (org) => [
+      db.prepare("UPDATE users SET signed_in_at = ? WHERE id = ?").bind(now(), user),
+      event(db, { org, user, what: "signin_password" }),
+      ...await rehashed(env, { user, stored: result.stored, typed }),
+    ] });
+  }
+  if (result.why === "locked") return locked(env, binding, email, next);
+  if (result.why === "network") return tooManyHashes();
+  if (result.why === "unavailable") return unavailable();
+  return passwordForm(env, binding, { next, email, status: 400,
+    error: "That email and password do not match. Check both, or sign in with an emailed code." });
+}
+
+/* Password sign-in is paused for this address, or for everyone: the code
+   still works, one press away. */
+async function locked(env, binding, email, next) {
+  return page("Use an emailed code", `<h1>Use an emailed code.</h1>
+    <p class="bad">There have been too many tries with a password, so password sign-in
+       is paused for up to ${LOCKOUT / 60} minutes. An emailed code still works, and
+       typing one gives this address its tries back.</p>
+    ${form("/signin", await formToken(env, binding, "signin"), `
+      <input type="hidden" name="next" value="${escape(next)}">
+      <input type="hidden" name="email" value="${escape(email)}">
+      <button type="submit">Email a code to ${escape(email)}</button>`)}
+    <p><a href="/signin">Use a different email</a></p>`,
+  { status: 429 });
+}
+
+/* ---------- a forgotten password ---------- */
+
+async function resetPage(request, env) {
+  if (await current(request, env)) return redirect("/");
+  return resetForm(env, readCookie(request, SIGNIN_COOKIE));
+}
+
+async function resetForm(env, browser, { email = "", error = "", status = 200 } = {}) {
+  const { binding, cookies } = bound(browser);
+  return page("Reset your password", `<h1>Reset your password</h1>
+    <p>Type your email, and we send you a code. You type it on the next page with
+       the password you want now, which replaces the old one and signs your
+       account out everywhere else.</p>
+    ${form("/reset", await formToken(env, binding, "reset"), `
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" maxlength="200" required autofocus
+             value="${escape(email)}">
+      ${problem(error)}
+      <button type="submit">Email me a code</button>`)}
+    <p><a href="/signin/password">Back to signing in</a></p>`,
+  { status, cookies });
+}
+
+/* The same answer for every address, with an account or a password or
+   neither, as /signin gives, and from the same day's mail. */
+async function resetPost(request, env, ctx) {
+  const f = await fields(request);
+  const binding = readCookie(request, SIGNIN_COOKIE);
+  if (!await formOk(env, f, binding, "reset")) return refused();
+  const email = address(f.get("email"));
+  if (!email) {
+    return resetForm(env, binding, { email: String(f.get("email") ?? "").slice(0, 200),
+      error: "That email address does not look right.", status: 400 });
+  }
+  return sendCode(request, env, ctx, { email, purpose: "reset", next: "/", previous: binding });
 }
 
 async function stepup(request, env, ctx) {
@@ -320,9 +522,12 @@ async function stepup(request, env, ctx) {
 const EVENTS = {
   signup: "Account made, with an emailed code",
   signin: "Signed in with an emailed code",
+  signin_password: "Signed in with your password",
   stepup: "Confirmed with an emailed code",
   password_added: "Password added, confirmed with an emailed code",
-  password_changed: "Password changed, confirmed with an emailed code",
+  password_changed: "Password changed, and every other session signed out",
+  password_reset: "Password reset with an emailed code, and every other session signed out",
+  password_removed: "Password removed",
   signout: "Signed out",
   signout_all: "Signed out everywhere",
   org_renamed: "Organisation renamed",
@@ -360,7 +565,66 @@ function panel(tier, onPlan) {
     <ul>${items}</ul>${after}</section>`;
 }
 
-async function dashboard(env, who, { error = "", status = 200 } = {}) {
+/* How this account can sign in. The emailed code always works. A password
+   is added, changed or removed with the current password or a code typed
+   in the last 15 minutes (fresh() in session.js); without a password, only
+   the code will do. The others are on their way. */
+async function methods(env, who, error) {
+  const stored = await passwordOf(env, who.user);
+  const confirmed = fresh(who);
+  const stepupToken = await formToken(env, who.id, "stepup");
+  const code = (label) => form("/stepup", stepupToken,
+    `<input type="hidden" name="next" value="/"><button type="submit">${label}</button>`, "row");
+  const currentField = (id) => (confirmed ? "" : `
+      <label for="${id}">Current password</label>
+      <input id="${id}" name="current" type="password" autocomplete="current-password" maxlength="4096" required>`);
+  const newField = `
+      <label for="new-password">New password</label>
+      <input id="new-password" name="password" type="password" autocomplete="new-password" minlength="${MIN_LENGTH}" required>
+      ${NEW_PASSWORD}`;
+  const recent = `<p>You typed an emailed code in the last ${FRESH_FOR / 60} minutes, so your current
+       password is not asked for.</p>`;
+  let password;
+  if (stored) {
+    const remove = await otherWaysIn(env, who.user) > 0
+      ? form("/password/remove", await formToken(env, who.id, "password-remove"), `${currentField("current-password-remove")}
+      <button type="submit">Remove password</button>`)
+      : "";
+    password = `<li data-method="password"><strong>Password</strong> <span class="tag">set</span>
+      <br>Sign in with your email and this password.
+      ${problem(error)}
+      ${confirmed ? recent : ""}
+      ${form("/password", await formToken(env, who.id, "password"), `${currentField("current-password")}${newField}
+      <button type="submit">Change password</button>`)}
+      <p>Changing it signs this account out everywhere else.</p>
+      ${remove}
+      ${confirmed ? "" : `<p>Forgot it? Confirm with an emailed code, and it is not asked for.</p>
+      ${code("Email me a code")}`}</li>`;
+  } else {
+    password = `<li data-method="password"><strong>Password</strong> <span class="tag">not set</span>
+      <br>Add one to sign in with your email and a password, as well as with a code.
+      ${problem(error)}
+      ${confirmed
+        ? form("/password", await formToken(env, who.id, "password"), `${newField}
+      <button type="submit">Add password</button>`)
+        : `<p>Adding one needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${code("Email me a code")}`}</li>`;
+  }
+  const coming = (key, name, says) => `<li data-method="${key}"><strong>${name}</strong> <span class="tag">coming</span>
+      <br>${says}</li>`;
+  return `<section class="panel" id="methods">
+    <h2>Sign-in methods</h2>
+    <ul>
+      <li data-method="code"><strong>Emailed code</strong> <span class="tag">always on</span>
+      <br>A code mailed to ${escape(who.email)} signs you in, and confirms what needs confirming.</li>
+      ${password}
+      ${coming("google", "Google", "Sign in with a Google account that has this address.")}
+      ${coming("github", "GitHub", "Sign in with a GitHub account that has this address, verified.")}
+      ${coming("passkeys", "Passkeys", "Sign in with this device's screen lock or a security key.")}
+    </ul></section>`;
+}
+
+async function dashboard(env, who, { error = "", passwordError = "", status = 200 } = {}) {
   const org = who.org;
   const events = await history(env, who.user);
   const onPlan = await plan(env, org.id);
@@ -382,6 +646,7 @@ async function dashboard(env, who, { error = "", status = 200 } = {}) {
     </dl>
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
+    ${await methods(env, who, passwordError)}
     ${rename}
     <h2>Recent activity</h2>
     ${activity}
@@ -441,6 +706,73 @@ async function rename(request, env) {
   return redirect("/");
 }
 
+/* ---------- the password, signed in ---------- */
+
+/* Whether the person may add, change or remove the password now: true when
+   a code was typed in the last 15 minutes or the current password is typed
+   now, under the same limits as signing in with it; otherwise the page
+   that says why not. Without a password, only the code will do. */
+async function allowed(request, env, who, stored, typed) {
+  if (fresh(who)) return true;
+  if (!stored) {
+    return dashboard(env, who, { status: 403,
+      passwordError: `Adding a password needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` });
+  }
+  const result = await checkPassword(request, env, who.email, typed);
+  if (result.ok && result.user === who.user) return true;
+  const [status, passwordError] = {
+    locked: [429, "Too many tries with a password. Confirm with an emailed code instead."],
+    network: [429, "More passwords were tried from your network in the last hour than we check. Confirm with an emailed code instead."],
+    unavailable: [503, "Passwords are not available just now."],
+  }[result.why] || [400, "Your current password is not right."];
+  return dashboard(env, who, { status, passwordError });
+}
+
+/* Adds or changes it, and ends every other session of the account: a
+   password that has to change may have been used elsewhere already. */
+async function setPassword(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "password")) return refused();
+  const ok = await allowed(request, env, who, await passwordOf(env, who.user), f.get("current"));
+  if (ok !== true) return ok;
+  if (!await hashAllowed(request, env)) return tooManyHashes();
+  const password = f.get("password");
+  const wrong = await passwordProblem(env, password);
+  if (wrong) return dashboard(env, who, { status: 400, passwordError: wrong });
+  let hash;
+  try {
+    hash = await hashPassword(env, password);
+  } catch (err) {
+    console.log(`account password hash: ${err.name || "error"}`);
+    return unavailable();
+  }
+  const db = env.LIST;
+  await db.batch([
+    ...await attachPassword(env, { user: who.user, org: who.org.id, hash }),
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").bind(who.user, who.id),
+  ]);
+  return redirect("/");
+}
+
+/* Only while another way in remains, which the emailed code always is. */
+async function removePassword(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "password-remove")) return refused();
+  const stored = await passwordOf(env, who.user);
+  if (!stored) return redirect("/");
+  if (await otherWaysIn(env, who.user) < 1) {
+    return dashboard(env, who, { status: 400, passwordError: "This password is your only way in, so it stays." });
+  }
+  const ok = await allowed(request, env, who, stored, f.get("current"));
+  if (ok !== true) return ok;
+  await env.LIST.batch(detachPassword(env, { user: who.user, org: who.org.id }));
+  return redirect("/");
+}
+
 /* ---------- the host ---------- */
 
 /* Path: { method: handler }. */
@@ -449,8 +781,12 @@ const ROUTES = {
   "/signin": { GET: signinPage, POST: signinPost },
   "/signin/code": { GET: codePage, POST: codePost },
   "/signin/again": { POST: again },
+  "/signin/password": { GET: passwordPage, POST: passwordPost },
   "/signup": { GET: signupPage, POST: signupPost },
+  "/reset": { GET: resetPage, POST: resetPost },
   "/stepup": { POST: stepup },
+  "/password": { POST: setPassword },
+  "/password/remove": { POST: removePassword },
   "/signout": { POST: signout },
   "/signout-all": { POST: signoutAll },
   "/org": { POST: rename },
