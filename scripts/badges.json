@@ -1,6 +1,13 @@
 {
   "badges": [
     {
+      "name": "Cyber Vendor Guide",
+      "added": "2026-10-06",
+      "snippet": "<a href=\"https://www.cybervendorguide.com/tools/ranwhat\"><img src=\"https://www.cybervendorguide.com/badge/listed-light.svg\" alt=\"Listed on Cyber Vendor Guide\" width=\"240\" height=\"56\"></a>",
+      "sha256": "5f4eb39732b539282123a1f1f53d9824c2087ae3c9961aa95d7d086bae094946",
+      "checked": "2026-10-06"
+    },
+    {
       "name": "MarketingDB",
       "added": "2026-10-05",
       "snippet": "<a href=\"https://marketingdb.live\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\"><img src=\"https://marketingdb.live/badge.svg\" alt=\"Launched on MarketingDB\" width=\"190\" height=\"44\"/></a>",
