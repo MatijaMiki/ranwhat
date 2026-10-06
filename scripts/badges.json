@@ -1,6 +1,13 @@
 {
   "badges": [
     {
+      "name": "Twelve Tools",
+      "added": "2026-10-07",
+      "snippet": "<a href=\"https://twelve.tools\" target=\"_blank\"><img src=\"https://twelve.tools/badge0-white.svg\" alt=\"Featured on Twelve Tools\" width=\"148\" height=\"40\"></a>",
+      "sha256": "65e8875f8bd345f49184babf93b84e98599979e89f9be8b0555c38539abd54c2",
+      "checked": "2026-10-07"
+    },
+    {
       "name": "Cyber Vendor Guide",
       "added": "2026-10-06",
       "snippet": "<a href=\"https://www.cybervendorguide.com/tools/ranwhat\"><img src=\"https://www.cybervendorguide.com/badge/listed-light.svg\" alt=\"Listed on Cyber Vendor Guide\" width=\"240\" height=\"56\"></a>",
