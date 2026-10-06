@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI agent token scopes: check them, then cut them | ranwhat</title>
+<title>AI agent token scopes and least privilege | ranwhat</title>
 <meta name="description" content="Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.">
 <link rel="canonical" href="https://ranwhat.com/guides/ai-agent-token-scopes">
 <meta name="color-scheme" content="light dark">
@@ -18,7 +18,7 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/ai-agent-token-scopes">
-<meta property="og:title" content="AI agent token scopes: check them, then cut them | ranwhat">
+<meta property="og:title" content="AI agent token scopes and least privilege | ranwhat">
 <meta property="og:description" content="Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
@@ -27,14 +27,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="AI agent token scopes: check them, then cut them | ranwhat">
+<meta name="twitter:title" content="AI agent token scopes and least privilege | ranwhat">
 <meta name="twitter:description" content="Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Check what the tokens your AI agent holds can do","description":"Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-agent-token-scopes"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Token scopes","item":"https://ranwhat.com/guides/ai-agent-token-scopes"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Check what the tokens your AI agent holds can do","description":"Check what the GitHub, Google, Slack, Stripe and AWS credentials your AI agent holds can do, find the grants it never used, and cut them to least privilege.","datePublished":"2026-10-02","dateModified":"2026-10-06","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-agent-token-scopes","about":[{"@type":"Thing","name":"Principle of least privilege"},{"@type":"Thing","name":"Non-human identities"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Token scopes","item":"https://ranwhat.com/guides/ai-agent-token-scopes"}]}]}</script>
 </head>
 <body>
 <header>
@@ -72,7 +72,7 @@
       Stripe or AWS.
     </p>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the GitHub, Google, Slack, Stripe, AWS, Railway and MCP documentation. Published <time datetime="2026-10-02">2 October 2026</time>.
+      Checked against the GitHub, Google, Slack, Stripe, AWS, Railway and MCP documentation. Published 2 October 2026, updated <time datetime="2026-10-06">6 October 2026</time>.
     </p>
   </div>
 </section>
@@ -81,7 +81,7 @@
   <div class="shell band split">
     <div class="marginal">01 / Why</div>
     <div>
-      <h2>Why scope is the part you control</h2>
+      <h2>Least privilege for AI agents: scope is the part you control</h2>
       <p class="lede">
         An agent running in your shell can use every credential your account
         can reach:
@@ -104,6 +104,16 @@
         set and add scope when a privileged operation first needs it. It is
         written for MCP servers and clients, and the reasoning holds for any
         token an agent carries.
+      </p>
+      <p style="color:var(--muted);font-size:15px">
+        An agent's tokens are non-human identities: credentials that act for
+        software, not for a person. The
+        <a href="https://owasp.github.io/www-project-non-human-identities-top-10/2025/top-10-2025/">OWASP
+        Non-Human Identities Top 10</a> names the same failures: secret leakage
+        (NHI2), over-privileged identities (NHI5) and long-lived secrets
+        (NHI7). Least privilege and a short expiry do not stop a token
+        leaking, but they limit what a leaked one is worth: a token that can do
+        less, for less time, is worth less to whoever copies it.
       </p>
       <p style="color:var(--muted);font-size:15px">
         So for each credential there are two questions: what can it do, and
@@ -583,6 +593,7 @@ ranwhat demo                                  <span class="c-mut"># the report o
       </p>
       <ul class="follow">
         <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices#scope-minimization">MCP security best practices<span>scope minimisation, risks and common mistakes</span></a></li>
+        <li><a href="https://owasp.github.io/www-project-non-human-identities-top-10/2025/top-10-2025/">OWASP Non-Human Identities Top 10<span>NHI2, NHI5, NHI7</span></a></li>
         <li><a href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps">GitHub: scopes for OAuth apps<span>X-OAuth-Scopes, what each scope grants</span></a></li>
         <li><a href="https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens">GitHub: permissions for fine-grained tokens<span>X-Accepted-GitHub-Permissions</span></a></li>
         <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">GitHub: managing personal access tokens<span>fine-grained over classic, limits, expiration</span></a></li>
@@ -666,6 +677,7 @@ ranwhat demo                                  <span class="c-mut"># the report o
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
         </ul>
       </div>
       <div>

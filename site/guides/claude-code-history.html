@@ -34,7 +34,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Where Claude Code keeps your conversation history","description":"Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.","datePublished":"2026-10-02","dateModified":"2026-10-02","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Where Claude Code keeps your conversation history","description":"Claude Code saves each session as plaintext JSONL in ~/.claude/projects and deletes it after 30 days by default. Where it lives, what it holds, how to purge it.","datePublished":"2026-10-02","dateModified":"2026-10-06","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
 </head>
 <body>
 <header>
@@ -79,7 +79,7 @@
       </div>
     </div>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code documentation and the reports under Sources. Published <time datetime="2026-10-02">2 October 2026</time>.
+      Checked against the Claude Code documentation and the reports under Sources. Published 2 October 2026, updated <time datetime="2026-10-06">6 October 2026</time>.
     </p>
   </div>
 </section>
@@ -184,6 +184,33 @@ rm /tmp/claude/response.md    <span class="c-mut"># once you have looked</span><
         <span class="icode">/tmp/claude/</span> belongs to another user,
         someone set up the overwrite the advisory describes. Note where the
         link points before you remove it.
+      </p>
+
+      <h3 style="margin-top:40px">Where the other coding agents keep theirs</h3>
+      <p style="font-size:15px;color:var(--ink-2)">
+        Claude Code is not the only one. Most coding agents keep a plaintext
+        record of each session in your home folder, each in its own place and
+        on its own schedule.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Agent</th><th>Where its sessions are</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Codex</strong></td>
+              <td data-label="Where its sessions are"><code>~/.codex/<wbr>sessions/<wbr>YYYY/MM/DD/<wbr>rollout-*.jsonl</code> (compressed to <code>.jsonl.zst</code> after a week idle) and <code>~/.codex/<wbr>archived_sessions/</code>, or under <code>$CODEX_HOME</code></td></tr>
+          <tr><td><strong>Gemini CLI</strong></td>
+              <td data-label="Where its sessions are"><code>~/.gemini/<wbr>tmp/<wbr>&lt;project&gt;/<wbr>chats/</code>, with <code>$GEMINI_CLI_HOME</code> in place of <code>~</code> when it is set</td></tr>
+          <tr><td><strong>GitHub Copilot CLI</strong></td>
+              <td data-label="Where its sessions are"><code>~/.copilot/<wbr>session-state/<wbr>&lt;session&gt;/<wbr>events.jsonl</code>, or under <code>$COPILOT_HOME</code></td></tr>
+          <tr><td><strong>Qwen Code</strong></td>
+              <td data-label="Where its sessions are"><code>~/.qwen/<wbr>projects/<wbr>&lt;project&gt;/<wbr>chats/</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <a href="/commands#sources">ranwhat sources</a> lists every agent
+        ranwhat reads, where it looked for each one's history on this machine,
+        and whether it found any.
       </p>
     </div>
   </div>
@@ -472,7 +499,7 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
         <li><a href="https://code.claude.com/docs/en/mcp">MCP<span>MCP server configs in ~/.claude.json</span></a></li>
         <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-4vp2-6q8c-pvq2">GHSA-4vp2-6q8c-pvq2<span>CVE-2026-46406, /copy, fixed in 2.1.128</span></a></li>
         <li><a href="https://www.gendigital.com/blog/insights/research/infostealers-your-ai-agent">Gen Digital: infostealers and your AI agent<span>8 September 2026</span></a></li>
-        <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>watch.py and clean.py: what is read, and how masking works</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/tree/main/ranwhat">ranwhat source<span>watch.py, clean.py and sources/: what is read, where, and how masking works</span></a></li>
       </ul>
       <h2 style="margin-top:52px">Related guides</h2>
       <ul class="follow">
@@ -526,6 +553,7 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
         </ul>
       </div>
       <div>

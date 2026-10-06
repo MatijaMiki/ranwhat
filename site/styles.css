@@ -384,7 +384,7 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
   padding-block:52px 34px}
 /* Column labels are paragraphs, not h4: under each page's h2 an h4 skipped
    a level, and a label for a list of links is not a heading anyway. */
-.fgrid .fh,.flisted .fh{font-family:"IBM Plex Mono",Menlo,monospace;font-size:10.5px;
+.fgrid .fh{font-family:"IBM Plex Mono",Menlo,monospace;font-size:10.5px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
   margin:0 0 14px;font-weight:500}
 .fgrid ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
@@ -622,15 +622,6 @@ table.flags td:first-child code{white-space:normal}
 /* The paragraph under the heading is one sentence, and at the usual measure
    its last word wrapped onto a third line, so it takes the column's width. */
 .lede.follow-lede{max-width:none}
-/* The directories ranwhat is listed on: a quiet strip of their badges at the
-   foot of the home page, a little smaller than given. The size is set here,
-   since the snippets stay as written. */
-.flisted{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;
-  padding-block:8px 44px}
-.flisted .fh{margin:0}
-.flisted .badges{display:flex;flex-wrap:wrap;gap:12px}
-.flisted .badges a{display:block;flex:none;line-height:0}
-.flisted .badges img{height:36px;width:auto}
 ul.follow{list-style:none;margin:20px 0 0;padding:0;display:flex;
   flex-direction:column;gap:1px;background:var(--rule-2);
   border:1px solid var(--rule-2)}
@@ -645,6 +636,35 @@ ul.follow a span{color:var(--muted);font-size:13px;font-weight:400;
 @media(max-width:560px){
   ul.follow a{flex-direction:column;align-items:flex-start;gap:4px}
   ul.follow a span{margin-left:0;text-align:left}
+}
+
+/* ---------- listed: directory badges ----------
+   scripts/badges.py pastes each snippet exactly as its directory gives it,
+   so nothing here may rely on a class or attribute inside one: the <li>
+   around it is ours, and everything reaches the badge through it. A tile
+   keeps its height whatever the badge does, so one that loads late, comes
+   without width and height, or sets its own size inline moves nothing else.
+   Each tile draws its own rule, so a last row that is not full ends cleanly
+   instead of in grey cells. */
+ul.listed{list-style:none;margin:22px 0 0;padding:1px;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1px}
+ul.listed li{background:var(--surface);box-shadow:0 0 0 1px var(--rule-2);
+  height:68px;padding:10px 8px;min-width:0;
+  display:flex;align-items:center;justify-content:center}
+ul.listed li:hover{background:var(--raise)}
+/* A transparent badge drawn for one ground keeps it in either theme:
+   badges.py add --ground light|dark. */
+ul.listed li.on-light{background:#ffffff}
+ul.listed li.on-dark{background:#151B21}
+ul.listed a{display:block;line-height:0;max-width:100%}
+ul.listed img{display:block;width:auto;height:auto;max-width:100%;
+  max-height:44px;object-fit:contain}
+.listed-more{margin-top:14px}
+.listed-more > ul.listed{margin-top:12px}
+@media(max-width:560px){
+  ul.listed{grid-template-columns:repeat(2,minmax(0,1fr))}
+  ul.listed li{height:56px;padding:8px 6px}
+  ul.listed img{max-height:36px}
 }
 
 /* ---------- the email signup ----------

@@ -1,6 +1,7 @@
 """The site states numbers that come from the catalogue. Those numbers drift
 the moment a provider is added, and a marketing page that undercounts its own
 product is the kind of thing nobody notices for months."""
+import difflib
 import functools
 import html
 import html.parser
@@ -277,6 +278,14 @@ def faq_blocks(text):
         r'<div class="faq"><h3>(.*?)</h3><p>(.*?)</p></div>', text, re.S)]
 
 
+def faq_page(pairs):
+    """An FAQPage node for these visible questions and answers."""
+    return {"@type": "FAQPage", "mainEntity": [
+        {"@type": "Question", "name": q,
+         "acceptedAnswer": {"@type": "Answer", "text": a}}
+        for q, a in pairs]}
+
+
 def faq_jsonld():
     """The FAQPage markup faq.html should carry, from its visible text. To
     regenerate after editing an answer: python3 -c "import sys;
@@ -284,15 +293,22 @@ def faq_jsonld():
     print(t.faq_jsonld())" and paste the result over the old block."""
     pairs = faq_blocks(read(SITE / "faq.html"))
     ld = {"@context": "https://schema.org", "@graph": [
-        {"@type": "FAQPage", "mainEntity": [
-            {"@type": "Question", "name": q,
-             "acceptedAnswer": {"@type": "Answer", "text": a}}
-            for q, a in pairs]},
+        faq_page(pairs),
         {"@type": "BreadcrumbList", "itemListElement": [
             {"@type": "ListItem", "position": 1, "name": "ranwhat",
              "item": ORIGIN + "/"},
             {"@type": "ListItem", "position": 2, "name": "FAQ",
              "item": ORIGIN + "/faq"}]}]}
+    return ('<script type="application/ld+json">%s</script>'
+            % json.dumps(ld, ensure_ascii=False, separators=(",", ":")))
+
+
+def home_faq_jsonld():
+    """The FAQPage markup index.html carries for its own questions, a block
+    of its own after the site's @graph. Regenerate it the same way as
+    faq_jsonld(), with print(t.home_faq_jsonld())."""
+    ld = {"@context": "https://schema.org"}
+    ld.update(faq_page(faq_blocks(read(SITE / "index.html"))))
     return ('<script type="application/ld+json">%s</script>'
             % json.dumps(ld, ensure_ascii=False, separators=(",", ":")))
 
@@ -370,29 +386,51 @@ class SiteStructure(unittest.TestCase):
             self.assertEqual(items[0]["item"], ORIGIN + "/", page.name)
             self.assertEqual(items[-1]["item"], url_for(page), page.name)
 
-    def test_faq_markup_matches_the_visible_answers(self):
-        text = read(SITE / "faq.html")
-        pairs = faq_blocks(text)
-        self.assertGreaterEqual(len(pairs), 9)
-        faq = [b for block in json_ld(text) for b in block.get("@graph", [block])
-               if b.get("@type") == "FAQPage"]
-        self.assertEqual(len(faq), 1)
-        marked = [(q["name"], q["acceptedAnswer"]["text"])
-                  for q in faq[0]["mainEntity"]]
-        self.assertEqual(marked, pairs, "faq.html's FAQPage markup has drifted "
-                         "from its text; see faq_jsonld() in this file")
+    # The pages that carry questions of their own, each with an FAQPage
+    # block made from its visible text, and how many each holds at least.
+    FAQ_PAGES = {"faq.html": (9, faq_jsonld), "index.html": (6, home_faq_jsonld)}
 
-    def test_faq_markup_is_only_on_the_faq_page(self):
+    def test_faq_markup_matches_the_visible_answers(self):
+        for name, (least, generate) in self.FAQ_PAGES.items():
+            text = read(SITE / name)
+            pairs = faq_blocks(text)
+            self.assertGreaterEqual(len(pairs), least, name)
+            faq = [b for block in json_ld(text) for b in block.get("@graph", [block])
+                   if b.get("@type") == "FAQPage"]
+            self.assertEqual(len(faq), 1, name)
+            marked = [(q["name"], q["acceptedAnswer"]["text"])
+                      for q in faq[0]["mainEntity"]]
+            self.assertEqual(marked, pairs, "%s's FAQPage markup has drifted "
+                             "from its text; see %s() in this file"
+                             % (name, generate.__name__))
+            self.assertIn(generate(), text, name)
+
+    def test_faq_markup_is_only_on_pages_with_questions_of_their_own(self):
         for page in all_pages():
-            if page.name != "faq.html":
+            if page.relative_to(SITE).as_posix() not in self.FAQ_PAGES:
                 self.assertNotIn('"FAQPage"', read(page), page.name)
 
-    def test_home_questions_are_copied_word_for_word_from_the_faq(self):
-        faq = dict(faq_blocks(read(SITE / "faq.html")))
+    def test_no_question_is_marked_up_on_two_pages(self):
+        # Google's FAQ guidance was to mark up one instance of a question
+        # and answer that repeats across a site. Both pages mark theirs up,
+        # so the home page asks its own questions and gives its own answers,
+        # and not /faq's reworded either: the home page's reworded "Which
+        # agents does it read?" and "Does it send anything anywhere?" shared
+        # about half their words with /faq's, and none kept shares a quarter.
+        faq = faq_blocks(read(SITE / "faq.html"))
         home = faq_blocks(read(SITE / "index.html"))
         self.assertTrue(home)
+        asked = {q.lower() for q, _ in faq}
+        answered = {a for _, a in faq}
+
+        def words(answer):
+            return re.findall(r"[a-z0-9.~/-]+", plain(answer).lower())
         for q, a in home:
-            self.assertEqual(faq.get(q), a, q)
+            self.assertNotIn(q.lower(), asked, q)
+            self.assertNotIn(a, answered, q)
+            for fq, fa in faq:
+                shared = difflib.SequenceMatcher(None, words(a), words(fa)).ratio()
+                self.assertLess(shared, 0.4, "%r reads like /faq's %r" % (q, fq))
 
     def test_sitemap_lists_every_indexable_page_and_nothing_else(self):
         locs = sitemap_locs()
@@ -452,9 +490,15 @@ class SiteStructure(unittest.TestCase):
     def test_scan_page_counts_are_current(self):
         n_prov, n_scopes = live()
         words = {12: "twelve"}
-        self.assertIn("%d scopes across %s providers"
-                      % (n_scopes, words.get(n_prov, n_prov)),
-                      read(SITE / "scan.html"))
+        for name in ("scan.html", "index.html"):
+            self.assertIn("%d scopes across %s providers"
+                          % (n_scopes, words.get(n_prov, n_prov)),
+                          read(SITE / name), name)
+
+    def test_home_page_counts_the_watch_rules(self):
+        from ranwhat import watch
+        self.assertIn("runs %s rules over it" % WORDS[len(watch.RULES)],
+                      plain(read(SITE / "index.html")))
 
     def test_install_page_names_the_current_version(self):
         self.assertIn("Current version %s." % ranwhat.__version__,
@@ -989,8 +1033,6 @@ class SiteAgentsComeFromTheRegistry(unittest.TestCase):
         self.assertIn("%s is next." % listed(names("Next")), answer)
         for name in names("Shipped, secrets read-only"):
             self.assertIn("%s keeps its history in a database" % name, answer)
-        home = dict(faq_blocks(read(SITE / "index.html")))
-        self.assertEqual(home.get("Which agents does it read?"), answer)
 
     def test_the_clean_page_says_which_agents_it_masks_and_only_reads(self):
         rows = re.findall(r'<span class="k">([^<]+)</span>\s*<span class="v">(.*?)</span></div>',
