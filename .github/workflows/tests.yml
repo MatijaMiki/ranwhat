@@ -54,4 +54,4 @@ jobs:
       # The release list and the feed end to end, over node:sqlite (Node
       # 22.13 and later). The feed test runs the real `ranwhat update`
       # against the Worker, so it needs the Python the runner comes with.
-      - run: node --test --test-timeout=60000 worker/test/list.test.mjs worker/test/feed.test.mjs worker/test/auth.test.mjs worker/test/stripe.test.mjs worker/test/accounts.test.mjs
+      - run: node --test worker/test/list.test.mjs worker/test/feed.test.mjs worker/test/auth.test.mjs worker/test/stripe.test.mjs worker/test/accounts.test.mjs
