@@ -19,6 +19,11 @@ from .catalog import (
 )
 
 
+# The finding for scopes the catalogue could not rate. Named, because the
+# CLI's feed hint (cli._catalogue_hint) follows it under a scan or live.
+UNCLASSIFIED = "Unclassified permissions"
+
+
 class ProfileError(ValueError):
     """A profile is malformed. Raised rather than scored, because a scan that
     silently produces a confident wrong number is worse than one that stops."""
@@ -475,7 +480,7 @@ def findings(rows, controls, ba):
     if unknown:
         out.append({
             "severity": "medium",
-            "title": "Unclassified permissions",
+            "title": UNCLASSIFIED,
             "body": "%d scope(s) are not in the capability catalog and were "
                     "classified by action verb. Confirm these manually." % len(unknown),
             "evidence": [r["scope"] for r in unknown],

@@ -287,6 +287,17 @@ class EvidenceShownWholeIsNotScannedAgain(unittest.TestCase):
 
 class ReadingCommandsImportNoNetwork(unittest.TestCase):
 
+    # Printed by each child below: whichever of these it ended up importing.
+    NETWORK = ("print(sorted(m for m in ('urllib.request', 'http.client', 'ssl',\n"
+               "                         'ranwhat.introspect', 'ranwhat.feed') if m in sys.modules))\n")
+
+    def _imported(self, code, *argv):
+        env = dict(os.environ, PYTHONPATH=ROOT, NO_COLOR="1")
+        env.pop("RANWHAT_NO_HINTS", None)
+        return subprocess.run([sys.executable, "-c", code + self.NETWORK] + list(argv),
+                              capture_output=True, text=True, encoding="utf-8",
+                              env=env, timeout=60).stdout.strip()
+
     def test_check_watch_and_clean_import_no_network_module(self):
         code = ("import sys, io, contextlib\n"
                 "from ranwhat import cli\n"
@@ -295,15 +306,23 @@ class ReadingCommandsImportNoNetwork(unittest.TestCase):
                 "        try:\n"
                 "            cli.main(argv + ['--root', sys.argv[1], '--state-dir', sys.argv[1]])\n"
                 "        except SystemExit:\n"
-                "            pass\n"
-                "print(sorted(m for m in ('urllib.request', 'http.client', 'ssl',\n"
-                "                         'ranwhat.introspect', 'ranwhat.feed') if m in sys.modules))\n")
+                "            pass\n")
         empty = os.path.join(ROOT, "tests")
-        env = dict(os.environ, PYTHONPATH=ROOT, NO_COLOR="1")
-        out = subprocess.run([sys.executable, "-c", code, os.path.join(empty, "no-such-root")],
-                             capture_output=True, text=True, encoding="utf-8",
-                             env=env, timeout=60).stdout
-        self.assertEqual(out.strip(), "[]")
+        self.assertEqual(self._imported(code, os.path.join(empty, "no-such-root")), "[]")
+
+    def test_a_hint_imports_no_network_module(self):
+        # cli imports hints for every command, check, watch and clean among
+        # them, and a hint is decided from what is on this machine: showing
+        # one must not be what brings the HTTP stack in.
+        code = ("import sys, io\n"
+                "from ranwhat import hints\n"
+                "class Tty(io.StringIO):\n"
+                "    def isatty(self):\n"
+                "        return True\n"
+                "tty = Tty()\n"
+                "assert hints.hint('test', ['  a hint'], stream=tty), 'nothing was shown'\n"
+                "assert tty.getvalue() == '  a hint\\n', tty.getvalue()\n")
+        self.assertEqual(self._imported(code), "[]")
 
     def test_every_provider_has_its_flag(self):
         from ranwhat import cli, usage

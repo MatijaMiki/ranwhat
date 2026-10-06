@@ -29,6 +29,13 @@
     "reversible": false,
     "why": "Webhooks are often what feeds an external audit trail. Deleting one silences the downstream record without touching Jira itself."
    },
+   "manage:confluence-configuration": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Change site-wide Confluence look and feel",
+    "reversible": true,
+    "why": "Sets the global theme and look and feel that every space inherits, so one change is seen by everyone on the site. The defaults can be restored with a reset, and the scope does not reach content, spaces or permissions."
+   },
    "manage:jira-configuration": {
     "authority": "destructive",
     "blast": "infrastructure",
@@ -42,6 +49,13 @@
     "label": "Administer projects, roles and permissions",
     "reversible": false,
     "why": "Can grant itself or others access to projects it could not previously read. Permission changes are rarely alerted on."
+   },
+   "read:confluence-content.all": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read all Confluence content, including page bodies",
+    "reversible": true,
+    "why": "Full page bodies across every space the user can see. Wikis hold runbooks, architecture notes and credentials pasted in for a colleague, and any page can carry injected instructions."
    },
    "read:jira-user": {
     "authority": "read",
@@ -57,12 +71,47 @@
     "reversible": true,
     "why": "Issue trackers hold incident write-ups, customer names and credentials pasted into comments by people in a hurry."
    },
+   "write:confluence-groups": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Create, change and remove user groups and their members",
+    "reversible": false,
+    "why": "Adds and removes group members, and groups are how Confluence grants access to spaces. Held by a site admin, it can put any account, including one it controls, into whichever group already has access to the spaces it wants."
+   },
+   "write:confluence-space": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Create, update and permanently delete spaces",
+    "reversible": false,
+    "why": "Deleting a space through the API skips the trash. Every page, attachment and page history in the space is gone at once, and Atlassian documents the deletion as permanent."
+   },
+   "write:group:jira": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Create user groups and change their members",
+    "reversible": false,
+    "why": "Covers adding users to groups, and Jira grants product access and project permissions through groups. Adding an account to a group gives it everything that group can reach."
+   },
    "write:jira-work": {
     "authority": "write",
     "blast": "data_egress",
     "label": "Create and edit issues, comments and worklogs",
     "reversible": true,
     "why": "Comments notify watchers by email, so a write here reaches people outside the tool."
+   },
+   "write:permission-scheme:jira": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Create and update permission schemes",
+    "reversible": false,
+    "why": "A permission scheme decides who may browse, edit and delete in every project that uses it. An update that sends a list of grants replaces all the existing ones, so one call can open those projects to anonymous users or lock their project admins out."
+   },
+   "write:servicedesk-request": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Create, approve, comment on and share customer requests",
+    "reversible": false,
+    "why": "Service desk customers are usually outside the company. A public comment reaches them in the user's name, and adding a participant shares the request with someone new. It can also approve requests waiting on the user, which in many desks is how access and changes are signed off."
    }
   },
   "aws": {
@@ -73,12 +122,47 @@
     "reversible": false,
     "why": "Unrestricted control of the account including IAM, billing and deletion."
    },
+   "cloudtrail:StopLogging": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Stop CloudTrail logging",
+    "reversible": false,
+    "why": "Stops a trail recording API calls and delivering its log files. Logging can be started again, but data events in the gap are never recorded, and management events survive only in the 90-day event history."
+   },
+   "ec2:RunInstances": {
+    "authority": "write",
+    "blast": "monetary",
+    "label": "Launch EC2 instances",
+    "reversible": false,
+    "why": "Compute is billed from launch, and terminating an instance does not refund the time it already ran. A loop or a hijacked agent turns into a bill."
+   },
    "iam:*": {
     "authority": "destructive",
     "blast": "identity",
     "label": "Full IAM control",
     "reversible": false,
     "why": "Can grant itself any other permission. This makes every other scope limit on this credential decorative."
+   },
+   "iam:AttachUserPolicy": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Attach managed policies to IAM users",
+    "reversible": false,
+    "why": "Can attach AdministratorAccess to any IAM user, including the one a user access key belongs to. Unless a permissions boundary caps that user, every other limit on the key is then decorative."
+   },
+   "iam:CreateAccessKey": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Create access keys for IAM users",
+    "reversible": false,
+    "why": "Mints a long-lived key for any IAM user the policy covers, including users with more access than the agent. The key keeps working after the agent's own credential is revoked."
+   },
+   "iam:PassRole": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Pass IAM roles to AWS services",
+    "reversible": false,
+    "why": "Gives a role to a service the agent controls, such as a Lambda function or an EC2 instance, which then acts with that role's permissions instead of the agent's own. AWS logs no event for the pass itself."
    },
    "lambda:InvokeFunction": {
     "authority": "write",
@@ -108,6 +192,13 @@
     "reversible": true,
     "why": "Object read."
    },
+   "s3:PutBucketPolicy": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Add or replace bucket policies",
+    "reversible": false,
+    "why": "A bucket policy can grant read to everyone or to another account, and unless Block Public Access is on, one call publishes the whole bucket. Only the bucket's own account can call this, and there a bucket policy needs no matching IAM allow, so the holder can also grant itself every S3 action on the bucket, deletion included."
+   },
    "s3:PutObject": {
     "authority": "write",
     "blast": "data_egress",
@@ -115,12 +206,26 @@
     "reversible": true,
     "why": "Object write."
    },
+   "secretsmanager:GetSecretValue": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read secret values",
+    "reversible": true,
+    "why": "Returns secrets in plaintext: database passwords, API keys and other systems' credentials. A value read here keeps working outside AWS, where revoking this permission does not reach it; only rotating the secret does."
+   },
    "ses:SendEmail": {
     "authority": "write",
     "blast": "external_comms",
     "label": "Send email",
     "reversible": false,
     "why": "Outbound email from your verified domain."
+   },
+   "ssm:SendCommand": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Run commands on managed instances",
+    "reversible": false,
+    "why": "Runs arbitrary commands on every managed server the policy covers, many at once. Each of those servers holds credentials of its own."
    }
   },
   "discord": {
@@ -131,12 +236,26 @@
     "reversible": true,
     "why": "Commands appear to members as a legitimate part of the server."
    },
+   "applications.commands.permissions.update": {
+    "authority": "write",
+    "blast": "identity",
+    "label": "Change who may use the app's commands in a server",
+    "reversible": true,
+    "why": "Rewrites which roles, members and channels may run the app's commands, using the server permissions of the user who granted it. The risk is an admin-only command opened to every member."
+   },
    "bot": {
     "authority": "write",
     "blast": "external_comms",
     "label": "Install a bot into a server",
     "reversible": false,
     "why": "The bot then acts under its own permission set, which is granted separately and is frequently far broader than this scope suggests."
+   },
+   "connections": {
+    "authority": "read",
+    "blast": "identity",
+    "label": "Read the user's linked accounts",
+    "reversible": true,
+    "why": "Linked accounts such as Steam, GitHub or YouTube, many under a real name, which ties a pseudonymous Discord account to a person."
    },
    "email": {
     "authority": "read",
@@ -159,6 +278,13 @@
     "reversible": true,
     "why": "Places a real account into a server without a further prompt. Whatever that server can see, it can now see about them."
    },
+   "guilds.members.read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read the user's member details in each server",
+    "reversible": true,
+    "why": "Nickname, roles and join date in any server the user belongs to. Roles show where they moderate or administer, and so whose account is worth taking."
+   },
    "identify": {
     "authority": "read",
     "blast": "identity",
@@ -173,12 +299,47 @@
     "reversible": true,
     "why": "Private conversation history, and a delivery route for prompt injection from anyone who can post in those channels."
    },
+   "relationships.read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read friends, friend requests and blocked users",
+    "reversible": true,
+    "why": "The user's social graph and their block list. A block list can reveal who someone is avoiding, which is sensitive in a way a friends list is not."
+   },
    "role_connections.write": {
     "authority": "write",
     "blast": "identity",
     "label": "Update the user's connection metadata",
     "reversible": true,
     "why": "Metadata other servers use to grant roles, so writing it can change access the user has elsewhere."
+   },
+   "rpc": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Control the user's Discord client",
+    "reversible": false,
+    "why": "Local control of the desktop client, up to moving the user into a voice channel, which puts their microphone in a room the app chooses. Approved partners only, so a grant is rare and worth asking about."
+   },
+   "rpc.notifications.read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Receive the user's notifications",
+    "reversible": true,
+    "why": "Each notification carries the full message that generated it, so mentions and new messages the user is notified about reach the app as they reach the user. Local RPC, approved partners only."
+   },
+   "sdk.social_layer": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Send messages as the user in DMs, lobbies and linked channels",
+    "reversible": false,
+    "why": "Sends messages as the user in direct messages, game lobbies and the Discord channels linked to them. Discord asks that each send follow a user action, but that is a policy the app keeps, not a limit the token enforces."
+   },
+   "voice": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Join voice as the user",
+    "reversible": false,
+    "why": "Connects to voice on the user's behalf and lists who is in the channel. Whatever is said there while it is connected has been heard. Approved partners only."
    },
    "webhook.incoming": {
     "authority": "write",
@@ -190,12 +351,61 @@
   },
   "generic": {},
   "github": {
+   "admin:enterprise": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Full control of an enterprise",
+    "reversible": false,
+    "why": "Can set the GitHub Actions policy every organisation in the enterprise inherits, such as which actions may run and what the default workflow token may do. Also includes full control of the enterprise's self-hosted runners and read/write access to its billing."
+   },
+   "admin:gpg_key": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Full control of the user's GPG keys",
+    "reversible": false,
+    "why": "Commits signed with a key it adds show as Verified under the user's name and pass rules that require signed commits. They stay Verified after the key is deleted, because GitHub does not re-check old signatures."
+   },
    "admin:org": {
     "authority": "destructive",
     "blast": "identity",
     "label": "Full organisation administration",
     "reversible": false,
     "why": "Can add and remove org members, i.e. can grant persistence to an attacker."
+   },
+   "admin:org_hook": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Manage organisation webhooks",
+    "reversible": false,
+    "why": "An organisation webhook is sent events from every repository in the organisation. The token manages only hooks its own app or user created, so it can add one but not remove anyone else's."
+   },
+   "admin:public_key": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Full control of the user's SSH keys",
+    "reversible": false,
+    "why": "An added SSH key pushes and pulls as the user, to every repository they can reach, whatever else this token was limited to. Deleting keys locks out the machines that use them."
+   },
+   "admin:repo_hook": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Manage repository webhooks",
+    "reversible": false,
+    "why": "A webhook sends the repository's events, pushes and pull requests among them, to any URL it names, until someone removes it. Narrower than repo, which covers hooks too."
+   },
+   "codespace": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Create, manage and delete codespaces",
+    "reversible": false,
+    "why": "A codespace is a billed cloud machine with the repository checked out. GitHub warns that the GITHUB_TOKEN inside it may hold scopes this token lacks. Deleting a codespace discards any work that was not pushed."
+   },
+   "delete:packages": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Delete packages",
+    "reversible": false,
+    "why": "Removes a published package or version that builds and deploys may pin. GitHub restores one only within 30 days, and only while nothing new has taken its name."
    },
    "delete_repo": {
     "authority": "destructive",
@@ -210,6 +420,27 @@
     "label": "Create gists",
     "reversible": false,
     "why": "A public gist is a one-call exfiltration primitive."
+   },
+   "manage_billing:copilot": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Add and remove paid Copilot seats",
+    "reversible": false,
+    "why": "Every seat it adds is billed to the organisation, pro rata to the end of the billing cycle. A removed seat stays billed until that cycle ends, so a mistaken bulk assignment is paid for even once it is undone."
+   },
+   "manage_billing:enterprise": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Read and write enterprise billing",
+    "reversible": false,
+    "why": "Billing settings decide what metered Actions, Codespaces and Copilot usage may cost the enterprise. Charges run up under a changed setting are still owed after it is changed back."
+   },
+   "manage_runners:enterprise": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Full control of the enterprise's self-hosted runners",
+    "reversible": false,
+    "why": "A runner it registers is sent the jobs whose labels it claims, from every organisation its runner group serves, and it can widen a group to every organisation in the enterprise. Those jobs bring the secrets they use. Removing runners stops the builds and deploys that depend on them."
    },
    "public_repo": {
     "authority": "write",
@@ -231,6 +462,20 @@
     "label": "Full control of private repositories",
     "reversible": false,
     "why": "Read and write all private source. Includes force-push, which can rewrite history and destroy the audit trail."
+   },
+   "scim:enterprise": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Provision and delete enterprise accounts through SCIM",
+    "reversible": false,
+    "why": "Creates, suspends and deletes the managed user accounts of an enterprise. GitHub documents deleting one as irreversible: it erases the user's data, keys and tokens."
+   },
+   "security_events": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Read and dismiss code scanning alerts",
+    "reversible": true,
+    "why": "Reads the list of known, unfixed vulnerabilities in the code, which is an attacker's shortlist. It can also dismiss alerts, so the people who would fix them stop seeing them."
    },
    "workflow": {
     "authority": "destructive",
@@ -269,6 +514,27 @@
     "reversible": false,
     "why": "The broadest GitLab token scope. Includes deleting projects, rewriting CI configuration and reading every variable a pipeline holds, which is where deployment credentials live."
    },
+   "create_runner": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Register new runners",
+    "reversible": false,
+    "why": "A runner it creates can claim the tags a project's jobs ask for. It then competes with the real runners for those jobs and is sent the ones it picks up, with their CI/CD variables, which is where deployment credentials live."
+   },
+   "k8s_proxy": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Call Kubernetes APIs through the GitLab agent",
+    "reversible": false,
+    "why": "Reaches every cluster whose agent gives the token's owner access, often as the agent's own service account. What it can delete is decided by that account's cluster role, not by the token."
+   },
+   "manage_runner": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Manage, reconfigure and delete runners",
+    "reversible": false,
+    "why": "It can unprotect a runner, so jobs from any branch run on a machine trusted with deploy credentials. It can also reset a runner's authentication token to take over the runner's jobs, or delete runners and stop CI."
+   },
    "read_api": {
     "authority": "read",
     "blast": "data_egress",
@@ -290,12 +556,26 @@
     "reversible": true,
     "why": "Full source history. Secrets committed and later removed are still present in the history this can read."
    },
+   "self_rotate": {
+    "authority": "write",
+    "blast": "identity",
+    "label": "Rotate its own token",
+    "reversible": false,
+    "why": "Each rotation revokes the old token and issues a new one, so a leaked token can keep renewing itself past its expiry date. Whoever rotates first locks the other holder out, and a later rotation attempt with the revoked token revokes the whole token family."
+   },
    "sudo": {
     "authority": "destructive",
     "blast": "identity",
     "label": "Act as any user on the instance",
     "reversible": false,
     "why": "Impersonation. Every action is attributed to the impersonated user, so the audit trail names the wrong person."
+   },
+   "write_package_registry": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Publish packages",
+    "reversible": false,
+    "why": "A deploy-token scope. It publishes into the project's package registry, and downstream builds install from that registry without review. Supply-chain reach."
    },
    "write_registry": {
     "authority": "write",
@@ -310,6 +590,13 @@
     "label": "Push to repositories",
     "reversible": false,
     "why": "A push can alter CI configuration, and CI runs with credentials the pusher may not otherwise hold. Force-push destroys history."
+   },
+   "write_virtual_registry": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Write and delete images in the dependency proxy cache",
+    "reversible": false,
+    "why": "Pipelines that pull images through the dependency proxy run whatever it has cached, so a push here changes the next build with no source change to review. Deleting only drops cached copies, which are fetched again from upstream."
    }
   },
   "google": {
@@ -319,6 +606,27 @@
     "label": "Full mailbox control including permanent delete",
     "reversible": false,
     "why": "Total mailbox authority including irreversible deletion. This is the broadest Gmail scope that exists."
+   },
+   "https://www.googleapis.com/auth/admin.directory.rolemanagement": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Create admin roles and assign them",
+    "reversible": false,
+    "why": "Creates admin roles and assigns them to any user or security group in the organisation, the account the agent runs as included. A role can carry any Admin console privilege, so with a super admin signed in it can hand out control of the whole domain."
+   },
+   "https://www.googleapis.com/auth/admin.directory.user": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Manage every user account in the Workspace domain",
+    "reversible": false,
+    "why": "Creates and deletes any account in the domain, and can make any user a super administrator. It covers every user, not only the one who granted it."
+   },
+   "https://www.googleapis.com/auth/admin.directory.user.security": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Manage users' backup codes, app passwords and OAuth tokens",
+    "reversible": false,
+    "why": "Reads any user's valid backup verification codes, which sign in past 2-Step Verification, and lists and deletes their app passwords and OAuth tokens. Revoking tokens also cuts off integrations people depend on."
    },
    "https://www.googleapis.com/auth/calendar": {
     "authority": "write",
@@ -334,6 +642,13 @@
     "reversible": true,
     "why": "Reveals meeting topics, attendees and internal org structure."
    },
+   "https://www.googleapis.com/auth/cloud-billing": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Manage Cloud billing accounts",
+    "reversible": false,
+    "why": "Links projects to billing accounts, which decides what gets charged and to whom. Removing a project's billing account stops its paid services."
+   },
    "https://www.googleapis.com/auth/cloud-platform": {
     "authority": "destructive",
     "blast": "infrastructure",
@@ -347,6 +662,13 @@
     "label": "Read/write contacts",
     "reversible": true,
     "why": "Contact list is the target list for any outbound abuse."
+   },
+   "https://www.googleapis.com/auth/devstorage.full_control": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Full control of Cloud Storage, including access policies",
+    "reversible": false,
+    "why": "Reads, overwrites and deletes every object, and changes bucket IAM policies, so it can make a bucket public. devstorage.read_write cannot touch access control; this can."
    },
    "https://www.googleapis.com/auth/drive": {
     "authority": "destructive",
@@ -369,6 +691,13 @@
     "reversible": true,
     "why": "Full document corpus is readable, and therefore summarisable into any outbound channel the agent also holds."
    },
+   "https://www.googleapis.com/auth/gmail.compose": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Manage drafts and send mail",
+    "reversible": false,
+    "why": "Sends mail as the user, as gmail.send does, and reads and rewrites every draft, which often holds text not yet meant to leave."
+   },
    "https://www.googleapis.com/auth/gmail.modify": {
     "authority": "write",
     "blast": "external_comms",
@@ -389,9 +718,65 @@
     "label": "Send mail as the user",
     "reversible": false,
     "why": "Can email any external party as the user. Sent mail cannot be recalled."
+   },
+   "https://www.googleapis.com/auth/gmail.settings.basic": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Manage Gmail settings and filters",
+    "reversible": false,
+    "why": "Creates filters that from then on forward matching mail to an already verified address, or archive or trash it. A standing rule like that can hide security alerts from the user long after the session that made it."
+   },
+   "https://www.googleapis.com/auth/gmail.settings.sharing": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Manage mail forwarding and delegates",
+    "reversible": false,
+    "why": "Turns on auto-forwarding and adds delegates marked accepted without any verification email. It works only through domain-wide delegation, so it reaches any mailbox in the domain."
+   },
+   "https://www.googleapis.com/auth/script.projects": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Create and rewrite Apps Script projects",
+    "reversible": false,
+    "why": "Replaces a script's code, which then runs from the script's triggers and test deployments with whatever access the script was already granted. The update clears every existing file in the project."
+   },
+   "https://www.googleapis.com/auth/spreadsheets": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Full access to every Google Sheets spreadsheet",
+    "reversible": false,
+    "why": "Reads, edits and deletes every spreadsheet the user can open, not only ones the app made. Finance, payroll and customer lists often live there."
    }
   },
   "hubspot": {
+   "automation": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Create workflows and custom workflow actions",
+    "reversible": false,
+    "why": "Workflows run on their own once made, enrolling records and acting on them. A custom action posts each record it runs on, with whichever properties the app asks for, to a URL the app chooses, which is a standing feed of CRM data."
+   },
+   "communication_preferences.write": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Subscribe and unsubscribe contacts",
+    "reversible": false,
+    "why": "Can opt contacts into the company's marketing email with whatever legal basis it states, so people who never agreed to it get mailed, and can opt contacts out of all email in a batch. HubSpot documents no API call that reverses an opt-out of all email, so the token that made one cannot put it back."
+   },
+   "crm.export": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Export CRM records of any type",
+    "reversible": true,
+    "why": "Bulk-exports any CRM object type, contacts, companies and deals among them, to a file whose download link needs no further authorization until it expires. HubSpot only lets a Super Admin grant it, so holding it means one did."
+   },
+   "crm.import": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Import records of any CRM type",
+    "reversible": false,
+    "why": "Creates and overwrites records of every CRM type in bulk, deals included. One file can rewrite the deal amounts that forecasts and commission rest on, or the email address on thousands of contacts, redirecting whatever HubSpot sends them next."
+   },
    "crm.objects.companies.read": {
     "authority": "read",
     "blast": "data_egress",
@@ -462,6 +847,20 @@
     "reversible": false,
     "why": "HubSpot-hosted files are served from public URLs by default, so an upload here is a publishing action."
    },
+   "files.delete": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Delete files in the file manager",
+    "reversible": false,
+    "why": "Pages, emails and other sites link to HubSpot files by URL, and a deleted file breaks every one of them. The Trash restores one only within 30 days, and not while another file has taken its name."
+   },
+   "marketing-email": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Read and send marketing email",
+    "reversible": false,
+    "why": "Sends marketing email to contact lists in the company's name. A send to a whole list cannot be recalled, whatever is corrected afterwards."
+   },
    "settings.billing.write": {
     "authority": "financial",
     "blast": "monetary",
@@ -475,15 +874,50 @@
     "label": "Create and modify portal users",
     "reversible": false,
     "why": "Can add users and change permissions, including granting access broader than the integration itself holds."
+   },
+   "transactional-email": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Send transactional email and create SMTP logins",
+    "reversible": false,
+    "why": "Sends email in the company's name, and creates SMTP logins of its own that stay valid for twelve months. Those are separate credentials, outside anything this token's grants show."
    }
   },
   "microsoft": {
+   "AppRoleAssignment.ReadWrite.All": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Grant application permissions to any app",
+    "reversible": false,
+    "why": "Can grant any app, itself included, any application permission on Microsoft Graph or any other API. Holding this one permission amounts to holding all of them."
+   },
+   "Application.ReadWrite.All": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Create, change and delete all app registrations and service principals",
+    "reversible": false,
+    "why": "Can add a new secret to almost any app in the tenant and then sign in as that app, with every permission it holds. A secret added this way keeps working after the agent's own token is revoked."
+   },
    "Calendars.ReadWrite": {
     "authority": "write",
     "blast": "external_comms",
     "label": "Full access to the user's calendars",
     "reversible": true,
     "why": "Creating an event emails every attendee, including external ones, so a calendar write is an outbound message."
+   },
+   "ChannelMessage.Send": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Send Teams channel messages as the user",
+    "reversible": false,
+    "why": "Posts into any Teams channel the user belongs to, under their name. Colleagues trust a message from a known person, and it is seen before it can be deleted."
+   },
+   "Chat.ReadWrite": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Read and write the user's Teams chats",
+    "reversible": false,
+    "why": "Every one-to-one and group chat the user is in, read and posted to as them. Microsoft does not require admin consent for it, so a user can grant it alone."
    },
    "Directory.ReadWrite.All": {
     "authority": "destructive",
@@ -492,12 +926,26 @@
     "reversible": false,
     "why": "Entra ID write. Can create accounts, change group membership and alter who has access to everything else in the tenant."
    },
+   "Files.Read.All": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Read all files the user can access",
+    "reversible": true,
+    "why": "Every OneDrive and SharePoint file the user can open, not only their own. Microsoft does not require admin consent for it."
+   },
    "Files.ReadWrite.All": {
     "authority": "destructive",
     "blast": "data_egress",
     "label": "Read and write all files the user can access",
     "reversible": false,
     "why": "Covers OneDrive and every SharePoint site the user can reach. Includes sharing, which is an egress path most DLP misses."
+   },
+   "Group.ReadWrite.All": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Read and write all groups",
+    "reversible": false,
+    "why": "Creates groups and changes the membership of those the user owns. Membership decides who reaches a team's chats, files and sites, so changing it changes access."
    },
    "Mail.Read": {
     "authority": "read",
@@ -520,6 +968,34 @@
     "reversible": false,
     "why": "Sends as a real person to any external party. Sent mail cannot be recalled once it leaves the tenant."
    },
+   "Mail.Send.Shared": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Send mail as the user and on behalf of others",
+    "reversible": false,
+    "why": "Sends from shared mailboxes and colleagues' mailboxes the user may send for, so a message can arrive from a team address or another person. Sent mail cannot be recalled once it leaves the tenant."
+   },
+   "MailboxSettings.ReadWrite": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Manage mailbox settings and inbox rules",
+    "reversible": false,
+    "why": "Inbox rules are a mailbox setting. One rule can forward or redirect every arriving message to an outside address, or permanently delete it, and it keeps running after the token is revoked."
+   },
+   "Policy.ReadWrite.ConditionalAccess": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Read and write Conditional Access policies",
+    "reversible": false,
+    "why": "Conditional Access is where MFA, device and location requirements are enforced. Turning a policy off drops those checks for everyone it covered, and excluding an account drops them for that account, without any change to the account itself."
+   },
+   "RoleManagement.ReadWrite.Directory": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Assign Entra ID directory roles",
+    "reversible": false,
+    "why": "Can add any account, its own service principal included, to Global Administrator. Microsoft's own reference warns that it lets an app grant additional privileges to itself."
+   },
    "Sites.FullControl.All": {
     "authority": "destructive",
     "blast": "data_egress",
@@ -527,15 +1003,36 @@
     "reversible": false,
     "why": "Total authority over every site collection in the tenant, including permissions and retention settings."
    },
+   "Sites.ReadWrite.All": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Edit and delete items in all SharePoint sites",
+    "reversible": false,
+    "why": "Edits and deletes documents and list items on every SharePoint site the user can open, not only their own. Microsoft does not require admin consent for it, and permanentDelete skips the recycle bin, so a deletion cannot be restored."
+   },
    "User.Read": {
     "authority": "read",
     "blast": "identity",
     "label": "Sign in and read the user's profile",
     "reversible": true,
     "why": "The baseline sign-in scope. Low authority on its own."
+   },
+   "User.ReadWrite.All": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Read and write all users' full profiles",
+    "reversible": false,
+    "why": "Writes the profile, manager and reports of every user in the tenant. With a User Administrator signed in, it is also what creates and deletes accounts."
    }
   },
   "sentry": {
+   "alerts:write": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Create, edit and delete alert rules",
+    "reversible": false,
+    "why": "Deleting or muting a rule stops the notification that would have told someone about a fault, including one the agent caused. Alerts not sent while a rule was gone are not sent later."
+   },
    "event:admin": {
     "authority": "destructive",
     "blast": "data_egress",
@@ -550,12 +1047,26 @@
     "reversible": true,
     "why": "Error events routinely contain request bodies, headers and tokens that were live at the moment of the exception."
    },
+   "event:write": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Update issues, including making them public",
+    "reversible": false,
+    "why": "Can publish an issue, which makes a link anyone outside the organisation can open, and can resolve or ignore issues so they stop alerting. Whoever opened the public link keeps what they saw after it is made private again."
+   },
    "member:admin": {
     "authority": "destructive",
     "blast": "identity",
     "label": "Add, change and remove members",
     "reversible": false,
     "why": "Can grant access to whoever it likes, including itself."
+   },
+   "member:write": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Invite members and change their roles",
+    "reversible": false,
+    "why": "Invites any email address into the organisation at a role up to the token holder's own, and on a user auth token changes existing members' roles within the same limit. Access granted this way outlives the token."
    },
    "org:admin": {
     "authority": "destructive",
@@ -564,12 +1075,33 @@
     "reversible": false,
     "why": "The broadest Sentry authority. Includes deleting the organisation and every project and event inside it."
    },
+   "org:ci": {
+    "authority": "write",
+    "blast": "infrastructure",
+    "label": "Create releases and upload source maps",
+    "reversible": true,
+    "why": "Meant for CI, across the whole organisation: creates releases, uploads source maps and manages code mappings. A wrong source map or code mapping points a stack trace at code that did not fail."
+   },
+   "org:integrations": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Manage and remove the organisation's integrations",
+    "reversible": false,
+    "why": "Removes the Slack, PagerDuty, Jira or source-code integration that alerts and issue links go through. Reinstalling one is a manual setup, not an undo."
+   },
    "org:read": {
     "authority": "read",
     "blast": "identity",
     "label": "Read organisation settings and membership",
     "reversible": true,
     "why": "Reveals projects, teams and who belongs to them."
+   },
+   "org:write": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Change organisation settings",
+    "reversible": false,
+    "why": "Controls org-wide data scrubbing, anonymous issue sharing, the two-factor requirement and open team membership. Events stored while scrubbing was off keep the passwords and tokens it would have removed."
    },
    "project:admin": {
     "authority": "destructive",
@@ -585,12 +1117,26 @@
     "reversible": true,
     "why": "Includes DSNs and configuration that describe your deployment."
    },
+   "project:releases": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Create, modify and delete releases",
+    "reversible": false,
+    "why": "Deletes a release and every file uploaded to it, which Sentry calls permanent. It refuses only a release that an issue was first seen in or that has release-health data, so any other release and its files can go."
+   },
    "project:write": {
     "authority": "write",
     "blast": "infrastructure",
     "label": "Modify project settings",
     "reversible": true,
     "why": "Can change alert rules and data-scrubbing settings, so it can turn off the filtering that keeps secrets out of captured events."
+   },
+   "team:admin": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Delete teams",
+    "reversible": false,
+    "why": "Teams decide which members reach which projects and who issues are assigned to. Deleting one removes that membership and ownership at once."
    }
   },
   "shopify": {
@@ -622,6 +1168,20 @@
     "reversible": true,
     "why": "Orders carry names, addresses, contact details and what people bought. A customer-data breach in one call."
    },
+   "write_customer_data_erasure": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Erase a customer's personal data",
+    "reversible": false,
+    "why": "Queues erasure of a customer's name, address and other personal details from the shop and from the apps and sales channels installed in it. A pending request can be cancelled; once it has run, the details are gone."
+   },
+   "write_customer_merge": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Merge customer profiles",
+    "reversible": false,
+    "why": "Combines two customer profiles into one and chooses whose email address survives, which decides who holds that customer's order history and account from then on. Shopify says a merge can't be reversed."
+   },
    "write_customers": {
     "authority": "write",
     "blast": "identity",
@@ -629,12 +1189,40 @@
     "reversible": false,
     "why": "Can alter the email address an order confirmation is sent to, which redirects both goods and correspondence."
    },
+   "write_discounts": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and modify discounts",
+    "reversible": false,
+    "why": "A discount code works for anyone who has it. A 100% code, or one with no usage limit, gives goods away until it is found and deleted, and orders already placed with it keep the discount."
+   },
    "write_draft_orders": {
     "authority": "financial",
     "blast": "monetary",
     "label": "Create and modify draft orders",
     "reversible": true,
     "why": "Draft orders can be turned into invoices emailed to customers, so this both creates a financial document and sends it outward."
+   },
+   "write_gift_cards": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Issue and modify gift cards",
+    "reversible": false,
+    "why": "Issues gift cards with a value of its choosing, which spend like cash in the shop. What was spent before a card is deactivated stays spent."
+   },
+   "write_inventory": {
+    "authority": "write",
+    "blast": "monetary",
+    "label": "Modify inventory",
+    "reversible": true,
+    "why": "Stock levels decide what can be sold. Set to zero, a product stops selling; set too high, the shop takes orders it cannot fill."
+   },
+   "write_order_edits": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Edit placed orders",
+    "reversible": false,
+    "why": "Changes what a placed order contains and costs: items, quantities, discounts and shipping. A changed total leaves the customer owing a balance or due a refund, and the customer can be notified before anyone checks."
    },
    "write_orders": {
     "authority": "financial",
@@ -649,6 +1237,34 @@
     "label": "Create and modify products",
     "reversible": true,
     "why": "Includes price. A wrong price is a real loss for as long as it is live, and the orders taken at it are already binding."
+   },
+   "write_returns": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Process returns and refund them",
+    "reversible": false,
+    "why": "Processing a return can refund it at the same time, shipping and duties included. A refund paid out is not taken back by editing the return."
+   },
+   "write_script_tags": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Load remote scripts into the storefront",
+    "reversible": false,
+    "why": "Loads JavaScript from a URL it names into the shop's pages, so the code that runs for shoppers can change after anyone reviewed it. Shopify now runs script tags only on vintage themes."
+   },
+   "write_store_credit_account_transactions": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Issue and debit customer store credit",
+    "reversible": false,
+    "why": "Can add store credit to any customer's account, which they spend at checkout like money, or debit balance they already hold. Credit spent before it is debited back stays spent."
+   },
+   "write_themes": {
+    "authority": "destructive",
+    "blast": "infrastructure",
+    "label": "Edit, publish and delete themes",
+    "reversible": false,
+    "why": "Theme code runs in every shopper's browser on the shop's own domain, so a theme edit is code execution with the shop's name on it. It can also publish a different theme or delete one."
    }
   },
   "slack": {
@@ -658,6 +1274,27 @@
     "label": "Workspace administration",
     "reversible": false,
     "why": "Full workspace control."
+   },
+   "admin.apps:write": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Approve, restrict and uninstall apps across the org",
+    "reversible": false,
+    "why": "Approving an app clears it to be installed with every scope it asked for, on one workspace or the whole Enterprise org, so this hands out access it does not itself hold. Once an admin app manages approvals, Slack turns off approving apps in the UI."
+   },
+   "admin.conversations:write": {
+    "authority": "destructive",
+    "blast": "data_egress",
+    "label": "Delete, archive and change any channel in the org",
+    "reversible": false,
+    "why": "Includes bulk delete, message retention settings and turning a private channel public. A deleted channel takes its messages with it for good, and a private channel made public is readable by everyone in the workspace at once."
+   },
+   "admin.users:write": {
+    "authority": "destructive",
+    "blast": "identity",
+    "label": "Add, remove and promote users across the org",
+    "reversible": false,
+    "why": "Across the whole Enterprise org: invites and removes users, makes them admins or owners, and ends their sessions. Adding an admin gives an attacker persistence, and removing the real ones locks them out."
    },
    "channels:history": {
     "authority": "read",
@@ -673,12 +1310,33 @@
     "reversible": false,
     "why": "Can post as the app into any channel it is in. Messages are seen before they can be deleted."
    },
+   "chat:write.customize": {
+    "authority": "write",
+    "blast": "identity",
+    "label": "Post under any name and avatar",
+    "reversible": false,
+    "why": "Messages can carry any display name and picture, a colleague's or an executive's. Combined with chat:write, which it requires, that is impersonation inside the company's own workspace."
+   },
+   "chat:write.public": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Post in channels the app was not added to",
+    "reversible": false,
+    "why": "Posts into any public channel without being invited, so the channels the app was added to no longer bound where it can speak."
+   },
    "files:read": {
     "authority": "read",
     "blast": "data_egress",
     "label": "Read files",
     "reversible": true,
     "why": "All shared files including exports and credentials pasted as snippets."
+   },
+   "files:write": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Upload, edit and delete files",
+    "reversible": false,
+    "why": "Shares a file into any channel the app is in, and with a user token turns a file into a public link that opens without signing in to Slack."
    },
    "groups:history": {
     "authority": "read",
@@ -693,6 +1351,20 @@
     "label": "Read direct messages",
     "reversible": true,
     "why": "DM content. Rarely justifiable for an agent."
+   },
+   "incoming-webhook": {
+    "authority": "write",
+    "blast": "external_comms",
+    "label": "Post into one channel through a webhook URL",
+    "reversible": false,
+    "why": "Installing with this scope returns a URL that posts into the channel picked at install, and only that channel. Whoever holds the URL can post, with no token, and it tends to be pasted into config and CI settings where nobody treats it as a secret."
+   },
+   "search:read": {
+    "authority": "read",
+    "blast": "data_egress",
+    "label": "Search everything the user can see",
+    "reversible": true,
+    "why": "One query reaches every message and file the user can open, private channels and DMs included. Finding a pasted password takes one search, not a read of every channel."
    },
    "users:read.email": {
     "authority": "read",
@@ -717,6 +1389,13 @@
     "reversible": false,
     "why": "Can move customer money. Settled charges are reversible only via refund, which is a separate, slower, partially-fee-bearing action."
    },
+   "credit_notes:write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Issue and void credit notes",
+    "reversible": false,
+    "why": "Reduces what a customer owes on a finalised invoice and credits their balance for future invoices. Stripe also creates a refund on the invoice's charge when a credit note asks for one."
+   },
    "customers:read": {
     "authority": "read",
     "blast": "data_egress",
@@ -731,12 +1410,33 @@
     "reversible": true,
     "why": "Can change the email on a customer record, which is an account-takeover primitive in most billing flows."
    },
+   "files:write": {
+    "authority": "write",
+    "blast": "data_egress",
+    "label": "Upload files and create file links",
+    "reversible": false,
+    "why": "A file link is a URL that opens the file without signing in, and links can be made to identity documents, selfies, dispute evidence, financial report runs and Sigma query results. A link with no expiry date works until someone expires it, and whoever fetched it keeps the file."
+   },
+   "issuing_cards:write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Create and manage issued cards",
+    "reversible": false,
+    "why": "Creates cards that spend the business's Issuing balance and raises a card's own spending limits. It can also set a card's PIN and change where a physical card ships. Purchases made on a card stay made, and cancelling a card is permanent."
+   },
    "payment_intents:write": {
     "authority": "financial",
     "blast": "monetary",
     "label": "Create payment intents",
     "reversible": true,
     "why": "Initiates payment flows."
+   },
+   "payouts:write": {
+    "authority": "financial",
+    "blast": "monetary",
+    "label": "Pay out the Stripe balance",
+    "reversible": false,
+    "why": "Sends the Stripe balance to any bank account or debit card already on the account, instantly where the account is eligible. Money paid out is no longer there to cover refunds and disputes."
    },
    "refunds:write": {
     "authority": "financial",
@@ -754,7 +1454,7 @@
    }
   }
  },
- "digest": "474668e50a4b099d46b945bb070facfd904fd186a9c2729f6c9ee0388e23b556",
+ "digest": "5e5a3954d2bf94e7c951ce80c916f197522c6a52b985beb6a409cfc98c313e5f",
  "schema": 1,
- "version": "0.5.0+474668e5"
+ "version": "0.5.0+5e5a3954.2026-10-06"
 }

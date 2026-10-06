@@ -53,5 +53,27 @@ class GithubOrgIsOnePathSegment(unittest.TestCase):
         self.assertTrue(seen[0].startswith("https://api.github.com/orgs/acme-inc/audit-log?"))
 
 
+class StripeEventsNameTheScopeThatMadeThem(unittest.TestCase):
+    """A payout is the Payouts permission, payouts:write, not Transfers.
+    Counted as transfers:write, a profile holding payouts:write had it listed
+    as never used while payouts went out, and transfers:write was marked
+    used by money it did not move."""
+
+    def _used(self, *types):
+        page = {"data": [{"id": "evt_%d" % i, "type": t} for i, t in enumerate(types)],
+                "has_more": False}
+        with mock.patch.object(usage, "_request",
+                               lambda url, **kw: (200, {}, json.dumps(page))):
+            used, _ = usage.stripe_usage("synthetic")
+        return used
+
+    def test_a_payout_marks_payouts_write(self):
+        self.assertEqual(self._used("payout.created", "payout.paid"), ["payouts:write"])
+
+    def test_a_transfer_still_marks_transfers_write(self):
+        self.assertEqual(self._used("transfer.created", "payout.paid"),
+                         ["payouts:write", "transfers:write"])
+
+
 if __name__ == "__main__":
     unittest.main()

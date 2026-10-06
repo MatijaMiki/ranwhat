@@ -258,8 +258,13 @@ API. Copy them into a profile as that credential's `scopes` and `scan` it.
 ### `ranwhat update`: refresh the capability catalogue
 
 `ranwhat update` refreshes the capability catalogue from ranwhat's feed. It
-needs a Plus subscription, which is not available yet, and sends only the
-subscription token.
+needs a Plus subscription, live now at €12 a month per organisation
+([pricing](https://ranwhat.com/pricing)), and sends only the subscription
+token.
+
+On a terminal, `scan`, `live` and `update --status` may add one dim line
+about the feed, on stderr and never with `--json`. `RANWHAT_NO_HINTS=1` turns
+it off.
 
 ## Precision is the feature
 

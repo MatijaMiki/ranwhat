@@ -56,8 +56,11 @@ _STRIPE_EVENT_SCOPES = {
     "refund.updated": "refunds:write",
     "transfer.created": "transfers:write",
     "transfer.updated": "transfers:write",
-    "payout.created": "transfers:write",
-    "payout.paid": "transfers:write",
+    # Payouts are their own restricted-key permission, not part of Transfers,
+    # which moves money to connected accounts. Counted as transfers:write, a
+    # payout marked that scope used and left payouts:write never used.
+    "payout.created": "payouts:write",
+    "payout.paid": "payouts:write",
     "payment_intent.created": "payment_intents:write",
     "payment_intent.succeeded": "payment_intents:write",
     "customer.created": "customers:write",

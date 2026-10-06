@@ -133,6 +133,11 @@ CATALOG = {
             "Workspace administration", DESTRUCTIVE, False, IDENTITY,
             "Full workspace control."),
     },
+    # Stripe has no scope strings an API reports: a restricted key is given
+    # Read or Write per resource in the Dashboard, and a profile lists them.
+    # These keys are ranwhat's resource:verb names for those permissions
+    # (Payouts: Write is payouts:write). Stripe Apps names the same ones
+    # payout_write and so on, which is what its permissions reference shows.
     "stripe": {
         "charges:write": _s(
             "Create and capture charges", FINANCIAL, False, MONETARY,
@@ -518,6 +523,17 @@ def _feed_catalogue():
         except Exception:
             _FEED_CACHE.append(None)
     return _FEED_CACHE[0]
+
+
+def feed_adds_scopes():
+    """Whether the cached feed has a scope the bundled catalogue does not,
+    the one sense in which it can be newer than the release: it may raise a
+    bundled rating, never lower one. Read as lookup() reads it, once per
+    process and never over the network."""
+    fed = _feed_catalogue()
+    return bool(fed) and any(
+        scope not in CATALOG.get(provider, {})
+        for provider, scopes in fed.items() for scope in scopes)
 
 
 def reset_feed_cache():
