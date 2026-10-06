@@ -641,30 +641,32 @@ ul.follow a span{color:var(--muted);font-size:13px;font-weight:400;
 /* ---------- listed: directory badges ----------
    scripts/badges.py pastes each snippet exactly as its directory gives it,
    so nothing here may rely on a class or attribute inside one: the <li>
-   around it is ours, and everything reaches the badge through it. A tile
-   keeps its height whatever the badge does, so one that loads late, comes
-   without width and height, or sets its own size inline moves nothing else.
-   Each tile draws its own rule, so a last row that is not full ends cleanly
-   instead of in grey cells. */
-ul.listed{list-style:none;margin:22px 0 0;padding:1px;display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1px}
-ul.listed li{background:var(--surface);box-shadow:0 0 0 1px var(--rule-2);
-  height:68px;padding:10px 8px;min-width:0;
-  display:flex;align-items:center;justify-content:center}
-ul.listed li:hover{background:var(--raise)}
+   around it is ours, and everything reaches the badge through it. The
+   badges stand as they are drawn, buttons in a row with no tile behind
+   them, all at one height whatever size a snippet declares, so one that
+   loads late or sets its own width moves nothing else. */
+ul.listed{list-style:none;margin:22px 0 0;padding:0;display:flex;
+  flex-wrap:wrap;align-items:center;gap:14px 16px}
+ul.listed li{flex:none;min-width:0;max-width:100%;height:44px;
+  display:flex;align-items:center}
+ul.listed a{display:block;line-height:0;max-width:100%;border-radius:8px;
+  transition:transform .15s ease,opacity .15s ease}
+ul.listed a:hover{transform:translateY(-2px);opacity:.92}
+ul.listed a:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+ul.listed img{display:block;height:44px;width:auto;max-width:100%;
+  object-fit:contain}
 /* A transparent badge drawn for one ground keeps it in either theme:
-   badges.py add --ground light|dark. */
+   badges.py add --ground light|dark. Only such a badge gets a backing. */
+ul.listed li.on-light,ul.listed li.on-dark{border-radius:8px;padding:0 10px}
 ul.listed li.on-light{background:#ffffff}
 ul.listed li.on-dark{background:#151B21}
-ul.listed a{display:block;line-height:0;max-width:100%}
-ul.listed img{display:block;width:auto;height:auto;max-width:100%;
-  max-height:44px;object-fit:contain}
 .listed-more{margin-top:14px}
 .listed-more > ul.listed{margin-top:12px}
+@media(prefers-reduced-motion:reduce){ul.listed a{transition:none}
+  ul.listed a:hover{transform:none}}
 @media(max-width:560px){
-  ul.listed{grid-template-columns:repeat(2,minmax(0,1fr))}
-  ul.listed li{height:56px;padding:8px 6px}
-  ul.listed img{max-height:36px}
+  ul.listed{gap:10px 12px}
+  ul.listed li,ul.listed img{height:36px}
 }
 
 /* ---------- the email signup ----------
