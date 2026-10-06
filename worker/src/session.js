@@ -42,7 +42,7 @@
 import { sha256 } from "./auth.js";
 import { REPLY_TO, mail, resend, same } from "./list.js";
 import {
-  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SESSION_IDLE, SESSION_MAX,
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
   authMailLeft, now, orgFor, spendAuthMail,
 } from "./accounts.js";
 
@@ -260,6 +260,9 @@ export async function requestCode(request, env, ctx, {
   const net = network(request);
   const wide = network(request, { v4: 24 });
   if (await bump(env, "ask-ip", net, HOUR) > ASKS_PER_NETWORK) return { refused: "network" };
+  // A step-up is keyed on the account, which no change of network escapes.
+  if (purpose === "stepup" && userId &&
+      await bump(env, "stepup-user", userId, DAY) > STEPUPS_PER_USER_DAY) return { refused: "budget" };
   if (await authMailLeft(env, purpose) <= 0) return { refused: "budget" };
   if (await peek(env, "mail-net", wide, DAY) >= NETWORK_MAIL_PER_DAY) return { refused: "network-day" };
 

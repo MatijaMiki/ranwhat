@@ -14,7 +14,7 @@ import { d1 } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const { NETWORK_MAIL_PER_DAY, formToken, network } = await import("../src/session.js");
-const { AUTH_MAIL_PER_DAY, STEPUP_RESERVE } = await import("../src/accounts.js");
+const { AUTH_MAIL_PER_DAY, STEPUP_RESERVE, STEPUPS_PER_USER_DAY } = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const SECRET = "an-account-test-secret-that-is-long-enough-0123456789";
@@ -808,9 +808,32 @@ test("strangers cannot use up the day's codes for everyone: one network takes te
   assert.equal(r.location, "/signin/code");
   assert.equal(s.emails.at(-1).subject, "Your ranwhat confirmation code");
   assert.equal((await typeCode(bob, codeIn(s.emails.at(-1)))).location, "/");
-  e.LIST.sql.prepare("UPDATE mail_counts SET sent = ? WHERE day = ? AND kind = 'auth'").run(AUTH_MAIL_PER_DAY, today());
+  e.LIST.sql.prepare("INSERT OR REPLACE INTO mail_counts (day, kind, sent) VALUES (?, 'auth-stepup', ?)")
+    .run(today(), STEPUP_RESERVE);
   later(MINUTE + 1);
-  assert.equal((await bob.post("/stepup", { form: await token() })).status, 503, "until the whole day's is gone");
+  assert.equal((await bob.post("/stepup", { form: await token() })).status, 503, "until the reserve is gone");
+});
+
+test("step-ups draw only on their own reserve, five a day per account, whatever the network", async () => {
+  const s = services();
+  const e = env();
+  const bob = new Browser(e, { ip: "198.51.100.20" });
+  await signIn(bob, s, "bob@example.com");
+  const token = async () => formToken(e, sha(bob.jar.get(SESSION)), "stepup");
+  const sent = (kind) => (rows(e, `SELECT sent FROM mail_counts WHERE kind = '${kind}'`)[0] || { sent: 0 }).sent;
+  const signinMail = sent("auth");
+  let mailed = 0;
+  for (let i = 0; i < 12; i++) {
+    later(20 * MINUTE);
+    bob.ip = `2001:db8:${i + 10}::1`; // a new /64 every time
+    const r = await bob.post("/stepup", { form: await token() });
+    if (r.location === "/signin/code") mailed++;
+  }
+  assert.equal(mailed, STEPUPS_PER_USER_DAY, "the account's own share, and no more");
+  assert.equal(sent("auth-stepup"), STEPUPS_PER_USER_DAY);
+  assert.equal(sent("auth"), signinMail, "nothing taken from the public forms' mail");
+  // Sign-in for everyone else is untouched.
+  await signIn(new Browser(e, { ip: "198.51.100.77" }), s, "carol@example.com");
 });
 
 test("account email stops at the day's cap, for every address alike, and starts again the next day", async () => {

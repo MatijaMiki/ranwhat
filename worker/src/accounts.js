@@ -46,6 +46,11 @@ export const AUTH_MAIL_PER_DAY = 60;
    approving a terminal or opening billing. */
 export const STEPUP_RESERVE = 10;
 
+/* And one account's share of that reserve: a session that asks to confirm
+   itself over and over, from as many networks as it likes, uses up its own
+   day and nobody else's. */
+export const STEPUPS_PER_USER_DAY = 5;
+
 export const now = () => Math.floor(Date.now() / 1000);
 
 /* "1" or "true" switch accounts on; unset, empty or anything else keeps
@@ -264,7 +269,8 @@ const SCHEMA = [
      window_start INTEGER NOT NULL,
      count INTEGER NOT NULL)`,
 
-  /* Emails sent per UTC day, by kind ('auth': every code). */
+  /* Emails sent per UTC day, by kind ('auth': codes from the public forms;
+     'auth-stepup': a signed-in step-up's). */
   `CREATE TABLE IF NOT EXISTS mail_counts (
      day TEXT NOT NULL,
      kind TEXT NOT NULL,
@@ -395,16 +401,21 @@ export async function history(env, userId, limit = 10) {
 
 const today = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
 
-/* How much of the day's account mail a code for `purpose` may use: all of
-   it for a signed-in step-up, all but STEPUP_RESERVE for anything else. */
-const mailCap = (purpose) => AUTH_MAIL_PER_DAY - (purpose === "stepup" ? 0 : STEPUP_RESERVE);
+/* The day's account mail is two counters. A signed-in step-up draws only
+   on its own STEPUP_RESERVE ('auth-stepup'); everything else, from the
+   public sign-in, sign-up and reset forms, on the rest ('auth'). Neither
+   can spend the other's, so a stranger draining the forms cannot stop a
+   step-up, and a signed-in session spraying step-ups cannot stop anyone
+   signing in. */
+const mailKind = (purpose) => (purpose === "stepup" ? "auth-stepup" : "auth");
+const mailCap = (purpose) => (purpose === "stepup" ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
 
 /* How many more account emails for `purpose` may go out today. Read before
    the per-address limits, so a day that is used up answers the same for
    every address. */
 export async function authMailLeft(env, purpose = "signin") {
-  const row = await env.LIST.prepare("SELECT sent FROM mail_counts WHERE day = ? AND kind = 'auth'")
-    .bind(today()).first();
+  const row = await env.LIST.prepare("SELECT sent FROM mail_counts WHERE day = ? AND kind = ?")
+    .bind(today(), mailKind(purpose)).first();
   return Math.max(0, mailCap(purpose) - (row ? row.sent : 0));
 }
 
@@ -413,9 +424,9 @@ export async function authMailLeft(env, purpose = "signin") {
    take the last. */
 export async function spendAuthMail(env, purpose = "signin") {
   const taken = await env.LIST.prepare(
-    `INSERT INTO mail_counts (day, kind, sent) VALUES (?, 'auth', 1)
+    `INSERT INTO mail_counts (day, kind, sent) VALUES (?, ?, 1)
      ON CONFLICT(day, kind) DO UPDATE SET sent = sent + 1 WHERE sent < ?`)
-    .bind(today(), mailCap(purpose)).run();
+    .bind(today(), mailKind(purpose), mailCap(purpose)).run();
   return taken.meta.changes === 1;
 }
 
