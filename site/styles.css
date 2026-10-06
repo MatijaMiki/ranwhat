@@ -653,8 +653,10 @@ ul.listed a{display:block;line-height:0;max-width:100%;border-radius:8px;
   transition:transform .15s ease,opacity .15s ease}
 ul.listed a:hover{transform:translateY(-2px);opacity:.92}
 ul.listed a:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
-ul.listed img{display:block;height:44px;width:auto;max-width:100%;
-  object-fit:contain}
+/* !important because a snippet may size its image inline (StartupBase's
+   says height:55px), and an inline style beats any rule here otherwise. */
+ul.listed img{display:block;height:44px !important;width:auto !important;
+  max-width:100%;object-fit:contain}
 /* A transparent badge drawn for one ground keeps it in either theme:
    badges.py add --ground light|dark. Only such a badge gets a backing. */
 ul.listed li.on-light,ul.listed li.on-dark{border-radius:8px;padding:0 10px}
@@ -666,7 +668,8 @@ ul.listed li.on-dark{background:#151B21}
   ul.listed a:hover{transform:none}}
 @media(max-width:560px){
   ul.listed{gap:10px 12px}
-  ul.listed li,ul.listed img{height:36px}
+  ul.listed li{height:36px}
+  ul.listed img{height:36px !important}
 }
 
 /* ---------- the email signup ----------

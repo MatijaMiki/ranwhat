@@ -568,8 +568,15 @@ class SiteStructure(unittest.TestCase):
 def _csp():
     """The site's Content-Security-Policy as {directive: [sources]}."""
     headers = (SITE / "_headers").read_text(encoding="utf-8")
-    lines = [l for l in headers.splitlines() if "Content-Security-Policy:" in l]
-    assert len(lines) == 1, "one Content-Security-Policy line in _headers"
+    # The site-wide policy is the one under /*; a path may set its own
+    # (/badges/* keeps self-hosted badge images inert), which no page uses.
+    lines, block = [], None
+    for l in headers.splitlines():
+        if l and not l[0].isspace():
+            block = l.strip()
+        elif block == "/*" and "Content-Security-Policy:" in l:
+            lines.append(l)
+    assert len(lines) == 1, "one Content-Security-Policy line under /* in _headers"
     policy = {}
     for directive in lines[0].split(":", 1)[1].split(";"):
         words = directive.split()
