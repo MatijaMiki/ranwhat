@@ -448,6 +448,33 @@ class RepeatedCallsAreReportedOnce(unittest.TestCase):
                 self.assertEqual([r["timestamp"] for r in records], [latest])
 
 
+class RemovingABucketIsACloudDelete(unittest.TestCase):
+    """`aws s3 rb --force` empties the bucket and then removes it, at least
+    as much as `aws s3 rm --recursive` does, and watch reported nothing for
+    it: cloud.destructive knew rm but not rb."""
+
+    def titles(self, command):
+        root = tempfile.mkdtemp(prefix="s3-rb-")
+        self.addCleanup(shutil.rmtree, root, True)
+        proj = os.path.join(root, "-tmp-synthetic-proj")
+        os.makedirs(proj)
+        with open(os.path.join(proj, "s.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "timestamp": "2026-09-01T10:00:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Bash",
+                     "input": {"command": command}}]}}) + "\n")
+        records, _ = watch.scan_all(root=root)
+        return [h["title"] for r in records for h in r["hits"]]
+
+    def test_rb_is_reported(self):
+        self.assertEqual(self.titles("aws s3 rb s3://b --force"),
+                         ["Cloud resource destroyed or modified"])
+
+    def test_listing_a_bucket_is_not(self):
+        self.assertEqual(self.titles("aws s3 ls"), [])
+
+
 class LocalFilePipedToTheNetwork(growth.Assertions, unittest.TestCase):
     """exfil.shape's pipe pattern could never match: _executable_text split
     every command on `|` and rejoined what it kept with ` ; `, so only the
