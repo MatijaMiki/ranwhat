@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ranwhat clean: find secrets in Claude Code transcripts</title>
-<meta name="description" content="Your agent ran cat .env and the value is still on disk. Find secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
+<title>ranwhat clean: secret scanning for AI agent transcripts</title>
+<meta name="description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
 <link rel="canonical" href="https://ranwhat.com/clean">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -18,8 +18,8 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/clean">
-<meta property="og:title" content="ranwhat clean: find secrets in Claude Code transcripts">
-<meta property="og:description" content="Your agent ran cat .env and the value is still on disk. Find secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
+<meta property="og:title" content="ranwhat clean: secret scanning for AI agent transcripts">
+<meta property="og:description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,8 +27,8 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="ranwhat clean: find secrets in Claude Code transcripts">
-<meta name="twitter:description" content="Your agent ran cat .env and the value is still on disk. Find secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
+<meta name="twitter:title" content="ranwhat clean: secret scanning for AI agent transcripts">
+<meta name="twitter:description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -96,7 +96,8 @@
       into its transcript in plaintext: your database password, your signing
       secrets, your provider tokens, sitting in
       <a href="/guides/claude-code-history">files Claude Code keeps for 30
-      days by default</a>.
+      days by default</a>. Secret scanning on your repository never looks
+      there. ranwhat clean does.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -291,6 +292,7 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
         </ul>
       </div>
       <div>

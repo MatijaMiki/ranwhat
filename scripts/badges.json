@@ -1,0 +1,18 @@
+{
+  "badges": [
+    {
+      "name": "MarketingDB",
+      "added": "2026-10-05",
+      "snippet": "<a href=\"https://marketingdb.live\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\"><img src=\"https://marketingdb.live/badge.svg\" alt=\"Launched on MarketingDB\" width=\"190\" height=\"44\"/></a>",
+      "sha256": "32e7f3a67b8afbd430fe17fefbee15c6cbc50c86369068c1dfdee751d6659167",
+      "checked": "2026-10-06"
+    },
+    {
+      "name": "Maidensail",
+      "added": "2026-10-04",
+      "snippet": "<a href=\"https://maidensail.com/startup/ranwhat\" rel=\"dofollow\"><img src=\"https://maidensail.com/badge/ranwhat.svg\" alt=\"Featured on Maidensail\" width=\"190\" height=\"44\"></a>",
+      "sha256": "a3c466bfb490ae08a9237e507dc20cfab5b63226c8e877cbe21a28a8bdde902b",
+      "checked": "2026-10-06"
+    }
+  ]
+}

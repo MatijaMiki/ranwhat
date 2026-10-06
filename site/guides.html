@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guides: Claude Code and AI coding agent security | ranwhat</title>
-<meta name="description" content="Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<title>Guides to AI agent security and OPSEC | ranwhat</title>
+<meta name="description" content="Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
 <link rel="canonical" href="https://ranwhat.com/guides">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -18,8 +18,8 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides">
-<meta property="og:title" content="Guides: Claude Code and AI coding agent security | ranwhat">
-<meta property="og:description" content="Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<meta property="og:title" content="Guides to AI agent security and OPSEC | ranwhat">
+<meta property="og:description" content="Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,14 +27,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="Guides: Claude Code and AI coding agent security | ranwhat">
-<meta name="twitter:description" content="Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<meta name="twitter:title" content="Guides to AI agent security and OPSEC | ranwhat">
+<meta name="twitter:description" content="Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"CollectionPage","@id":"https://ranwhat.com/guides#page","name":"Guides to AI coding agent security","description":"Practical guides to AI coding agent security: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.","url":"https://ranwhat.com/guides","isPartOf":{"@id":"https://ranwhat.com/#website"},"mainEntity":{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"https://ranwhat.com/guides/ai-coding-agent-security","name":"AI coding agent security: a checklist for your own machine"},{"@type":"ListItem","position":2,"url":"https://ranwhat.com/guides/claude-code-history","name":"Where Claude Code keeps your conversation history"},{"@type":"ListItem","position":3,"url":"https://ranwhat.com/guides/claude-code-env-secrets","name":"How to stop Claude Code reading your .env file"},{"@type":"ListItem","position":4,"url":"https://ranwhat.com/guides/claude-code-audit-log","name":"A Claude Code audit log from what is already on disk"},{"@type":"ListItem","position":5,"url":"https://ranwhat.com/guides/claude-code-deleted-files","name":"Claude Code deleted my files. What now?"},{"@type":"ListItem","position":6,"url":"https://ranwhat.com/guides/ai-agent-token-scopes","name":"Check what the tokens your AI agent holds can do"}]}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"CollectionPage","@id":"https://ranwhat.com/guides#page","name":"Guides to AI coding agent security","description":"Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.","url":"https://ranwhat.com/guides","isPartOf":{"@id":"https://ranwhat.com/#website"},"mainEntity":{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"https://ranwhat.com/guides/ai-coding-agent-security","name":"AI coding agent security: a checklist for your own machine"},{"@type":"ListItem","position":2,"url":"https://ranwhat.com/guides/claude-code-history","name":"Where Claude Code keeps your conversation history"},{"@type":"ListItem","position":3,"url":"https://ranwhat.com/guides/claude-code-env-secrets","name":"How to stop Claude Code reading your .env file"},{"@type":"ListItem","position":4,"url":"https://ranwhat.com/guides/claude-code-audit-log","name":"A Claude Code audit log from what is already on disk"},{"@type":"ListItem","position":5,"url":"https://ranwhat.com/guides/claude-code-deleted-files","name":"Claude Code deleted my files. What now?"},{"@type":"ListItem","position":6,"url":"https://ranwhat.com/guides/ai-agent-token-scopes","name":"Check what the tokens your AI agent holds can do"},{"@type":"ListItem","position":7,"url":"https://ranwhat.com/guides/developer-opsec","name":"Developer OPSEC: what your laptop and your AI agents give away"}]}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"}]}]}</script>
 </head>
 <body>
 <header>
@@ -151,7 +151,7 @@
           <h3><a href="/guides/ai-agent-token-scopes">Check what the tokens your AI agent holds can do</a></h3>
           <p>Check what GitHub, Google, Slack, Stripe and AWS credentials allow
              with each provider's own tools, see which grants were ever used,
-             then cut them down.</p>
+             then cut them down to least privilege.</p>
         </div>
       </div>
     </div>
@@ -160,7 +160,29 @@
 
 <section class="mark-4">
   <div class="shell band split">
-    <div class="marginal">04 / Check now</div>
+    <div class="marginal">04 / Laptop</div>
+    <div>
+      <h2>What the rest of the laptop gives away.</h2>
+      <p class="lede">
+        The agent is one part of a developer's OPSEC. Cloud keys, SSH keys,
+        registry tokens and shell history sit on the same disk.
+      </p>
+      <div class="grid2">
+        <div class="cell" style="grid-column:1/-1">
+          <h3><a href="/guides/developer-opsec">Developer OPSEC: what your laptop and your AI agents give away</a></h3>
+          <p>Where credentials sit on a developer laptop, what agent
+             transcripts add, how to find and rotate what is already there,
+             and how to keep the next one out of plaintext. Ten steps at the
+             end.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Check now</div>
     <div>
       <h2>Or check your own machine now.</h2>
       <p class="lede">
@@ -229,6 +251,7 @@
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
         </ul>
       </div>
       <div>
