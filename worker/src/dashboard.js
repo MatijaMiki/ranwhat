@@ -3,7 +3,8 @@
  * only once ACCOUNTS_ON is set.
  *
  *   GET  /              The account: who you are, your organisation, its
- *                       plan, what happened lately, and signing out.
+ *                       plan and what each plan has (features.js), what
+ *                       happened lately, and signing out.
  *                       Without a session it sends you to /signin.
  *   GET  /signin        The email form.
  *   POST /signin        Mails a code; the same answer for every address.
@@ -21,6 +22,8 @@
  * form token in its handler (session.js says what both are).
  */
 import { escape } from "./list.js";
+import { plan } from "./auth.js";
+import { PLAN_NAMES, atLeast, featuresOf } from "./features.js";
 import {
   SESSION_MAX, canManage, event, history, now, orgFor, orgName, ready, schema, userForVerifiedEmail,
 } from "./accounts.js";
@@ -32,6 +35,8 @@ import {
 import { form, notFound, page, redirect, refused, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
+const PRICING = "https://ranwhat.com/pricing";
+const TALK = "mailto:hello@ranwhat.com?subject=ranwhat%20Team";
 
 /* A form's fields, or none when the body is not a form. */
 async function fields(request) {
@@ -235,9 +240,32 @@ async function home(request, env) {
   return dashboard(env, who);
 }
 
+/* One panel per paid plan, drawn from features.js, so what the page shows
+   locked is what the server refuses. Locked while the organisation's plan
+   is below it. Plus links to the pricing page; Team has no price and no
+   checkout, only a way to talk to us. */
+function panel(tier, onPlan) {
+  const open = atLeast(onPlan, tier);
+  const items = featuresOf(tier).map((f) => {
+    const state = open
+      ? (f.status === "live" ? "Included" : "Coming, included in your plan")
+      : (f.status === "live" ? `Needs ${PLAN_NAMES[tier]}` : `Coming, included in ${PLAN_NAMES[tier]}`);
+    return `<li data-feature="${escape(f.key)}"><strong>${escape(f.name)}</strong> <span class="tag">${state}</span>
+      <br>${escape(f.says)}</li>`;
+  }).join("");
+  const after = open ? "" : tier === "plus"
+    ? `<p>Everything ranwhat does on your machines stays free. Plus adds what needs a server.</p>
+       <p><a href="${PRICING}">Upgrade to Plus</a></p>`
+    : `<p>Team is arranged with each organisation. <a href="${TALK}">Talk to us</a></p>`;
+  return `<section class="panel${open ? "" : " locked"}" id="${tier}">
+    <h2>${PLAN_NAMES[tier]}${open ? "" : ` <span class="tag">locked</span>`}</h2>
+    <ul>${items}</ul>${after}</section>`;
+}
+
 async function dashboard(env, who, { error = "", status = 200 } = {}) {
   const org = who.org;
   const events = await history(env, who.user);
+  const onPlan = await plan(env, org.id);
   const rename = canManage(org) ? `<h2>Organisation name</h2>
     ${form("/org", await formToken(env, who.id, "org"), `
       <label for="name">Name</label>
@@ -247,15 +275,15 @@ async function dashboard(env, who, { error = "", status = 200 } = {}) {
   const activity = events.length
     ? `<ul>${events.map((e) => `<li>${escape(when(e.at))}: ${escape(EVENTS[e.event] || e.event)}</li>`).join("")}</ul>`
     : "<p>Nothing yet.</p>";
-  /* Free for everyone here: the plan, from linked subscriptions and grants,
-     and the panels it unlocks come with the feature map. */
   return page("Your account", `<h1>Your account</h1>
     <dl>
       <dt>Signed in as</dt><dd>${escape(who.email)}</dd>
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
-      <dt>Plan</dt><dd>Free</dd>
+      <dt>Plan</dt><dd id="plan">${PLAN_NAMES[onPlan]}</dd>
     </dl>
+    ${panel("plus", onPlan)}
+    ${panel("team", onPlan)}
     ${rename}
     <h2>Recent activity</h2>
     ${activity}

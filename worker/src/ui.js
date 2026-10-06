@@ -31,7 +31,10 @@ button:hover{background:var(--ink);color:var(--surface)}
 form.row{display:inline-block;margin-right:8px}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0 0 8px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
 ul{padding-left:18px;color:var(--muted)}li{margin:2px 0}
-small{color:var(--muted)}`;
+small{color:var(--muted)}
+.panel{border:1px solid var(--rule);padding:2px 18px 6px;margin:18px 0}.panel h2{margin-top:16px}
+.locked{border-style:dashed}.locked strong{color:var(--muted)}
+.tag{font:12px Menlo,Consolas,monospace;color:var(--muted)}`;
 
 let policy = null;
 
