@@ -1,14 +1,23 @@
-"""Give an organisation Team or a comped Plus, or take it back.
+"""Give an organisation Team or a comped Plus, or take it back, or link a
+Stripe subscription to it.
 
     python3 scripts/org_admin.py grant team ORG_ID "contract: Acme" [--days N]
     python3 scripts/org_admin.py grant comp ORG_ID "press: Ana" [--days N]
     python3 scripts/org_admin.py revoke team ORG_ID
     python3 scripts/org_admin.py revoke comp ORG_ID
+    python3 scripts/org_admin.py link SUB_ID ORG_ID
 
 ORG_ID is the organisation's id from the orgs table. Team is never sold
 through checkout: it is a grant, written here once a contract is agreed.
 A comp is Plus given by hand: press, a partner, the holder of a hand-made
 feed token who now has an account. Without --days a grant has no end date.
+
+link ties a Stripe subscription (SUB_ID, sub_..., from the subscriptions
+table or Stripe) to an organisation, which then has Plus while the
+subscription is live: for a subscriber who paid with another address, or
+who cannot claim it from the dashboard. A subscription is linked once and
+never moved, so linking one that already has an organisation changes
+nothing.
 
 This writes nothing and sends nothing: it prints the SQL, to paste into the
 database's console in the Cloudflare dashboard or to run with the printed
@@ -30,6 +39,9 @@ PLANS = {"team": "team", "comp": "plus"}
 
 # crypto.randomUUID(), which is how accounts.js names an organisation.
 ORG_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+# A Stripe subscription id, as worker/src/stripe.js accepts one.
+SUB_ID = re.compile(r"sub_[A-Za-z0-9]{6,250}")
 
 
 def command(sql):
@@ -53,6 +65,13 @@ def org_id(text):
     return org
 
 
+def sub_id(text):
+    sub = text.strip()
+    if not SUB_ID.fullmatch(sub):
+        sys.exit("That does not look like a Stripe subscription id (sub_...).")
+    return sub
+
+
 def grant_sql(kind, org, note, days=None, now=None):
     """One grant, written only if the organisation exists, so a mistyped id
     changes nothing."""
@@ -68,6 +87,16 @@ def revoke_sql(kind, org, now=None):
     t = int(time.time()) if now is None else now
     return ("UPDATE grants SET until = %d WHERE org_id = '%s' AND plan = '%s' "
             "AND (until IS NULL OR until > %d)" % (t, org, PLANS[kind], t))
+
+
+def link_sql(sub, org, now=None):
+    """One link, written only if both the subscription and the organisation
+    exist, and never over a link the subscription already has."""
+    t = int(time.time()) if now is None else now
+    return ("INSERT INTO org_subscriptions (subscription, org_id, how, linked_at) "
+            "SELECT '%s', '%s', 'script', %d WHERE EXISTS (SELECT 1 FROM orgs WHERE id = '%s') "
+            "AND EXISTS (SELECT 1 FROM subscriptions WHERE id = '%s') "
+            "ON CONFLICT(subscription) DO NOTHING" % (sub, org, t, org, sub))
 
 
 def usage():
@@ -97,6 +126,11 @@ def main(argv):
         print("Gives organisation %s %s, %s.\n"
               % (org, what, "for %d days" % days if days else "with no end date"))
         switch_on(grant_sql(args[1], org, note, days))
+        return 0
+    if len(args) == 3 and args[0] == "link" and days is None:
+        sub, org = sub_id(args[1]), org_id(args[2])
+        print("Links subscription %s to organisation %s, unless it is linked to one already.\n" % (sub, org))
+        switch_on(link_sql(sub, org))
         return 0
     if len(args) == 3 and args[0] == "revoke" and args[1] in PLANS and days is None:
         org = org_id(args[2])

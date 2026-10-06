@@ -116,7 +116,7 @@ test("each plan has what its map says, and nothing unknown is let through", () =
     assert.equal(allows("plus", key), f.plan === "plus", key);
     assert.equal(allows("team", key), true, key);
   }
-  for (const key of ["feed", "push", "alerts", "machines", "history", "drift", "digest", "signed_reports"]) {
+  for (const key of ["feed", "ci_tokens", "push", "alerts", "machines", "history", "drift", "digest", "signed_reports"]) {
     assert.equal(FEATURES[key].plan, "plus", key);
   }
   for (const key of ["hash_chain", "underwriter_export"]) assert.equal(FEATURES[key].plan, "team", key);
@@ -196,6 +196,22 @@ test("scripts/org_admin.py's grants and revocations are what plan() reads", asyn
   orgAdmin(e, "revoke", "comp", o);
   assert.equal(await plan(e, o), "free");
   assert.equal(e.LIST.sql.prepare("SELECT count(*) AS n FROM grants").get().n, 2, "revoked grants stay on record");
+});
+
+test("scripts/org_admin.py's link puts an organisation on its subscription's plan, and never moves it", async () => {
+  const e = await stand();
+  const o = org(e), other = org(e, "Other");
+  const { sub, tok } = subscription(e, "active");
+  assert.equal(await plan(e, o), "free");
+  orgAdmin(e, "link", sub, o);
+  assert.equal(await plan(e, o), "plus");
+  assert.equal((await identify(asking(tok), e)).org, o);
+  orgAdmin(e, "link", sub, other);
+  assert.equal(await plan(e, other), "free", "a linked subscription is never moved");
+  assert.deepEqual(e.LIST.sql.prepare("SELECT org_id, how FROM org_subscriptions").all().map((r) => ({ ...r })),
+                   [{ org_id: o, how: "script" }]);
+  run(e, "UPDATE subscriptions SET status = 'canceled' WHERE id = ?", sub);
+  assert.equal(await plan(e, o), "free", "Plus only while the subscription is live");
 });
 
 /* ---------- identify() and the feed ---------- */
@@ -353,6 +369,8 @@ test("a Free organisation's dashboard shows Plus and Team locked, from the map, 
     assert.ok(plus.html.includes(f.name), f.key);
     assert.ok(plus.html.includes(f.status === "live" ? "Needs Plus" : "Coming, included in Plus"), f.key);
   }
+  assert.deepEqual(plus.features.slice(0, 2), ["feed", "ci_tokens"], "the feed and CI tokens lead the Plus panel");
+  assert.match(plus.html, /<li data-feature="ci_tokens"><strong>CI tokens<\/strong> <span class="tag">Coming, included in Plus<\/span>/);
   assert.match(plus.html, /<a href="https:\/\/ranwhat\.com\/pricing">Upgrade to Plus<\/a>/);
   // Team: no price and nothing to buy, only a way to talk to us.
   assert.doesNotMatch(team.html, /<form|€|\$|£|\/\s*(month|year)|per (month|year|seat)|pricing|checkout/i);

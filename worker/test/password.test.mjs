@@ -296,6 +296,22 @@ test("the breach check sends five hex digits of the SHA-1, padded, and refuses a
   assert.equal(await passwordProblem(LOW, "a password nobody has used", { fetch: globalThis.fetch }), null);
 });
 
+test("a breached password that NFKC changes is refused as it was breached, though it would sign in as either", async () => {
+  const typed = "\uFB01refly-dragon-2009";     // an "fi" ligature, as some keyboards and pastes give it
+  const plainForm = typed.normalize("NFKC");
+  assert.equal(plainForm, "firefly-dragon-2009");
+  const s = services({ breached: [typed] });
+  assert.match(await passwordProblem(LOW, typed, { fetch: globalThis.fetch }), /known data breach/);
+  assert.deepEqual(s.ranges.map((r) => r.url.slice(-5)), [sha1(plainForm).slice(0, 5), sha1(typed).slice(0, 5)],
+    "each form sends only its own five hex digits");
+  assert.equal(await verifyPassword(await hashPassword(LOW, plainForm), typed), true, "why it matters");
+
+  /* A password NFKC leaves alone is looked up once. */
+  s.ranges.length = 0;
+  assert.equal(await passwordProblem(LOW, "a password nobody has used", { fetch: globalThis.fetch }), null);
+  assert.equal(s.ranges.length, 1);
+});
+
 test("when the breach check fails or is slow, it is skipped with a warning that names no part of the password", async () => {
   const pw = "correct horse battery staple";
   const prefix = sha1(pw).slice(0, 5);
@@ -680,7 +696,7 @@ test("a password signs in as a code does, in place of the browser's old session,
   assert.ok(!everything(e).includes(ANA_PASSWORD));
 });
 
-test("a wrong password, an address with no password and one with no account get one answer, after one PBKDF2 run", async () => {
+test("a wrong password, an address with no password and one with no account get one answer, after the same PBKDF2 work", async () => {
   const s = services();
   const e = env();
   await account(e, s, "ana@example.com", ANA_PASSWORD);
@@ -711,6 +727,40 @@ test("a wrong password, an address with no password and one with no account get 
   e.PBKDF2_ITERATIONS = "3000";
   const { counts } = await derived(() => withPassword(b, "dee@example.com", ANA_PASSWORD));
   assert.deepEqual(counts, [3000]);
+
+  /* Ana's hash is still at 1,000, as she has not signed in since the count
+     was raised: it is topped up to 3,000, so her address costs what one
+     with no account does and gets the same answer. */
+  const older = await derived(() => withPassword(new Browser(e, { ip: "192.0.2.11" }), "ana@example.com", "still not ana's password"));
+  assert.deepEqual(older.counts, [1000, 2000]);
+  assert.equal(older.result.status, 400);
+  assert.equal(plain(older.result.text, "ana@example.com"), answers[0]);
+  assert.match(passwordOf(e, "ana@example.com"), /^pbkdf2-sha256\$1000\$/, "a wrong password rehashes nothing");
+
+  /* A runtime that refuses the count refuses the decoy and the top-up
+     alike, though it would run Ana's own 1,000. */
+  const runtime = crypto.subtle.deriveBits;
+  const ran = [];
+  crypto.subtle.deriveBits = (algorithm, ...rest) => {
+    ran.push(algorithm.iterations);
+    if (algorithm.iterations > 1500) {
+      return Promise.reject(new DOMException("iteration counts above 1500 are not supported", "NotSupportedError"));
+    }
+    return runtime.call(crypto.subtle, algorithm, ...rest);
+  };
+  try {
+    const refusedFor = [];
+    for (const [email, ip] of [["ana@example.com", "192.0.2.12"], ["eve@example.com", "192.0.2.13"]]) {
+      const { result, lines } = await logged(() => withPassword(new Browser(e, { ip }), email, "not the password at all"));
+      assert.deepEqual(lines, ["account password check: NotSupportedError"], email);
+      refusedFor.push([result.status, plain(result.text, email)]);
+    }
+    assert.deepEqual(ran, [1000, 2000, 3000]);
+    assert.equal(refusedFor[0][0], 503);
+    assert.deepEqual(refusedFor[1], refusedFor[0]);
+  } finally {
+    delete crypto.subtle.deriveBits;
+  }
 
   /* The form is refused from another site or without its token, before any hashing. */
   const form = await b.get("/signin/password");
@@ -859,7 +909,8 @@ test("signing in hashes the password again when the count has been raised, and o
   e.PBKDF2_ITERATIONS = "2000";
   const raised = await derived(() => withPassword(new Browser(e, { ip: "203.0.113.31" }), "ana@example.com", ANA_PASSWORD));
   assert.equal(raised.result.status, 303);
-  assert.deepEqual(raised.counts, [1000, 2000], "verified at its own count, hashed again at the new one");
+  assert.deepEqual(raised.counts, [1000, 1000, 2000],
+                   "verified at its own count and topped up to the new one, then hashed again at it");
   const second = passwordOf(e, "ana@example.com");
   assert.match(second, /^pbkdf2-sha256\$2000\$/);
   assert.equal(await verifyPassword(second, ANA_PASSWORD), true);

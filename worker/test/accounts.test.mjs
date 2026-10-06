@@ -995,7 +995,7 @@ test("nothing logged carries an address or a code", async () => {
   for (const line of lines) assert.doesNotMatch(line, /@|secret\.person|example\.com|[0-9A-Z]{4}-[0-9A-Z]{4}/);
 });
 
-test("the cron deletes what is out of date once accounts are on, and touches nothing while they are off", async () => {
+test("the cron deletes what is out of date once accounts are on, and makes nothing where they never were", async () => {
   const s = services();
   const off = env({ ACCOUNTS_ON: undefined });
   const waits = [];
@@ -1017,4 +1017,24 @@ test("the cron deletes what is out of date once accounts are on, and touches not
   for (const table of ["signins", "sessions", "throttle"]) assert.equal(count(e, table), 0, table);
   assert.equal(count(e, "users"), 1);
   assert.equal(count(e, "auth_events"), 1, "the history is kept 13 months");
+});
+
+test("switched off after being on, accounts serve nothing, and the cron still deletes what is out of date", async () => {
+  const s = services();
+  const e = env();
+  await signIn(new Browser(e), s, "ana@example.com");
+  await askCode(new Browser(e, { ip: "203.0.113.81" }), "typo-of-someone@example.com");
+  assert.equal(rows(e, "SELECT email FROM signins WHERE used_at IS NULL")[0].email, "typo-of-someone@example.com");
+  assert.equal(count(e, "sessions"), 1);
+
+  e.ACCOUNTS_ON = "";
+  assert.equal((await new Browser(e).get("/signin")).status, 404);
+  later(31 * DAY);
+  const waits = [];
+  await worker.scheduled({}, e, { waitUntil: (p) => waits.push(p) });
+  await Promise.all(waits);
+  for (const table of ["signins", "sessions", "throttle"]) assert.equal(count(e, table), 0, table);
+  const left = JSON.stringify(tables(e).map((t) => rows(e, `SELECT * FROM ${t}`)));
+  assert.ok(!left.includes("typo-of-someone"), "the typed address is gone");
+  assert.equal(count(e, "users"), 1, "accounts themselves are kept");
 });

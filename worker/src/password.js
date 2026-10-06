@@ -30,7 +30,9 @@
  * Signing in with one. checkPassword() gives one answer for a wrong
  * password, an address with no password and an address with no account,
  * after the same work: an address without a hash is checked against a
- * decoy, one PBKDF2 run at the current count, as a real one would be. An
+ * decoy, one PBKDF2 run at the current count, as a real one would be, and
+ * a real hash made before the count was raised is topped up to it, so an
+ * account whose owner has not signed in since does not answer faster. An
  * address gets five tries in fifteen minutes, counted before the hash so
  * that tries at once cannot slip past, and started again by a right
  * password or a typed code. Ten wrong passwords from one network (an IPv6
@@ -51,8 +53,9 @@ import { b64url, bump, forget, network, peek } from "./session.js";
      supported"), on the Free and the Paid plan alike, and only in
      production: Node, wrangler dev and Miniflare all run 600,000. Until
      Cloudflare lifts it, production needs PBKDF2_ITERATIONS = "100000",
-     or no password can be set (the sign-up page then says passwords are
-     not available, and the emailed code still works).
+     which wrangler.toml's [vars] sets, or no password can be set (the
+     sign-up page then says passwords are not available, and the emailed
+     code still works).
    - CPU: 100,000 iterations take about 10 ms, 600,000 about 50 ms. Workers
      Free allows 10 ms of CPU a request, so even the lower count may not
      fit, and the owner may need Workers Paid for passwords at all.
@@ -112,11 +115,15 @@ export async function hashPassword(env, password) {
 
 /* Whether a password is the one a stored hash was made from. The two
    hashes are compared in full, whatever byte differs first. false for
-   anything that is not a hash this file made. */
-export async function verifyPassword(stored, password) {
+   anything that is not a hash this file made. With `atLeast`, a hash made
+   at a lower count is checked and then followed by the iterations it is
+   short of, whose result is thrown away, so the check costs `atLeast`
+   iterations whatever the hash's age. */
+export async function verifyPassword(stored, password, { atLeast = 0 } = {}) {
   const kept = parse(stored);
   if (!kept || typeof password !== "string" || password.length > 4096) return false;
   const got = await derive(password, kept.salt, kept.count);
+  if (kept.count < atLeast) await derive(password, kept.salt, atLeast - kept.count);
   let diff = got.length ^ kept.hash.length;
   for (let i = 0; i < kept.hash.length; i++) diff |= got[i] ^ kept.hash[i];
   return diff === 0;
@@ -136,11 +143,15 @@ export function needsRehash(env, stored) {
    form, or null when nothing is. fetch is the one the check against Have I
    Been Pwned uses; tests pass their own. */
 export async function passwordProblem(env, password, { fetch: get = globalThis.fetch, wait = PWNED_WAIT } = {}) {
-  const p = typeof password === "string" ? normal(password) : "";
+  const raw = typeof password === "string" ? password : "";
+  const p = normal(raw);
   const length = [...p].length;
   if (length < MIN_LENGTH) return `A password needs at least ${MIN_LENGTH} characters.`;
   if (length > MAX_LENGTH) return `A password can have at most ${MAX_LENGTH} characters.`;
-  if (await pwned(p, get, wait)) {
+  /* Have I Been Pwned has each password as it was breached, and NFKC can
+     change one (a ligature, full-width letters). Either form typed signs
+     in, so both are looked up when they differ. */
+  if (await pwned(p, get, wait) || (raw !== p && await pwned(raw, get, wait))) {
     return "That password is in a known data breach, so it is among the first that attackers try. Choose another.";
   }
   return null;
@@ -244,9 +255,15 @@ export async function checkPassword(request, env, email, typed) {
   if (!await hashAllowed(request, env)) return { ok: false, why: "network" };
   const row = await holder(env, email);
   const real = Boolean(row) && isPasswordHash(row.hash);
+  /* The decoy and a real hash of any age both cost the current count. A
+     hash is made again at that count only when its owner next signs in
+     with it (rehashed(), which needs the password), so until then the
+     top-up is what keeps an older one from answering faster. Both run in
+     one try: a run the runtime refuses is "unavailable", whichever it was. */
   let right;
   try {
-    right = await verifyPassword(real ? row.hash : decoy(env), typeof typed === "string" ? typed : "");
+    right = await verifyPassword(real ? row.hash : decoy(env), typeof typed === "string" ? typed : "",
+      { atLeast: iterations(env) });
   } catch (err) {
     console.log(`account password check: ${err.name || "error"}`);
     return { ok: false, why: "unavailable" };

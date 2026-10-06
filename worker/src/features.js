@@ -24,6 +24,10 @@ export const FEATURES = Object.freeze({
     plan: "plus", status: "live", name: "Catalogue feed",
     says: "Scopes rated since the last release, fetched by ranwhat update.",
   }),
+  ci_tokens: Object.freeze({
+    plan: "plus", status: "coming", name: "CI tokens",
+    says: "A token for a pipeline, made and revoked here.",
+  }),
   push: Object.freeze({
     plan: "plus", status: "coming", name: "Push",
     says: "Send a machine's findings to your account, as derived metadata only.",

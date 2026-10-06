@@ -30,15 +30,16 @@ zone_name = "ranwhat.com"
 pattern = "feed.ranwhat.com/v1/*"
 zone_name = "ranwhat.com"
 
-# Accounts, in dashboard.js. A custom domain, so the first deploy makes the
-# DNS record and its certificate. Until ACCOUNTS_ON is set, every request
-# here gets the same 404 as an unknown path. Its forms that mail a code
-# check Turnstile with TURNSTILE_SECRET, the contact form's widget: add
+# Accounts, in dashboard.js. A route, as for the feed, so a deploy needs no
+# DNS permission: the hostname needs a proxied DNS record of its own
+# (AAAA account -> 100::). Until ACCOUNTS_ON is set, every request here
+# gets the same 404 as an unknown path. Its forms that mail a code check
+# Turnstile with TURNSTILE_SECRET, the contact form's widget: add
 # account.ranwhat.com to that widget's hostnames before switching it on,
 # or no code can be asked for.
 [[routes]]
-pattern = "account.ranwhat.com"
-custom_domain = true
+pattern = "account.ranwhat.com/*"
+zone_name = "ranwhat.com"
 
 # TURNSTILE_SECRET, X_PIXEL_TOKEN, RESEND_API_KEY and LIST_SECRET are
 # encrypted secrets, set with `npx wrangler secret put <NAME>`, never here.
@@ -55,6 +56,13 @@ custom_domain = true
 # is not open yet. LIST_SECRET also derives each subscriber's feed token:
 # change it and tokens already issued keep working, but a subscriber's
 # welcome page would then show a new one.
+#
+# ACCOUNT_SECRET keeps account codes, sessions and form tokens (src/session.js):
+# 32 characters or more, e.g. `openssl rand -base64 32`, and never the same
+# as LIST_SECRET. Accounts also need RESEND_API_KEY and TURNSTILE_SECRET.
+# ACCOUNTS_ON = "1" in [vars] below switches them on; until then they are
+# dark. Switched on with any of those missing, account.ranwhat.com only says
+# accounts are not available.
 
 # The X lead event's ID, from X Events Manager. Not a secret: the same ID is in
 # site/consent.js. Remove it and the Worker reports nothing to X.
@@ -66,6 +74,11 @@ X_EVENT_LEAD = "tw-rfz6t-rfz7z"
 # it. "off": no tax in checkout. site/terms.html and privacy.html describe
 # "managed": change them with it.
 STRIPE_TAX = "managed"
+# The PBKDF2 count for account passwords (src/password.js). Workers' WebCrypto
+# refuses more than 100,000 in production, so without this no password could
+# be set or checked there. When Cloudflare lifts that limit, raise it: older
+# hashes still verify, and are hashed again as their owners sign in.
+PBKDF2_ITERATIONS = "100000"
 
 # Signups waiting to be confirmed, and which releases went out. No
 # database_id on purpose: the first deploy creates the database (Wrangler's

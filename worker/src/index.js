@@ -265,11 +265,12 @@ export default {
   },
 
   /* The cron trigger in wrangler.toml: send any new release to the list,
-     and, once accounts are on, delete the codes, sessions and counts that
-     are out of date. */
+     and delete the account codes, sessions and counts that are out of
+     date. That goes on while accounts are switched off again after being
+     on; where they never were, sweep() makes and touches nothing. */
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(announce(env));
-    if (accountsOn(env) && env.LIST) {
+    if (env.LIST) {
       ctx.waitUntil(sweep(env).catch((err) => console.log(`account sweep: ${err.name || "error"}`)));
     }
   },

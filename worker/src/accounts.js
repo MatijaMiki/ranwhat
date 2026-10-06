@@ -4,7 +4,9 @@
  *
  * Dark until ACCOUNTS_ON is set: until then index.js answers 404 to
  * everything on the account host, before any of this runs, and the cron
- * leaves these tables alone.
+ * makes none of these tables. Once they exist, its sweep keeps deleting
+ * what is out of date with accounts on or off: switching them off stops
+ * serving them, not deleting what this file promises to delete.
  *
  * Every table the accounts design needs is made here, in one go, including
  * the ones later work fills (passwords, passkeys, Google and GitHub
@@ -281,6 +283,13 @@ export async function schema(db) {
   made.add(db);
 }
 
+/* Whether this database has the tables above, made in one batch the
+   first time accounts were on, without making them. */
+async function tablesMade(db) {
+  if (made.has(db)) return true;
+  return Boolean(await db.prepare("SELECT 1 AS yes FROM sqlite_master WHERE type = 'table' AND name = 'signins'").first());
+}
+
 /* ---------- people and organisations ---------- */
 
 /* The account an address belongs to, made on first use: a user, their
@@ -412,13 +421,17 @@ export async function spendAuthMail(env, purpose = "signin") {
 
 /* ---------- the cron ---------- */
 
-/* Runs on the cron trigger, every quarter hour, once accounts are on.
-   What a used or out-of-date code, session, limit or count needed is
-   deleted, so an address someone typed and never verified is gone within
-   the code's ten minutes and the next run. */
+/* Runs on the cron trigger, every quarter hour. What a used or
+   out-of-date code, session, limit or count needed is deleted, so an
+   address someone typed and never verified is gone within the code's ten
+   minutes and the next run, and so is the password hash held with it.
+   That holds while accounts are dark again after being on, too: dark
+   stops serving, not deleting. A database accounts were never on in gets
+   no tables from it. */
 export async function sweep(env) {
   const db = env.LIST;
-  await schema(db);
+  if (accountsOn(env)) await schema(db);
+  else if (!await tablesMade(db)) return;
   const t = now();
   await db.batch([
     db.prepare("DELETE FROM signins WHERE expires_at <= ? OR used_at IS NOT NULL").bind(t),
