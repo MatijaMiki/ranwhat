@@ -1,0 +1,89 @@
+name: indexnow
+
+# Tell Bing and the other IndexNow engines which pages changed, once they
+# are live. Cloudflare Pages deploys main on its own and reports a
+# "Cloudflare Pages" check on the commit; submitting before that check
+# passes would point the engines at the old pages.
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**"]
+  # Run by hand from the Actions tab to send every sitemap page again.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: read
+  # To find the commit the last successful run sent up to.
+  actions: read
+
+# One submission at a time. A run left pending behind another is cancelled
+# when a third arrives, so no run diffs against its own push: each sends
+# everything since the last run that succeeded, and a cancelled, failed or
+# timed-out run's pages go out with the next one.
+concurrency:
+  group: indexnow
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    # Branch commits get Cloudflare preview deploys under the same check
+    # name; only main's pages are ranwhat.com's.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # The diff against the last commit sent needs that commit.
+          fetch-depth: 0
+
+      # Event values reach the shell through env, never pasted into the
+      # script, so nothing in a ref or message can become a command.
+      # A preview deploy's check names a "Branch Preview URL"; production's
+      # does not, and only production counts.
+      - name: Wait for Cloudflare Pages to deploy this commit to production
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          for i in $(seq 1 50); do
+            state=$(gh api "repos/$REPO/commits/$SHA/check-runs" --jq '
+              [.check_runs[] | select(.name == "Cloudflare Pages")
+                | select(.output.summary // "" | test("Branch Preview URL") | not)][0]
+              // empty | "\(.status) \(.conclusion)"') || state=""
+            echo "attempt $i: ${state:-no production Cloudflare Pages check yet}"
+            case "$state" in
+              "completed success") sleep 20; exit 0 ;;
+              completed*) echo "::error::Cloudflare Pages did not deploy $SHA ($state); nothing sent."; exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "::error::No finished Cloudflare Pages deploy for $SHA after 25 minutes; nothing sent."
+          exit 1
+
+      # Since the last run that succeeded, or this push's previous head when
+      # there is none. A run by hand on main sends every page: that is what
+      # it is for, and with no SINCE the script sends them all.
+      - name: Submit to IndexNow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          since=""
+          if [ "$EVENT" = "push" ]; then
+            since=$(gh api "repos/$REPO/actions/workflows/indexnow.yml/runs?branch=main&status=success&per_page=1" \
+              --jq '.workflow_runs[0].head_sha // empty') || since=""
+            since="${since:-$BEFORE}"
+          fi
+          if [ -n "$since" ]; then
+            echo "Pages changed since $since:"
+            python3 scripts/indexnow.py --changed "$since" --send
+          else
+            python3 scripts/indexnow.py --send
+          fi

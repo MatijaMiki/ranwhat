@@ -1,9 +1,11 @@
-"""scripts/indexnow.py sends only what the sitemap lists, under the key the
-site serves. Nothing here touches the network: the opener is a stand-in."""
+"""scripts/indexnow.py sends what the sitemap lists, and pages a push removed,
+under the key the site serves. Nothing here touches the network: the opener
+is a stand-in."""
 import importlib.util
 import io
 import json
 import os
+import re
 import pathlib
 import unittest
 import urllib.error
@@ -104,6 +106,113 @@ class Send(unittest.TestCase):
         with redirect_stdout(out):
             self.assertEqual(indexnow.main([]), 0)
         self.assertIn("Nothing sent", out.getvalue())
+
+
+class Changed(unittest.TestCase):
+    """--changed REV: what a push changed, what it removed, and what to do
+    with a revision there is nothing to diff against."""
+
+    def _run(self, argv):
+        from contextlib import redirect_stdout, redirect_stderr
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = indexnow.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_first_push_or_a_run_by_hand_lists_every_page(self):
+        for rev in ("0" * 40, ""):
+            self.assertFalse(indexnow.known_commit(rev), rev)
+        code, out, err = self._run(["--changed", "0" * 40])
+        self.assertEqual(code, 0)
+        self.assertIn("listing every sitemap page", err)
+        for u in indexnow.sitemap_urls():
+            self.assertIn(u, out)
+
+    def test_a_commit_this_checkout_has_is_known(self):
+        head = indexnow._git("rev-parse", "HEAD").strip()
+        self.assertTrue(indexnow.known_commit(head))
+        self.assertFalse(indexnow.known_commit("f" * 40))
+
+    def test_removed_pages_are_sent_after_the_changed_ones(self):
+        diffs = {"--diff-filter=d": "site/watch.html\nsite/styles.css\n",
+                 "--diff-filter=D": "site/guides/old-guide.html\n"}
+
+        def git(*args):
+            if args[0] == "diff":
+                return diffs[next(a for a in args if a.startswith("--diff-filter="))]
+            return ""
+        orig_git, orig_known = indexnow._git, indexnow.known_commit
+        indexnow._git, indexnow.known_commit = (lambda *a, **k: git(*a)), (lambda rev: True)
+        try:
+            code, out, _ = self._run(["--changed", "abc123"])
+        finally:
+            indexnow._git, indexnow.known_commit = orig_git, orig_known
+        self.assertEqual(code, 0)
+        listed = [line for line in out.splitlines() if line.startswith("https://")]
+        self.assertEqual(listed, ["https://ranwhat.com/watch",
+                                  "https://ranwhat.com/guides/old-guide"])
+
+
+class RenamesInARealRepository(unittest.TestCase):
+    """A moved page is a new URL and a removed one, not a rename git hides."""
+
+    def test_a_moved_page_sends_its_old_url_as_removed(self):
+        import shutil, subprocess, tempfile
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+
+        def git(*args):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+                                  + list(args), cwd=tmp, check=True,
+                                  capture_output=True, text=True).stdout
+        os.makedirs(os.path.join(tmp, "site", "guides"))
+        page = "<html><body>" + "the same guide, word for word. " * 40 + "</body></html>\n"
+        for name in ("guides/old-guide.html", "gone.html", "watch.html"):
+            with open(os.path.join(tmp, "site", name), "w", encoding="utf-8") as fh:
+                fh.write(page if name.startswith("guides") else name + "\n")
+        git("init", "-q")
+        git("add", "-A")
+        git("commit", "-q", "-m", "first")
+        first = git("rev-parse", "HEAD").strip()
+        git("mv", "site/guides/old-guide.html", "site/guides/new-guide.html")
+        git("rm", "-q", "site/gone.html")
+        with open(os.path.join(tmp, "site", "watch.html"), "a", encoding="utf-8") as fh:
+            fh.write("edited\n")
+        git("commit", "-q", "-am", "second")
+
+        changed, removed = indexnow.changed_since(first, cwd=tmp)
+        self.assertEqual(changed, {"https://ranwhat.com/guides/new-guide",
+                                   "https://ranwhat.com/watch"})
+        self.assertEqual(removed, {"https://ranwhat.com/guides/old-guide",
+                                   "https://ranwhat.com/gone"})
+
+
+class Workflow(unittest.TestCase):
+    PATH = ROOT / ".github" / "workflows" / "indexnow.yml"
+
+    def test_it_waits_for_the_pages_deploy_before_sending(self):
+        text = self.PATH.read_text(encoding="utf-8")
+        self.assertLess(text.index('select(.name == "Cloudflare Pages")'),
+                        text.index("scripts/indexnow.py --changed"))
+        # A branch's preview deploy carries the same check name.
+        self.assertIn('test("Branch Preview URL") | not', text)
+        self.assertIn("if: github.ref == 'refs/heads/main'", text)
+
+    def test_it_sends_since_the_last_run_that_succeeded(self):
+        # Diffing only against the push's own previous head loses the pages
+        # of any run that was cancelled, failed or timed out.
+        text = self.PATH.read_text(encoding="utf-8")
+        self.assertIn("status=success", text)
+        self.assertIn("actions: read", text)
+
+    def test_no_event_value_is_pasted_into_a_shell_command(self):
+        # A run: block that interpolates ${{ }} runs whatever the value holds;
+        # every value goes through env instead.
+        text = self.PATH.read_text(encoding="utf-8")
+        blocks = re.findall(r"run: \|\n((?:          .*\n|\n)+)", text)
+        self.assertTrue(blocks)
+        for block in blocks:
+            self.assertNotIn("${{", block)
 
 
 if __name__ == "__main__":

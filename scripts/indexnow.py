@@ -4,6 +4,11 @@
     python3 scripts/indexnow.py --changed REV    # list only pages changed since REV
     python3 scripts/indexnow.py --send [...]     # submit them
 
+.github/workflows/indexnow.yml runs it after every push to main that touches
+site/: it waits for the Cloudflare Pages check on that commit to pass, then
+sends the pages the push changed, and any it removed. Run it by hand from
+the Actions tab to send every sitemap page again.
+
 Bing Webmaster Tools only knew the four URLs pasted into it by hand on 27
 September; the sitemap lists every page, and a crawler reads it when it gets
 round to it. IndexNow is the push side: one POST names the URLs, and Bing,
@@ -16,8 +21,9 @@ else. A submission is refused until the live key file says the same as the
 local one, so a run before the deploy reaches ranwhat.com fails here with a
 reason rather than at the engine with a 403.
 
-Only URLs in site/sitemap.xml are ever sent: a page left out of the sitemap
-is left out on purpose. Standard library only, like the rest of the repo.
+A page is sent only while site/sitemap.xml lists it, since a page left out
+of the sitemap is left out on purpose, or once it has been removed, so the
+engines drop it. Standard library only, like the rest of the repo.
 """
 import argparse
 import json
@@ -88,10 +94,35 @@ def url_for(path):
     return ORIGIN + "/" + rel
 
 
-def changed_since(rev):
-    out = subprocess.run(["git", "diff", "--name-only", rev, "--", "site"], cwd=ROOT,
-                         check=True, capture_output=True, text=True).stdout
-    return {u for u in map(url_for, out.split()) if u}
+def _git(*args, cwd=ROOT):
+    return subprocess.run(["git"] + list(args), cwd=cwd, check=True,
+                          capture_output=True, text=True).stdout
+
+
+def known_commit(rev):
+    """False for a revision this checkout cannot diff against: the forty
+    zeros a push event reports for a branch's first push, or a commit a
+    shallow clone never fetched."""
+    if not rev or set(rev) == {"0"}:
+        return False
+    try:
+        _git("cat-file", "-e", rev + "^{commit}")
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
+def changed_since(rev, cwd=ROOT):
+    """(URLs of pages edited or added since rev, URLs of pages removed since
+    rev). IndexNow wants a removed URL too, so an engine re-fetches it, sees
+    the 404 and drops it, rather than waiting for its next crawl to notice.
+    --no-renames, because git otherwise reports a moved page as one rename,
+    and its old URL would be neither changed nor removed."""
+    def urls(diff_filter):
+        out = _git("diff", "--name-only", "--no-renames", "--diff-filter=" + diff_filter,
+                   rev, "--", "site", cwd=cwd)
+        return {u for u in map(url_for, out.split()) if u}
+    return urls("d"), urls("D")
 
 
 def payload(urls, k):
@@ -143,9 +174,13 @@ def main(argv=None):
     try:
         k = key()
         urls = sitemap_urls()
-        if args.changed:
-            changed = changed_since(args.changed)
-            urls = [u for u in urls if u in changed]
+        if args.changed and not known_commit(args.changed):
+            print("%s is not a commit this checkout has; listing every sitemap page."
+                  % args.changed, file=sys.stderr)
+        elif args.changed:
+            changed, removed = changed_since(args.changed)
+            listed = set(urls)
+            urls = [u for u in urls if u in changed] + sorted(removed - listed)
         if not urls:
             print("No sitemap pages to submit.")
             return 0
