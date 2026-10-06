@@ -25,11 +25,18 @@
  *
  * /api/checkout, /api/welcome, /api/stripe and /api/billing: buying Plus
  * through Stripe, in stripe.js. Paying issues the token the feed accepts.
+ *
+ * account.ranwhat.com: accounts, in dashboard.js. Checked by hostname before
+ * any route is looked up, so none of the routes below answers there and
+ * none of its pages answers anywhere else. Until ACCOUNTS_ON is set it
+ * answers 404 to everything, exactly as an unknown path does here.
  */
 import { EmailMessage } from "cloudflare:email";
 import { announce, confirm, subscribe, switchedOn } from "./list.js";
 import { catalogue } from "./feed.js";
 import { billing, checkout, webhook, welcome } from "./stripe.js";
+import { ACCOUNT_HOST, accountsOn, sweep } from "./accounts.js";
+import { account } from "./dashboard.js";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TO = "ranwhatcom@gmail.com";
@@ -255,6 +262,9 @@ const ROUTES = {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.hostname === ACCOUNT_HOST) {
+      return accountsOn(env) ? account(request, env, ctx) : json(404, { error: "Not found." });
+    }
     const route = ROUTES[url.pathname];
     if (!route) return json(404, { error: "Not found." });
     const [handle, methods] = route;
@@ -267,8 +277,13 @@ export default {
     return handle(request, env, ctx);
   },
 
-  /* The cron trigger in wrangler.toml: send any new release to the list. */
+  /* The cron trigger in wrangler.toml: send any new release to the list,
+     and, once accounts are on, delete the codes, sessions and counts that
+     are out of date. */
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(announce(env));
+    if (accountsOn(env) && env.LIST) {
+      ctx.waitUntil(sweep(env).catch((err) => console.log(`account sweep: ${err.name || "error"}`)));
+    }
   },
 };

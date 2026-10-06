@@ -30,6 +30,13 @@ zone_name = "ranwhat.com"
 pattern = "feed.ranwhat.com/v1/*"
 zone_name = "ranwhat.com"
 
+# Accounts, in dashboard.js. A custom domain, so the first deploy makes the
+# DNS record and its certificate. Until ACCOUNTS_ON is set, every request
+# here gets the same 404 as an unknown path.
+[[routes]]
+pattern = "account.ranwhat.com"
+custom_domain = true
+
 # TURNSTILE_SECRET, X_PIXEL_TOKEN, RESEND_API_KEY and LIST_SECRET are
 # encrypted secrets, set with `npx wrangler secret put <NAME>`, never here.
 # RESEND_API_KEY: a Full access key (the list makes contacts, a segment and
