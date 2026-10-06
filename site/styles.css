@@ -384,7 +384,7 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
   padding-block:52px 34px}
 /* Column labels are paragraphs, not h4: under each page's h2 an h4 skipped
    a level, and a label for a list of links is not a heading anyway. */
-.fgrid .fh{font-family:"IBM Plex Mono",Menlo,monospace;font-size:10.5px;
+.fgrid .fh,.flisted .fh{font-family:"IBM Plex Mono",Menlo,monospace;font-size:10.5px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
   margin:0 0 14px;font-weight:500}
 .fgrid ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
@@ -619,16 +619,18 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 table.flags td:first-child code{white-space:normal}
 
 /* ---------- follow ---------- */
-/* The heading, with the directory badges at its right; they drop under it
-   where they do not fit one line, and under each other on a phone. The paragraph under them is one
-   sentence, and at the usual measure its last word wrapped onto a third
-   line, so it takes the column's width. */
-.follow-head{display:flex;flex-wrap:wrap;align-items:center;
-  justify-content:space-between;gap:12px 24px;margin-bottom:14px}
-.follow-head h2{margin:0}
-.follow-head .badges{display:flex;flex-wrap:wrap;gap:12px}
-.follow-head .badges a{display:block;flex:none;line-height:0}
+/* The paragraph under the heading is one sentence, and at the usual measure
+   its last word wrapped onto a third line, so it takes the column's width. */
 .lede.follow-lede{max-width:none}
+/* The directories ranwhat is listed on: a quiet strip of their badges at the
+   foot of the home page, a little smaller than given. The size is set here,
+   since the snippets stay as written. */
+.flisted{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;
+  padding-block:8px 44px}
+.flisted .fh{margin:0}
+.flisted .badges{display:flex;flex-wrap:wrap;gap:12px}
+.flisted .badges a{display:block;flex:none;line-height:0}
+.flisted .badges img{height:36px;width:auto}
 ul.follow{list-style:none;margin:20px 0 0;padding:0;display:flex;
   flex-direction:column;gap:1px;background:var(--rule-2);
   border:1px solid var(--rule-2)}
