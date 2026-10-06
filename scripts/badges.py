@@ -4,6 +4,7 @@ files that have to agree on them.
 
     pbpaste | python3 scripts/badges.py add "Uneed"        the snippet on stdin
     python3 scripts/badges.py add "Uneed" --file badge.html
+    python3 scripts/badges.py add "Noonlaunch" --file badge.html --self-host
     python3 scripts/badges.py list                          what is listed, and what each link passes
     python3 scripts/badges.py check                         online: fetch every badge image again
     python3 scripts/badges.py remove "Uneed"
@@ -22,7 +23,13 @@ here (306c8a3). So nothing in this file edits a snippet, and the page's
 styles reach a badge only through the <li> around it.
 
 A badge goes on the page only once its image has been fetched and set no
-cookie, because the privacy page says that of each one. add fetches it and
+cookie, because the privacy page says that of each one. A directory whose
+image does set one can still be listed with --self-host: the image is saved
+under site/badges/ and served from here, and the page swaps only that src
+for the local path. The snippet in badges.json stays as given, so its sha256
+still matches; the visitor's browser never asks the directory for anything.
+An SVG saved here must carry no script, handler, foreignObject or external
+reference, and site/_headers gives /badges/* a policy of its own besides. add fetches it and
 stamps the badge "checked"; add --offline leaves it in badges.json, unstamped,
 and sync refuses to write the page until check has fetched it.
 
@@ -77,6 +84,7 @@ class Files:
         self.index = root / "site" / "index.html"
         self.privacy = root / "site" / "privacy.html"
         self.headers = root / "site" / "_headers"
+        self.site = root / "site"
 
 
 # --------------------------------------------------------------------------
@@ -134,9 +142,12 @@ def origin(url):
 
 def hosts(badge):
     """The origins img-src has to allow for one badge: its image URLs, then
-    any host its image redirected through when it was added."""
+    any host its image redirected through when it was added. A self-hosted
+    image is served from here, which 'self' already allows."""
     out = []
-    for o in [origin(u) for u in image_urls(badge["snippet"])] + badge.get("extra_hosts", []):
+    local = (badge.get("self_host") or {}).get("src")
+    urls = [u for u in image_urls(badge["snippet"]) if u != local]
+    for o in [origin(u) for u in urls] + badge.get("extra_hosts", []):
         if o not in out:
             out.append(o)
     return out
@@ -246,6 +257,40 @@ def digest(snippet):
     return hashlib.sha256(snippet.encode("utf-8")).hexdigest()
 
 
+# What an SVG saved under site/badges/ may not carry. An <img> never runs an
+# SVG's script, but the file is also a page on ranwhat.com that anyone can
+# open, and an external reference would ask a third party for it after all.
+SVG_REFUSED = [
+    (re.compile(r"<\s*script", re.I), "a <script>"),
+    (re.compile(r"<\s*foreignObject", re.I), "a <foreignObject>"),
+    (re.compile(r"\son[a-z]+\s*=", re.I), "an inline event handler"),
+    (re.compile(r"(?:xlink:)?href\s*=\s*[\"'](?!#|data:)", re.I), "an href that is not local or data:"),
+    (re.compile(r"url\(\s*[\"']?(?!#|data:)", re.I), "a url() that is not local or data:"),
+    (re.compile(r"@import", re.I), "an @import"),
+    (re.compile(r"<!ENTITY", re.I), "an entity declaration"),
+]
+SELF_HOST_TYPES = {"image/svg+xml": "svg", "image/png": "png", "image/webp": "webp"}
+
+
+def svg_problems(data):
+    text = data.decode("utf-8", "replace")
+    return ["the SVG has %s" % why for pattern, why in SVG_REFUSED if pattern.search(text)]
+
+
+def served(badge):
+    """The snippet as the page carries it: as given, except that a
+    self-hosted badge's image src points at the copy served from here."""
+    snippet, local = badge["snippet"], badge.get("self_host")
+    if not local:
+        return snippet
+    quoted = ['src="%s"' % local["src"], "src='%s'" % local["src"]]
+    for q in quoted:
+        if snippet.count(q) == 1:
+            return snippet.replace(q, 'src="/%s"' % local["path"].split("site/", 1)[1])
+    raise SystemExit("%s: its snippet no longer holds the src it was self-hosted from"
+                     % badge["name"])
+
+
 # --------------------------------------------------------------------------
 # What the three files say
 # --------------------------------------------------------------------------
@@ -274,7 +319,7 @@ def _write(path, text):
 def _li(badge):
     ground = badge.get("ground")
     cls = ' class="on-%s"' % ground if ground in GROUNDS else ""
-    return "<li%s>%s</li>" % (cls, badge["snippet"])
+    return "<li%s>%s</li>" % (cls, served(badge))
 
 
 def render_index(badges, indent):
@@ -299,7 +344,8 @@ def render_privacy(badges):
     parts = []
     for b in sorted(badges, key=lambda b: b["name"].casefold()):
         bare = [h.split("://", 1)[1] for h in hosts(b)]
-        parts.append("%s (%s)" % (html.escape(b["name"], quote=False), ", ".join(bare)))
+        where = ", ".join(bare) if bare else "its image served from ranwhat.com"
+        parts.append("%s (%s)" % (html.escape(b["name"], quote=False), where))
     if not parts:
         return "There are none at present."
     if len(parts) == 1:
@@ -336,10 +382,16 @@ def _replace(text, marks, body, where):
 
 
 def csp_line(headers_text):
-    lines = [l for l in headers_text.splitlines()
-             if l.lstrip().startswith("Content-Security-Policy:")]
+    """The site-wide policy: the Content-Security-Policy line in the /* block.
+    Other paths may set their own (/badges/* does), which badges never use."""
+    lines, block = [], None
+    for l in headers_text.splitlines():
+        if l and not l[0].isspace():
+            block = l.strip()
+        elif block == "/*" and l.lstrip().startswith("Content-Security-Policy:"):
+            lines.append(l)
     if len(lines) != 1:
-        raise SystemExit("expected one Content-Security-Policy line in site/_headers")
+        raise SystemExit("expected one Content-Security-Policy line under /* in site/_headers")
     return lines[0]
 
 
@@ -400,10 +452,68 @@ def problems_with(badges):
     return out
 
 
+def local_problems(files, badges):
+    """A self-hosted image that is missing, or no longer the file that was
+    checked when it was saved."""
+    out = []
+    for b in badges:
+        local = b.get("self_host")
+        if not local:
+            continue
+        path = files.site.parent / local["path"]
+        if not path.is_file():
+            out.append("%s: %s is missing; add it again with --self-host" % (b["name"], local["path"]))
+            continue
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != local.get("sha256"):
+            out.append("%s: %s is not the file that was checked (its sha256 differs)"
+                       % (b["name"], local["path"]))
+        if path.suffix == ".svg":
+            out += ["%s: %s" % (b["name"], p) for p in svg_problems(data)]
+    return out
+
+
+def _slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "badge"
+
+
+def self_host(files, name, snippet):
+    """Fetch the badge's one image and save it under site/badges/. Returns the
+    self_host record, or exits with why it cannot be served from here."""
+    urls = image_urls(snippet)
+    if len(urls) != 1:
+        raise SystemExit("not added: --self-host needs a snippet with exactly one image URL")
+    src = urls[0]
+    request = urllib.request.Request(src, headers={
+        "User-Agent": "Mozilla/5.0 (ranwhat badge check)",
+        "Accept": "image/svg+xml,image/png,image/webp,image/*;q=0.8"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            kind = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            data = response.read((2 << 20) + 1)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise SystemExit("not added: could not fetch %s: %s" % (src, e))
+    if kind not in SELF_HOST_TYPES:
+        raise SystemExit("not added: %s is %s; --self-host takes only %s"
+                         % (src, kind or "untyped", ", ".join(sorted(SELF_HOST_TYPES))))
+    if len(data) > (2 << 20):
+        raise SystemExit("not added: %s is over 2 MB" % src)
+    if kind == "image/svg+xml":
+        problems = svg_problems(data)
+        if problems:
+            raise SystemExit("not added:\n  " + "\n  ".join(problems))
+    rel = "site/badges/%s.%s" % (_slug(name), SELF_HOST_TYPES[kind])
+    path = files.site.parent / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return {"src": src, "path": rel, "sha256": hashlib.sha256(data).hexdigest()}
+
+
 def render(files, badges, dropped=()):
     """{path: new text} for the three files, worked out in full before any is
     written, so a refusal leaves them all as they were."""
-    problems = problems_with(badges)
+    problems = problems_with(badges) + local_problems(files, badges)
     if problems:
         raise SystemExit("not written:\n  " + "\n  ".join(problems))
     index, privacy, headers = _read(files.index), _read(files.privacy), _read(files.headers)
@@ -523,8 +633,9 @@ def _link_status(snippet):
 
 def _describe(badge):
     snippet = badge["snippet"]
+    where = ", ".join(h.split("://", 1)[1] for h in hosts(badge)) or "ranwhat.com (self-hosted)"
     return "image from %s, link %s" % (
-        ", ".join(h.split("://", 1)[1] for h in hosts(badge)),
+        where,
         "followed" if followed(snippet) else "not followed (rel=\"%s\")" % " ".join(rel(snippet)))
 
 
@@ -581,7 +692,14 @@ def cmd_add(args, files):
     badge = {"name": name, "added": today, "snippet": snippet, "sha256": digest(snippet)}
     if args.ground:
         badge["ground"] = args.ground
-    if not args.offline:
+    if args.self_host:
+        if args.offline:
+            raise SystemExit("--self-host fetches the image, so it cannot be --offline")
+        badge["self_host"] = self_host(files, name, snippet)
+        # Its image is served from here, so the directory's cookie never
+        # reaches a visitor: the check the privacy page describes is this.
+        badge["checked"] = today
+    elif not args.offline:
         _, extra, problems = probe(snippet)
         if problems:
             raise SystemExit("not added:\n  " + "\n  ".join(problems))
@@ -604,7 +722,13 @@ def cmd_add(args, files):
               "not fetched (--offline). python3 scripts/badges.py check fetches it "
               "and, if it sets no cookie, writes the three files." % name)
         return
-    changed = sync(files, badges)
+    try:
+        changed = sync(files, badges)
+    except SystemExit:
+        local = (badge.get("self_host") or {}).get("path")
+        if local and (files.site.parent / local).is_file():
+            (files.site.parent / local).unlink()
+        raise
     save(files, badges)
     print("added %s: %s" % (name, _describe(badge)))
     for host in other_sites(badge):
@@ -624,6 +748,11 @@ def cmd_remove(args, files):
     dropped = set(all_hosts(gone)) - set(all_hosts(keep))
     changed = sync(files, keep, dropped)
     save(files, keep)
+    for b in gone:
+        local = (b.get("self_host") or {}).get("path")
+        if local and (files.site.parent / local).is_file():
+            (files.site.parent / local).unlink()
+            print("  deleted %s" % local)
     print("removed %s%s" % (gone[0]["name"], "; img-src no longer allows " +
                             ", ".join(sorted(dropped)) if dropped else ""))
     for path in changed:
@@ -657,6 +786,11 @@ def cmd_check(args, files):
     today = datetime.date.today().isoformat()
     probed, stamped = [], []
     for b in badges:
+        if b.get("self_host"):
+            # Served from here: what counts is the saved file, which
+            # local_problems checks below with everything else.
+            probed.append((b, [], [], []))
+            continue
         hops, extra, problems = probe(b["snippet"])
         if "checked" not in b and not problems:
             # Its first fetch: the hosts its redirects go through are
@@ -694,6 +828,8 @@ def cmd_check(args, files):
         for p in problems:
             print("  ! " + p)
             bad += 1
+        if b.get("self_host"):
+            print("  image served from /%s" % b["self_host"]["path"].split("site/", 1)[1])
         href, status = _link_status(b["snippet"])
         # A directory behind a bot wall answers 403 to this and 200 to a
         # browser, so only a listing that is plainly gone counts.
@@ -724,6 +860,9 @@ def main(argv=None, files=None):
                    help="put it last rather than first")
     a.add_argument("--ground", choices=GROUNDS,
                    help="for a transparent badge drawn for one background")
+    a.add_argument("--self-host", action="store_true",
+                   help="save the image under site/badges/ and serve it from here, "
+                        "for a directory whose image sets a cookie")
     a.add_argument("--offline", action="store_true",
                    help="do not fetch the image: save it to badges.json only, "
                         "until check fetches it and puts it on the page")
