@@ -25,7 +25,7 @@ h2{font-size:15px;margin:26px 0 8px}
 p{color:var(--muted);margin:0 0 14px}a{color:var(--ink)}
 .bad{color:var(--bad)}
 label{display:block;font-size:14px;margin:14px 0 6px}
-input[type=email],input[type=text]{width:100%;font:16px Menlo,Consolas,monospace;padding:10px 12px;background:var(--ground);color:var(--ink);border:1px solid var(--rule)}
+input[type=email],input[type=text],input[type=password]{width:100%;font:16px Menlo,Consolas,monospace;padding:10px 12px;background:var(--ground);color:var(--ink);border:1px solid var(--rule)}
 button{margin-top:12px;font:13px Menlo,Consolas,monospace;padding:11px 16px;background:transparent;color:var(--ink);border:1px solid var(--ink);cursor:pointer}
 button:hover{background:var(--ink);color:var(--surface)}
 form.row{display:inline-block;margin-right:8px}

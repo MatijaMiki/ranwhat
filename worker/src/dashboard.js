@@ -1,6 +1,6 @@
-/* account.ranwhat.com: signing in with an emailed code, and the account
- * page behind it. index.js sends every request for this host here, and
- * only once ACCOUNTS_ON is set.
+/* account.ranwhat.com: signing in with an emailed code, making an account
+ * with a password, and the account page behind both. index.js sends every
+ * request for this host here, and only once ACCOUNTS_ON is set.
  *
  *   GET  /              The account: who you are, your organisation, its
  *                       plan and what each plan has (features.js), what
@@ -9,9 +9,14 @@
  *   GET  /signin        The email form.
  *   POST /signin        Mails a code; the same answer for every address.
  *   GET  /signin/code   The box to type the code in. Never filled in.
- *   POST /signin/code   Checks it, makes the account on first use, and
- *                       opens a new session.
- *   POST /signin/again  A new code for the same address.
+ *   POST /signin/code   Checks it, makes the account on first use, sets
+ *                       the password a sign-up chose, and opens a new
+ *                       session.
+ *   POST /signin/again  A new code for the same address (and password).
+ *   GET  /signup        The email and password form.
+ *   POST /signup        Judges the password, then mails a code as /signin
+ *                       does; the password is set only once it is typed
+ *                       (password.js says why that is the whole defence).
  *   POST /stepup        A fresh code for someone signed in, for the actions
  *                       that need one.
  *   POST /signout       Ends this session.
@@ -32,6 +37,7 @@ import {
   current, formOk, formToken, nextPath, openSession, randomToken, readCookie, requestCode,
   sameOrigin, setCookie,
 } from "./session.js";
+import { attachPassword, hashAllowed, hashPassword, isPasswordHash, passwordProblem } from "./password.js";
 import { form, notFound, page, redirect, refused, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
@@ -64,12 +70,14 @@ async function signinPage(request, env, ctx, url) {
 /* The form's token is bound to the browser's __Host-rw_signin cookie, made
    here when it has none yet, so even the first form has something a page
    on another site cannot know. */
-async function signinForm(env, binding, { next = "/", email = "", error = "", status = 200 } = {}) {
-  const cookies = [];
-  if (!binding) {
-    binding = randomToken();
-    cookies.push(setCookie(SIGNIN_COOKIE, binding, SIGNIN_FOR));
-  }
+function bound(binding) {
+  if (binding) return { binding, cookies: [] };
+  const made = randomToken();
+  return { binding: made, cookies: [setCookie(SIGNIN_COOKIE, made, SIGNIN_FOR)] };
+}
+
+async function signinForm(env, browser, { next = "/", email = "", error = "", status = 200 } = {}) {
+  const { binding, cookies } = bound(browser);
   return page("Sign in", `<h1>Sign in</h1>
     <p>Type your email, and we send you a code to type on the next page. The
        same code makes your account if you do not have one yet.</p>
@@ -80,6 +88,7 @@ async function signinForm(env, binding, { next = "/", email = "", error = "", st
              value="${escape(email)}">
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
+    <p>Want a password as well? <a href="/signup">Make an account with a password</a></p>
     <p><small>The address is used to send the code, and kept only once the code
        is typed, as your account. This page sets two cookies, both only to sign
        you in, and nothing on it tracks you. <a href="${PRIVACY}">Privacy</a></small></p>`,
@@ -124,20 +133,28 @@ async function codePage(request, env) {
   return codeForm(env, token, row);
 }
 
+/* Where a code page sends someone who wants to start again. */
+const startOver = (row) => ({
+  stepup: `<a href="/">Back to your account</a>`,
+  verify: `<a href="/signup">Use a different email</a>`,
+}[row.purpose] || `<a href="/signin">Use a different email</a>`);
+
 async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
   const stepup = row.purpose === "stepup";
+  const verify = row.purpose === "verify";
   return page(stepup ? "Confirm it is you" : "Check your email", `<h1>Check your email.</h1>
     <p>A code is on its way to <strong>${escape(row.email)}</strong>. Type it here:
        it works for ${CODE_FOR / 60} minutes, in this browser only.</p>
+    ${verify ? "<p>Your password is set when the code is typed, and not before.</p>" : ""}
     ${form("/signin/code", await formToken(env, token, "code"), `
       <label for="code">Code</label>
       <input id="code" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters"
              spellcheck="false" maxlength="12" required autofocus>
       ${problem(error)}
-      <button type="submit">${stepup ? "Confirm" : "Sign in"}</button>`)}
+      <button type="submit">${stepup ? "Confirm" : verify ? "Confirm and sign in" : "Sign in"}</button>`)}
     <p>Nothing after a minute? Look in spam, then ask again.</p>
     ${form("/signin/again", await formToken(env, token, "again"), `<button type="submit">Send a new code</button>`, "row")}
-    <p>${stepup ? `<a href="/">Back to your account</a>` : `<a href="/signin">Use a different email</a>`}</p>`,
+    <p>${startOver(row)}</p>`,
   { status });
 }
 
@@ -150,7 +167,7 @@ async function spent(env, token, row, why, status = 400) {
   return page("Ask for a new code", `<h1>Ask for a new code.</h1>
     <p class="bad">${text}</p>
     ${form("/signin/again", await formToken(env, token, "again"), `<button type="submit">Send a new code</button>`, "row")}
-    <p>${row.purpose === "stepup" ? `<a href="/">Back to your account</a>` : `<a href="/signin">Use a different email</a>`}</p>`,
+    <p>${startOver(row)}</p>`,
   { status });
 }
 
@@ -170,12 +187,19 @@ async function codePost(request, env) {
 }
 
 /* A code was typed: the account (made now if this is its first sign-in), a
-   new session in place of whatever the browser had, and the event, in one
-   batch. */
+   new session in place of whatever the browser had, and the events, in one
+   batch. With 'verify', the password this browser chose becomes the
+   account's in the same batch: the row is the attempt this browser holds
+   and has just typed the code for, so the hash is the one it sent. */
 async function signedIn(request, env, row) {
   const db = env.LIST;
   let user, what;
-  if (row.purpose === "signin") {
+  let password = null;
+  if (row.purpose === "signin" || row.purpose === "verify") {
+    if (row.purpose === "verify") {
+      if (!isPasswordHash(row.password_hash)) return redirect("/signup", [clearCookie(SIGNIN_COOKIE)]);
+      password = row.password_hash;
+    }
     const found = await userForVerifiedEmail(env, { email: row.email });
     user = found.id;
     what = found.created ? "signup" : "signin";
@@ -185,7 +209,7 @@ async function signedIn(request, env, row) {
     user = known.id;
     what = "stepup";
   } else {
-    /* 'verify' and 'reset' belong to passwords, which have their own pages. */
+    /* 'reset' comes with password sign-in, on its own pages. */
     return redirect("/signin", [clearCookie(SIGNIN_COOKIE)]);
   }
   const was = await current(request, env);
@@ -193,7 +217,8 @@ async function signedIn(request, env, row) {
   const { value, statements } = await openSession(env, {
     user, org: org ? org.id : null, previous: readCookie(request, SESSION_COOKIE),
   });
-  await db.batch([...statements, event(db, { org: org ? org.id : null, user, what })]);
+  const credential = password ? await attachPassword(env, { user, org: org ? org.id : null, hash: password }) : [];
+  await db.batch([...statements, event(db, { org: org ? org.id : null, user, what }), ...credential]);
   return redirect(nextPath(row.next), [setCookie(SESSION_COOKIE, value, SESSION_MAX), clearCookie(SIGNIN_COOKIE)]);
 }
 
@@ -205,7 +230,78 @@ async function again(request, env, ctx) {
   if (!row) return redirect("/signin");
   return sendCode(request, env, ctx, {
     email: row.email, purpose: row.purpose, userId: row.user_id, next: row.next, previous: token,
+    passwordHash: row.password_hash,
   });
+}
+
+/* ---------- making an account with a password ---------- */
+
+async function signupPage(request, env, ctx, url) {
+  const next = nextPath(url.searchParams.get("next"));
+  if (await current(request, env)) return redirect(next);
+  return signupForm(env, readCookie(request, SIGNIN_COOKIE), { next });
+}
+
+/* Never filled in with the password, even after a mistake. */
+async function signupForm(env, browser, { next = "/", email = "", error = "", status = 200 } = {}) {
+  const { binding, cookies } = bound(browser);
+  return page("Make an account", `<h1>Make an account</h1>
+    <p>Choose a password, and we send you a code to type on the next page. The
+       password is set only once that code is typed, in this browser.</p>
+    ${form("/signup", await formToken(env, binding, "signup"), `
+      <input type="hidden" name="next" value="${escape(next)}">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" maxlength="200" required autofocus
+             value="${escape(email)}">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required>
+      <p><small>At least 12 characters, of any kind, spaces too: a few unrelated words
+         work well. Passwords known from data breaches are refused.</small></p>
+      ${problem(error)}
+      <button type="submit">Email me a code</button>`)}
+    <p>Rather not have a password? <a href="/signin">Sign in with an emailed code</a>; it makes
+       the account too.</p>
+    <p><small>The address is used to send the code, and kept only once the code is typed, as
+       your account. The password is kept only as a salted hash. To check it against known
+       breaches we send Have I Been Pwned the first 5 characters of its SHA-1 hash, never the
+       password. <a href="${PRIVACY}">Privacy</a></small></p>`,
+  { status, cookies });
+}
+
+/* The same answer for every address, as /signin gives: what can be wrong
+   here is the address's form, the password or the network, never whether
+   the address has an account. The hash goes into this browser's attempt and
+   nowhere else. */
+async function signupPost(request, env, ctx) {
+  const f = await fields(request);
+  const binding = readCookie(request, SIGNIN_COOKIE);
+  if (!await formOk(env, f, binding, "signup")) return refused();
+  const next = nextPath(f.get("next"));
+  const typed = String(f.get("email") ?? "").slice(0, 200);
+  const email = address(f.get("email"));
+  if (!email) {
+    return signupForm(env, binding, { next, email: typed, error: "That email address does not look right.", status: 400 });
+  }
+  if (!await hashAllowed(request, env)) {
+    return page("Too many tries", `<h1>Too many tries.</h1>
+      <p>More accounts were asked for from your network in the last hour than
+         we take. Try again in an hour, or <a href="/signin">sign in with an
+         emailed code</a>.</p>`, { status: 429 });
+  }
+  const password = f.get("password");
+  const wrong = await passwordProblem(env, password);
+  if (wrong) return signupForm(env, binding, { next, email, error: wrong, status: 400 });
+  let hash;
+  try {
+    hash = await hashPassword(env, password);
+  } catch (err) {
+    /* PBKDF2_ITERATIONS above what the runtime allows (password.js). */
+    console.log(`account password hash: ${err.name || "error"}`);
+    return page("Not available", `<h1>Passwords are not available just now.</h1>
+      <p>You can still <a href="/signin">sign in with an emailed code</a>, which
+         makes the account too.</p>`, { status: 503 });
+  }
+  return sendCode(request, env, ctx, { email, purpose: "verify", next, previous: binding, passwordHash: hash });
 }
 
 async function stepup(request, env, ctx) {
@@ -225,6 +321,8 @@ const EVENTS = {
   signup: "Account made, with an emailed code",
   signin: "Signed in with an emailed code",
   stepup: "Confirmed with an emailed code",
+  password_added: "Password added, confirmed with an emailed code",
+  password_changed: "Password changed, confirmed with an emailed code",
   signout: "Signed out",
   signout_all: "Signed out everywhere",
   org_renamed: "Organisation renamed",
@@ -351,6 +449,7 @@ const ROUTES = {
   "/signin": { GET: signinPage, POST: signinPost },
   "/signin/code": { GET: codePage, POST: codePost },
   "/signin/again": { POST: again },
+  "/signup": { GET: signupPage, POST: signupPost },
   "/stepup": { POST: stepup },
   "/signout": { POST: signout },
   "/signout-all": { POST: signoutAll },

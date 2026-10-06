@@ -193,8 +193,12 @@ const SCHEMA = [
      ACCOUNT_SECRET. email_mac: the same for the address, to find every
      open attempt for one address without searching by the address. purpose:
      signing in, a fresh code before something sensitive, or (with
-     passwords) proving an address and resetting a password. The sweep
-     deletes a row once its code is out of date. */
+     passwords) proving an address and resetting a password.
+     password_hash: with 'verify', the PBKDF2 hash of the password the
+     browser holding this attempt chose (password.js). This row is the only
+     place it is kept until that browser types the code; then it moves to
+     credentials, and it is cleared as soon as the attempt is used or
+     cancelled. The sweep deletes a row once its code is out of date. */
   `CREATE TABLE IF NOT EXISTS signins (
      id TEXT PRIMARY KEY,
      email TEXT NOT NULL,
@@ -202,6 +206,7 @@ const SCHEMA = [
      purpose TEXT NOT NULL CHECK (purpose IN ('signin', 'stepup', 'verify', 'reset')),
      user_id TEXT,
      code_mac TEXT NOT NULL,
+     password_hash TEXT,
      next TEXT NOT NULL DEFAULT '/',
      created_at INTEGER NOT NULL,
      expires_at INTEGER NOT NULL,

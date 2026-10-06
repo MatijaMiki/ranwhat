@@ -63,7 +63,7 @@ export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 const enc = new TextEncoder();
 
-function b64url(bytes) {
+export function b64url(bytes) {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -155,7 +155,7 @@ export async function formOk(env, form, binding, action) {
 
 /* Counts one more in a fixed window, and returns the count. One statement,
    so concurrent requests cannot both read the old count. */
-async function bump(env, kind, who, window) {
+export async function bump(env, kind, who, window) {
   const t = now();
   const key = `${kind}:${await mac(env, `throttle:${kind}:${who}`)}`;
   const row = await env.LIST.prepare(
@@ -184,8 +184,16 @@ async function peek(env, kind, who, window) {
    previous: the browser's last attempt, cancelled by this one. When the
    address is over its own limits, the browser keeps a live attempt it
    already has for that address, or gets one whose code was never sent:
-   either way the reply is the same as for any other address. */
-export async function requestCode(request, env, ctx, { email, purpose, userId = null, next = "/", previous = null }) {
+   either way the reply is the same as for any other address.
+
+   passwordHash: with purpose 'verify', the hash of the password this
+   browser chose (password.js). It is kept in this attempt's row and
+   nowhere else, so only this browser, typing this code, can attach it to
+   an account. A browser that keeps its live attempt keeps it with the
+   password it typed last. */
+export async function requestCode(request, env, ctx, {
+  email, purpose, userId = null, next = "/", previous = null, passwordHash = null,
+}) {
   const db = env.LIST;
   const t = now();
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
@@ -200,6 +208,10 @@ export async function requestCode(request, env, ctx, { email, purpose, userId = 
     .bind(await sha256(previous)).first() : null;
   if (limited && before && before.email_mac === emailMac && before.purpose === purpose &&
       !before.used_at && before.tries < CODE_TRIES && before.expires_at > t) {
+    if (passwordHash) {
+      await db.prepare("UPDATE signins SET password_hash = ? WHERE id = ? AND used_at IS NULL")
+        .bind(passwordHash, await sha256(previous)).run();
+    }
     return { token: previous };
   }
   if (!limited && !await spendAuthMail(env)) return { refused: "budget" };
@@ -208,12 +220,14 @@ export async function requestCode(request, env, ctx, { email, purpose, userId = 
   const id = await sha256(token);
   const code = newCode();
   const statements = [
-    db.prepare(`INSERT INTO signins (id, email, email_mac, purpose, user_id, code_mac, next, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(id, email, emailMac, purpose, userId, await codeMac(env, id, code), nextPath(next), t, t + CODE_FOR),
+    db.prepare(`INSERT INTO signins (id, email, email_mac, purpose, user_id, code_mac, password_hash, next,
+                                     created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, email, emailMac, purpose, userId, await codeMac(env, id, code), passwordHash, nextPath(next),
+        t, t + CODE_FOR),
   ];
   if (previous) {
-    statements.push(db.prepare("UPDATE signins SET used_at = ? WHERE id = ? AND used_at IS NULL")
+    statements.push(db.prepare("UPDATE signins SET used_at = ?, password_hash = NULL WHERE id = ? AND used_at IS NULL")
       .bind(t, await sha256(previous)));
   }
   await db.batch(statements);
@@ -229,10 +243,14 @@ const FROM = "ranwhat <account@ranwhat.com>";
 
 /* No link: the code is typed, never clicked. The text names the one place
    it goes, because a code someone reads out to a caller signs the caller
-   in. */
+   in. A code that sets a password says so, so that someone who never chose
+   one knows what ignoring it prevents. */
 async function mailCode(env, email, code, purpose) {
   const shown = `${code.slice(0, 4)}-${code.slice(4)}`;
-  const what = purpose === "stepup" ? "confirmation code" : "sign-in code";
+  const what = purpose === "signin" ? "sign-in code" : "confirmation code";
+  const sets = purpose === "verify"
+    ? "Typing it confirms this address and sets the password chosen on that page."
+    : "";
   await resend(env, "POST", "/emails", {
     from: FROM,
     to: [email],
@@ -246,6 +264,7 @@ async function mailCode(env, email, code, purpose) {
       `Type it on the page at ${ACCOUNT_HOST} that asked for it. It works`,
       "once, for 10 minutes, in that browser only.",
       "",
+      ...(sets ? [sets, ""] : []),
       `Never type it anywhere else. Nobody from ranwhat will ever ask you`,
       "for it, by email, chat or phone.",
       "",
@@ -258,7 +277,7 @@ async function mailCode(env, email, code, purpose) {
       <p>Your ranwhat ${what}:</p>
       <p style="margin:22px 0;font-family:Menlo,Consolas,monospace;font-size:26px;letter-spacing:3px">${shown}</p>
       <p>Type it on the page at ${ACCOUNT_HOST} that asked for it. It works once, for 10 minutes,
-         in that browser only.</p>
+         in that browser only.</p>${sets ? `\n      <p>${sets}</p>` : ""}
       <p>Never type it anywhere else. Nobody from ranwhat will ever ask you for it, by email,
          chat or phone.</p>
       <p style="color:#5a6672">If you did not ask for a code, ignore this email: nothing happens
@@ -278,6 +297,8 @@ export async function attempt(env, token) {
    ten wrong ones for an address in an hour burn all of its attempts. The
    attempt is then used in one UPDATE that has to change exactly one row,
    so two requests with the right code at once open one session, not two.
+   The same UPDATE clears a password hash the attempt held: the row that
+   comes back still carries it, for the caller to attach.
 
    { ok: true, row } or { ok: false, why: "expired" | "burned" | "wrong", left } */
 export async function checkCode(env, token, typed) {
@@ -307,7 +328,7 @@ export async function checkCode(env, token, typed) {
     const left = CODE_TRIES - row.tries - 1;
     return left > 0 ? { ok: false, why: "wrong", left } : { ok: false, why: "burned" };
   }
-  const used = await db.prepare("UPDATE signins SET used_at = ? WHERE id = ? AND used_at IS NULL")
+  const used = await db.prepare("UPDATE signins SET used_at = ?, password_hash = NULL WHERE id = ? AND used_at IS NULL")
     .bind(t, row.id).run();
   if (used.meta.changes !== 1) return { ok: false, why: "expired" };
   return { ok: true, row };
