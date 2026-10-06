@@ -1,6 +1,25 @@
 {
   "badges": [
     {
+      "name": "Noonlaunch",
+      "added": "2026-10-07",
+      "snippet": "<a href=\"https://noonlaunch.com/product/ranwhat\" rel=\"dofollow\">\n  <img src=\"https://noonlaunch.com/badges/ranwhat.svg\"\n       alt=\"Featured on Noonlaunch\" width=\"220\" height=\"60\" />\n</a>",
+      "sha256": "06f483c786d36f6870fb212f55641739a908ed26602bc03e74dfd688dc9c0e99",
+      "self_host": {
+        "src": "https://noonlaunch.com/badges/ranwhat.svg",
+        "path": "site/badges/noonlaunch.svg",
+        "sha256": "6a8a46721db05feac63e79c64da7067f2719a1b0b89db899356a28e1aa13320c"
+      },
+      "checked": "2026-10-07"
+    },
+    {
+      "name": "ScrollLaunch",
+      "added": "2026-10-07",
+      "snippet": "<a href=\"https://www.scrolllaunch.com/products/ranwhat?ref=badge\" target=\"_blank\" rel=\"noopener\">\n  <img src=\"https://www.scrolllaunch.com/api/badge/ranwhat\" alt=\"Featured on ScrollLaunch\" width=\"220\" height=\"48\" loading=\"lazy\" />\n</a>",
+      "sha256": "b9a3733256c0d230461d39c1fdffc5fdfc956edcadc94b052ab865b5d2161b56",
+      "checked": "2026-10-07"
+    },
+    {
       "name": "Twelve Tools",
       "added": "2026-10-07",
       "snippet": "<a href=\"https://twelve.tools\" target=\"_blank\"><img src=\"https://twelve.tools/badge0-white.svg\" alt=\"Featured on Twelve Tools\" width=\"148\" height=\"40\"></a>",

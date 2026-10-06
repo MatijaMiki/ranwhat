@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://static.ads-twitter.com https://*.googletagmanager.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://maidensail.com https://marketingdb.live https://twelve.tools https://www.cybervendorguide.com https://t.co https://analytics.twitter.com https://ads-twitter.com https://*.google-analytics.com https://*.googletagmanager.com; manifest-src 'self'; connect-src 'self' https://cloudflareinsights.com https://analytics.twitter.com https://t.co https://ads-twitter.com https://ads-api.twitter.com https://ads-api.x.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://static.ads-twitter.com https://*.googletagmanager.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://maidensail.com https://marketingdb.live https://twelve.tools https://www.cybervendorguide.com https://www.scrolllaunch.com https://t.co https://analytics.twitter.com https://ads-twitter.com https://*.google-analytics.com https://*.googletagmanager.com; manifest-src 'self'; connect-src 'self' https://cloudflareinsights.com https://analytics.twitter.com https://t.co https://ads-twitter.com https://ads-api.twitter.com https://ads-api.x.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'
   # Strict-Transport-Security deliberately omitted. Enabling it is a one-way
   # door: browsers cache the policy, and `preload` ships inside Chrome and
   # Firefox and takes months to undo. Turn it on as a separate decision,
@@ -63,6 +63,12 @@
 
 /fonts/*
   Cache-Control: public, max-age=31536000, immutable
+
+/badges/*
+  # Directory badges served from here (scripts/badges.py add --self-host).
+  # An <img> never runs an SVG's script, but the file is also a page anyone
+  # can open: this policy keeps it inert there, whatever it holds.
+  Content-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox
 
 /og-*.png
   # The share card is meant to be shown on other sites (X, Slack, LinkedIn

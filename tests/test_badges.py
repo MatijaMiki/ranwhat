@@ -90,8 +90,14 @@ class DirectoryBadges(unittest.TestCase):
                 # Once on the whole page, and that once inside the block: no
                 # stale copy elsewhere, as when they sat beside the Follow
                 # heading, and nothing added to the tags.
-                self.assertEqual(index.count(b["snippet"]), 1)
-                self.assertIn(">%s</li>" % b["snippet"], block)
+                # A self-hosted badge differs from its snippet only in the
+                # image src, which served() swaps for the copy kept here.
+                shown = self.tool.served(b)
+                self.assertEqual(index.count(shown), 1)
+                self.assertIn(">%s</li>" % shown, block)
+
+    def test_a_self_hosted_image_is_the_file_that_was_checked(self):
+        self.assertEqual(self.tool.local_problems(self.files, self.badges), [])
 
     def test_every_badge_image_host_is_allowed_by_img_src(self):
         img = self.tool.img_src(self.tool.csp_line(read(self.files.headers)))
@@ -159,6 +165,8 @@ class TheTool(unittest.TestCase):
             dest.parent.mkdir(parents=True, exist_ok=True)
             # Through read() so a CRLF checkout starts the copy as LF.
             dest.write_bytes(read(getattr(real, name)).encode("utf-8"))
+        if (real.site / "badges").is_dir():
+            shutil.copytree(str(real.site / "badges"), str(self.files.site / "badges"))
         self.before = self.snapshot()
 
     def snapshot(self):
@@ -363,6 +371,93 @@ class TheValidator(unittest.TestCase):
         self.assertEqual(out, "  Content-Security-Policy: default-src 'none'; img-src "
                               "'self' data: https://new.example https://t.co; font-src 'self'")
         self.assertEqual(self.tool.with_hosts(out, ["https://new.example"]), out)
+
+
+class SelfHosted(unittest.TestCase):
+    """--self-host: the directory's image saved here, its snippet kept as given."""
+
+    SNIPPET = ('<a href="https://noon.example/product/ranwhat" rel="dofollow">\n'
+               '  <img src="https://noon.example/badges/ranwhat.svg"\n'
+               '       alt="Featured on Example" width="220" height="60" />\n</a>')
+    CLEAN = (b'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+             b'<rect width="10" height="10" fill="#fff"/>'
+             b'<image xlink:href="data:image/png;base64,AAAA"/></svg>')
+
+    def setUp(self):
+        self.tool = _tool()
+        self.tool._link_status = lambda snippet: ("https://noon.example/", 200)
+        # serve() replaces urlopen on the shared urllib module; put the real
+        # one back afterwards, or every later test in the run gets the stub.
+        real_urlopen = self.tool.urllib.request.urlopen
+        self.addCleanup(setattr, self.tool.urllib.request, "urlopen", real_urlopen)
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(self.tmp), True)
+        real = self.tool.Files(ROOT)
+        self.files = self.tool.Files(self.tmp)
+        for name in ("data", "index", "privacy", "headers"):
+            dest = getattr(self.files, name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(read(getattr(real, name)).encode("utf-8"))
+        if (real.site / "badges").is_dir():
+            shutil.copytree(str(real.site / "badges"), str(self.files.site / "badges"))
+
+    def serve(self, body, kind="image/svg+xml"):
+        class Response(io.BytesIO):
+            headers = {"Content-Type": kind, "Set-Cookie": "session=1"}
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        self.tool.urllib.request.urlopen = lambda request, timeout=None: Response(body)
+
+    def add(self):
+        path = self.tmp / "snippet.html"
+        path.write_text(self.SNIPPET, encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.tool.main(["add", "Example", "--file", str(path), "--self-host"], self.files)
+        return out.getvalue()
+
+    def test_the_page_serves_the_copy_and_the_snippet_stays_as_given(self):
+        self.serve(self.CLEAN)
+        self.add()
+        badge = [b for b in self.tool.load(self.files) if b["name"] == "Example"][0]
+        self.assertEqual(badge["snippet"], self.SNIPPET)
+        self.assertEqual(badge["sha256"], self.tool.digest(self.SNIPPET))
+        self.assertEqual((self.files.site / "badges" / "example.svg").read_bytes(), self.CLEAN)
+        index = read(self.files.index)
+        self.assertIn('src="/badges/example.svg"', index)
+        self.assertNotIn("https://noon.example/badges/ranwhat.svg", index)
+        self.assertIn('href="https://noon.example/product/ranwhat" rel="dofollow"', index)
+        # Nothing for img-src to allow, and the privacy page says where it is served.
+        self.assertEqual(self.tool.hosts(badge), [])
+        self.assertNotIn("noon.example", self.tool.csp_line(read(self.files.headers)))
+        self.assertIn("Example (its image served from ranwhat.com)", read(self.files.privacy))
+
+    def test_an_svg_that_could_run_or_call_out_is_refused(self):
+        for bad in (b'<svg><script>alert(1)</script></svg>',
+                    b'<svg onload="x()"></svg>',
+                    b'<svg><foreignObject></foreignObject></svg>',
+                    b'<svg><image href="https://tracker.example/p.png"/></svg>',
+                    b'<svg><rect style="fill:url(https://x.example/a)"/></svg>'):
+            with self.subTest(svg=bad):
+                self.serve(bad)
+                with self.assertRaises(SystemExit):
+                    self.add()
+                self.assertFalse((self.files.site / "badges" / "example.svg").exists())
+
+    def test_an_edited_copy_stops_the_page_being_written(self):
+        self.serve(self.CLEAN)
+        self.add()
+        (self.files.site / "badges" / "example.svg").write_bytes(self.CLEAN + b"<!-- -->")
+        self.assertTrue(self.tool.local_problems(self.files, self.tool.load(self.files)))
+        with self.assertRaises(SystemExit):
+            self.tool.sync(self.files, self.tool.load(self.files))
+
+    def test_remove_deletes_the_copy(self):
+        self.serve(self.CLEAN)
+        self.add()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.tool.main(["remove", "Example"], self.files)
+        self.assertFalse((self.files.site / "badges" / "example.svg").exists())
 
 
 if __name__ == "__main__":
