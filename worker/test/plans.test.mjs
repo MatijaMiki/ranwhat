@@ -32,7 +32,8 @@ const hash = (t) => createHash("sha256").update(t).digest("hex");
 const token = (prefix = "rw_") => prefix + randomBytes(32).toString("base64url");
 
 const env = (extra = {}) => ({
-  LIST: d1(), RESEND_API_KEY: "re_test_key", ACCOUNT_SECRET: SECRET, ACCOUNTS_ON: "1", ...extra,
+  LIST: d1(), RESEND_API_KEY: "re_test_key", ACCOUNT_SECRET: SECRET, TURNSTILE_SECRET: "turnstile-" + "test",
+  ACCOUNTS_ON: "1", ...extra,
 });
 
 async function stand(extra) {
@@ -270,6 +271,24 @@ test("subscription and hand-made tokens answer as before, accounts on or off, by
     assert.deepEqual([h.kind, h.plan, h.org], ["hand", "plus", null]);
     const s = await identify(asking(live.tok), e);
     assert.deepEqual([s.kind, s.plan, s.org], ["subscription", "plus", null]);
+  }
+});
+
+test("switching accounts off never moves a machine's plan: a Free organisation's stays refused", async () => {
+  const e = await stand();
+  const free = org(e, "Free"), paid = org(e, "Paid");
+  subscription(e, "active", paid);
+  const m = machine(e, free), p = machine(e, paid, "ci");
+  for (const switched of ["1", undefined, "", "0"]) {
+    e.ACCOUNTS_ON = switched;
+    const who = await identify(asking(m.tok), e);
+    assert.deepEqual([who.kind, who.plan, who.org], ["device", "free", free], `ACCOUNTS_ON=${switched}`);
+    const r = await feed(e, m.tok);
+    assert.equal(r.status, 403, `ACCOUNTS_ON=${switched}`);
+    assert.deepEqual(await r.json(), { error: "plus_required", upgrade: "https://account.ranwhat.com/" });
+    const ok = await feed(e, p.tok);
+    assert.equal(ok.status, 200);
+    assert.equal(await ok.text(), BODY);
   }
 });
 

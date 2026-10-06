@@ -14,6 +14,7 @@
  *   POST /signin/code   Checks it, makes the account on first use, sets
  *                       the password a sign-up or a reset chose, and opens
  *                       a new session.
+ *   GET  /signin/again  The button for a new code, on a page of its own.
  *   POST /signin/again  A new code for the same address (and password).
  *   GET  /signin/password  The email and password form.
  *   POST /signin/password  Checks them under password.js's limits; one
@@ -34,14 +35,20 @@
  *   POST /org           Renames the organisation (owner or admin).
  *
  * Nothing changes on a GET. Every POST passes the origin check here and its
- * form token in its handler (session.js says what both are).
+ * form token in its handler (session.js says what both are). Every form
+ * that mails a code (/signin, /signup, /reset, /signin/again) also passes
+ * Turnstile, checked on the server for this host and that form before any
+ * limit is counted (challenge.js): the day's account mail is shared, and
+ * this is what makes each email cost whoever asks for it something. Those
+ * pages are the only ones Turnstile's script loads on (ui.js).
  */
 import { escape } from "./list.js";
 import { plan } from "./auth.js";
 import { PLAN_NAMES, atLeast, featuresOf } from "./features.js";
 import {
-  SESSION_MAX, canManage, event, history, now, orgFor, orgName, ready, schema, userForVerifiedEmail,
+  ACCOUNT_HOST, SESSION_MAX, canManage, event, history, now, orgFor, orgName, ready, schema, userForVerifiedEmail,
 } from "./accounts.js";
+import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, checkCode,
   clearCookie, current, formOk, formToken, fresh, nextPath, openSession, randomToken, readCookie, requestCode,
@@ -51,7 +58,7 @@ import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
   otherWaysIn, passwordOf, passwordProblem, rehashed, unlock,
 } from "./password.js";
-import { form, notFound, page, redirect, refused, wrongMethod } from "./ui.js";
+import { form, notFound, page, redirect, refused, widget, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
 const PRICING = "https://ranwhat.com/pricing";
@@ -86,6 +93,22 @@ const tooManyHashes = () => page("Too many tries", `<h1>Too many tries.</h1>
 const NEW_PASSWORD = `<p><small>At least ${MIN_LENGTH} characters, of any kind, spaces too: a few unrelated
    words work well. Passwords known from data breaches are refused.</small></p>`;
 
+/* A Turnstile token solved anywhere but this host does not count here. */
+const CHALLENGE_HOSTS = new Set([ACCOUNT_HOST]);
+
+/* Turnstile, for a form that mails a code: null when it passed for this
+   host and `action`, otherwise [status, the sentence the form shows]. It
+   says nothing about the address, which is not looked at. */
+async function unchallenged(request, env, f, action) {
+  const outcome = await challenge(request, env, f.get("cf-turnstile-response"),
+    { hostnames: CHALLENGE_HOSTS, action });
+  if (outcome === "ok") return null;
+  return {
+    missing: [400, "Complete the check above the button, then send the form again."],
+    unavailable: [502, "The check could not be verified just now. Try again in a minute."],
+  }[outcome] || [403, "That check did not pass. Try it again."];
+}
+
 /* ---------- signing in ---------- */
 
 async function signinPage(request, env, ctx, url) {
@@ -113,14 +136,16 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
       <label for="email">Email</label>
       <input id="email" name="email" type="email" autocomplete="email" maxlength="200" required autofocus
              value="${escape(email)}">
+      ${widget("signin")}
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
     <p>Have a password? <a href="/signin/password">Sign in with it</a>.
        Want one? <a href="/signup">Make an account with a password</a></p>
     <p><small>The address is used to send the code, and kept only once the code
        is typed, as your account. This page sets two cookies, both only to sign
-       you in, and nothing on it tracks you. <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status, cookies });
+       you in, and nothing on it tracks you. Cloudflare Turnstile checks that a
+       person is asking. <a href="${PRIVACY}">Privacy</a></small></p>`,
+  { status, cookies, challenge: true });
 }
 
 async function signinPost(request, env, ctx) {
@@ -133,16 +158,24 @@ async function signinPost(request, env, ctx) {
     return signinForm(env, binding, { next, email: String(f.get("email") ?? "").slice(0, 200),
       error: "That email address does not look right.", status: 400 });
   }
+  const no = await unchallenged(request, env, f, "signin");
+  if (no) return signinForm(env, binding, { next, email, error: no[1], status: no[0] });
   return sendCode(request, env, ctx, { email, purpose: "signin", next, previous: binding });
 }
 
-/* Either refusal is about the network or the day, never the address. */
+/* Each refusal is about the network or the day, never the address. */
 async function sendCode(request, env, ctx, wanted) {
   const result = await requestCode(request, env, ctx, wanted);
   if (result.refused === "network") {
     return page("Too many codes", `<h1>Too many codes asked for.</h1>
       <p>More sign-in codes were asked for from your network in the last hour
          than we send. Try again in an hour.</p>`, { status: 429 });
+  }
+  if (result.refused === "network-day") {
+    return page("Too many codes", `<h1>Too many codes asked for.</h1>
+      <p>More sign-in codes were sent for your network today than we send to
+         one network in a day. Try again tomorrow, from another network, or
+         <a href="/signin/password">with your password</a> if you have one.</p>`, { status: 429 });
   }
   if (result.refused === "budget") {
     return page("No more codes today", `<h1>No more codes today.</h1>
@@ -161,6 +194,11 @@ async function codePage(request, env) {
   return codeForm(env, token, row);
 }
 
+/* Where a code page sends someone for a new code: a step-up asks again
+   from the account page, as it asked the first time, so that Turnstile's
+   script never loads for someone signed in. */
+const anew = (row, text) => `<a href="${row.purpose === "stepup" ? "/" : "/signin/again"}">${text}</a>`;
+
 /* Where a code page sends someone who wants to start again. */
 const startOver = (row) => ({
   stepup: `<a href="/">Back to your account</a>`,
@@ -177,7 +215,9 @@ async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
   return page(stepup ? "Confirm it is you" : reset ? "Reset your password" : "Check your email", `<h1>Check your email.</h1>
     <p>A code is on its way to <strong>${escape(row.email)}</strong>. Type it here:
        it works for ${CODE_FOR / 60} minutes, in this browser only.</p>
-    ${verify ? "<p>Your password is set when the code is typed, and not before.</p>" : ""}
+    ${verify ? `<p>Your password is set when the code is typed, and not before. If this address
+       already has an account, it replaces that account's password and signs it out everywhere
+       else.</p>` : ""}
     ${reset ? "<p>Type it with the password you want now. Setting it signs your account out everywhere else.</p>" : ""}
     ${form("/signin/code", await formToken(env, token, "code"), `
       <label for="code">Code</label>
@@ -188,8 +228,7 @@ async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
       ${NEW_PASSWORD}` : ""}
       ${problem(error)}
       <button type="submit">${stepup ? "Confirm" : verify ? "Confirm and sign in" : reset ? "Set password and sign in" : "Sign in"}</button>`)}
-    <p>Nothing after a minute? Look in spam, then ask again.</p>
-    ${form("/signin/again", await formToken(env, token, "again"), `<button type="submit">Send a new code</button>`, "row")}
+    <p>Nothing after a minute? Look in spam, then ${anew(row, "ask for a new code")}.</p>
     <p>${startOver(row)}</p>`,
   { status });
 }
@@ -202,7 +241,7 @@ async function spent(env, token, row, why, status = 400) {
     : "That code has expired or was already used. Ask for a new one.";
   return page("Ask for a new code", `<h1>Ask for a new code.</h1>
     <p class="bad">${text}</p>
-    ${form("/signin/again", await formToken(env, token, "again"), `<button type="submit">Send a new code</button>`, "row")}
+    <p>${anew(row, "Send a new code")}</p>
     <p>${startOver(row)}</p>`,
   { status });
 }
@@ -213,7 +252,7 @@ async function codePost(request, env) {
   if (!await formOk(env, f, token, "code")) return refused();
   const held = await attempt(env, token);
   if (held && held.purpose === "reset") return resetCode(request, env, token, held, f);
-  const result = await checkCode(env, token, f.get("code"));
+  const result = await checkCode(request, env, token, f.get("code"));
   if (result.ok) return signedIn(request, env, result.row);
   return notTaken(env, token, result);
 }
@@ -249,11 +288,18 @@ async function enter(request, env, { user, next = "/", coded = true, before = []
    batch. With 'verify', the password this browser chose becomes the
    account's in the same batch: the row is the attempt this browser holds
    and has just typed the code for, so the hash is the one it sent. A code
-   also gives the address back its password tries (password.js). */
+   also gives the address back its password tries (password.js).
+
+   'verify' for an account that was already there sets its password as a
+   reset does, because that is what it is: the code proved the address, and
+   whoever else was signed in, perhaps with the password being replaced, is
+   signed out, every session of the account ending in the same batch. The
+   event then says so (password_reset, or password_added when it had none). */
 async function signedIn(request, env, row) {
   const db = env.LIST;
   let user, what;
   let password = null;
+  let reset = false;
   if (row.purpose === "signin" || row.purpose === "verify") {
     if (row.purpose === "verify") {
       if (!isPasswordHash(row.password_hash)) return redirect("/signup", [clearCookie(SIGNIN_COOKIE)]);
@@ -262,6 +308,7 @@ async function signedIn(request, env, row) {
     const found = await userForVerifiedEmail(env, { email: row.email });
     user = found.id;
     what = found.created ? "signup" : "signin";
+    reset = password !== null && !found.created;
   } else if (row.purpose === "stepup") {
     const known = await db.prepare("SELECT id FROM users WHERE id = ?").bind(row.user_id).first();
     if (!known) return redirect("/signin", [clearCookie(SIGNIN_COOKIE)]);
@@ -271,11 +318,15 @@ async function signedIn(request, env, row) {
     /* 'reset' never gets here: codePost sends it to resetCode. */
     return redirect("/signin", [clearCookie(SIGNIN_COOKIE)]);
   }
-  return enter(request, env, { user, next: row.next, after: async (org) => [
-    event(db, { org, user, what }),
-    ...(password ? await attachPassword(env, { user, org, hash: password }) : []),
-    await unlock(env, row.email),
-  ] });
+  return enter(request, env, {
+    user, next: row.next,
+    before: reset ? [db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user)] : [],
+    after: async (org) => [
+      event(db, { org, user, what }),
+      ...(password ? await attachPassword(env, { user, org, hash: password, reset }) : []),
+      await unlock(env, row.email),
+    ],
+  });
 }
 
 /* A reset code, typed with the new password. The password is judged and
@@ -298,7 +349,7 @@ async function resetCode(request, env, token, row, f) {
     console.log(`account password hash: ${err.name || "error"}`);
     return unavailable();
   }
-  const result = await checkCode(env, token, f.get("code"));
+  const result = await checkCode(request, env, token, f.get("code"));
   if (!result.ok) return notTaken(env, token, result);
   const db = env.LIST;
   const found = await userForVerifiedEmail(env, { email: row.email });
@@ -314,12 +365,37 @@ async function resetCode(request, env, token, row, f) {
   });
 }
 
+/* A new code for the browser's attempt, on a page of its own, so that
+   Turnstile's script never runs on the page a code is typed into. A
+   step-up asks again from the account page instead (anew()). */
+async function againPage(request, env) {
+  const token = readCookie(request, SIGNIN_COOKIE);
+  const row = await attempt(env, token);
+  if (!row) return redirect("/signin");
+  if (row.purpose === "stepup") return redirect("/");
+  return againForm(env, token, row);
+}
+
+async function againForm(env, token, row, { error = "", status = 200 } = {}) {
+  return page("Send a new code", `<h1>Send a new code</h1>
+    <p>To <strong>${escape(row.email)}</strong>, in place of the last one, which then stops
+       working.</p>
+    ${form("/signin/again", await formToken(env, token, "again"), `
+      ${widget("again")}
+      ${problem(error)}
+      <button type="submit">Send a new code</button>`)}
+    <p>${startOver(row)}</p>`,
+  { status, challenge: true });
+}
+
 async function again(request, env, ctx) {
   const f = await fields(request);
   const token = readCookie(request, SIGNIN_COOKIE);
   if (!await formOk(env, f, token, "again")) return refused();
   const row = await attempt(env, token);
   if (!row) return redirect("/signin");
+  const no = await unchallenged(request, env, f, "again");
+  if (no) return againForm(env, token, row, { error: no[1], status: no[0] });
   return sendCode(request, env, ctx, {
     email: row.email, purpose: row.purpose, userId: row.user_id, next: row.next, previous: token,
     passwordHash: row.password_hash,
@@ -349,6 +425,7 @@ async function signupForm(env, browser, { next = "/", email = "", error = "", st
       <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required>
       <p><small>At least 12 characters, of any kind, spaces too: a few unrelated words
          work well. Passwords known from data breaches are refused.</small></p>
+      ${widget("signup")}
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
     <p>Rather not have a password? <a href="/signin">Sign in with an emailed code</a>; it makes
@@ -356,8 +433,9 @@ async function signupForm(env, browser, { next = "/", email = "", error = "", st
     <p><small>The address is used to send the code, and kept only once the code is typed, as
        your account. The password is kept only as a salted hash. To check it against known
        breaches we send Have I Been Pwned the first 5 characters of its SHA-1 hash, never the
-       password. <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status, cookies });
+       password. Cloudflare Turnstile checks that a person is asking.
+       <a href="${PRIVACY}">Privacy</a></small></p>`,
+  { status, cookies, challenge: true });
 }
 
 /* The same answer for every address, as /signin gives: what can be wrong
@@ -374,6 +452,8 @@ async function signupPost(request, env, ctx) {
   if (!email) {
     return signupForm(env, binding, { next, email: typed, error: "That email address does not look right.", status: 400 });
   }
+  const no = await unchallenged(request, env, f, "signup");
+  if (no) return signupForm(env, binding, { next, email, error: no[1], status: no[0] });
   if (!await hashAllowed(request, env)) {
     return page("Too many tries", `<h1>Too many tries.</h1>
       <p>More accounts were asked for from your network in the last hour than
@@ -454,19 +534,20 @@ async function passwordPost(request, env) {
     error: "That email and password do not match. Check both, or sign in with an emailed code." });
 }
 
-/* Password sign-in is paused for this address, or for everyone: the code
-   still works, one press away. */
+/* Password sign-in is paused for this address, or for this network: the
+   code still works, one press (and Turnstile) away. */
 async function locked(env, binding, email, next) {
   return page("Use an emailed code", `<h1>Use an emailed code.</h1>
-    <p class="bad">There have been too many tries with a password, so password sign-in
-       is paused for up to ${LOCKOUT / 60} minutes. An emailed code still works, and
-       typing one gives this address its tries back.</p>
+    <p class="bad">There have been too many tries with a password, for this address or
+       from your network, so password sign-in is paused for up to ${LOCKOUT / 60} minutes.
+       An emailed code still works, and typing one gives this address its tries back.</p>
     ${form("/signin", await formToken(env, binding, "signin"), `
       <input type="hidden" name="next" value="${escape(next)}">
       <input type="hidden" name="email" value="${escape(email)}">
+      ${widget("signin")}
       <button type="submit">Email a code to ${escape(email)}</button>`)}
     <p><a href="/signin">Use a different email</a></p>`,
-  { status: 429 });
+  { status: 429, challenge: true });
 }
 
 /* ---------- a forgotten password ---------- */
@@ -486,10 +567,11 @@ async function resetForm(env, browser, { email = "", error = "", status = 200 } 
       <label for="email">Email</label>
       <input id="email" name="email" type="email" autocomplete="email" maxlength="200" required autofocus
              value="${escape(email)}">
+      ${widget("reset")}
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
     <p><a href="/signin/password">Back to signing in</a></p>`,
-  { status, cookies });
+  { status, cookies, challenge: true });
 }
 
 /* The same answer for every address, with an account or a password or
@@ -503,6 +585,8 @@ async function resetPost(request, env, ctx) {
     return resetForm(env, binding, { email: String(f.get("email") ?? "").slice(0, 200),
       error: "That email address does not look right.", status: 400 });
   }
+  const no = await unchallenged(request, env, f, "reset");
+  if (no) return resetForm(env, binding, { email, error: no[1], status: no[0] });
   return sendCode(request, env, ctx, { email, purpose: "reset", next: "/", previous: binding });
 }
 
@@ -780,7 +864,7 @@ const ROUTES = {
   "/": { GET: home },
   "/signin": { GET: signinPage, POST: signinPost },
   "/signin/code": { GET: codePage, POST: codePost },
-  "/signin/again": { POST: again },
+  "/signin/again": { GET: againPage, POST: again },
   "/signin/password": { GET: passwordPage, POST: passwordPost },
   "/signup": { GET: signupPage, POST: signupPost },
   "/reset": { GET: resetPage, POST: resetPost },

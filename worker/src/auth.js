@@ -9,9 +9,11 @@
  * themselves: a copy of the database hands out no feed. A token is one of
  * three kinds, tried in this order:
  *
- *   device, ci    Once accounts are on: a machine linked to an
- *                 organisation (accounts.js's machines), on that
- *                 organisation's plan.
+ *   device, ci    A machine linked to an organisation (accounts.js's
+ *                 machines), on that organisation's plan. Read whenever
+ *                 the machines table exists, ACCOUNTS_ON or not, so that
+ *                 switching accounts off never puts a Free organisation's
+ *                 machines on Plus.
  *   subscription  Made by stripe.js and tied to its Stripe subscription
  *                 (token_subscriptions); works while that subscription does.
  *   hand          Made with scripts/feed_token.py, with no subscription;
@@ -68,9 +70,12 @@ export async function sha256(text) {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/* The token's row, with whatever it is tied to. While accounts are dark
-   their tables may not exist, and no machine can have been linked, so the
-   query is the one from before them. */
+/* The token's row, with whatever it is tied to. LEGACY is the query from
+   before accounts, for a database that has never had their tables, where
+   no machine can have been linked. Once it has them, LINKED is the query,
+   whether accounts are switched on or not: a machine's token is a plain
+   tokens row with no subscription, so under LEGACY it would pass for one
+   made by hand, on Plus. */
 const LEGACY = `SELECT t.expires_at, t.revoked_at, l.subscription, s.status FROM tokens t
        LEFT JOIN token_subscriptions l ON l.hash = t.hash
        LEFT JOIN subscriptions s ON s.id = l.subscription
@@ -86,6 +91,19 @@ const LINKED = `SELECT t.expires_at, t.revoked_at, l.subscription, s.status,
      WHERE t.hash = ?`;
 
 const unix = () => Math.floor(Date.now() / 1000);
+
+/* Whether a database has the accounts tables (machines among them). Asked
+   of sqlite_master, which is the schema, not one of their tables, so a
+   database that has never had them is not read any further. Remembered
+   once true: tables are never dropped. */
+const linkedDbs = new WeakSet();
+async function hasMachines(db) {
+  if (linkedDbs.has(db)) return true;
+  const row = await db.prepare("SELECT 1 AS yes FROM sqlite_master WHERE type = 'table' AND name = 'machines'")
+    .first();
+  if (row) linkedDbs.add(db);
+  return Boolean(row);
+}
 
 /* An organisation's plan, worked out now and never stored:
      'team'  while a team grant is in force;
@@ -134,8 +152,8 @@ export async function identify(request, env) {
   if (!env.LIST) return { ok: false, status: 503, error: "The feed is not available just now." };
   const db = env.LIST;
   await schema(db);
-  const linked = accountsOn(env);
-  if (linked) await accountsSchema(db);
+  if (accountsOn(env)) await accountsSchema(db);
+  const linked = await hasMachines(db);
   const hash = await sha256(m[1]);
   const row = await db.prepare(linked ? LINKED : LEGACY).bind(hash).first();
   const t = unix();

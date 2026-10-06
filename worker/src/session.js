@@ -13,7 +13,20 @@
  * Asking for a code gives the same answer for every address, known or
  * not, limited or not: the code is mailed after the reply has gone, no
  * account is looked up until a code is typed, and an address over its
- * limit gets an attempt whose code was never sent.
+ * limit gets an attempt whose code was never sent, and which no code
+ * completes.
+ *
+ * The limits. What one person does must not use up what another needs, so
+ * a stranger can neither lock someone out of their account nor shut
+ * sign-in for everyone. Each is counted for a network (network() below:
+ * an IPv6 /64 counts as one, as an IPv4 address does) or for an address
+ * as asked for from one network, and the only limit on codes for an
+ * address alone is the mail it can be sent in an hour. Wrong codes count
+ * against the network that typed them, never against another browser's
+ * attempt. The day's account mail (accounts.js) keeps a reserve for
+ * signed-in step-ups, and each network (for this, an IPv4 /24) gets a
+ * share of the rest. The forms that mail a code also pass Turnstile first
+ * (dashboard.js, challenge.js).
  *
  * The session. __Host-rw_session holds 32 random bytes; D1 keeps their
  * SHA-256 as the session's id. Every sign-in opens a new one and ends the
@@ -29,7 +42,7 @@
 import { sha256 } from "./auth.js";
 import { REPLY_TO, mail, resend, same } from "./list.js";
 import {
-  ACCOUNT_HOST, ACCOUNT_ORIGIN, HOUR, SESSION_IDLE, SESSION_MAX,
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SESSION_IDLE, SESSION_MAX,
   authMailLeft, now, orgFor, spendAuthMail,
 } from "./accounts.js";
 
@@ -38,10 +51,13 @@ export const SIGNIN_COOKIE = "__Host-rw_signin";
 
 export const CODE_FOR = 10 * 60;      // a code works this long
 export const CODE_TRIES = 5;          // and is burned by this many wrong tries
-const GUESSES_PER_HOUR = 10;          // wrong codes for one address, across its attempts
-const CODE_EVERY = 60;                // at most one code per address a minute
+const CODE_EVERY = 60;                // one code a minute for an address, from one network
 const CODES_PER_HOUR = 5;             // and five an hour
-const ASKS_PER_NETWORK = 20;          // code requests from one IP address an hour
+const CODES_PER_ADDRESS = 20;         // and twenty an hour for an address from every network together
+const ASKS_PER_NETWORK = 20;          // code requests from one network an hour
+export const NETWORK_MAIL_PER_DAY = 10; // codes mailed a day for one network: an IPv6 /64, or here an IPv4 /24
+const GUESSES_PER_HOUR = 10;          // wrong codes for one address from one network an hour
+const GUESSES_PER_NETWORK = 30;       // wrong codes from one network an hour, whatever the address
 export const SIGNIN_FOR = HOUR;       // the sign-in cookie: long enough to leave the form open a while
 export const FRESH_FOR = 15 * 60;     // a code typed this recently counts as fresh
 const SEEN_EVERY = 5 * 60;            // seen_at is written at most this often
@@ -153,6 +169,30 @@ export async function formOk(env, form, binding, action) {
 
 /* ---------- limits ---------- */
 
+/* The network a request comes from, as the limits count it: an IPv4
+   address by itself (with `v4: 24`, its /24), and an IPv6 address by its
+   /64, which is what one home, phone or server is given, so that walking
+   through the addresses of one /64 is still one network. An address that
+   cannot be read is counted as itself. */
+export function network(request, { v4 = 32 } = {}) {
+  const ip = (request.headers.get("cf-connecting-ip") || "unknown").trim().toLowerCase();
+  const four = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (four) return v4 === 24 ? `${four[1]}.${four[2]}.${four[3]}.0/24` : four.slice(1).join(".");
+  const halves = ip.split("::");
+  if (!ip.includes(":") || halves.length > 2) return ip;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const gap = 8 - head.length - tail.length;
+  if (halves.length === 1 ? gap !== 0 : gap < 1) return ip;
+  const groups = [...head, ...Array(halves.length === 2 ? gap : 0).fill("0"), ...tail];
+  if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return ip;
+  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
+}
+
+/* One key for two things counted together, such as an address as asked
+   for from one network. */
+const both = (a, b) => JSON.stringify([a, b]);
+
 const throttleKey = async (env, kind, who) => `${kind}:${await mac(env, `throttle:${kind}:${who}`)}`;
 
 /* Counts one more in a fixed window, and returns the count. One statement,
@@ -187,13 +227,25 @@ export async function forget(env, kind, who) {
 
 /* Starts an attempt and mails its code, after the reply, through
    ctx.waitUntil. Returns { token } for the __Host-rw_signin cookie, or
-   { refused: "network" | "budget" } when nothing can be sent right now:
-   neither depends on the address, so neither says anything about it.
+   { refused: "network" | "network-day" | "budget" } when nothing can be
+   sent right now: none depends on the address, so none says anything
+   about it.
+
+   The order matters. The network's requests this hour are counted first,
+   then the day's mail for this purpose and the network's share of it are
+   read, before anything about the address; mail is taken from both only
+   when a code is mailed, so they say no more about an address than the
+   day's budget always has. Then the address, as asked for from this
+   network (a minute, an hour) and from everywhere (an hour). A stranger's
+   requests for someone's address therefore use up the stranger's own
+   limits, not theirs, until there are enough of them to reach the
+   address's hourly cap on mail.
 
    previous: the browser's last attempt, cancelled by this one. When the
-   address is over its own limits, the browser keeps a live attempt it
-   already has for that address, or gets one whose code was never sent:
-   either way the reply is the same as for any other address.
+   address is over its limits, the browser keeps a live attempt it already
+   has for that address, or gets one whose code was never sent (mailed 0)
+   and which checkCode() never accepts: either way the reply is the same
+   as for any other address.
 
    passwordHash: with purpose 'verify', the hash of the password this
    browser chose (password.js). It is kept in this attempt's row and
@@ -205,13 +257,17 @@ export async function requestCode(request, env, ctx, {
 }) {
   const db = env.LIST;
   const t = now();
-  const ip = request.headers.get("cf-connecting-ip") || "unknown";
-  if (await bump(env, "ask-ip", ip, HOUR) > ASKS_PER_NETWORK) return { refused: "network" };
-  if (await authMailLeft(env) <= 0) return { refused: "budget" };
+  const net = network(request);
+  const wide = network(request, { v4: 24 });
+  if (await bump(env, "ask-ip", net, HOUR) > ASKS_PER_NETWORK) return { refused: "network" };
+  if (await authMailLeft(env, purpose) <= 0) return { refused: "budget" };
+  if (await peek(env, "mail-net", wide, DAY) >= NETWORK_MAIL_PER_DAY) return { refused: "network-day" };
 
   const emailMac = await mac(env, `email:${email}`);
-  const limited = await bump(env, "code-minute", email, CODE_EVERY) > 1 ||
-    await bump(env, "code-hour", email, HOUR) > CODES_PER_HOUR;
+  const here = both(email, net);
+  const limited = await bump(env, "code-minute", here, CODE_EVERY) > 1 ||
+    await bump(env, "code-hour", here, HOUR) > CODES_PER_HOUR ||
+    await bump(env, "code-address", email, HOUR) > CODES_PER_ADDRESS;
   const before = previous ? await db.prepare(
     "SELECT email_mac, purpose, expires_at, tries, used_at FROM signins WHERE id = ?")
     .bind(await sha256(previous)).first() : null;
@@ -223,17 +279,20 @@ export async function requestCode(request, env, ctx, {
     }
     return { token: previous };
   }
-  if (!limited && !await spendAuthMail(env)) return { refused: "budget" };
+  if (!limited) {
+    if (!await spendAuthMail(env, purpose)) return { refused: "budget" };
+    await bump(env, "mail-net", wide, DAY);
+  }
 
   const token = randomToken();
   const id = await sha256(token);
   const code = newCode();
   const statements = [
     db.prepare(`INSERT INTO signins (id, email, email_mac, purpose, user_id, code_mac, password_hash, next,
-                                     created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                                     created_at, expires_at, mailed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(id, email, emailMac, purpose, userId, await codeMac(env, id, code), passwordHash, nextPath(next),
-        t, t + CODE_FOR),
+        t, t + CODE_FOR, limited ? 0 : 1),
   ];
   if (previous) {
     statements.push(db.prepare("UPDATE signins SET used_at = ?, password_hash = NULL WHERE id = ? AND used_at IS NULL")
@@ -258,7 +317,7 @@ async function mailCode(env, email, code, purpose) {
   const shown = `${code.slice(0, 4)}-${code.slice(4)}`;
   const what = { signin: "sign-in code", reset: "password reset code" }[purpose] || "confirmation code";
   const sets = {
-    verify: "Typing it confirms this address and sets the password chosen on that page.",
+    verify: "Typing it confirms this address and sets the password chosen on that page, replacing any password the account had and signing it out everywhere else.",
     reset: "Typing it, with a new password, on that page replaces this account's password and signs it out everywhere else.",
   }[purpose] || "";
   await resend(env, "POST", "/emails", {
@@ -303,23 +362,35 @@ export async function attempt(env, token) {
 }
 
 /* Checks a typed code against the browser's attempt. Every try is counted
-   before the code is compared, the fifth wrong one burns the attempt, and
-   ten wrong ones for an address in an hour burn all of its attempts. The
-   attempt is then used in one UPDATE that has to change exactly one row,
-   so two requests with the right code at once open one session, not two.
-   The same UPDATE clears a password hash the attempt held: the row that
-   comes back still carries it, for the caller to attach.
+   before the code is compared, and the fifth wrong one burns the attempt.
+   Wrong codes are also counted for the network that typed them: ten for
+   one address, or thirty for any, in an hour, and that network's attempts
+   are burned as it tries them. Nothing typed anywhere else touches this
+   attempt, so a stranger's guesses can never spend the tries of the
+   person whose address it is. An attempt whose code was never mailed
+   answers as any attempt does, and is never right.
+
+   The attempt is then used in one UPDATE that has to change exactly one
+   row, so two requests with the right code at once open one session, not
+   two. The same UPDATE clears a password hash the attempt held: the row
+   that comes back still carries it, for the caller to attach.
 
    { ok: true, row } or { ok: false, why: "expired" | "burned" | "wrong", left } */
-export async function checkCode(env, token, typed) {
+export async function checkCode(request, env, token, typed) {
   const db = env.LIST;
   const t = now();
   const row = await attempt(env, token);
   if (!row || row.used_at || row.expires_at <= t) return { ok: false, why: "expired" };
   if (row.tries >= CODE_TRIES) return { ok: false, why: "burned" };
-  if (await peek(env, "guess", row.email_mac, HOUR) >= GUESSES_PER_HOUR) {
-    await burn(env, row.email_mac);
+  const net = network(request);
+  const here = both(row.email_mac, net);
+  const burned = async () => {
+    await db.prepare("UPDATE signins SET tries = ? WHERE id = ? AND used_at IS NULL").bind(CODE_TRIES, row.id).run();
     return { ok: false, why: "burned" };
+  };
+  if (await peek(env, "guess", here, HOUR) >= GUESSES_PER_HOUR ||
+      await peek(env, "guess-net", net, HOUR) >= GUESSES_PER_NETWORK) {
+    return burned();
   }
   const counted = await db.prepare(
     "UPDATE signins SET tries = tries + 1 WHERE id = ? AND used_at IS NULL AND tries < ? AND expires_at > ?")
@@ -327,14 +398,13 @@ export async function checkCode(env, token, typed) {
   if (counted.meta.changes !== 1) return { ok: false, why: "burned" };
 
   const code = typedCode(typed);
-  const right = code !== null && same(await codeMac(env, row.id, code), row.code_mac);
-  if (!right) {
-    /* The address's tenth wrong code in the hour burns this attempt with
-       the rest, so the answer says so now, not on the next try. */
-    if (await bump(env, "guess", row.email_mac, HOUR) >= GUESSES_PER_HOUR) {
-      await burn(env, row.email_mac);
-      return { ok: false, why: "burned" };
-    }
+  const matches = code !== null && same(await codeMac(env, row.id, code), row.code_mac);
+  if (!matches || row.mailed !== 1) {
+    /* This network's tenth wrong code for the address, or thirtieth in
+       all, burns this attempt now, so the answer says so at once. */
+    const forAddress = await bump(env, "guess", here, HOUR);
+    const fromNetwork = await bump(env, "guess-net", net, HOUR);
+    if (forAddress >= GUESSES_PER_HOUR || fromNetwork >= GUESSES_PER_NETWORK) return burned();
     const left = CODE_TRIES - row.tries - 1;
     return left > 0 ? { ok: false, why: "wrong", left } : { ok: false, why: "burned" };
   }
@@ -343,9 +413,6 @@ export async function checkCode(env, token, typed) {
   if (used.meta.changes !== 1) return { ok: false, why: "expired" };
   return { ok: true, row };
 }
-
-const burn = (env, emailMac) => env.LIST.prepare(
-  "UPDATE signins SET tries = ? WHERE email_mac = ? AND used_at IS NULL").bind(CODE_TRIES, emailMac).run();
 
 /* ---------- sessions ---------- */
 

@@ -32,7 +32,10 @@ zone_name = "ranwhat.com"
 
 # Accounts, in dashboard.js. A custom domain, so the first deploy makes the
 # DNS record and its certificate. Until ACCOUNTS_ON is set, every request
-# here gets the same 404 as an unknown path.
+# here gets the same 404 as an unknown path. Its forms that mail a code
+# check Turnstile with TURNSTILE_SECRET, the contact form's widget: add
+# account.ranwhat.com to that widget's hostnames before switching it on,
+# or no code can be asked for.
 [[routes]]
 pattern = "account.ranwhat.com"
 custom_domain = true

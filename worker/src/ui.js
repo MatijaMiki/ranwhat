@@ -1,14 +1,20 @@
 /* The pages account.ranwhat.com serves, and the headers on every response
  * from it.
  *
- * No script runs on this host, ours or anyone's: the pages are plain HTML
- * forms, and the policy allows no script at all. The one inline style is
- * allowed by its hash rather than by 'unsafe-inline', so markup that ever
- * slipped past escape() could not style itself either. Nothing loads from
- * ranwhat.com, so GTM, the analytics and the X pixel that run there never
- * share a page with a signed-in session.
+ * None of our script runs on this host: the pages are plain HTML forms.
+ * The one script allowed anywhere is Cloudflare Turnstile's, and only on
+ * the pages whose form mails a code to someone signing in (sign in, make
+ * an account, reset, a new code, and the page that offers one when
+ * password sign-in is paused): never on the page a code is typed into, and
+ * never on the account's own pages, a step-up's included. Every other
+ * page's policy allows no script at all. The one inline style is allowed by its hash
+ * rather than by 'unsafe-inline', so markup that ever slipped past
+ * escape() could not style itself either. Nothing loads from ranwhat.com,
+ * so GTM, the analytics and the X pixel that run there never share a page
+ * with a signed-in session.
  */
 import { escape } from "./list.js";
+import { CHALLENGE_ORIGIN, CHALLENGE_SCRIPT, SITEKEY } from "./challenge.js";
 
 /* The site's colours, without its font: /fonts/ is on ranwhat.com, which
    this host's policy does not reach. */
@@ -34,14 +40,16 @@ ul{padding-left:18px;color:var(--muted)}li{margin:2px 0}
 small{color:var(--muted)}
 .panel{border:1px solid var(--rule);padding:2px 18px 6px;margin:18px 0}.panel h2{margin-top:16px}
 .locked{border-style:dashed}.locked strong{color:var(--muted)}
-.tag{font:12px Menlo,Consolas,monospace;color:var(--muted)}`;
+.tag{font:12px Menlo,Consolas,monospace;color:var(--muted)}
+.cf-turnstile{min-height:65px;margin-top:14px}`;
 
 let policy = null;
 
 /* default-src 'none' covers script, images, fonts, frames and fetches;
    form-action keeps every form posting here; frame-ancestors keeps the
-   page out of anyone's frame. */
-async function csp() {
+   page out of anyone's frame. With `challenge`, Turnstile's script and
+   its frame, from challenges.cloudflare.com and nowhere else. */
+async function csp(challenge = false) {
   if (!policy) {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(CSS)));
     let s = "";
@@ -49,7 +57,7 @@ async function csp() {
     policy = `default-src 'none'; style-src 'sha256-${btoa(s)}'; form-action 'self'; ` +
       "frame-ancestors 'none'; base-uri 'none'";
   }
-  return policy;
+  return challenge ? `${policy}; script-src ${CHALLENGE_ORIGIN}; frame-src ${CHALLENGE_ORIGIN}` : policy;
 }
 
 /* On every response from this host, redirects included. HSTS is sent here
@@ -57,9 +65,9 @@ async function csp() {
    includeSubDomains keeps the decision for ranwhat.com and its other hosts
    separate (site/_headers says why it waits there). Referrer-Policy is
    same-origin, not no-referrer: see sameOrigin() in session.js. */
-async function secured(headers) {
+async function secured(headers, { challenge = false } = {}) {
   headers.set("cache-control", "no-store");
-  headers.set("content-security-policy", await csp());
+  headers.set("content-security-policy", await csp(challenge));
   headers.set("x-frame-options", "DENY");
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "same-origin");
@@ -70,17 +78,25 @@ async function secured(headers) {
   return headers;
 }
 
-/* An HTML page. body is markup already escaped by the caller. */
-export async function page(title, body, { status = 200, cookies = [] } = {}) {
+/* An HTML page. body is markup already escaped by the caller. challenge:
+   the page holds a widget() and may load Turnstile's script. */
+export async function page(title, body, { status = 200, cookies = [], challenge = false } = {}) {
+  const script = challenge ? `\n<script src="${CHALLENGE_SCRIPT}" async defer></script>` : "";
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex"><title>${escape(title)} | ranwhat account</title>
-<style>${CSS}</style></head>
+<style>${CSS}</style>${script}</head>
 <body><main><a class="wm" href="/">ran<i>what</i></a>${body}</main></body></html>`;
   const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
   for (const c of cookies) headers.append("set-cookie", c);
-  return new Response(html, { status, headers: await secured(headers) });
+  return new Response(html, { status, headers: await secured(headers, { challenge }) });
 }
+
+/* Turnstile's box, inside a form: once solved, it adds the token to the
+   form as cf-turnstile-response, which the server checks for `action`
+   (challenge.js). Only on a page made with { challenge: true }. */
+export const widget = (action) =>
+  `<div class="cf-turnstile" data-sitekey="${SITEKEY}" data-action="${escape(action)}"></div>`;
 
 /* 303, so the browser follows a POST with a GET. Always a path on this
    host: nothing here redirects anywhere a request named. */

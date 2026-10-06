@@ -1,19 +1,20 @@
 /* Accounts on account.ranwhat.com: the Worker's own fetch and scheduled
  * handlers over a real SQLite database (node:sqlite, which is what D1
- * runs), with Resend answered by a stand-in that keeps every email, and a
+ * runs), with Resend answered by a stand-in that keeps every email,
+ * Turnstile's siteverify by one that passes what solved() makes, and a
  * browser stand-in that keeps cookies as a browser does and sends the
  * headers a browser sends with a form from the page it is on.
  *
- *     node --test worker/test/accounts.test.mjs
+ *     node --test --test-timeout=20000 worker/test/accounts.test.mjs
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { d1 } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
-const { formToken } = await import("../src/session.js");
-const { AUTH_MAIL_PER_DAY } = await import("../src/accounts.js");
+const { NETWORK_MAIL_PER_DAY, formToken, network } = await import("../src/session.js");
+const { AUTH_MAIL_PER_DAY, STEPUP_RESERVE } = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const SECRET = "an-account-test-secret-that-is-long-enough-0123456789";
@@ -33,11 +34,24 @@ const sha = (text) => createHash("sha256").update(text).digest("hex");
 
 /* ---------- stand-ins ---------- */
 
-/* Resend's /emails, the only call accounts make to anyone. */
+/* Resend's /emails, and Turnstile's siteverify: the only calls accounts
+   make to anyone. A Turnstile token from solved(action) passes for that
+   form, as solved on s.solvedOn; anything else fails. s.siteverify "down"
+   makes the call fail. */
+const solved = (action) => `solved:${action}`;
 function services() {
-  const s = { emails: [], fail: 0 };
+  const s = { emails: [], fail: 0, challenges: [], solvedOn: "account.ranwhat.com", siteverify: "up" };
   globalThis.fetch = async (url, init = {}) => {
     const u = new URL(String(url));
+    if (u.hostname === "challenges.cloudflare.com") {
+      assert.equal(`${init.method} ${u.pathname}`, "POST /turnstile/v0/siteverify");
+      const asked = JSON.parse(init.body);
+      s.challenges.push(asked);
+      if (s.siteverify === "down") throw new TypeError("fetch failed");
+      const m = /^solved:([a-z]+)$/.exec(asked.response);
+      return new Response(JSON.stringify(m ? { success: true, hostname: s.solvedOn, action: m[1] }
+        : { success: false, "error-codes": ["invalid-input-response"] }), { status: 200 });
+    }
     assert.equal(`${init.method} ${u.hostname}${u.pathname}`, "POST api.resend.com/emails");
     assert.match(init.headers.authorization, /^Bearer re_test/);
     if (s.fail) {
@@ -50,7 +64,8 @@ function services() {
 }
 
 const env = (extra = {}) => ({
-  LIST: d1(), RESEND_API_KEY: "re_test_key", ACCOUNT_SECRET: SECRET, ACCOUNTS_ON: "1", ...extra,
+  LIST: d1(), RESEND_API_KEY: "re_test_key", ACCOUNT_SECRET: SECRET, TURNSTILE_SECRET: "turnstile-" + "test",
+  ACCOUNTS_ON: "1", ...extra,
 });
 
 class Browser {
@@ -118,7 +133,15 @@ async function askCode(b, email, next) {
   const form = await b.get(next === undefined ? "/signin" : `/signin?next=${encodeURIComponent(next)}`);
   assert.equal(form.status, 200);
   return b.post("/signin", { form: tokenFor(form.text, "/signin"), email,
-                             next: form.text.match(/name="next" value="([^"]*)"/)[1] });
+                             next: form.text.match(/name="next" value="([^"]*)"/)[1],
+                             "cf-turnstile-response": solved("signin") });
+}
+
+/* A new code for the browser's attempt, from its own page. */
+async function askAgain(b) {
+  const page = await b.get("/signin/again");
+  assert.equal(page.status, 200, page.text);
+  return b.post("/signin/again", { form: tokenFor(page.text, "/signin/again"), "cf-turnstile-response": solved("again") });
 }
 
 async function typeCode(b, code) {
@@ -162,9 +185,10 @@ test("with ACCOUNTS_ON unset, the account host answers 404 to everything, as an 
   }
 });
 
-test("switched on without its secret, its database or its mail key, it signs nobody in", async () => {
+test("switched on without its secret, its database, its mail key or Turnstile's secret, it signs nobody in", async () => {
   for (const extra of [{ ACCOUNT_SECRET: undefined }, { ACCOUNT_SECRET: "too-short" },
-                       { RESEND_API_KEY: undefined }, { LIST: undefined }]) {
+                       { RESEND_API_KEY: undefined }, { LIST: undefined }, { TURNSTILE_SECRET: undefined },
+                       { TURNSTILE_SECRET: "" }]) {
     const s = services();
     const b = new Browser(env(extra));
     assert.equal((await b.get("/")).status, 503);
@@ -319,7 +343,7 @@ test("every address gets the same answer: known, new, or over its limit", async 
   });
   const known = shape(await askCode(new Browser(e, { ip: "203.0.113.1" }), "known@example.com"));
   const fresh = shape(await askCode(new Browser(e, { ip: "203.0.113.2" }), "new@example.com"));
-  const limited = shape(await askCode(new Browser(e, { ip: "203.0.113.3" }), "known@example.com"));
+  const limited = shape(await askCode(new Browser(e, { ip: "203.0.113.1" }), "known@example.com"));
   assert.deepEqual(fresh, known);
   assert.deepEqual(limited, known);
   assert.equal(known.status, 303);
@@ -374,7 +398,7 @@ test("a code works once, and two tabs typing it at once open one session", async
   assert.equal(count(e, "sessions"), 1);
 });
 
-test("five wrong tries burn a code, and ten wrong for an address burn all of its codes for an hour", async () => {
+test("five wrong tries burn a code, and ten wrong for an address from one network stop that network's tries for it", async () => {
   const s = services();
   const e = env();
   const b = new Browser(e);
@@ -395,7 +419,7 @@ test("five wrong tries burn a code, and ten wrong for an address burn all of its
   assert.match((await b.get("/signin/code")).text, /Too many wrong tries/, "and the page no longer offers the box");
   assert.ok(!b.jar.has(SESSION));
 
-  // Four more wrong on a second code (nine for the address), then one on a third.
+  // Four more wrong on a second code (nine from this network for the address), then one on a third.
   later(MINUTE + 1);
   await askCode(b, "ana@example.com");
   code = codeIn(s.emails.at(-1));
@@ -406,14 +430,20 @@ test("five wrong tries burn a code, and ten wrong for an address burn all of its
   const third = tokenFor((await b.get("/signin/code")).text, "/signin/code");
   assert.match((await typeCode(b, wrongFor(code))).text, /Too many wrong tries/, "the tenth");
   assert.match((await b.post("/signin/code", { form: third, code })).text, /Too many wrong tries/,
-               "this code had one wrong try, but the address had ten");
+               "this code had one wrong try, but its network had ten for the address");
 
-  // A code asked for from another browser in the same hour is mailed, and refused.
+  // Another browser on that network: its code is mailed, and refused for the hour.
   later(MINUTE + 1);
-  const other = new Browser(e, { ip: "203.0.113.9" });
-  await askCode(other, "ana@example.com");
-  assert.match((await typeCode(other, codeIn(s.emails.at(-1)))).text, /Too many wrong tries/);
-  assert.equal(count(e, "sessions"), 0);
+  const neighbour = new Browser(e);
+  await askCode(neighbour, "ana@example.com");
+  const theirs = tokenFor((await neighbour.get("/signin/code")).text, "/signin/code");
+  r = await neighbour.post("/signin/code", { form: theirs, code: codeIn(s.emails.at(-1)) });
+  assert.match(r.text, /Too many wrong tries/);
+
+  // From another network the address's code works: those guesses were not made there.
+  later(MINUTE + 1);
+  await signIn(new Browser(e, { ip: "203.0.113.9" }), s, "ana@example.com");
+  assert.equal(count(e, "sessions"), 1);
 
   later(HOUR + 1);
   await signIn(b, s, "ana@example.com");
@@ -428,7 +458,7 @@ test("a new request cancels the browser's last code, and a code works only in th
   const before = b.clone();
   later(MINUTE + 1);
   const page = await b.get("/signin/code");
-  assert.equal((await b.post("/signin/again", { form: tokenFor(page.text, "/signin/again") })).status, 303);
+  assert.equal((await askAgain(b)).status, 303);
   assert.equal(s.emails.length, 2);
   const second = codeIn(s.emails.at(-1));
   assert.notEqual(second, first);
@@ -499,7 +529,8 @@ test("sign-in sends you on only to a page on the list", async () => {
     const b = new Browser(e, { ip: `198.51.100.${s.emails.length + 20}` });
     const form = await b.get(`/signin?next=${encodeURIComponent(asked)}`);
     assert.match(form.text, /name="next" value="\/"/);
-    await b.post("/signin", { form: tokenFor(form.text, "/signin"), email: `n${s.emails.length}@example.com`, next: asked });
+    await b.post("/signin", { form: tokenFor(form.text, "/signin"), email: `n${s.emails.length}@example.com`, next: asked,
+                              "cf-turnstile-response": solved("signin") });
     assert.equal((await typeCode(b, codeIn(s.emails.at(-1)))).location, "/", asked);
   }
 });
@@ -591,7 +622,7 @@ test("a fresh code opens a new session, confirmed now, in place of the old one",
 
 /* ---------- limits ---------- */
 
-test("an address gets a code a minute and five an hour, and the browser that asked keeps its code", async () => {
+test("an address gets a code a minute and five an hour from one network, twenty from all, and the browser that asked keeps its code", async () => {
   const s = services();
   const e = env();
   const b = new Browser(e);
@@ -604,34 +635,190 @@ test("an address gets a code a minute and five an hour, and the browser that ask
 
   for (let i = 2; i <= 5; i++) {
     later(MINUTE + 1);
-    await askCode(new Browser(e, { ip: `203.0.113.${i}` }), "ana@example.com");
+    await askCode(new Browser(e), "ana@example.com");
   }
   assert.equal(s.emails.length, 5);
   later(MINUTE + 1);
-  assert.equal((await askCode(new Browser(e, { ip: "203.0.113.6" }), "ana@example.com")).status, 303);
-  assert.equal(s.emails.length, 5, "the sixth in the hour sends nothing");
+  assert.equal((await askCode(new Browser(e), "ana@example.com")).status, 303);
+  assert.equal(s.emails.length, 5, "the sixth in the hour from this network sends nothing");
+
+  for (let i = 1; i <= 15; i++) {
+    await askCode(new Browser(e, { ip: `192.0.${i}.1` }), "ana@example.com");
+  }
+  assert.equal(s.emails.length, 20, "other networks still get theirs, to twenty in the hour");
+  assert.equal((await askCode(new Browser(e, { ip: "192.0.99.1" }), "ana@example.com")).status, 303);
+  assert.equal(s.emails.length, 20, "and no more, from anywhere");
   later(HOUR);
   await askCode(new Browser(e, { ip: "203.0.113.7" }), "ana@example.com");
-  assert.equal(s.emails.length, 6);
+  assert.equal(s.emails.length, 21);
 });
 
-test("one network asks for at most twenty codes an hour", async () => {
+test("a stranger asking for codes for someone's address uses up the stranger's limits, not theirs", async () => {
   const s = services();
   const e = env();
-  for (let i = 0; i < 20; i++) {
-    assert.equal((await askCode(new Browser(e, { ip: "192.0.2.1" }), `p${i}@example.com`)).status, 303);
+  await signIn(new Browser(e, { ip: "203.0.113.10" }), s, "ana@example.com");
+  later(HOUR + 1);
+  const before = s.emails.length;
+  for (let i = 0; i < 6; i++) {
+    later(MINUTE + 1);
+    await askCode(new Browser(e, { ip: "192.0.2.66" }), "ana@example.com");
   }
-  const r = await askCode(new Browser(e, { ip: "192.0.2.1" }), "p20@example.com");
+  assert.equal(s.emails.length - before, 5, "five from the stranger's network, then nothing");
+
+  later(MINUTE + 1);
+  const ana = new Browser(e, { ip: "203.0.113.10" });
+  await signIn(ana, s, "ana@example.com");
+  assert.equal(s.emails.length - before, 6, "Ana's own request is mailed");
+  assert.equal((await ana.get("/")).status, 200);
+});
+
+test("a stranger's wrong codes for someone's address never spend the tries of that person's code", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e, { ip: "203.0.113.10" });
+  await askCode(ana, "ana@example.com");
+  const good = codeIn(s.emails.at(-1));
+  const page = await ana.get("/signin/code");
+
+  /* Three attempts of the stranger's own for Ana's address, burned by
+     wrong codes: past the ten that stop that network's tries for her. */
+  const seen = [];
+  for (let a = 0; a < 3; a++) {
+    later(MINUTE + 1);
+    const mallory = new Browser(e, { ip: "192.0.2.66" });
+    await askCode(mallory, "ana@example.com");
+    const theirs = codeIn(s.emails.at(-1));
+    const answers = [];
+    for (;;) {
+      const p = await mallory.get("/signin/code");
+      if (!/action="\/signin\/code"/.test(p.text)) break;
+      const r = await mallory.post("/signin/code", { form: tokenFor(p.text, "/signin/code"), code: wrongFor(theirs) });
+      answers.push(/not right/.test(r.text) ? "wrong" : "burned");
+    }
+    seen.push(answers.join(" "));
+  }
+  assert.deepEqual(seen, ["wrong wrong wrong wrong burned", "wrong wrong wrong wrong burned", "burned"],
+                   "the network's tenth wrong code for her address stops its tries for the hour");
+  assert.deepEqual(rows(e, "SELECT tries FROM signins WHERE id = ?", sha(ana.jar.get(SIGNIN))), [{ tries: 0 }]);
+
+  const r = await ana.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: good });
+  assert.equal(r.status, 303, r.text);
+  assert.ok(ana.jar.has(SESSION));
+});
+
+test("an attempt made while the address was over its limits never signs in, whatever is typed", async () => {
+  const s = services();
+  const e = env();
+  const b = new Browser(e);
+  await askCode(b, "ana@example.com");
+  const limited = new Browser(e);
+  assert.equal((await askCode(limited, "ana@example.com")).status, 303);
+  assert.equal(s.emails.length, 1, "inside the minute, from the same network: not mailed");
+  const id = sha(limited.jar.get(SIGNIN));
+  assert.deepEqual(rows(e, "SELECT mailed FROM signins WHERE id = ?", id), [{ mailed: 0 }]);
+  assert.deepEqual(rows(e, "SELECT mailed FROM signins WHERE id = ?", sha(b.jar.get(SIGNIN))), [{ mailed: 1 }]);
+
+  /* Even a code the row itself holds is not accepted. */
+  const known = "ABCD2345";
+  e.LIST.sql.prepare("UPDATE signins SET code_mac = ? WHERE id = ?")
+    .run(createHmac("sha256", SECRET).update(`code:${id}:${known}`).digest("base64url"), id);
+  for (let left = 4; left >= 1; left--) {
+    const r = await typeCode(limited, known);
+    assert.equal(r.status, 400);
+    assert.match(r.text, new RegExp(`not right\\. ${left} tr(y|ies) left`), "it answers as any attempt does");
+  }
+  assert.match((await typeCode(limited, known)).text, /Too many wrong tries/);
+  assert.ok(!limited.jar.has(SESSION));
+  assert.equal((await typeCode(b, codeIn(s.emails[0]))).status, 303, "the mailed one still works");
+});
+
+test("one network asks for at most twenty codes an hour, and every address in an IPv6 /64 is that network", async () => {
+  const s = services();
+  const e = env();
+  for (let i = 1; i <= 20; i++) {
+    assert.equal((await askCode(new Browser(e, { ip: `2001:db8:1:1::${i.toString(16)}` }), "p@example.com")).status, 303);
+  }
+  const r = await askCode(new Browser(e, { ip: "2001:db8:1:1:ffff:ffff:ffff:ffff" }), "q@example.com");
   assert.equal(r.status, 429);
-  assert.equal(s.emails.length, 20);
-  assert.equal((await askCode(new Browser(e, { ip: "192.0.2.2" }), "p20@example.com")).status, 303);
+  assert.match(r.text, /in the last hour/);
+  assert.equal(s.emails.length, 1);
+  assert.equal((await askCode(new Browser(e, { ip: "2001:db8:1:2::1" }), "q@example.com")).status, 303);
+
+  for (let i = 0; i < 20; i++) {
+    assert.equal((await askCode(new Browser(e, { ip: "192.0.2.1" }), "r@example.com")).status, 303);
+  }
+  assert.equal((await askCode(new Browser(e, { ip: "192.0.2.1" }), "s@example.com")).status, 429);
+  assert.equal((await askCode(new Browser(e, { ip: "192.0.2.2" }), "s@example.com")).status, 303,
+               "an IPv4 address is a network of its own for this");
+
+  const at = (ip) => network(new Request(ORIGIN, { headers: { "cf-connecting-ip": ip } }));
+  assert.equal(at("2001:DB8:1:1:0:0:0:1"), at("2001:db8:1:1::ffff"));
+  assert.notEqual(at("2001:db8:1:1::1"), at("2001:db8:1:2::1"));
+  assert.equal(at("::ffff:192.0.2.1"), at("192.0.2.1"));
+});
+
+test("one network has ten codes mailed a day, an IPv4 /24 or an IPv6 /64, and other networks still get theirs", async () => {
+  const s = services();
+  const e = env();
+  assert.equal(NETWORK_MAIL_PER_DAY, 10);
+  for (let i = 0; i < NETWORK_MAIL_PER_DAY; i++) {
+    assert.equal((await askCode(new Browser(e, { ip: `2001:db8:5:5:${i}::1` }), `p${i}@example.com`)).status, 303);
+    assert.equal((await askCode(new Browser(e, { ip: `198.51.100.${i + 1}` }), `q${i}@example.com`)).status, 303);
+  }
+  assert.equal(s.emails.length, 2 * NETWORK_MAIL_PER_DAY);
+  for (const ip of ["2001:db8:5:5:ffff::9", "198.51.100.200"]) {
+    const r = await askCode(new Browser(e, { ip }), "more@example.com");
+    assert.equal(r.status, 429, ip);
+    assert.match(r.text, /today/);
+    assert.equal(r.headers.getSetCookie().length, 0);
+  }
+  assert.equal(s.emails.length, 2 * NETWORK_MAIL_PER_DAY);
+  assert.equal((await askCode(new Browser(e, { ip: "2001:db8:5:6::1" }), "more@example.com")).status, 303);
+  assert.equal((await askCode(new Browser(e, { ip: "198.51.101.1" }), "other@example.com")).status, 303);
+  assert.equal(s.emails.length, 2 * NETWORK_MAIL_PER_DAY + 2);
+  later(DAY + 1);
+  assert.equal((await askCode(new Browser(e, { ip: "198.51.100.200" }), "more@example.com")).status, 303);
+});
+
+test("strangers cannot use up the day's codes for everyone: one network takes ten, and step-ups keep a reserve", async () => {
+  const s = services();
+  const e = env();
+  const bob = new Browser(e, { ip: "203.0.113.20" });
+  await signIn(bob, s, "bob@example.com");
+
+  /* Sixty throwaway addresses from one /64, walking through it. */
+  const before = s.emails.length;
+  for (let i = 0; i < 60; i++) {
+    await askCode(new Browser(e, { ip: `2001:db8:1:1::${(i % 3) + 1}` }), `x${i}@mailinator.com`);
+  }
+  assert.equal(s.emails.length - before, NETWORK_MAIL_PER_DAY);
+  await signIn(new Browser(e, { ip: "198.51.100.30" }), s, "carol@example.com");
+
+  /* Many networks' shares, all of what sign-in may take today. */
+  e.LIST.sql.prepare("UPDATE mail_counts SET sent = ? WHERE day = ? AND kind = 'auth'")
+    .run(AUTH_MAIL_PER_DAY - STEPUP_RESERVE, today());
+  const out = await askCode(new Browser(e, { ip: "198.51.102.1" }), "dan@example.com");
+  assert.equal(out.status, 503);
+  assert.match(out.text, /No more codes today/);
+
+  /* Someone signed in still confirms it is them, from the reserve. */
+  later(20 * MINUTE);
+  const token = async () => formToken(e, sha(bob.jar.get(SESSION)), "stepup");
+  const r = await bob.post("/stepup", { form: await token() });
+  assert.equal(r.location, "/signin/code");
+  assert.equal(s.emails.at(-1).subject, "Your ranwhat confirmation code");
+  assert.equal((await typeCode(bob, codeIn(s.emails.at(-1)))).location, "/");
+  e.LIST.sql.prepare("UPDATE mail_counts SET sent = ? WHERE day = ? AND kind = 'auth'").run(AUTH_MAIL_PER_DAY, today());
+  later(MINUTE + 1);
+  assert.equal((await bob.post("/stepup", { form: await token() })).status, 503, "until the whole day's is gone");
 });
 
 test("account email stops at the day's cap, for every address alike, and starts again the next day", async () => {
   const s = services();
   const e = env();
   await signIn(new Browser(e, { ip: "203.0.113.40" }), s, "known@example.com");
-  e.LIST.sql.prepare("UPDATE mail_counts SET sent = ? WHERE day = ? AND kind = 'auth'").run(AUTH_MAIL_PER_DAY - 1, today());
+  const cap = AUTH_MAIL_PER_DAY - STEPUP_RESERVE;
+  e.LIST.sql.prepare("UPDATE mail_counts SET sent = ? WHERE day = ? AND kind = 'auth'").run(cap - 1, today());
   const last = await askCode(new Browser(e, { ip: "203.0.113.41" }), "a@example.com");
   assert.equal(last.status, 303);
   assert.equal(s.emails.length, 2);
@@ -643,28 +830,95 @@ test("account email stops at the day's cap, for every address alike, and starts 
     assert.equal(r.headers.getSetCookie().length, 0);
   }
   assert.equal(s.emails.length, 2);
-  assert.deepEqual(rows(e, "SELECT sent FROM mail_counts WHERE kind = 'auth'"), [{ sent: AUTH_MAIL_PER_DAY }]);
+  assert.deepEqual(rows(e, "SELECT sent FROM mail_counts WHERE kind = 'auth'"), [{ sent: cap }]);
   later(DAY);
   assert.equal((await askCode(new Browser(e, { ip: "203.0.113.44" }), "b@example.com")).status, 303);
   assert.equal(s.emails.length, 3);
 });
 
-/* ---------- pages ---------- */
+/* ---------- Turnstile ---------- */
 
-test("every page from the account host runs no script and carries its own strict headers", async () => {
+test("every form that mails a code passes Turnstile first, for this host and that form", async () => {
   const s = services();
   const e = env();
   const b = new Browser(e);
-  const pages = [await b.get("/signin"), await b.get("/no-such-page"), await b.get("/")];
-  await signIn(b, s);
-  pages.push(await b.get("/"));
-  for (const r of pages) {
+  const ask = async (extra) => {
+    const form = await b.get("/signin");
+    return b.post("/signin", { form: tokenFor(form.text, "/signin"), email: "ana@example.com", next: "/", ...extra });
+  };
+  const missing = await ask({});
+  assert.equal(missing.status, 400);
+  assert.match(missing.text, /Complete the check/);
+  assert.match(missing.text, /value="ana@example.com"/, "the address is kept for the next try");
+  assert.equal(s.challenges.length, 0, "nothing to verify");
+  for (const token of ["made-up", solved("signup"), solved("reset")]) {
+    const r = await ask({ "cf-turnstile-response": token });
+    assert.equal(r.status, 403, token);
+    assert.match(r.text, /did not pass/);
+  }
+  s.solvedOn = "ranwhat.com";
+  assert.equal((await ask({ "cf-turnstile-response": solved("signin") })).status, 403, "solved on the site, not here");
+  s.solvedOn = "account.ranwhat.com";
+  s.siteverify = "down";
+  assert.equal((await ask({ "cf-turnstile-response": solved("signin") })).status, 502);
+  s.siteverify = "up";
+  assert.equal(s.emails.length, 0);
+  assert.equal(count(e, "signins"), 0);
+  assert.equal(count(e, "throttle"), 0, "a refused challenge counts against no limit");
+  assert.deepEqual(s.challenges.at(-1), { secret: "turnstile-" + "test", response: solved("signin"), remoteip: "198.51.100.7" });
+
+  assert.equal((await ask({ "cf-turnstile-response": solved("signin") })).status, 303);
+  assert.equal(s.emails.length, 1);
+
+  /* A new code asks again, on its own page. */
+  later(MINUTE + 1);
+  const page = await b.get("/signin/again");
+  const token = tokenFor(page.text, "/signin/again");
+  assert.equal((await b.post("/signin/again", { form: token })).status, 400);
+  assert.equal((await b.post("/signin/again", { form: token, "cf-turnstile-response": solved("signin") })).status, 403);
+  assert.equal(s.emails.length, 1);
+  assert.equal((await b.post("/signin/again", { form: token, "cf-turnstile-response": solved("again") })).status, 303);
+  assert.equal(s.emails.length, 2);
+});
+
+/* ---------- pages ---------- */
+
+test("no page runs our script; Turnstile's alone loads, only on the forms that mail a code; strict headers on all", async () => {
+  const s = services();
+  const e = env();
+  const b = new Browser(e);
+  const challenged = [await b.get("/signin"), await b.get("/signup"), await b.get("/reset")];
+  const plain = [await b.get("/no-such-page"), await b.get("/"), await b.get("/signin/password")];
+  await askCode(b, "ana@example.com");
+  plain.push(await b.get("/signin/code"));
+  challenged.push(await b.get("/signin/again"));
+  await typeCode(b, codeIn(s.emails.at(-1)));
+  plain.push(await b.get("/"));
+  /* A step-up's code page sends a signed-in person back to the account
+     page for a new code, never to a page with Turnstile on it. */
+  later(20 * MINUTE);
+  await b.post("/stepup", { form: await formToken(e, sha(b.jar.get(SESSION)), "stepup") });
+  const stepup = await b.get("/signin/code");
+  assert.match(stepup.text, /<a href="\/">ask for a new code<\/a>/);
+  assert.doesNotMatch(stepup.text, /\/signin\/again/);
+  plain.push(stepup);
+  assert.equal((await b.get("/signin/again")).location, "/");
+  const POLICY = "default-src 'none'; style-src 'sha256-[A-Za-z0-9+/]+=*'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+  for (const [r, challenge] of [...challenged.map((r) => [r, true]), ...plain.map((r) => [r, false])]) {
     const csp = r.headers.get("content-security-policy");
-    assert.match(csp, /^default-src 'none'; style-src 'sha256-[A-Za-z0-9+/]+=*'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'$/);
+    if (challenge) {
+      assert.match(csp, new RegExp(`^${POLICY}; script-src https://challenges\\.cloudflare\\.com; frame-src https://challenges\\.cloudflare\\.com$`));
+      const scripts = r.text.match(/<script[^>]*>/g);
+      assert.deepEqual(scripts, ['<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer>']);
+      assert.match(r.text, /<div class="cf-turnstile" data-sitekey="0x4[A-Za-z0-9_-]+" data-action="(signin|signup|reset|again)"><\/div>/);
+    } else {
+      assert.match(csp, new RegExp(`^${POLICY}$`));
+      assert.doesNotMatch(r.text, /<script|class="cf-turnstile"/i);
+    }
     if (r.text) {
       const style = r.text.match(/<style>([\s\S]*?)<\/style>/)[1];
       assert.ok(csp.includes(`'sha256-${createHash("sha256").update(style).digest("base64")}'`), "the hash is the page's own style");
-      assert.doesNotMatch(r.text, /<script|\son[a-z]+=/i);
+      assert.doesNotMatch(r.text, /\son[a-z]+=/i);
     }
     assert.equal(r.headers.get("cache-control"), "no-store");
     assert.equal(r.headers.get("x-frame-options"), "DENY");

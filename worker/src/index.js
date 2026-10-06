@@ -37,8 +37,8 @@ import { catalogue } from "./feed.js";
 import { billing, checkout, webhook, welcome } from "./stripe.js";
 import { ACCOUNT_HOST, accountsOn, sweep } from "./accounts.js";
 import { account } from "./dashboard.js";
+import { challenge } from "./challenge.js";
 
-const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TO = "ranwhatcom@gmail.com";
 const FROM = "form@ranwhat.com";
 
@@ -51,7 +51,8 @@ const SUBJECTS = {
 
 const LIMITS = { message: 8000, email: 200 };
 
-/* A token solved on another site with the same key must not count here.
+/* A token solved on another site with the same key must not count here,
+   nor one solved on account.ranwhat.com, whose forms check their own.
    Preview deployments are left out on purpose: the form only sends from
    the canonical host. */
 const HOSTNAMES = new Set(["ranwhat.com"]);
@@ -80,31 +81,17 @@ const header = (s) => String(s || "").replace(/[\r\n]+/g, " ").trim();
 /* Asks Cloudflare whether a Turnstile token is good for this site, and, when
    an action is given, for this form: a token solved on the signup form is not
    a pass for the contact form, or the other way round. Returns null when it
-   is, or the Response to send back when it is not. */
+   is, or the Response to send back when it is not. The check itself is in
+   challenge.js, which the account host's forms use too. */
 async function refuseChallenge(request, env, token, action) {
-  if (!token) return json(400, { error: "Complete the challenge and try again." });
-
+  const outcome = await challenge(request, env, token, { hostnames: HOSTNAMES, action });
+  if (outcome === "missing") return json(400, { error: "Complete the challenge and try again." });
   /* If siteverify is down or answers with something other than JSON, say so
      in the same shape as every other error rather than throwing a bare 500. */
-  let outcome;
-  try {
-    const verify = await fetch(SITEVERIFY, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        secret: env.TURNSTILE_SECRET,
-        response: token,
-        remoteip: request.headers.get("cf-connecting-ip") || undefined,
-      }),
-    });
-    outcome = await verify.json();
-  } catch {
+  if (outcome === "unavailable") {
     return json(502, { error: "The challenge could not be checked just now. Try again in a minute." });
   }
-  if (!outcome.success || !HOSTNAMES.has(outcome.hostname) ||
-      (action && outcome.action !== action)) {
-    return json(403, { error: "That challenge did not verify. Reload and try again." });
-  }
+  if (outcome !== "ok") return json(403, { error: "That challenge did not verify. Reload and try again." });
   return null;
 }
 

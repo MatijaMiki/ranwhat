@@ -20,7 +20,7 @@ const worker = (await import("../src/index.js")).default;
 const { AUTH_MAIL_PER_DAY, sweep } = await import("../src/accounts.js");
 const { CODE_FOR, FRESH_FOR, formToken } = await import("../src/session.js");
 const {
-  ITERATIONS, LOCKOUT, MAX_LENGTH, MIN_LENGTH, TRIES_PER_ADDRESS, WRONG_EVERYWHERE, hashPassword, isPasswordHash,
+  ITERATIONS, LOCKOUT, MAX_LENGTH, MIN_LENGTH, TRIES_PER_ADDRESS, WRONG_PER_NETWORK, hashPassword, isPasswordHash,
   iterations, needsRehash, passwordProblem, verifyPassword,
 } = await import("../src/password.js");
 
@@ -48,15 +48,23 @@ const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
 /* ---------- stand-ins ---------- */
 
-/* Have I Been Pwned's range API and Resend's /emails. `breached` holds the
-   passwords the range API knows; every answer is padded with made-up
-   suffixes at a count of 0, and `padded` adds a real one at 0. */
+/* Have I Been Pwned's range API, Resend's /emails and Turnstile's
+   siteverify. `breached` holds the passwords the range API knows; every
+   answer is padded with made-up suffixes at a count of 0, and `padded` adds
+   a real one at 0. A Turnstile token from solved(action) passes for that
+   form on the account host. */
+const solved = (action) => `solved:${action}`;
 function services({ breached = [], padded = [] } = {}) {
   const s = { emails: [], ranges: [], hibp: "up" };
   const known = breached.map(sha1);
   const zero = padded.map(sha1);
   globalThis.fetch = async (url, init = {}) => {
     const u = new URL(String(url));
+    if (u.hostname === "challenges.cloudflare.com") {
+      const m = /^solved:([a-z]+)$/.exec(JSON.parse(init.body).response);
+      return new Response(JSON.stringify(m ? { success: true, hostname: "account.ranwhat.com", action: m[1] }
+        : { success: false }), { status: 200 });
+    }
     if (u.hostname === "api.pwnedpasswords.com") {
       s.ranges.push({ url: String(url), method: init.method || "GET", headers: new Headers(init.headers) });
       if (s.hibp === "down") throw new TypeError("fetch failed");
@@ -78,7 +86,8 @@ function services({ breached = [], padded = [] } = {}) {
 }
 
 const env = (extra = {}) => ({
-  LIST: d1(), RESEND_API_KEY: RESEND_KEY, ACCOUNT_SECRET: SECRET, ACCOUNTS_ON: "1", ...LOW, ...extra,
+  LIST: d1(), RESEND_API_KEY: RESEND_KEY, ACCOUNT_SECRET: SECRET, TURNSTILE_SECRET: "turnstile-" + "test",
+  ACCOUNTS_ON: "1", ...LOW, ...extra,
 });
 
 /* A browser: keeps cookies as one does, and sends the headers it sends
@@ -135,12 +144,14 @@ const wrongFor = (code) => {
 async function signUp(b, email, password) {
   const form = await b.get("/signup");
   assert.equal(form.status, 200, form.text);
-  return b.post("/signup", { form: tokenFor(form.text, "/signup"), email, password, next: "/" });
+  return b.post("/signup", { form: tokenFor(form.text, "/signup"), email, password, next: "/",
+                             "cf-turnstile-response": solved("signup") });
 }
 
 async function askCode(b, email) {
   const form = await b.get("/signin");
-  return b.post("/signin", { form: tokenFor(form.text, "/signin"), email, next: "/" });
+  return b.post("/signin", { form: tokenFor(form.text, "/signin"), email, next: "/",
+                             "cf-turnstile-response": solved("signin") });
 }
 
 async function typeCode(b, code) {
@@ -150,8 +161,8 @@ async function typeCode(b, code) {
 }
 
 async function again(b) {
-  const page = await b.get("/signin/code");
-  return b.post("/signin/again", { form: tokenFor(page.text, "/signin/again") });
+  const page = await b.get("/signin/again");
+  return b.post("/signin/again", { form: tokenFor(page.text, "/signin/again"), "cf-turnstile-response": solved("again") });
 }
 
 const rows = (e, sql, ...p) => e.LIST.sql.prepare(sql).all(...p).map((r) => ({ ...r }));
@@ -316,10 +327,14 @@ test("sign-up holds the hash only in the asking browser's attempt, and sets it o
   const form = await b.get("/signup");
   assert.equal(form.status, 200);
   assert.match(form.text, /type="password" autocomplete="new-password"/);
-  assert.doesNotMatch(form.text, /<script|\son[a-z]+=/i);
+  assert.deepEqual(form.text.match(/<script[^>]*>/g),
+                   ['<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer>'],
+                   "Turnstile's script alone");
+  assert.doesNotMatch(form.text, /\son[a-z]+=/i);
   assert.match(form.headers.get("content-security-policy"), /^default-src 'none'; /);
 
-  const asked = await b.post("/signup", { form: tokenFor(form.text, "/signup"), email: "Ana@Example.com",
+  const asked = await b.post("/signup", { form: tokenFor(form.text, "/signup"), "cf-turnstile-response": solved("signup"),
+    email: "Ana@Example.com",
                                           password: ANA_PASSWORD, next: "/" });
   assert.equal(asked.status, 303);
   assert.equal(asked.location, "/signin/code");
@@ -462,22 +477,49 @@ test("a new code keeps the attempt's password, and a password typed again replac
   assert.equal(await verifyPassword(kept, "the one I mistyped"), false);
 });
 
-test("an account that has a password gets a new one only through its code, and the change is logged", async () => {
+test("an account that has a password gets a new one only through its code, which signs it out everywhere else, as logged", async () => {
   const s = services();
   const e = env();
   const first = new Browser(e);
   await signUp(first, "ana@example.com", ANA_PASSWORD);
   await typeCode(first, codeIn(s.emails.at(-1)));
+  /* Someone else has the password, and a session of their own with it. */
+  const thief = new Browser(e, { ip: "192.0.2.66" });
+  assert.equal((await withPassword(thief, "ana@example.com", ANA_PASSWORD)).status, 303);
+  assert.equal((await thief.get("/")).status, 200);
   later(MINUTE + 1);
   const second = new Browser(e, { ip: "203.0.113.20" });
   await signUp(second, "ana@example.com", "a brand new passphrase");
+  assert.match(s.emails.at(-1).text, /replacing any password the account had and signing it out everywhere else/);
   assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), ANA_PASSWORD), true, "unchanged until the code");
+  assert.equal((await thief.get("/")).status, 200, "and so is every session");
   await typeCode(second, codeIn(s.emails.at(-1)));
   const kept = passwordOf(e, "ana@example.com");
   assert.equal(await verifyPassword(kept, "a brand new passphrase"), true);
   assert.equal(await verifyPassword(kept, ANA_PASSWORD), false);
-  assert.deepEqual(eventsOf(e, "ana@example.com"), ["signup", "password_added", "signin", "password_changed"]);
+  assert.deepEqual(eventsOf(e, "ana@example.com"),
+                   ["signup", "password_added", "signin_password", "signin", "password_reset"]);
   assert.equal(count(e, "users"), 1);
+
+  /* Every other session ended, as the log says: the thief's and the first browser's. */
+  assert.equal((await thief.get("/")).location, "/signin");
+  assert.equal((await first.get("/")).location, "/signin");
+  assert.deepEqual(sessionsOf(e, "ana@example.com").map((r) => r.id), [sha256(second.jar.get(SESSION))]);
+  const home = await second.get("/");
+  assert.match(home.text, /Password reset with an emailed code, and every other session signed out/);
+  assert.doesNotMatch(home.text, /Password changed/);
+
+  /* An account with no password that gets one this way is signed out elsewhere too. */
+  const coded = new Browser(e, { ip: "203.0.113.30" });
+  await askCode(coded, "bo@example.com");
+  await typeCode(coded, codeIn(s.emails.at(-1)));
+  later(MINUTE + 1);
+  const added = new Browser(e, { ip: "203.0.113.31" });
+  await signUp(added, "bo@example.com", "bo picks a passphrase now");
+  await typeCode(added, codeIn(s.emails.at(-1)));
+  assert.equal((await coded.get("/")).location, "/signin");
+  assert.equal((await added.get("/")).status, 200);
+  assert.deepEqual(eventsOf(e, "bo@example.com"), ["signup", "signin", "password_added"]);
 });
 
 test("a short or breached password is refused before any code is sent, and the form never shows it back", async () => {
@@ -520,12 +562,12 @@ test("the sign-up form is refused from another site or without its token, and on
   assert.equal(count(e, "signins"), 0);
 
   for (let i = 0; i < 20; i++) {
-    assert.equal((await signUp(b, `person${i}@example.com`, ANA_PASSWORD)).status, 303, `sign-up ${i}`);
+    assert.equal((await signUp(b, "person@example.com", ANA_PASSWORD)).status, 303, `sign-up ${i}`);
   }
-  const over = await signUp(b, "one-more@example.com", ANA_PASSWORD);
+  const over = await signUp(new Browser(e, { ip: b.ip }), "one-more@example.com", ANA_PASSWORD);
   assert.equal(over.status, 429);
   assert.equal(s.ranges.length, 20, "refused before the breach check");
-  assert.equal(s.emails.length, 20);
+  assert.equal(s.emails.length, 1, "the same address inside the minute: one code");
 });
 
 test("when the runtime refuses the iteration count, sign-up says passwords are not available and sends nothing", async () => {
@@ -715,7 +757,9 @@ test("an address gets five password tries in fifteen minutes, then only a code s
      address its tries back. */
   assert.match(held.text, /name="email" value="ana@example.com"/);
   later(MINUTE + 1);
-  const sent = await ana.post("/signin", { form: tokenFor(held.text, "/signin"), email: "ana@example.com", next: "/" });
+  assert.match(held.text, /<div class="cf-turnstile"[^>]* data-action="signin">/);
+  const sent = await ana.post("/signin", { form: tokenFor(held.text, "/signin"), email: "ana@example.com", next: "/",
+                                           "cf-turnstile-response": solved("signin") });
   assert.equal(sent.location, "/signin/code");
   assert.equal((await typeCode(ana, codeIn(s.emails.at(-1)))).status, 303);
   assert.equal((await withPassword(new Browser(e, { ip: "198.51.100.10" }), "ana@example.com", ANA_PASSWORD)).status, 303);
@@ -741,28 +785,48 @@ test("a right password gives the address its tries back", async () => {
   assert.equal((await withPassword(c, "ana@example.com", ANA_PASSWORD)).status, 303);
 });
 
-test("a hundred wrong passwords across every address pause password sign-in for everyone, while the code still works", async () => {
+test("wrong passwords pause password sign-in for the network they come from, never for everyone", async () => {
   const s = services();
   const e = env();
   await account(e, s, "ana@example.com", ANA_PASSWORD);
-  assert.equal(WRONG_EVERYWHERE, 100);
-  const bots = Array.from({ length: 5 }, (_, i) => new Browser(e, { ip: `192.0.2.${i + 1}` }));
-  for (let i = 0; i < WRONG_EVERYWHERE; i++) {
-    const r = await withPassword(bots[i % 5], `person${i % 25}@example.com`, `stuffed password ${i}`);
-    assert.equal(r.status, 400, `try ${i}`);
+  assert.equal(WRONG_PER_NETWORK, 10);
+
+  /* A hundred wrong passwords, ten from each of ten networks, many addresses. */
+  for (let n = 1; n <= 10; n++) {
+    for (let i = 0; i < WRONG_PER_NETWORK; i++) {
+      const r = await withPassword(new Browser(e, { ip: `192.0.2.${n}` }), `person${n}-${i}@example.com`,
+                                   `stuffed password ${i}`);
+      assert.equal(r.status, 400, `network ${n}, try ${i}`);
+    }
   }
   const ana = new Browser(e, { ip: "198.51.100.9" });
-  const { result, counts } = await derived(() => withPassword(ana, "ana@example.com", ANA_PASSWORD));
+  assert.equal((await withPassword(ana, "ana@example.com", ANA_PASSWORD)).status, 303, "nothing paused for Ana");
+
+  /* Each of those networks is paused, unhashed, even for the right password. */
+  const { result, counts } = await derived(() => withPassword(new Browser(e, { ip: "192.0.2.3" }), "ana@example.com",
+                                                              ANA_PASSWORD));
   assert.equal(result.status, 429);
+  assert.match(result.text, /from your network/);
   assert.deepEqual(counts, []);
 
+  /* Every address in an IPv6 /64 is one network. */
+  const statuses = [];
+  for (let i = 0; i < 12; i++) {
+    statuses.push((await withPassword(new Browser(e, { ip: `2001:db8:1:2::${(i % 5) + 1}` }), `spray${i}@example.org`,
+                                      `wrong password ${i}`)).status);
+  }
+  assert.deepEqual(statuses, [...Array(10).fill(400), 429, 429]);
+
+  /* There, the code still signs in; and the pause ends with the window. */
+  const there = new Browser(e, { ip: "2001:db8:1:2::77" });
   later(MINUTE + 1);
-  await askCode(ana, "ana@example.com");
-  assert.equal((await typeCode(ana, codeIn(s.emails.at(-1)))).status, 303, "the code still signs in");
-  assert.equal((await withPassword(new Browser(e, { ip: "198.51.100.10" }), "ana@example.com", ANA_PASSWORD)).status,
-    429, "a code gives one address its tries back, not everyone's");
+  await askCode(there, "ana@example.com");
+  assert.equal((await typeCode(there, codeIn(s.emails.at(-1)))).status, 303, "the code still signs in");
+  assert.equal((await withPassword(new Browser(e, { ip: "2001:db8:1:2::78" }), "ana@example.com", ANA_PASSWORD)).status,
+               429);
   later(LOCKOUT);
-  assert.equal((await withPassword(new Browser(e, { ip: "198.51.100.11" }), "ana@example.com", ANA_PASSWORD)).status, 303);
+  assert.equal((await withPassword(new Browser(e, { ip: "2001:db8:1:2::79" }), "ana@example.com", ANA_PASSWORD)).status,
+               303);
 });
 
 test("one network has twenty password hashes an hour, sign-ins among them", async () => {
@@ -770,8 +834,10 @@ test("one network has twenty password hashes an hour, sign-ins among them", asyn
   const e = env();
   const b = new Browser(e, { ip: "203.0.113.80" });
   for (let i = 0; i < 20; i++) {
+    if (i === WRONG_PER_NETWORK) later(LOCKOUT + 1);
     assert.equal((await withPassword(b, `someone${i}@example.com`, ANA_PASSWORD)).status, 400, `try ${i}`);
   }
+  later(LOCKOUT + 1);
   const { result, counts } = await derived(() => withPassword(b, "one-more@example.com", ANA_PASSWORD));
   assert.equal(result.status, 429);
   assert.match(result.text, /from your network/);
@@ -810,7 +876,7 @@ test("signing in hashes the password again when the count has been raised, and o
 async function askReset(b, email) {
   const form = await b.get("/reset");
   assert.equal(form.status, 200, form.text);
-  return b.post("/reset", { form: tokenFor(form.text, "/reset"), email });
+  return b.post("/reset", { form: tokenFor(form.text, "/reset"), email, "cf-turnstile-response": solved("reset") });
 }
 
 test("asking for a reset answers the same for every address, and takes from the day's mail", async () => {

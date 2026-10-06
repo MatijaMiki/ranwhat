@@ -33,14 +33,16 @@
  * decoy, one PBKDF2 run at the current count, as a real one would be. An
  * address gets five tries in fifteen minutes, counted before the hash so
  * that tries at once cannot slip past, and started again by a right
- * password or a typed code. A hundred wrong passwords across every
- * address in those fifteen minutes pause password sign-in for everyone.
- * Either way the emailed code still works, and is then the way in. Both
- * counts are kept per address or overall, whether or not an account
- * exists, so neither says anything about one.
+ * password or a typed code. Ten wrong passwords from one network (an IPv6
+ * /64, an IPv4 address) in those fifteen minutes pause password sign-in
+ * for that network, whatever the addresses: that caps spraying one
+ * password across many accounts without letting anyone pause it for
+ * everyone else. Either way the emailed code still works, and is then the
+ * way in. Both counts are kept whether or not an account exists, so
+ * neither says anything about one.
  */
 import { HOUR, event, now } from "./accounts.js";
-import { b64url, bump, forget, peek } from "./session.js";
+import { b64url, bump, forget, network, peek } from "./session.js";
 
 /* OWASP's 2023 count for PBKDF2-HMAC-SHA256. PBKDF2_ITERATIONS sets
    another, for two limits on Workers:
@@ -195,15 +197,14 @@ async function pwned(password, get, wait) {
    go ahead. Asked before the breach check and the hash, which are what the
    limit protects. */
 export async function hashAllowed(request, env) {
-  const ip = request.headers.get("cf-connecting-ip") || "unknown";
-  return await bump(env, "hash-ip", ip, HOUR) <= HASHES_PER_NETWORK;
+  return await bump(env, "hash-ip", network(request), HOUR) <= HASHES_PER_NETWORK;
 }
 
 /* ---------- signing in with one ---------- */
 
 export const LOCKOUT = 15 * 60;          // the window both counts below are kept over
 export const TRIES_PER_ADDRESS = 5;      // password tries for one address in it
-export const WRONG_EVERYWHERE = 100;     // wrong passwords for all addresses together in it
+export const WRONG_PER_NETWORK = 10;     // wrong passwords from one network, for any addresses, in it
 
 /* What a password is checked against when the address has none: the
    current count, and a salt and hash of zero bytes. Never accepted, even
@@ -227,15 +228,17 @@ export async function passwordOf(env, user) {
 
 /* Whether `typed` is the password of the account at `email`, under the
    limits. { ok: true, user, stored } or { ok: false, why }:
-     "locked"       this address's tries, or everyone's wrong passwords, are
-                    used up for now: an emailed code is the way in;
+     "locked"       this address's tries, or this network's wrong
+                    passwords, are used up for now: an emailed code is the
+                    way in;
      "network"      the request's network has asked for its hashes;
      "unavailable"  the runtime refused to hash (PBKDF2_ITERATIONS);
      "wrong"        anything else, the same whatever the reason.
    A right one starts the address's tries again; a wrong one counts
-   towards everyone's. */
+   towards the network's. */
 export async function checkPassword(request, env, email, typed) {
-  if (await peek(env, "pw-wrong", "everyone", LOCKOUT) >= WRONG_EVERYWHERE) return { ok: false, why: "locked" };
+  const net = network(request);
+  if (await peek(env, "pw-wrong", net, LOCKOUT) >= WRONG_PER_NETWORK) return { ok: false, why: "locked" };
   const tries = await bump(env, "pw-tries", email, LOCKOUT);
   if (tries > TRIES_PER_ADDRESS) return { ok: false, why: "locked" };
   if (!await hashAllowed(request, env)) return { ok: false, why: "network" };
@@ -252,7 +255,7 @@ export async function checkPassword(request, env, email, typed) {
     await (await unlock(env, email)).run();
     return { ok: true, user: row.id, stored: row.hash };
   }
-  await bump(env, "pw-wrong", "everyone", LOCKOUT);
+  await bump(env, "pw-wrong", net, LOCKOUT);
   return { ok: false, why: tries >= TRIES_PER_ADDRESS ? "locked" : "wrong" };
 }
 

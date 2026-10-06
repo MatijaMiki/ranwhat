@@ -37,17 +37,26 @@ const KEEP_COUNTS = 7 * DAY;            // the daily email counts
    about 60, so a burst of sign-ups can never hold back someone's token. */
 export const AUTH_MAIL_PER_DAY = 60;
 
+/* The last of those are kept for someone already signed in who is asked to
+   confirm it is them (purpose 'stepup'): codes asked for from the sign-in,
+   sign-up and reset forms, by anyone, stop short of them. Strangers who use
+   up the day's sign-in mail still cannot stop a signed-in person from
+   approving a terminal or opening billing. */
+export const STEPUP_RESERVE = 10;
+
 export const now = () => Math.floor(Date.now() / 1000);
 
 /* "1" or "true" switch accounts on; unset, empty or anything else keeps
    them dark. */
 export const accountsOn = (env) => ["1", "true"].includes(String(env.ACCOUNTS_ON ?? "").trim().toLowerCase());
 
-/* Switched on and able to work: the database, a way to send the code, and
-   a secret of its own to keep codes and form tokens under. Never
-   LIST_SECRET, which every feed token is derived from. */
+/* Switched on and able to work: the database, a way to send the code, a
+   secret of its own to keep codes and form tokens under (never LIST_SECRET,
+   which every feed token is derived from), and Turnstile's secret, which
+   every form that mails a code is checked with (challenge.js). */
 export const ready = (env) => Boolean(env.LIST && env.RESEND_API_KEY &&
-  typeof env.ACCOUNT_SECRET === "string" && env.ACCOUNT_SECRET.length >= 32);
+  typeof env.ACCOUNT_SECRET === "string" && env.ACCOUNT_SECRET.length >= 32 &&
+  typeof env.TURNSTILE_SECRET === "string" && env.TURNSTILE_SECRET.length > 0);
 
 const SCHEMA = [
   /* The same table list.js makes; accounts_schema says which version of
@@ -198,7 +207,10 @@ const SCHEMA = [
      browser holding this attempt chose (password.js). This row is the only
      place it is kept until that browser types the code; then it moves to
      credentials, and it is cleared as soon as the attempt is used or
-     cancelled. The sweep deletes a row once its code is out of date. */
+     cancelled. mailed: 1 once its code is on its way. An attempt made while
+     the address was over its limits keeps 0: its code was never sent, and
+     no code typed into it is ever right (session.js). The sweep deletes a
+     row once its code is out of date. */
   `CREATE TABLE IF NOT EXISTS signins (
      id TEXT PRIMARY KEY,
      email TEXT NOT NULL,
@@ -211,6 +223,7 @@ const SCHEMA = [
      created_at INTEGER NOT NULL,
      expires_at INTEGER NOT NULL,
      tries INTEGER NOT NULL DEFAULT 0,
+     mailed INTEGER NOT NULL DEFAULT 0,
      used_at INTEGER)`,
   `CREATE INDEX IF NOT EXISTS signins_email ON signins (email_mac, created_at)`,
 
@@ -373,22 +386,27 @@ export async function history(env, userId, limit = 10) {
 
 const today = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
 
-/* Whether another account email may go out today. Read before the
-   per-address limits, so a day that is used up answers the same for every
-   address. */
-export async function authMailLeft(env) {
+/* How much of the day's account mail a code for `purpose` may use: all of
+   it for a signed-in step-up, all but STEPUP_RESERVE for anything else. */
+const mailCap = (purpose) => AUTH_MAIL_PER_DAY - (purpose === "stepup" ? 0 : STEPUP_RESERVE);
+
+/* How many more account emails for `purpose` may go out today. Read before
+   the per-address limits, so a day that is used up answers the same for
+   every address. */
+export async function authMailLeft(env, purpose = "signin") {
   const row = await env.LIST.prepare("SELECT sent FROM mail_counts WHERE day = ? AND kind = 'auth'")
     .bind(today()).first();
-  return Math.max(0, AUTH_MAIL_PER_DAY - (row ? row.sent : 0));
+  return Math.max(0, mailCap(purpose) - (row ? row.sent : 0));
 }
 
-/* Takes one email from today's budget, or returns false when none is
-   left. One statement, so two requests at once cannot both take the last. */
-export async function spendAuthMail(env) {
+/* Takes one email for `purpose` from today's budget, or returns false when
+   none is left for it. One statement, so two requests at once cannot both
+   take the last. */
+export async function spendAuthMail(env, purpose = "signin") {
   const taken = await env.LIST.prepare(
     `INSERT INTO mail_counts (day, kind, sent) VALUES (?, 'auth', 1)
      ON CONFLICT(day, kind) DO UPDATE SET sent = sent + 1 WHERE sent < ?`)
-    .bind(today(), AUTH_MAIL_PER_DAY).run();
+    .bind(today(), mailCap(purpose)).run();
   return taken.meta.changes === 1;
 }
 
