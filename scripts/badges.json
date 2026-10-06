@@ -1,6 +1,13 @@
 {
   "badges": [
     {
+      "name": "StartupBase",
+      "added": "2026-10-07",
+      "snippet": "<a href=\"https://startupbase.io/products/ranwhat?utm_source=startupbase&utm_medium=badge&utm_campaign=launch-badge-light\" target=\"_blank\" rel=\"noopener noreferrer\">\n  <img src=\"https://statics.startupbase.io/site/badges/launched-on-sb.svg\" alt=\"Launched on StartupBase\" height=\"55\" style=\"height:55px;width:auto;\" />\n</a>",
+      "sha256": "6b1fe68afd6228f1b9ff26d66c686b8b778552fba096a7148dc6ac3f3116b4ba",
+      "checked": "2026-10-07"
+    },
+    {
       "name": "Noonlaunch",
       "added": "2026-10-07",
       "snippet": "<a href=\"https://noonlaunch.com/product/ranwhat\" rel=\"dofollow\">\n  <img src=\"https://noonlaunch.com/badges/ranwhat.svg\"\n       alt=\"Featured on Noonlaunch\" width=\"220\" height=\"60\" />\n</a>",
