@@ -267,21 +267,27 @@
       <p class="lede">
         <span class="icode">scan</span>, <span class="icode">live</span> and <span class="icode">demo</span> rate each scope
         against a catalogue of what it allows, and one ships with ranwhat.
-        <span class="icode">update</span> fetches a newer one for a Plus subscription, and Plus
-        is <a href="/pricing">not available yet</a>.
+        <span class="icode">update</span> fetches a newer one for a Plus subscription, which
+        is <a href="/pricing">live now at &euro;12 a month</a> per organisation.
       </p>
       <div class="term" aria-label="What ranwhat update --status prints">
         <div class="term-bar"><span>ranwhat update</span></div>
         <div class="term-body"><pre><span class="c-mut">$</span> uvx ranwhat update --status
-  No feed cached. The bundled catalogue is in use.
-  A subscription adds providers as they ship new scopes:
-  https://ranwhat.com/pricing</pre></div>
+  No feed cached. The catalogue bundled with 0.5.0 is in use.
+<span class="c-mut">  Plus gets new scopes the day they are added; the next free release
+  gets them too: https://ranwhat.com/pricing</span></pre></div>
       </div>
       <p class="cmdnote">
         It is the only command that talks to ranwhat's own server, and it sends
         the subscription token and nothing else. Keep the token in
         <span class="icode">RANWHAT_TOKEN</span>, or pass <span class="icode">--token</span> once with
         <span class="icode">--save-token</span>. <span class="icode">--status</span> stays offline.
+      </p>
+      <p class="cmdnote">
+        On a terminal, <span class="icode">scan</span>, <span class="icode">live</span> and
+        <span class="icode">update --status</span> may add one dim line about the feed, on stderr
+        and never with <span class="icode">--json</span>. <span class="icode">RANWHAT_NO_HINTS=1</span>
+        turns it off.
       </p>
       <p class="flaglist">Flags: <a href="#flag-token"><span class="icode">--token TOKEN</span></a>, <a href="#flag-save-token"><span class="icode">--save-token</span></a>, <a href="#flag-status"><span class="icode">--status</span></a>.</p>
     </div>

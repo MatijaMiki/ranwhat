@@ -20,7 +20,9 @@ import shutil
 import sys
 import time
 
-from .score import scan as _run_scan, ProfileError, _validate as _validate_profile
+from . import __version__
+from .score import (scan as _run_scan, ProfileError, UNCLASSIFIED,
+                    _validate as _validate_profile)
 from .report import render
 from . import watch as watch_mod
 from . import clean as clean_mod
@@ -28,6 +30,7 @@ from . import known as known_mod
 from . import catalog as catalog_mod
 from . import agents as agents_mod
 from . import sources as sources_mod
+from . import hints
 from . import term
 
 # introspect, usage and feed talk to providers and to the feed, and import
@@ -463,10 +466,17 @@ def _update(args):
     if args.status:
         st = feed_mod.status()
         if not st["active"]:
+            # The fact only, for any reader. Plus is left to the hint: on a
+            # terminal, once, and not to someone with a token, who needs
+            # `update` rather than a subscription.
             sys.stdout.write(
-                "  No feed cached. The bundled catalogue is in use.\n"
-                "  A subscription adds providers as they ship new scopes:\n"
-                "  https://ranwhat.com/pricing\n")
+                "  No feed cached. The catalogue bundled with %s is in use.\n"
+                % __version__)
+            if hints.allowed("bundled-catalogue", json=args.json) and not _has_plus():
+                hints.hint("bundled-catalogue", term.wrap(
+                    "Plus gets new scopes the day they are added; the next "
+                    "free release gets them too: https://ranwhat.com/pricing",
+                    stream=sys.stderr), json=args.json)
             return 0
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(st["fetched_at"]))
         sys.stdout.write(
@@ -512,6 +522,47 @@ def _update(args):
         "  Updated to feed %s\n  %d providers, %d scopes\n"
         % (doc.get("version") or "?", len(cat), sum(len(v) for v in cat.values())))
     return 0
+
+
+def _has_plus():
+    """A token, in the environment or saved, or a cached feed with a scope
+    this release lacks: someone a hint about the feed would only repeat
+    itself to. Read from this machine; the server is never asked."""
+    try:
+        return bool(_module("feed_mod").read_token()) or catalog_mod.feed_adds_scopes()
+    except Exception:
+        # A token file that cannot be read (not UTF-8, say) is still one.
+        # The hint is skipped, and nothing fails after a report has printed.
+        return True
+
+
+def _catalogue_hint(result, args):
+    """Under a scan or live report on a terminal: how many scopes the
+    bundled catalogue could not rate, and that the feed rates new ones
+    before the next release does. Not for demo, whose unclassified scope is
+    part of the example, and never under --json.
+
+    Only scopes of a provider the bundle rates count, each once however many
+    credentials hold it. "generic" (a credential that names no provider, or
+    an RFC 7662 issuer) has no catalogue for the feed to add to, and neither
+    has a provider ranwhat does not know, so a hint for their scopes would
+    sell the feed for something it does not cover."""
+    if not any(f["title"] == UNCLASSIFIED for f in result["findings"]):
+        return
+    unrated = {(r["provider"], r["scope"]) for r in result["scopes"]
+               if not r["known"] and catalog_mod.CATALOG.get(r["provider"])}
+    if (not unrated or not hints.allowed("unclassified-scopes", json=args.json)
+            or _has_plus()):
+        return
+    n = len(unrated)
+    # Pricing, not `update`: without a token, which is who this reaches,
+    # update stops at "No token".
+    hints.hint("unclassified-scopes", term.wrap(
+        "%s not in the catalogue bundled with %s. The Plus feed adds new "
+        "scopes between releases: https://ranwhat.com/pricing"
+        % ("This scope is" if n == 1 else "These %d scopes are" % n,
+           __version__), stream=sys.stderr), json=args.json)
+
 
 def _finding_json(f):
     """A clean finding as JSON. files, origins and projects are sets in
@@ -1264,8 +1315,12 @@ def _quiet_stdout():
 
 
 def _main(argv=None):
+    # The opt-out is said where someone who saw a hint would look for it.
     p = argparse.ArgumentParser(prog="ranwhat",
-                                description=TAGLINE + " " + NETWORK)
+                                description=TAGLINE + " " + NETWORK,
+                                epilog="RANWHAT_NO_HINTS=1 turns off the dim "
+                                       "one-line hints some commands print on "
+                                       "a terminal. None is printed with --json.")
     p.add_argument("command", nargs="?",
                    choices=["check", "demo", "scan", "live", "watch",
                             "clean", "sources", "update"])
@@ -1462,8 +1517,9 @@ def _main(argv=None):
         profile, online = _load(args.profile), False
         if args.pull_usage:
             profile, online = _pull_usage(profile, args)
-        _emit(run_scan(profile, args.profile, pulled=args.pull_usage), args,
-              online=online)
+        result = run_scan(profile, args.profile, pulled=args.pull_usage)
+        _emit(result, args, online=online)
+        _catalogue_hint(result, args)
         return 0
 
     # live
@@ -1490,7 +1546,9 @@ def _main(argv=None):
     profile = {"agent": "live-scan", "credentials": creds, "controls": controls}
     if args.pull_usage:
         profile, _ = _pull_usage(profile, args)
-    _emit(run_scan(profile, pulled=args.pull_usage), args, online=True)
+    result = run_scan(profile, pulled=args.pull_usage)
+    _emit(result, args, online=True)
+    _catalogue_hint(result, args)
     return 0
 
 

@@ -20,7 +20,8 @@
  * trigger sends each new release in /rss.xml as one broadcast.
  *
  * GET feed.ranwhat.com/v1/catalogue: the subscription feed `ranwhat update`
- * reads, in feed.js. Routed here from its own hostname.
+ * reads, in feed.js, to whoever auth.js says holds a live token. Routed here
+ * from its own hostname.
  *
  * /api/checkout, /api/welcome, /api/stripe and /api/billing: buying Plus
  * through Stripe, in stripe.js. Paying issues the token the feed accepts.

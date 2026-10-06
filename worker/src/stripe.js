@@ -8,7 +8,7 @@
  *                       the token, the same one the email carries.
  *   POST /api/stripe    Stripe's webhook. After a checkout: the token, by
  *                       email. On any change to a subscription: its status,
- *                       which feed.js checks on every `ranwhat update`.
+ *                       which auth.js checks on every `ranwhat update`.
  *   GET  /api/billing   The customer portal's login page, where a subscriber
  *                       changes plan or card, gets invoices, or cancels.
  *
@@ -25,7 +25,7 @@
  * endpoint and the portal. Secrets: STRIPE_SECRET_KEY and
  * STRIPE_WEBHOOK_SECRET, with the list's RESEND_API_KEY and LIST_SECRET.
  */
-import { LIVE, schema, sha256 } from "./feed.js";
+import { LIVE, schema, sha256 } from "./auth.js";
 import { CODE, REPLY_TO, SENDER, escape, mail, page, resend, same, sign, switchedOn } from "./list.js";
 
 const ORIGIN = "https://ranwhat.com";
@@ -121,7 +121,7 @@ function seller(env) {
 
 /* ---------- tokens ---------- */
 
-/* The subscription as Stripe has it now, with its status kept for feed.js
+/* The subscription as Stripe has it now, with its status kept for auth.js
    and returned as kept. Fetched rather than read from the event: Stripe
    does not promise to deliver events in order, and a late one must not
    bring back an old status. null when it is not something this sells. */

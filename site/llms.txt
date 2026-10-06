@@ -17,7 +17,7 @@ Commands:
 - `ranwhat scan profile.json`: scores authority, observability and reversibility for the credentials an agent holds. `--html report.html` writes a report. `--pull-usage` checks which grants were used, against the provider's own audit trail.
 - `ranwhat live`: the same, from read-only token introspection. Pass tokens in the environment (`RANWHAT_GITHUB_TOKEN`, `RANWHAT_GOOGLE_TOKEN`, `RANWHAT_SLACK_TOKEN`, `RANWHAT_STRIPE_TOKEN`), not as flags.
 - `ranwhat demo`: an authority scan on a bundled example, with no setup.
-- `ranwhat update`: refreshes the capability catalogue. Needs a Plus subscription, and Plus is not available yet.
+- `ranwhat update`: refreshes the capability catalogue. Needs a Plus subscription, which is live: €12 a month per organisation. On a terminal, `scan`, `live` and `update --status` may add one dim line about the feed on stderr, never with `--json`; `RANWHAT_NO_HINTS=1` turns it off.
 
 Agents read: Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, Grok Build, Droid, Kimi Code, Kimi CLI, Pi, Muse Code and OpenClaw. `check`, `watch` and `clean` read all twelve, each from where it keeps its history, for the last 30 days by default (`--days N`). For Claude Code that is `~/.claude/projects/*/*.jsonl` and each session's `subagents/` transcripts, or the same under `$CLAUDE_CONFIG_DIR/projects` when that is set; `--root PATH` reads another directory. Databases and compressed files are only read: OpenClaw's history is a database, so `clean` finds its secrets but cannot mask them there. Meta Muse, Grok Bot and the current Amp keep their history in their vendor's cloud, so there is nothing local to read. Cursor is next.
 

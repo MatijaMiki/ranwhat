@@ -1,11 +1,13 @@
 """The site states numbers that come from the catalogue. Those numbers drift
 the moment a provider is added, and a marketing page that undercounts its own
 product is the kind of thing nobody notices for months."""
+import contextlib
 import difflib
 import functools
 import html
 import html.parser
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -18,7 +20,7 @@ import unittest
 from unittest import mock
 
 import ranwhat
-from ranwhat import catalog, cli, feed
+from ranwhat import catalog, cli, feed, hints
 
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 ORIGIN = "https://ranwhat.com"
@@ -126,6 +128,40 @@ class ExampleReportIgnoresThisMachinesFeed(unittest.TestCase):
         self.assertEqual(os.environ["RANWHAT_HOME"], self.home)
         self.assertEqual(catalog.lookup("slack", "chat:write")["label"],
                          "Pay anyone")
+
+
+class UpdateSampleIsWhatUpdatePrints(unittest.TestCase):
+    """commands.html shows `update --status` with no feed, as a terminal
+    shows it: the line naming the bundled release, then the dim hint. The
+    line carries the version, so a release that does not change the page
+    fails here rather than showing last release's number."""
+
+    class _Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    def test_the_sample_matches(self):
+        home = tempfile.mkdtemp(prefix="update-home-")
+        self.addCleanup(shutil.rmtree, home, True)
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("RANWHAT_TOKEN", "RANWHAT_NO_HINTS")}
+        env.update(RANWHAT_HOME=home, NO_COLOR="1")
+        out, err = io.StringIO(), self._Tty()
+        with mock.patch.dict(os.environ, env, clear=True), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            hints.reset()
+            catalog.reset_feed_cache()
+            try:
+                self.assertEqual(cli.main(["update", "--status"]), 0)
+            finally:
+                hints.reset()
+                catalog.reset_feed_cache()
+        sample = re.search(r'aria-label="What ranwhat update --status prints">'
+                           r'.*?<pre>(.*?)</pre>', read(SITE / "commands.html"), re.S)
+        shown = plain(sample.group(1)).replace("$ uvx ranwhat update --status", "", 1)
+        self.assertIn("No feed cached", out.getvalue())
+        self.assertTrue(err.getvalue(), "the hint is part of the sample")
+        self.assertEqual(shown.strip(), " ".join((out.getvalue() + err.getvalue()).split()))
 
 
 class AdMeasurementNeedsConsent(unittest.TestCase):
