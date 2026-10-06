@@ -1,0 +1,5 @@
+# Directory badge images served from here (scripts/badges.py add --self-host).
+# badges.json records each file's sha256, so its bytes must come out of git
+# exactly as they went in: a Windows checkout would otherwise turn an SVG's
+# LF into CRLF and the check would refuse the file.
+site/badges/* -text
