@@ -91,11 +91,31 @@ def read_token():
     tok = os.environ.get("RANWHAT_TOKEN")
     if tok:
         return tok.strip()
+    return saved_token()[0]
+
+
+def saved_token():
+    """(token, why): the token saved at ~/.ranwhat/token, read without
+    following a symlink, or None and why not: 'none', 'symlink' or
+    'unreadable'. `ranwhat login` writes that file; a symlink planted there
+    would otherwise have whatever it points to sent as a Bearer token."""
+    path = token_path()
+    if os.path.islink(path):
+        return None, "symlink"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     try:
-        with open(token_path(), encoding="utf-8") as fh:
-            return fh.read().strip() or None
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None, "none"
     except OSError:
-        return None
+        return None, "unreadable"
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            data = fh.read(4096)
+        token = data.decode("utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None, "unreadable"
+    return (token, "ok") if token else (None, "unreadable")
 
 
 def save_token(token):
@@ -198,21 +218,28 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
                         "with your token." % newurl)
 
 
+_LOOPBACK = ("localhost", "127.0.0.1", "::1")
+
+
 def _check_url(url):
     """https only. Plain http is allowed to this machine alone, for testing a
     feed server locally; anywhere else it would send the token in clear."""
     parts = urllib.parse.urlsplit(url)
     if parts.scheme == "https" and parts.hostname:
         return
-    if parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1"):
+    if parts.scheme == "http" and parts.hostname in _LOOPBACK:
         return
     raise FeedError("The feed URL must be https: %s" % url)
 
 
 def _open(req, timeout, context):
-    opener = urllib.request.build_opener(
-        _NoRedirect, urllib.request.HTTPSHandler(context=context))
-    return opener.open(req, timeout=timeout)
+    handlers = [_NoRedirect, urllib.request.HTTPSHandler(context=context)]
+    # A server on this machine, the only one plain http may reach
+    # (_check_url), is asked directly: through an http_proxy from the
+    # environment the token would go, in clear, to wherever the proxy is.
+    if urllib.parse.urlsplit(req.full_url).hostname in _LOOPBACK:
+        handlers.append(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(*handlers).open(req, timeout=timeout)
 
 
 def _check_token(token):

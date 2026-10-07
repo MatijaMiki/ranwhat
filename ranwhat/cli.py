@@ -497,6 +497,10 @@ def _update(args):
     # Stripped as every other token is: a \r from a CRLF file would make
     # http.client quote the header, token and all, into its error.
     token = (args.token or "").strip() or feed_mod.read_token()
+    if not token and feed_mod.saved_token()[1] == "symlink":
+        sys.stderr.write("  %s is a symlink; not reading a token through it.\n"
+                         % feed_mod.token_path())
+        return 1
     if not token:
         sys.stderr.write(
             "  No token. Set RANWHAT_TOKEN, or pass --token with --save-token\n"
@@ -560,16 +564,23 @@ def _account(p, args):
         p.error("--token is for update and whoami; %s uses the token saved "
                 "on this machine" % args.command)
     account_mod = _module("account_mod")
-    if args.command == "login":
-        return account_mod.login(force=args.force, no_browser=args.no_browser)
-    if args.command == "logout":
-        return account_mod.logout(local=args.local)
-    if token:
-        sys.stderr.write(
-            "  Warning: a token in the command line is readable by every user\n"
-            "  on this machine through the process table, and is written to\n"
-            "  your shell history. Prefer RANWHAT_TOKEN.\n\n")
-    return account_mod.whoami(token=token or None)
+    # Each waits on the server for up to account.TIMEOUT. Ctrl-C there is
+    # an answer, not a traceback; login and logout say what it left where
+    # it matters (a token linked or revoked), and anything else is this.
+    try:
+        if args.command == "login":
+            return account_mod.login(force=args.force, no_browser=args.no_browser)
+        if args.command == "logout":
+            return account_mod.logout(local=args.local)
+        if token:
+            sys.stderr.write(
+                "  Warning: a token in the command line is readable by every user\n"
+                "  on this machine through the process table, and is written to\n"
+                "  your shell history. Prefer RANWHAT_TOKEN.\n\n")
+        return account_mod.whoami(token=token or None)
+    except KeyboardInterrupt:
+        sys.stderr.write("\n  Cancelled.\n")
+        return 130
 
 
 def _has_plus():
@@ -579,13 +590,17 @@ def _has_plus():
     organisation's machine is not: its person still sees the hints. Read
     from this machine; the server is never asked."""
     try:
-        token = _module("feed_mod").read_token()
+        feed_mod = _module("feed_mod")
+        token = feed_mod.read_token()
+        if token is None and feed_mod.saved_token()[1] != "none":
+            # A token file that cannot be read, or a symlink, is still one.
+            return True
         if token and _module("account_mod").cached_plan(token) != "free":
             return True
         return catalog_mod.feed_adds_scopes()
     except Exception:
-        # A token file that cannot be read (not UTF-8, say) is still one.
-        # The hint is skipped, and nothing fails after a report has printed.
+        # Whatever else goes wrong here, the hint is skipped, and nothing
+        # fails after a report has printed.
         return True
 
 

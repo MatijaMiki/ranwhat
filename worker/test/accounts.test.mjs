@@ -977,7 +977,7 @@ test("an owner renames the organisation; a name is escaped, and a member cannot"
   assert.ok(home.text.includes("Acme &lt;b&gt;&amp; Co"));
   assert.ok(!home.text.includes("<b>&"));
   assert.equal(rows(e, "SELECT name FROM orgs")[0].name, "Acme <b>& Co");
-  for (const bad of ["", "   ", "x".repeat(81), "evil‮gnp.exe", "bell\u0007"]) {
+  for (const bad of ["", "   ", "x".repeat(81), "evil\u202egnp.exe", "bell\u0007"]) {
     r = await ana.post("/org", { form: tokenFor(home.text, "/org"), name: bad });
     assert.equal(r.status, 400, JSON.stringify(bad));
   }

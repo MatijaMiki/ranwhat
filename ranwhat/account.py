@@ -1,9 +1,11 @@
 """Linking this machine to a ranwhat.com account: login, whoami, logout.
 
 Three opt-in commands, and with `update` the only ones that talk to
-ranwhat's own server. cli.py imports this module only for them, as it does
-feed.py for `update`: check, watch, clean, sources, scan, live and demo
-never load it or the HTTP stack it uses, and none of them needs an account.
+ranwhat's own server. None of the others needs an account. check, watch,
+clean and sources never load this module or the HTTP stack it uses. scan,
+live and `update --status` may load it, with feed.py, to read the plan
+cache below for the hints about Plus (cli._has_plus), and ask the server
+nothing.
 
   login   RFC 8628's device authorization grant, as `gh auth login` does
           it. The server hands out a device code to poll with and a user
@@ -13,7 +15,9 @@ never load it or the HTTP stack it uses, and none of them needs an account.
           none is printed or opened with it, so a link someone else sends
           cannot approve a terminal in one click. The first poll after
           approval returns this machine's own token, which is saved where
-          `update` reads it (0600, never written through a symlink).
+          `update` reads it (0600, never written through a symlink). With
+          --force it replaces a token already saved there, and then asks
+          the server to revoke the one it replaced, as logout would.
   whoami  the account, organisation and plan a token belongs to.
   logout  asks the server to revoke this machine's token, then deletes it;
           when the server cannot say it did, keeps it and exits 1, and
@@ -26,9 +30,10 @@ named on the web, by its person, never by what it says about itself. The
 token never goes in argv or a URL.
 
 What is kept: the token, in ~/.ranwhat/token, and in ~/.ranwhat/account.json
-(0600) the plan, organisation and email last heard for it, with the token's
-SHA-256 and never the token, so that a machine linked to a Free
-organisation still sees the hints about Plus (cli._has_plus).
+(0600) the plan, organisation and email last heard for it and for the few
+tokens last used before it (one from RANWHAT_TOKEN or --token, say), each
+under the token's SHA-256 and never the token, so that a machine linked to
+a Free organisation still sees the hints about Plus (cli._has_plus).
 
 Everything the server says is shown only after it is checked: text loses
 any terminal control character, a link is printed or opened only when it is
@@ -73,7 +78,9 @@ _DEVICE_CODE = re.compile(r"[A-Za-z0-9._~+/=-]{16,512}\Z")
 # Shown text loses terminal control characters (feed.py's class) and the
 # invisible ones that reorder or hide what is around them: an organisation
 # named with U+202E could make the line it is on read as something else.
-_HIDDEN = re.compile(r"[​-‏‪-‮⁠-⁩﻿]")
+# Written as escapes: the characters themselves in source would reorder the
+# line for whoever reads it (Trojan Source, CVE-2021-42574).
+_HIDDEN = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
 _LOCAL = ("localhost", "127.0.0.1", "::1")
 _SSH = ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
 
@@ -138,12 +145,37 @@ def _write_private(path, text):
         raise
 
 
+# Tokens the plan cache keeps an entry for, the latest first: the saved one,
+# and one or two used beside it with RANWHAT_TOKEN or --token, so that
+# using another token never costs the saved one what was heard for it.
+CACHE_ENTRIES = 4
+
+
+def _entries():
+    """The plan cache's entries, each a dict with a token_sha256 and a
+    known plan; [] for a cache that is missing or not one. Never raises."""
+    try:
+        with open(cache_path(), encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return []
+    entries = doc.get("tokens") if isinstance(doc, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries if isinstance(e, dict)
+            and isinstance(e.get("token_sha256"), str) and e.get("plan") in PLANS]
+
+
 def remember(token, plan, org=None, email=None):
-    """Note the plan last heard for `token`. A convenience for the hints
-    only: a cache that cannot be written is no cache, never an error."""
+    """Note the plan last heard for `token`, beside what was heard for the
+    few tokens before it. A convenience for the hints only: a cache that
+    cannot be written is no cache, never an error."""
     if plan not in PLANS:
         return
-    doc = {"token_sha256": _sha256(token), "plan": plan, "org": org, "email": email}
+    key = _sha256(token)
+    entry = {"token_sha256": key, "plan": plan, "org": org, "email": email}
+    kept = [e for e in _entries() if e["token_sha256"] != key]
+    doc = {"tokens": [entry] + kept[:CACHE_ENTRIES - 1]}
     try:
         _write_private(cache_path(), json.dumps(doc, indent=1, sort_keys=True))
     except OSError:
@@ -152,15 +184,11 @@ def remember(token, plan, org=None, email=None):
 
 def cached(token):
     """What remember() kept for this token, or None. Never raises."""
-    try:
-        with open(cache_path(), encoding="utf-8") as fh:
-            doc = json.load(fh)
-    except (OSError, ValueError, RecursionError):
-        return None
-    if (not isinstance(doc, dict) or doc.get("token_sha256") != _sha256(token)
-            or doc.get("plan") not in PLANS):
-        return None
-    return doc
+    key = _sha256(token)
+    for entry in _entries():
+        if entry["token_sha256"] == key:
+            return entry
+    return None
 
 
 def cached_plan(token):
@@ -169,9 +197,11 @@ def cached_plan(token):
 
 
 def _forget():
+    """Delete the plan cache. A cache: one that cannot be deleted is left,
+    never an error."""
     try:
         os.unlink(cache_path())
-    except FileNotFoundError:
+    except OSError:
         pass
 
 
@@ -386,26 +416,9 @@ def revoke(token):
 # ---------- the saved token ----------
 
 def _saved_token():
-    """(token, why): the token saved at ~/.ranwhat/token, read without
-    following a symlink, or None and why not: 'none', 'symlink' or
-    'unreadable'."""
-    path = feed.token_path()
-    if os.path.islink(path):
-        return None, "symlink"
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    try:
-        fd = os.open(path, flags)
-    except FileNotFoundError:
-        return None, "none"
-    except OSError:
-        return None, "unreadable"
-    try:
-        with os.fdopen(fd, "rb") as fh:
-            data = fh.read(4096)
-        token = data.decode("utf-8").strip()
-    except (OSError, UnicodeDecodeError):
-        return None, "unreadable"
-    return (token, "ok") if token else (None, "unreadable")
+    """(token, why) for the token saved on this machine: feed.saved_token(),
+    which never reads through a symlink."""
+    return feed.saved_token()
 
 
 def _plan_name(plan):
@@ -480,6 +493,28 @@ def _open_browser(url):
         return False
 
 
+def _revoke_replaced(token, out, err):
+    """login --force: revoke the token the new one replaced, as logout
+    would. The server revokes a terminal's own token only; a shared one (a
+    subscription's or a CI token) is left as it is, and said to be."""
+    try:
+        said = revoke(token)
+    except Rejected:
+        out.write("  The token this machine had before was no longer accepted, so there\n"
+                  "  was nothing to revoke.\n")
+        return
+    except (feed.FeedError, KeyboardInterrupt):
+        err.write("  The token this machine had before could not be revoked, so it may\n"
+                  "  still work. Revoke it at %s\n" % ACCOUNT_PAGE)
+        return
+    if said == "revoked":
+        out.write("  The token this machine had before is revoked.\n")
+    else:
+        out.write("  The token this machine had before is a shared one (a subscription's\n"
+                  "  or a CI token), so it was not revoked and still works wherever else\n"
+                  "  it is used.\n")
+
+
 # ---------- the commands ----------
 
 def login(force=False, no_browser=False, out=None, err=None):
@@ -496,6 +531,10 @@ def login(force=False, no_browser=False, out=None, err=None):
                   "  Run ranwhat logout first, or ranwhat login --force to replace it.\n"
                   % _whose_saved(token))
         return 1
+    # With --force, the token being replaced: revoked once the new one is
+    # saved, so that linking a machine again, because its token may have
+    # leaked, leaves no copy of the old one working.
+    replaced = _saved_token()[0] if force else None
     try:
         code = request_code()
         out.write(
@@ -521,6 +560,12 @@ def login(force=False, no_browser=False, out=None, err=None):
 
     try:
         feed.save_token(got["token"])
+    except KeyboardInterrupt:
+        out.write("\n")
+        err.write("  Cancelled after the machine was linked, perhaps before its token was\n"
+                  "  saved. If ranwhat whoami says this machine is not logged in, revoke\n"
+                  "  the new token at %s and run ranwhat login again.\n" % ACCOUNT_PAGE)
+        return 130
     except (feed.FeedError, OSError) as exc:
         err.write("  The machine was linked, but its token could not be saved: %s\n"
                   "  Revoke it at %s and run ranwhat login again.\n"
@@ -531,6 +576,8 @@ def login(force=False, no_browser=False, out=None, err=None):
               % (got["org"] or "your organisation", got["email"] or "you",
                  _plan_name(got["plan"])))
     out.write("  Name this machine, or unlink it, at %s\n" % ACCOUNT_PAGE)
+    if replaced is not None and replaced != got["token"]:
+        _revoke_replaced(replaced, out, err)
     if got["plan"] == "free":
         out.write("\n")
         _needs_plus(out)
@@ -649,6 +696,11 @@ def logout(local=False, out=None, err=None):
     else:
         try:
             revoked = revoke(token)
+        except KeyboardInterrupt:
+            out.write("\n")
+            err.write("  Cancelled before the server answered, so the token may still work.\n"
+                      "  It is kept at %s; run ranwhat logout again.\n" % path)
+            return 130
         except Rejected:
             note = "The server no longer accepted it, so there was nothing to revoke."
         except feed.FeedError as exc:
@@ -663,10 +715,17 @@ def logout(local=False, out=None, err=None):
 
     try:
         feed.delete_token()
-        _forget()
-    except OSError as exc:
-        err.write("  Could not delete %s: %s\n" % (path, type(exc).__name__))
-        return 1
+    except (OSError, KeyboardInterrupt) as exc:
+        stopped = isinstance(exc, KeyboardInterrupt)
+        if revoked == "revoked":
+            err.write("  The token is revoked on the server, but %s was not deleted%s.\n"
+                      "  Run ranwhat logout --local to delete it.\n"
+                      % (path, " (cancelled)" if stopped else ": " + type(exc).__name__))
+        else:
+            err.write("  Could not delete %s: %s\n"
+                      % (path, "cancelled" if stopped else type(exc).__name__))
+        return 130 if stopped else 1
+    _forget()
     if revoked == "revoked":
         out.write("  Logged out. This machine's token is revoked and deleted.\n")
     elif revoked == "shared":

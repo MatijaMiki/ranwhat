@@ -372,7 +372,7 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   r = await rename(ana, anas.id, "é".repeat(60));
   assert.equal(r.status, 303);
   assert.equal(labelOf(anas.id), "é".repeat(60));
-  for (const bad of ["", "   ", "x".repeat(61), "evil‮gnp.exe", "bell\u0007", "zero​width", ""]) {
+  for (const bad of ["", "   ", "x".repeat(61), "evil\u202egnp.exe", "bell\u0007", "zero\u200bwidth", ""]) {
     r = await rename(ana, anas.id, bad);
     assert.equal(r.status, 400, JSON.stringify(bad));
     assert.match(r.text, /A name is 1 to 60 characters/);

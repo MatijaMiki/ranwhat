@@ -239,6 +239,15 @@ export async function peek(env, kind, who, window) {
   return row ? row.count : 0;
 }
 
+/* One fewer in the window, for a count bumped before the thing it limits
+   turned out not to be one (a right code, counted as a try before it was
+   looked up). Never below nothing. */
+export async function unbump(env, kind, who, window) {
+  const key = await throttleKey(env, kind, who);
+  await env.LIST.prepare("UPDATE throttle SET count = count - 1 WHERE key = ? AND window_start > ? AND count > 0")
+    .bind(key, now() - window).run();
+}
+
 /* The statement that starts a count again from nothing, for the caller's
    batch. */
 export async function forget(env, kind, who) {

@@ -782,7 +782,7 @@ test("a terminal is named on the page that approves it: without a good name noth
   const code = shown.text.match(/name="user_code" value="([^"]+)"/)[1];
   const form = tokenFor(shown.text, "/device/approve");
 
-  for (const bad of [undefined, "", "   ", "x".repeat(61), "evil‮gnp.exe", "bell\u0007", "zero​width"]) {
+  for (const bad of [undefined, "", "   ", "x".repeat(61), "evil\u202egnp.exe", "bell\u0007", "zero\u200bwidth"]) {
     const sent = { form, user_code: code, org };
     if (bad !== undefined) sent.label = bad;
     const r = await b.post("/device/approve", sent);
@@ -887,6 +887,40 @@ test("wrong codes: five in ten minutes lock a session's form, and five at one wa
                      sha(target.device_code)]) {
     assert.ok(!keys.includes(raw));
   }
+});
+
+test("guesses sent at once are held to the limits: each is counted before it is looked up", async () => {
+  const s = services();
+  const e = env();
+  const victim = await newCode(e, { ip: "203.0.113.77" });
+  const b = new Browser(e, { ip: "198.51.100.40" });
+  await signIn(b, s, "mallory@example.com");
+  const form = tokenFor((await b.get("/device")).text, "/device");
+  /* Fifty wrong guesses that share nothing with the waiting code, and the
+     waiting code itself among them, past the first few. */
+  const guesses = Array.from({ length: 50 }, (_, k) => stranger(victim.user_code, (k % 19) + 1));
+  guesses[30] = victim.user_code;
+  const replies = await Promise.all(guesses.map((user_code) => b.post("/device", { form, user_code })));
+  const looked = replies.filter((r) => r.status !== 429);
+  assert.ok(looked.length <= device.WRONG_PER_SESSION, `${looked.length} guesses were looked up`);
+  assert.ok(replies.filter((r) => r.status === 429).length >= 50 - device.WRONG_PER_SESSION);
+  assert.ok(!replies.some((r) => /Approve this terminal/.test(r.text)), "the waiting code was never shown");
+  assert.equal(stateOf(e, victim.device_code).state, "pending");
+  /* Locked afterwards, the right code included. */
+  assert.equal((await b.get("/device")).status, 429);
+  assert.equal((await b.post("/device", { form, user_code: victim.user_code })).status, 429);
+
+  /* A right code gives its try back: a person who types their own code
+     between wrong ones is not locked out sooner for it. */
+  const ana = new Browser(e, { ip: "198.51.100.41" });
+  await signIn(ana, s);
+  const mine = await newCode(e, { ip: "198.51.100.41" });
+  for (let k = 1; k <= 3; k++) assert.equal((await typeDevice(ana, stranger(mine.user_code, k))).status, 400);
+  assert.equal((await typeDevice(ana, mine.user_code)).status, 200);
+  const fourth = await typeDevice(ana, stranger(mine.user_code, 4));
+  assert.equal(fourth.status, 400);
+  assert.match(fourth.text, /That code is not right\. 1 try left\./);
+  assert.equal((await typeDevice(ana, stranger(mine.user_code, 5))).status, 429);
 });
 
 test("an account gets ten wrong codes an hour over all its sessions", async () => {
@@ -998,7 +1032,7 @@ test("last use is noted to the day, at most once a day, and never for a shared t
 
 /* ---------- housekeeping ---------- */
 
-test("slow_down adds five seconds each time, up to a minute, and a network's polls are capped", async () => {
+test("slow_down adds five seconds each time, up to a minute, and polls with made-up codes never hold a terminal back", async () => {
   const e = env();
   const cli = await newCode(e);
   await poll(e, cli.device_code);
@@ -1010,13 +1044,27 @@ test("slow_down adds five seconds each time, up to a minute, and a network's pol
   later(60);
   assert.equal((await poll(e, cli.device_code)).json.error, "authorization_pending");
 
+  /* Someone on the same network polls with codes nobody holds, as many
+     times as an hour's budget once was: each is told invalid_grant, no
+     count is written for them, and the terminal waiting there is answered
+     on time, then given its token once approved. */
+  const s = services();
   const many = env();
   const code = await newCode(many, { ip: "203.0.113.50" });
-  for (let i = 0; i < device.POLLS_PER_NETWORK; i++) await poll(many, madeToken("").slice(0, 43), { ip: "203.0.113.50" });
-  const capped = await poll(many, code.device_code, { ip: "203.0.113.50" });
-  assert.deepEqual([capped.status, capped.json.error], [400, "slow_down"]);
-  assert.equal(stateOf(many, code.device_code).polled_at, null, "the code itself was not polled");
-  assert.equal((await poll(many, code.device_code, { ip: "203.0.113.51" })).json.error, "authorization_pending");
+  const throttles = count(many, "throttle");
+  for (let i = 0; i < 1250; i++) {
+    const r = await poll(many, madeToken("").slice(0, 43), { ip: "203.0.113.50" });
+    assert.equal(r.json.error, "invalid_grant");
+  }
+  assert.equal(count(many, "throttle"), throttles, "a made-up code writes nothing");
+  assert.equal((await poll(many, code.device_code, { ip: "203.0.113.50" })).json.error, "authorization_pending");
+  const b = new Browser(many);
+  await signIn(b, s);
+  assert.equal((await approve(b, code.user_code)).done.status, 200);
+  later(device.INTERVAL);
+  const got = await poll(many, code.device_code, { ip: "203.0.113.50" });
+  assert.equal(got.status, 200, got.text);
+  assert.match(got.json.access_token, /^rw_m_/);
 });
 
 test("the cron deletes device codes an hour after they expire; the terminal's token stays", async () => {
@@ -1140,17 +1188,33 @@ test("the real ranwhat login, whoami, update and logout, against the Worker over
     assert.match(linkedRun.stdout, /Linked to Personal as ana@example\.com \(Free\)\./);
     assert.match(linkedRun.stdout, /need Plus:\s+https:\/\/account\.ranwhat\.com\//);
 
-    const token = readFileSync(join(cli.home, "token"), "utf8").trim();
+    let token = readFileSync(join(cli.home, "token"), "utf8").trim();
     assert.match(token, /^rw_m_[A-Za-z0-9_-]{43}$/);
     assert.ok(!dump(e).includes(token), "D1 holds the token's hash, never the token");
     assert.equal(one(e, "SELECT kind FROM machines WHERE hash = ?", sha(token)).kind, "device");
     const cache = readFileSync(join(cli.home, "account.json"), "utf8");
     assert.ok(!cache.includes(token));
-    assert.equal(JSON.parse(cache).plan, "free");
+    assert.equal(JSON.parse(cache).tokens[0].plan, "free");
 
     const again = await cli.run("login");
     assert.equal(again.status, 1);
     assert.match(again.stderr, /already has a saved token \(ana@example\.com, Personal, Free\)/);
+
+    /* --force links it again, and revokes the token it replaces: no copy
+       of the old one is left working, nor listed on the account page. */
+    const forced = cli.start("login", "--no-browser", "--force");
+    const [, forcedCode] = await forced.until(/^ {4}([BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4})$/m);
+    assert.equal((await approve(b, forcedCode, "Ana's laptop")).done.status, 200);
+    const relinked = await forced.done;
+    assert.equal(relinked.status, 0, relinked.stderr);
+    assert.match(relinked.stdout, /The token this machine had before is revoked\./);
+    const replaced = token;
+    token = readFileSync(join(cli.home, "token"), "utf8").trim();
+    assert.notEqual(token, replaced);
+    assert.equal((await whoami(e, replaced)).status, 403, "the replaced token no longer works");
+    assert.equal((await whoami(e, token)).status, 200);
+    assert.equal(rows(e, `SELECT m.id FROM machines m JOIN tokens t ON t.hash = m.hash
+                          WHERE m.kind = 'device' AND t.revoked_at IS NULL`).length, 1);
 
     const who = await cli.run("whoami");
     assert.equal(who.status, 0, who.stderr);
@@ -1168,7 +1232,7 @@ test("the real ranwhat login, whoami, update and logout, against the Worker over
     const plus = await cli.run("update");
     assert.equal(plus.status, 0, plus.stderr);
     assert.match(plus.stdout, /Updated to feed/);
-    assert.equal(JSON.parse(readFileSync(join(cli.home, "account.json"), "utf8")).plan, "plus");
+    assert.equal(JSON.parse(readFileSync(join(cli.home, "account.json"), "utf8")).tokens[0].plan, "plus");
 
     const out = await cli.run("logout");
     assert.equal(out.status, 0, out.stderr);
@@ -1177,8 +1241,10 @@ test("the real ranwhat login, whoami, update and logout, against the Worker over
     assert.ok(one(e, "SELECT revoked_at FROM tokens WHERE hash = ?", sha(token)).revoked_at);
     assert.equal((await feed(e, token)).status, 403);
 
-    for (const r of [linkedRun, again, who, free, plus, out]) {
-      assert.ok(!r.stdout.includes(token) && !r.stderr.includes(token), "no command prints the token");
+    for (const r of [linkedRun, again, relinked, who, free, plus, out]) {
+      for (const t of [token, replaced]) {
+        assert.ok(!r.stdout.includes(t) && !r.stderr.includes(t), "no command prints a token");
+      }
     }
   } finally {
     cli.close();

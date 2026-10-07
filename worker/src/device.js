@@ -53,11 +53,14 @@
  * soft cap on the codes waiting at once, past which only a network with
  * none waiting gets one, and a ceiling past which nobody does; neither
  * device path answers a browser, so no web page can spend its visitors'
- * networks on them; polls per network an hour, and slow_down for a code
- * polled sooner than its interval, which then grows by five seconds; wrong
- * user codes per session (five in ten minutes lock the form), per account
- * and per network; and five wrong tries at one waiting code lock that
- * code, so that guessing at any one terminal stops there.
+ * networks on them; slow_down for a code polled sooner than its
+ * interval, which then grows by five seconds, and for a code nobody holds
+ * one read and no write, with no count a network shares, so that nobody
+ * else's polls can hold a waiting terminal back; wrong user codes per
+ * session (five in ten minutes lock the form), per account and per
+ * network, each counted before the code is looked up, so that guesses sent
+ * at once are held to the limits too; and five wrong tries at one waiting
+ * code lock that code, so that guessing at any one terminal stops there.
  */
 import { identify, plan, schema as feedSchema, sha256 } from "./auth.js";
 import { ACCOUNT_ORIGIN, HOUR, event, now, ready, schema as accountsSchema } from "./accounts.js";
@@ -66,7 +69,7 @@ import { escape, same } from "./list.js";
 import { MAX_LABEL, machineLabel } from "./machines.js";
 import {
   FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formOk, formToken, fresh, mac, network, peek, randomToken,
-  readCookie,
+  readCookie, unbump,
 } from "./session.js";
 import { fields, form, page, redirect, refused } from "./ui.js";
 
@@ -86,7 +89,6 @@ export const WAITING_PER_NETWORK = 5;     // and in DEVICE_FOR, so about as many
 export const CODE_NET_V6 = 48;            // for these two, an IPv6 network is its /48, not its /64
 export const MAX_PENDING = 1000;          // codes waiting at once past which only networks with none waiting get one
 export const PENDING_CEILING = 10 * MAX_PENDING; // and past which nobody does
-export const POLLS_PER_NETWORK = 1200;    // token polls from one network an hour
 export const WRONG_PER_SESSION = 5;       // wrong user codes one session may type in WRONG_WINDOW
 export const WRONG_WINDOW = 10 * 60;
 export const WRONG_PER_USER = 10;         // and one account in an hour, over all its sessions
@@ -319,9 +321,12 @@ export async function deviceToken(request, env) {
   if (typeof sent !== "string" || !DEVICE_CODE.test(sent)) return unknown();
   const db = env.LIST;
   await tables(db);
-  if (await bump(env, "device-poll-net", network(request), HOUR) > POLLS_PER_NETWORK) {
-    return oauthError(400, "slow_down", "Too many polls from your network. Wait longer between them.");
-  }
+  /* The code is looked up before anything is counted. A code nobody holds
+     costs one read by the table's key, and no write, and is answered
+     invalid_grant however many come; one that is waiting is held back by
+     its own polled_at and interval below. No count is shared by a network,
+     so polls with made-up codes from the same address, however many,
+     never slow a waiting terminal there. */
   const hash = await sha256(sent);
   const t = now();
   const row = await db.prepare("SELECT state, expires_at FROM device_codes WHERE device_hash = ?").bind(hash).first();
@@ -469,12 +474,44 @@ function ago(seconds) {
   return `${m} minute${m === 1 ? "" : "s"} ago`;
 }
 
+/* The three counts of wrong codes: this session's, this account's and
+   this network's, each with its window and its limit. */
+const WRONG_COUNTS = (request, who) => [
+  ["device-wrong", who.id, WRONG_WINDOW, WRONG_PER_SESSION],
+  ["device-wrong-user", who.user, HOUR, WRONG_PER_USER],
+  ["device-wrong-net", network(request), HOUR, WRONG_PER_NETWORK],
+];
+
 /* Whether this session, this account or this network has typed too many
-   wrong codes lately to type another. */
+   wrong codes lately to type another. Read only: for drawing the form.
+   A typed code is counted with countTry() before it is looked up. */
 async function overLimit(request, env, who) {
-  return await peek(env, "device-wrong", who.id, WRONG_WINDOW) >= WRONG_PER_SESSION ||
-    await peek(env, "device-wrong-user", who.user, HOUR) >= WRONG_PER_USER ||
-    await peek(env, "device-wrong-net", network(request), HOUR) >= WRONG_PER_NETWORK;
+  for (const [kind, key, window, limit] of WRONG_COUNTS(request, who)) {
+    if (await peek(env, kind, key, window) >= limit) return true;
+  }
+  return false;
+}
+
+/* Counts a typed code as a wrong try before it is looked up, and says
+   whether it may be: { ok, left }. Counting first, in the one statement
+   bump() is, is what holds the limits against a burst of guesses sent at
+   once: each gets its own count, and those past the limit are turned away
+   unlooked. A count past its limit stops the counting there, so a locked
+   session does not spend its account's or its network's tries. A code
+   that turns out right gives its try back (refund()). */
+async function countTry(request, env, who) {
+  let left = WRONG_PER_SESSION;
+  for (const [kind, key, window, limit] of WRONG_COUNTS(request, who)) {
+    const n = await bump(env, kind, key, window);
+    if (n > limit) return { ok: false, left: 0 };
+    if (kind === "device-wrong") left = limit - n;
+    else if (n === limit) left = 0;
+  }
+  return { ok: true, left };
+}
+
+async function refund(request, env, who) {
+  for (const [kind, key, window] of WRONG_COUNTS(request, who)) await unbump(env, kind, key, window);
 }
 
 const tooMany = () => page("Too many wrong codes", `<h1>Too many wrong codes.</h1>
@@ -535,14 +572,11 @@ function notWaiting(row) {
     <p><a href="/device">Type another code</a></p>`, { status: 400 });
 }
 
-/* A wrong code, counted for this session, this account and this network,
-   and against any waiting code whose first half it named: the fifth such
-   try locks that code. */
-async function wrongTry(request, env, who, others) {
+/* A wrong code, already counted for this session, this account and this
+   network by countTry(), counted against any waiting code whose first
+   half it named: the fifth such try locks that code. */
+async function wrongTry(env, others) {
   const t = now();
-  await bump(env, "device-wrong", who.id, WRONG_WINDOW);
-  await bump(env, "device-wrong-user", who.user, HOUR);
-  await bump(env, "device-wrong-net", network(request), HOUR);
   for (const r of others) {
     if (r.state !== "pending" || r.expires_at <= t) continue;
     if (await bump(env, "device-code-wrong", r.device_hash, DEVICE_FOR) >= WRONG_PER_CODE) {
@@ -567,14 +601,16 @@ export async function deviceLookup(request, env) {
     return codeBox(request, env, who, { status: 400,
       error: "A code is eight letters, in two groups of four, as your terminal printed it." });
   }
+  const tried = await countTry(request, env, who);
+  if (!tried.ok) return tooMany();
   const { row, others } = await find(env, code);
   if (!row) {
-    await wrongTry(request, env, who, others);
-    if (await overLimit(request, env, who)) return tooMany();
-    const left = WRONG_PER_SESSION - await peek(env, "device-wrong", who.id, WRONG_WINDOW);
+    await wrongTry(env, others);
+    if (tried.left <= 0) return tooMany();
     return codeBox(request, env, who, { status: 400,
-      error: `That code is not right. ${left} ${left === 1 ? "try" : "tries"} left.` });
+      error: `That code is not right. ${tried.left} ${tried.left === 1 ? "try" : "tries"} left.` });
   }
+  await refund(request, env, who);
   if (row.state !== "pending" || row.expires_at <= now()) return notWaiting(row);
   return confirmPage(env, who, code, row);
 }

@@ -404,10 +404,10 @@ class Login(AccountCase):
     def test_what_the_server_says_is_shown_without_control_characters(self):
         token = made()
         status, out, err = self.link(token, granted(
-            token, org="Ac\x1b[2Jme‮", email="ana@example.com\x07\r\x1b]52;c;eA==\x07"))
+            token, org="Ac\x1b[2Jme\u202e", email="ana@example.com\x07\r\x1b]52;c;eA==\x07"))
         self.assertEqual(status, 0, err)
         self.assertIn("Linked to Ac[2Jme as ana@example.com]52;c;eA== (Plus).", out)
-        for c in ("\x1b", "\x07", "\r", "‮"):
+        for c in ("\x1b", "\x07", "\r", "\u202e"):
             self.assertNotIn(c, out + err)
         description = "Wait\x1b[1A\x1b[2K, then try again."
         status, out, err = self.link(made(), (400, {"error": "x", "error_description": description}),
@@ -449,14 +449,43 @@ class Login(AccountCase):
                 self.assertEqual(status, 1)
                 self.assertIn(said, err)
 
-    def test_force_replaces_it(self):
-        self.save(made())
+    def test_force_replaces_it_and_revokes_the_one_it_replaced(self):
+        old = self.save(made())
         token = made()
         self.server.on("GET", "/whoami", (200, device_doc()))
+        self.server.on("POST", "/logout", (200, {"revoked": True}))
         status, out, err = self.link(token, argv=("login", "--force"))
         self.assertEqual(status, 0, err)
         self.assertEqual(self.saved(), token + "\n")
         self.assertEqual(self.server.requests("/whoami"), [])
+        asked = self.server.requests("/logout")
+        self.assertEqual([r["headers"]["Authorization"] for r in asked], ["Bearer " + old],
+                         "the old token, and only once the new one was saved")
+        self.assertIn("The token this machine had before is revoked.", out)
+        self.assertNotShown(old, out, err)
+        self.assertNotShown(token, out, err)
+
+    def test_force_says_when_the_one_it_replaced_was_not_revoked(self):
+        for name, answer, said, stream in (
+                ("shared", (200, {"revoked": False, "shared": True}), "was not revoked", "out"),
+                ("dead", (403, {"error": "That token was not accepted."}), "no longer accepted", "out"),
+                ("down", (503, {"error": "temporarily_unavailable"}), "could not be revoked", "err")):
+            with self.subTest(answer=name):
+                self.save(made())
+                self.server.on("POST", "/logout", answer)
+                token = made()
+                status, out, err = self.link(token, argv=("login", "--force"))
+                self.assertEqual(status, 0, err)
+                self.assertEqual(self.saved(), token + "\n", "linked whatever became of the old one")
+                self.assertIn(said, " ".join((out if stream == "out" else err).split()))
+                if name == "down":
+                    self.assertIn("https://account.ranwhat.com/", err)
+
+    def test_force_with_nothing_saved_revokes_nothing(self):
+        token = made()
+        status, _out, err = self.link(token, argv=("login", "--force"))
+        self.assertEqual(status, 0, err)
+        self.assertEqual(self.server.requests("/logout"), [])
 
     def test_a_symlink_at_the_token_path_is_never_written_through(self):
         os.makedirs(os.path.dirname(self.token_file()), exist_ok=True)
@@ -505,7 +534,7 @@ class Login(AccountCase):
             text = fh.read()
         self.assertNotIn(token, text)
         self.assertNotIn(token[len("rw_m_"):], text)
-        doc = json.loads(text)
+        [doc] = json.loads(text)["tokens"]
         self.assertEqual(doc["plan"], "plus")
         self.assertEqual(doc["org"], "Acme")
         self.assertEqual(doc["email"], "ana@example.com")
@@ -692,10 +721,10 @@ class Whoami(AccountCase):
         self.server.on("GET", "/whoami", (200, {
             "kind": "device", "email": "a\x1b[31m@b", "org": "\x1b]0;title\x07Org",
             "role": "owner\x1b[0m", "plan": "plus",
-            "machine": {"label": "lap‮top\x1b[2J", "created_at": "soon"}}))
+            "machine": {"label": "lap\u202etop\x1b[2J", "created_at": "soon"}}))
         status, out, err = self.run_cli("whoami")
         self.assertEqual(status, 0, err)
-        for c in ("\x1b", "\x07", "‮"):
+        for c in ("\x1b", "\x07", "\u202e"):
             self.assertNotIn(c, out + err)
         self.assertIn("laptop[2J", out)
         self.assertNotIn("Linked", out)
@@ -821,6 +850,111 @@ class Logout(AccountCase):
         self.assertIn("RANWHAT_TOKEN is still set", out)
 
 
+    def test_a_plan_cache_that_cannot_be_deleted_is_no_error(self):
+        os.makedirs(account.cache_path())       # a directory: unlink fails
+        status, _out, err = self.run_cli("logout")
+        self.assertEqual(status, 1)
+        self.assertIn("Not logged in", err)
+        self.assertNotIn("Traceback", err)
+        token = self.save(made())
+        self.server.on("POST", "/logout", (200, {"revoked": True}))
+        status, out, err = self.run_cli("logout")
+        self.assertEqual(status, 0, err)
+        self.assertIn("revoked and deleted", out)
+        self.assertNotIn("Could not delete", err)
+        self.assertFalse(os.path.lexists(self.token_file()))
+        self.assertNotShown(token, out, err)
+
+
+class CtrlC(AccountCase):
+    """Each command waits on the server for up to account.TIMEOUT. Ctrl-C
+    there ends it with 130 and a sentence, never a traceback."""
+
+    def interrupted(self, *argv):
+        with mock.patch.object(account, "_call", side_effect=KeyboardInterrupt):
+            return self.run_cli(*argv)
+
+    def test_whoami_and_login_with_a_saved_token(self):
+        token = self.save(made())
+        for argv in (("whoami",), ("login",)):
+            with self.subTest(argv=argv):
+                status, out, err = self.interrupted(*argv)
+                self.assertEqual(status, 130)
+                self.assertIn("Cancelled.", err)
+                self.assertNotShown(token, out, err)
+                self.assertEqual(self.saved(), token + "\n")
+
+    def test_logout_keeps_the_token_it_could_not_hear_revoked(self):
+        token = self.save(made())
+        status, out, err = self.interrupted("logout")
+        self.assertEqual(status, 130)
+        self.assertIn("may still work", err)
+        self.assertIn("run ranwhat logout again", err)
+        self.assertEqual(self.saved(), token + "\n")
+        self.assertNotShown(token, out, err)
+
+    def test_logout_says_a_revoked_token_was_not_deleted(self):
+        token = self.save(made())
+        self.server.on("POST", "/logout", (200, {"revoked": True}))
+        with mock.patch.object(feed, "delete_token", side_effect=KeyboardInterrupt):
+            status, out, err = self.run_cli("logout")
+        self.assertEqual(status, 130)
+        self.assertIn("revoked on the server", err)
+        self.assertIn("ranwhat logout --local", err)
+        self.assertNotShown(token, out, err)
+
+    def test_login_once_linked_says_the_token_may_not_be_saved(self):
+        token = made()
+        self.server.on("POST", "/device/code", code_answer())
+        self.server.on("POST", "/device/token", granted(token))
+        with mock.patch.object(feed, "save_token", side_effect=KeyboardInterrupt):
+            status, out, err = self.run_cli("login")
+        self.assertEqual(status, 130)
+        self.assertIn("after the machine was linked", err)
+        self.assertIn("https://account.ranwhat.com/", err)
+        self.assertNotShown(token, out, err)
+
+
+class Proxies(AccountCase):
+    """A server on this machine, the only one plain http may reach, is asked
+    directly, whatever proxy the environment names: through one, the token
+    would go in clear to wherever the proxy is."""
+
+    def test_a_proxy_from_the_environment_is_not_used_for_this_machine(self):
+        proxy = Server()
+        self.addCleanup(proxy.close)
+        url = "http://127.0.0.1:%d" % proxy.httpd.server_port
+        token = self.save(made())
+        self.server.on("GET", "/whoami", (200, device_doc()))
+        self.server.on("GET", "/catalogue", (500, {}))
+        with mock.patch.object(urllib.request, "getproxies",
+                               lambda: {"http": url, "https": url}):
+            status, _out, err = self.run_cli("whoami")
+            self.assertEqual(status, 0, err)
+            self.run_cli("update")
+        self.assertEqual(proxy.seen, [], "nothing went through the proxy")
+        self.assertEqual(len(self.server.requests("/whoami")), 1)
+        self.assertEqual(len(self.server.requests("/catalogue")), 1)
+        self.assertEqual(self.server.requests("/catalogue")[0]["headers"]["Authorization"],
+                         "Bearer " + token)
+
+
+class UpdateReadsNoSymlink(AccountCase):
+
+    def test_update_refuses_a_symlinked_token_file(self):
+        os.makedirs(os.path.dirname(self.token_file()), exist_ok=True)
+        target = os.path.join(self.home, "elsewhere")
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(made() + "\n")
+        self.symlink_or_skip(target, self.token_file())
+        self.assertIsNone(feed.read_token())
+        self.assertEqual(feed.saved_token(), (None, "symlink"))
+        status, _out, err = self.run_cli("update")
+        self.assertEqual(status, 1)
+        self.assertIn("is a symlink; not reading a token through it", err)
+        self.assertEqual(self.server.seen, [], "what the link points to was never sent")
+
+
 # ---------- update, the hints and the flags ----------
 
 class UpdateOnAFreeOrganisation(AccountCase):
@@ -890,11 +1024,59 @@ class HasPlus(AccountCase):
             feed.delete_token()
             self.assertFalse(cli._has_plus())
 
+    def test_whoami_with_another_token_keeps_what_was_heard_for_the_saved_one(self):
+        saved = self.save(made())
+        account.remember(saved, "free", "Acme", "ana@example.com")
+        other = made("rw_" "c_")
+        self.server.on("GET", "/whoami", (200, device_doc(kind="ci")))
+        for how in ("--token", "RANWHAT_TOKEN"):
+            with self.subTest(how=how):
+                if how == "--token":
+                    status, _out, err = self.run_cli("whoami", "--token", other)
+                else:
+                    with mock.patch.dict(os.environ, {"RANWHAT_TOKEN": other}):
+                        status, _out, err = self.run_cli("whoami")
+                self.assertEqual(status, 0, err)
+                self.assertEqual(account.cached_plan(other), "plus")
+                self.assertEqual(account.cached_plan(saved), "free")
+        with mock.patch.object(catalog, "feed_adds_scopes", return_value=False):
+            self.assertFalse(cli._has_plus(), "the saved token's organisation is still on Free")
+
+    def test_the_cache_keeps_the_latest_few_tokens(self):
+        tokens = [made() for _ in range(account.CACHE_ENTRIES + 2)]
+        for token in tokens:
+            account.remember(token, "free")
+        account.remember(tokens[-1], "plus")
+        self.assertEqual(account.cached_plan(tokens[-1]), "plus")
+        for token in tokens[-account.CACHE_ENTRIES:-1]:
+            self.assertEqual(account.cached_plan(token), "free")
+        for token in tokens[:2]:
+            self.assertIsNone(account.cached_plan(token))
+        with open(account.cache_path(), encoding="utf-8") as fh:
+            self.assertEqual(len(json.load(fh)["tokens"]), account.CACHE_ENTRIES)
+
+    def test_a_token_file_that_cannot_be_read_or_is_a_symlink_still_counts_as_one(self):
+        os.makedirs(os.path.dirname(self.token_file()), exist_ok=True)
+        with mock.patch.object(catalog, "feed_adds_scopes", return_value=False):
+            with open(self.token_file(), "wb") as fh:
+                fh.write(b"\xff\xfe not utf-8")
+            self.assertTrue(cli._has_plus())
+            os.unlink(self.token_file())
+            target = os.path.join(self.home, "elsewhere")
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write(made() + "\n")
+            self.symlink_or_skip(target, self.token_file())
+            self.assertTrue(cli._has_plus())
+
     def test_a_cache_that_is_not_one_is_none(self):
         token = made()
+        key = account._sha256(token)
         os.makedirs(os.path.dirname(account.cache_path()), exist_ok=True)
         for text in ("", "[]", "{", '{"plan": "free"}', '{"token_sha256": 1, "plan": "free"}',
-                     json.dumps({"token_sha256": account._sha256(token), "plan": "gold"})):
+                     json.dumps({"token_sha256": key, "plan": "free"}),
+                     json.dumps({"tokens": {"token_sha256": key, "plan": "free"}}),
+                     json.dumps({"tokens": [None, 1, "x", {"token_sha256": 1, "plan": "free"}]}),
+                     json.dumps({"tokens": [{"token_sha256": key, "plan": "gold"}]})):
             with self.subTest(text=text):
                 with open(account.cache_path(), "w", encoding="utf-8") as fh:
                     fh.write(text)

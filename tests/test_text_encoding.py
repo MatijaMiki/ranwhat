@@ -16,6 +16,7 @@ import ast
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -96,6 +97,35 @@ class EveryTextOpenNamesItsEncoding(unittest.TestCase):
             fh.write(src)
         self.addCleanup(os.unlink, fh.name)
         self.assertEqual(_unnamed_encodings(fh.name), [1, 2, 4, 6, 7, 10])
+
+
+# Characters that reorder or hide the text around them: bidi controls,
+# isolates and zero-width ones, and the byte order mark. In source they make
+# a line read as something other than what runs (Trojan Source,
+# CVE-2021-42574), so code and tests write them as escapes.
+HIDDEN = "[\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069\\ufeff]"
+
+
+class NoHiddenCharactersInSource(unittest.TestCase):
+
+    def test_package_scripts_tests_and_worker(self):
+        hidden = re.compile(HIDDEN)
+        paths = []
+        for part, pattern in (("ranwhat", "*.py"), ("scripts", "*.py"), ("tests", "*.py"),
+                              ("worker", "*.js"), ("worker", "*.mjs")):
+            paths += [p for p in glob.glob(os.path.join(REPO, part, "**", pattern),
+                                           recursive=True)
+                      if "node_modules" not in p.split(os.sep)]
+        self.assertGreater(len(paths), 20)
+        found = {}
+        for path in paths:
+            with open(path, encoding="utf-8") as fh:
+                for n, line in enumerate(fh, 1):
+                    chars = hidden.findall(line)
+                    if chars:
+                        found.setdefault(os.path.relpath(path, REPO), []).append(
+                            (n, ["U+%04X" % ord(c) for c in chars]))
+        self.assertEqual(found, {}, "write these as \\u escapes")
 
 
 # Run in a child, since the locale's encoding is fixed at interpreter start.
