@@ -71,13 +71,20 @@ A call never ran ("declined") when its record says so (cursor-logger
 parse.py; the toolpath and vibe-replay notes): result {"rejected": true};
 userDecision "rejected" in toolFormerData or additionalData; status
 "cancelled"; status "loading" or "running", or none at all, with no
-result; status "error" with additionalData.status "error" and no result.
-A shell command that started and was stopped (endedReason ...ABORTED,
-notInterrupted false, or any output) ran, whatever its status says.
+result. Whatever else it says, a call ran when it shows it started: a
+shell command with additionalData.startedAtMs (the time its terminal
+started), an exit code, any output, or a stop part way (endedReason
+...ABORTED, notInterrupted false); and an edit with a result (Cursor
+writes an edit to the file first, and a "rejected" review undoes it).
+Status "error" with no result is a call that ran and failed (the toolpath
+notes; cursor-logger reads it as a failure, not as never run). When one
+toolCallId is in several bubbles, a copy that ran wins over a declined one.
 
 A call's time is its bubble's createdAt, else additionalData.startedAtMs,
 else timingInfo.clientStartTime when it is an epoch after 2000 (it is
-sometimes elapsed ms). Without one, not_after is its chat's lastUpdatedAt,
+sometimes elapsed ms). Without one, not_after is the newest of its chat's
+lastUpdatedAt and every dated bubble of that chat (lastUpdatedAt is the
+time of the user's last prompt: in the 3.6 dump every bubble is later),
 else the newer mtime of the database and its -wal (a live database's
 newest rows are in the -wal).
 
@@ -99,7 +106,9 @@ import ast
 import contextlib
 import json
 import os
+import re
 import sqlite3
+import stat
 
 from urllib.parse import unquote
 
@@ -128,6 +137,10 @@ CONTENT = "composer.content."
 
 # Keys that hold an encryption key, never handed to clean or kept.
 KEYS = ("blobEncryptionKey", "speculativeSummarizationEncryptionKey")
+# Such a key's value in a row's text, for a row that is not JSON (cut
+# short, or damaged): the string, closed or not, is blanked.
+_KEY_VALUE = re.compile(r'("(?:%s)"\s*:\s*)"(?:[^"\\]|\\.)*"?'
+                        % "|".join(KEYS))
 
 # What clean's report says of a database that holds a secret.
 WHY_READ_ONLY = "Cursor keeps this in a database; delete the chat in Cursor."
@@ -275,6 +288,13 @@ def _without_keys(node, raw=None, depth=0):
     return node
 
 
+def _scrubbed(text):
+    """A row's raw text with every encryption key's value blanked."""
+    if not text or not any(key in text for key in KEYS):
+        return text
+    return _KEY_VALUE.sub(r'\1""', text)
+
+
 def _workspace(ident):
     """The folder a workspaceIdentifier names: uri.fsPath (or its path
     for a file: URI), else configPath (a .code-workspace file)."""
@@ -375,35 +395,50 @@ def classify(name, arguments, result=None):
     return kind, True, None, (), (), None
 
 
-def _ran(result):
-    """True when a shell result shows the command started: it printed
-    something, or it was stopped part way."""
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _ran(result, data):
+    """True when a shell record shows the command started: its terminal
+    started (startedAtMs), it exited with a code, it printed something,
+    or it was stopped part way."""
+    if _number(data.get("startedAtMs")) and data["startedAtMs"] > 0:
+        return True
     if not isinstance(result, dict):
         return False
     ended = result.get("endedReason")
     return ((isinstance(ended, str) and ended.upper().endswith("ABORTED"))
             or result.get("notInterrupted") is False
+            or _number(result.get("exitCode"))
+            or _number(result.get("exitCodeV2"))
             or bool(_string(result.get("output"))))
 
 
-def declined(former, result, data):
+def declined(former, result, data, kind=None):
     """True when the editor's record says the call never ran (see the
-    module notes)."""
+    module notes). kind is the call's (classify)."""
     if isinstance(result, dict) and result.get("rejected") is True:
         return True
-    if _ran(result):
+    if _ran(result, data):
         return False
+    if kind == "write" and result is not None and result not in ("", {}):
+        return False            # written; a rejected review undid it
     if "rejected" in (former.get("userDecision"), data.get("userDecision")):
         return True
-    status = former.get("status")
-    if status == "cancelled":
-        return True
-    if result is None or result == "":
-        if status in (None, "loading", "running"):
-            return True
-        if status == "error" and data.get("status") == "error":
-            return True
-    return False
+    # "loading", "running" or no status with no result is not taken for
+    # declined: a call that is still running, or whose result the editor
+    # had not saved yet, looks the same, and a command that ran must never
+    # be shown as one that did not.
+    return former.get("status") == "cancelled"
+
+
+def _later(a, b):
+    """The later of two UTC stamps ("...Z"), either of which may be None;
+    a stamp of no zone is not compared."""
+    a = a if isinstance(a, str) and a.endswith("Z") else None
+    b = b if isinstance(b, str) and b.endswith("Z") else None
+    return max(a, b) if a and b else (a or b)
 
 
 def _former_args(former):
@@ -456,9 +491,17 @@ def _wal_mtime(path, mtime):
 
 
 def _read_small(path):
-    """A small JSON file's object, or {}."""
+    """A small JSON file's object, or {}. Only a regular file is read: a
+    FIFO there would block the read for good."""
     try:
-        with open(path, "rb") as fh:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_BINARY", 0))
+    except (OSError, ValueError):
+        return {}
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return {}
             raw = fh.read(_SMALL_MAX + 1)
     except OSError:
         return {}
@@ -664,7 +707,8 @@ class CursorSource(Source):
         _BAD (counted as unparsed with tally); an empty one is skipped."""
         low, high = _range(prefix)
         for row in _sqlite.iter_rows(conn, KV, ("key", "value"),
-                                     where="key >= ? AND key < ?",
+                                     where="key >= ? AND key < ? "
+                                           "ORDER BY key",
                                      params=(low, high)):
             key = row["key"]
             if not isinstance(key, str):
@@ -750,10 +794,20 @@ class CursorSource(Source):
             chats[cid] = (project, not_after)
             conversation = value.get("conversation")
             if isinstance(conversation, list):
-                for bubble in conversation:
-                    if isinstance(bubble, dict):
-                        inline(cid, bubble, chats[cid])
+                bubbles = [b for b in conversation if isinstance(b, dict)]
+                for bubble in bubbles:
+                    not_after = _later(not_after, self._bubble_stamp(bubble))
+                for bubble in bubbles:
+                    inline(cid, bubble, (project, not_after))
         return chats
+
+    @staticmethod
+    def _bubble_stamp(bubble):
+        """A bubble's own time, any bubble's."""
+        former = bubble.get("toolFormerData")
+        data = (_object(former.get("additionalData"))
+                if isinstance(former, dict) else {})
+        return _bubble_time(bubble, data)
 
     def _call(self, store, cid, bubble, chat):
         """The ToolCall a bubble holds, or None (no call, or a stub)."""
@@ -775,7 +829,8 @@ class CursorSource(Source):
             self.id, store.path, name or "", arguments, kind=kind,
             known=known, session=cid, project=project or workdir,
             timestamp=stamp, tool_call_id=call_id,
-            status=DECLINED if declined(former, result, data) else None,
+            status=DECLINED if declined(former, result, data, kind)
+            else None,
             not_after=None if stamp else (chat_after
                                           or self._not_after(store)),
             command=command, workdir=workdir, paths=paths,
@@ -797,10 +852,14 @@ class CursorSource(Source):
                 pending.append(call)
 
         chats = self._chats(store, conn, heads, tally, inline)
+        held = {}
         for call in pending:
-            if self._new(call, seen):
-                yield call
+            for out in self._new(call, seen, held):
+                yield out
         del pending[:]
+        # Rows come in key order, so each chat's bubbles together: its
+        # undated calls wait for the newest time of any of its bubbles.
+        current, undated, newest = None, [], None
         for key, value, _raw in self._rows(conn, BUBBLE, tally):
             if value is _BAD:
                 continue
@@ -809,20 +868,56 @@ class CursorSource(Source):
                     self.count("unknown")
                 continue
             cid, _bid = _key_parts(key, BUBBLE)
+            if cid != current:
+                for out in self._flush(undated, newest, seen, held):
+                    yield out
+                current, undated, newest = cid, [], None
+            newest = _later(newest, self._bubble_stamp(value))
             chat = chats.get(cid) or (heads.get(cid), None)
             call = self._call(store, cid, value, chat)
-            if call is not None and self._new(call, seen):
+            if call is None:
+                continue
+            if call.timestamp is None:
+                undated.append(call)
+                continue
+            for out in self._new(call, seen, held):
+                yield out
+        for out in self._flush(undated, newest, seen, held):
+            yield out
+        for call_id, call in held.items():
+            if call_id not in seen:
                 yield call
 
+    def _flush(self, undated, newest, seen, held):
+        """One chat's undated calls, each not after the newest time of
+        its chat's bubbles when that is later than what it has."""
+        out = []
+        for call in undated:
+            call.not_after = _later(call.not_after, newest) or call.not_after
+            out += self._new(call, seen, held)
+        return out
+
     @staticmethod
-    def _new(call, seen):
-        """True the first time a call id is met (always for none)."""
-        if call.tool_call_id is None:
-            return True
-        if call.tool_call_id in seen:
-            return False
-        seen.add(call.tool_call_id)
-        return True
+    def _new(call, seen, held):
+        """[call] the first time its id is met (always for none), [] after.
+        A declined call, or one with no output yet, is held back until the
+        end (held), and dropped if a copy of it with its output is met: a
+        stale copy must not hide the one that shows what ran. Of the held
+        copies, one that is not declined wins."""
+        call_id = call.tool_call_id
+        if call_id is None:
+            return [call]
+        if call_id in seen:
+            return []
+        if call.status == DECLINED or call.output is None:
+            kept = held.get(call_id)
+            if kept is None or (kept.status == DECLINED
+                                and call.status != DECLINED):
+                held[call_id] = call
+            return []
+        seen.add(call_id)
+        held.pop(call_id, None)
+        return [call]
 
     def _bubble_texts(self, store, cid, bubble, chat, where, contents):
         """A bubble's texts: the bubble with its params decoded and its
@@ -862,7 +957,7 @@ class CursorSource(Source):
         for key, value, raw in self._rows(conn, COMPOSER, tally):
             where = "%s %s" % (KV, _shown(key))
             if value is _BAD:
-                yield SecretText(_text(raw), where=where)
+                yield SecretText(_scrubbed(_text(raw)), where=where)
                 continue
             value = _without_keys(value, raw)
             if not isinstance(value, dict):
@@ -891,7 +986,7 @@ class CursorSource(Source):
         for key, value, raw in self._rows(conn, BUBBLE, tally):
             where = "%s %s" % (KV, _shown(key))
             if value is _BAD:
-                yield SecretText(_text(raw), where=where)
+                yield SecretText(_scrubbed(_text(raw)), where=where)
                 continue
             if not isinstance(value, dict):
                 yield SecretText(value, where=where)
@@ -905,7 +1000,7 @@ class CursorSource(Source):
         # not depend on which pass ran first.
         for key, value, raw in self._rows(conn, CONTEXT, False):
             where = "%s %s" % (KV, _shown(key))
-            yield SecretText(_text(raw) if value is _BAD
+            yield SecretText(_scrubbed(_text(raw)) if value is _BAD
                              else _without_keys(value, raw), where=where)
         # A file's text as the agent read or wrote it: a real copy of
         # whatever it holds. Named after the file the edit names.
