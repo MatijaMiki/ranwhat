@@ -1,0 +1,149 @@
+name: ranwhat
+description: >-
+  Check what AI coding agents ran in this job, and the secrets they left in
+  their history, with ranwhat. Fails the step on findings at or above a
+  severity, and uploads them to code scanning as SARIF.
+author: Matija Mikulinec
+branding:
+  icon: shield
+  color: gray-dark
+
+# Runs ranwhat from this action's own checkout, with the runner's Python
+# (3.9 or newer): no dependency is installed and nothing is fetched from
+# PyPI, so the code that runs is the code at the ref the workflow pins.
+# Nothing goes online but the SARIF upload to this repository's code
+# scanning, by GitHub's own upload-sarif action.
+
+inputs:
+  command:
+    description: check, watch or clean. clean never masks here; it reports.
+    required: false
+    default: check
+  fail-on:
+    description: >-
+      Fail the step when anything at or above this severity is found:
+      medium, high or critical (every secret clean finds is critical).
+      Empty to never fail on findings.
+    required: false
+    default: high
+  days:
+    description: How far back to read each agent's history, in days.
+    required: false
+    default: "30"
+  args:
+    description: >-
+      More flags for ranwhat, such as --source claude-code or
+      --path codex=~/.codex. Split on spaces.
+    required: false
+    default: ""
+  sarif-file:
+    description: Where to write the SARIF log.
+    required: false
+    default: ranwhat.sarif
+  upload-sarif:
+    description: >-
+      Upload the SARIF log to code scanning. Needs the job's
+      security-events write permission.
+    required: false
+    default: "true"
+  sarif-category:
+    description: The code scanning category for the upload.
+    required: false
+    default: ranwhat
+  allow-empty:
+    description: >-
+      Pass when there is no agent history to read (ranwhat's exit status
+      2). Off by default, so a step pointed at the wrong place says so.
+    required: false
+    default: "false"
+
+outputs:
+  exit-code:
+    description: >-
+      ranwhat's exit status: 0 nothing at or above fail-on, 1 an error
+      (a flag ranwhat refused too), 2 no agent history to read, 3 findings
+      at or above fail-on.
+    value: ${{ steps.run.outputs.exit-code }}
+  sarif-file:
+    description: The SARIF log written.
+    value: ${{ steps.run.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      # Inputs reach the script only through the environment, never
+      # through ${{ }} in its text, so none is read as shell.
+      env:
+        RANWHAT_ACTION_PATH: ${{ github.action_path }}
+        RANWHAT_COMMAND: ${{ inputs.command }}
+        RANWHAT_FAIL_ON: ${{ inputs.fail-on }}
+        RANWHAT_DAYS: ${{ inputs.days }}
+        RANWHAT_ARGS: ${{ inputs.args }}
+        RANWHAT_SARIF: ${{ inputs.sarif-file }}
+        RANWHAT_NO_HINTS: "1"
+      run: |
+        case "$RANWHAT_COMMAND" in
+          check|watch|clean) ;;
+          *) echo "::error::command must be check, watch or clean, not '$RANWHAT_COMMAND'"; exit 1 ;;
+        esac
+        case "$RANWHAT_FAIL_ON" in
+          ""|medium|high|critical) ;;
+          *) echo "::error::fail-on must be medium, high, critical or empty, not '$RANWHAT_FAIL_ON'"; exit 1 ;;
+        esac
+        case "$RANWHAT_DAYS" in
+          ""|*[!0-9]*|0) echo "::error::days must be a whole number of days, not '$RANWHAT_DAYS'"; exit 1 ;;
+        esac
+        # One left by an earlier step is not this run's.
+        rm -f -- "$RANWHAT_SARIF"
+        python=python3
+        command -v "$python" >/dev/null 2>&1 || python=python
+        argv=("$RANWHAT_COMMAND" --days "$RANWHAT_DAYS" --sarif "$RANWHAT_SARIF")
+        if [ "$RANWHAT_COMMAND" = clean ]; then argv+=(--no-interactive); fi
+        if [ -n "$RANWHAT_FAIL_ON" ]; then argv+=(--fail-on "$RANWHAT_FAIL_ON"); fi
+        read -r -a extra <<< "$RANWHAT_ARGS"
+        argv+=("${extra[@]}")
+        # -I: neither the workspace nor PYTHONPATH is on the path, so a
+        # module the repository holds (a json.py, a ranwhat/) is never run.
+        set +e
+        "$python" -I -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from ranwhat.cli import main; sys.exit(main(sys.argv[1:]))' \
+          "$RANWHAT_ACTION_PATH" "${argv[@]}" </dev/null
+        status=$?
+        set -e
+        # ranwhat writes the SARIF whenever it gets as far as reading, with
+        # no history too. A 2 without it is argparse refusing a flag in
+        # args, an error, not "nothing to read".
+        if [ "$status" = 2 ] && [ ! -f "$RANWHAT_SARIF" ]; then
+          echo "::error::ranwhat refused its arguments; see the usage above."
+          status=1
+        fi
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        if [ -f "$RANWHAT_SARIF" ]; then
+          echo "sarif-file=$RANWHAT_SARIF" >> "$GITHUB_OUTPUT"
+        fi
+
+    - if: ${{ inputs.upload-sarif == 'true' && steps.run.outputs.sarif-file != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.run.outputs.sarif-file }}
+        category: ${{ inputs.sarif-category }}
+
+    - shell: bash
+      env:
+        RANWHAT_STATUS: ${{ steps.run.outputs.exit-code }}
+        RANWHAT_ALLOW_EMPTY: ${{ inputs.allow-empty }}
+      run: |
+        case "$RANWHAT_STATUS" in
+          0) exit 0 ;;
+          2) if [ "$RANWHAT_ALLOW_EMPTY" = true ]; then
+               echo "::notice::ranwhat found no agent history to read."
+               exit 0
+             fi
+             echo "::error::ranwhat found no agent history to read. Run it after the agent's steps, in the same job, or point it with args (--root, --path ID=PATH)."
+             exit 2 ;;
+          3) echo "::error::ranwhat found something at or above the fail-on severity. See the log above, or code scanning."
+             exit 3 ;;
+          *) echo "::error::ranwhat failed (exit status $RANWHAT_STATUS)."
+             exit 1 ;;
+        esac
