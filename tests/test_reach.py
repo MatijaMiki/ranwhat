@@ -469,7 +469,8 @@ class ReviewFindings(_Home):
         with mock.patch.object(reach, "_tomllib", return_value=None):
             text = reach.render(self.audit(), self.home)
         self.assertIn("None found in 0 configuration files read.", text)
-        self.assertIn("Not read: ~/.codex/config.toml (Codex), needs Python 3.11",
+        self.assertIn("Not read: %s (Codex), needs Python 3.11"
+                      % os.path.join("~", ".codex", "config.toml"),
                       " ".join(text.split()))
         self.assertIn("could not be parsed", text)
 
