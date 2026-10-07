@@ -30,6 +30,14 @@
  * any route is looked up, so none of the routes below answers there and
  * none of its pages answers anywhere else. Until ACCOUNTS_ON is set it
  * answers 404 to everything, exactly as an unknown path does here.
+ *
+ * Linking a terminal (device.js): POST feed.ranwhat.com/v1/device/code and
+ * /v1/device/token, GET /v1/whoami and POST /v1/logout, which answer on
+ * the feed host only and take a Bearer token, never a cookie; and GET
+ * ranwhat.com/device, a redirect to the page on account.ranwhat.com where
+ * the code is typed. Each is looked up by host and path together, and
+ * until ACCOUNTS_ON is set none of them is there: they answer 404 as an
+ * unknown path does.
  */
 import { EmailMessage } from "cloudflare:email";
 import { announce, confirm, subscribe, switchedOn } from "./list.js";
@@ -37,6 +45,7 @@ import { catalogue } from "./feed.js";
 import { billing, checkout, webhook, welcome } from "./stripe.js";
 import { ACCOUNT_HOST, accountsOn, sweep } from "./accounts.js";
 import { account } from "./dashboard.js";
+import { deviceRoute } from "./device.js";
 import { challenge } from "./challenge.js";
 
 const TO = "ranwhatcom@gmail.com";
@@ -252,7 +261,7 @@ export default {
     if (url.hostname === ACCOUNT_HOST) {
       return accountsOn(env) ? account(request, env, ctx) : json(404, { error: "Not found." });
     }
-    const route = ROUTES[url.pathname];
+    const route = (accountsOn(env) && deviceRoute(url)) || ROUTES[url.pathname];
     if (!route) return json(404, { error: "Not found." });
     const [handle, methods] = route;
     if (!methods.includes(request.method)) {

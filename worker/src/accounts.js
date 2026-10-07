@@ -239,7 +239,11 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS grants_org ON grants (org_id)`,
 
   /* A feed token that belongs to an organisation. hash: tokens.hash, where
-     revocation stays. id: what forms name it by, never the hash. */
+     revocation stays. id: what forms name it by, never the hash. user_id:
+     who approved a terminal (kind 'device', device.js). label: what it is
+     called on the web; a terminal sends none, so its row keeps '' until it
+     is named there, which auth.js reads as no label. last_used_day: the
+     start of the UTC day a device or ci token was last used (auth.js). */
   `CREATE TABLE IF NOT EXISTS machines (
      id TEXT PRIMARY KEY,
      hash TEXT NOT NULL UNIQUE,

@@ -59,6 +59,13 @@
  *                       answer for every way it can be wrong.
  *   GET  /passkeys.js   The script the two passkey pages load, the only
  *                       script of ours on this host.
+ *   GET  /device        The box for the code a terminal printed after
+ *                       ranwhat login, with a fresh code (device.js).
+ *   POST /device        Looks the typed code up, under its limits, and
+ *                       shows what approving it would do.
+ *   POST /device/approve  Links the terminal to the organisation shown,
+ *                       with a fresh code.
+ *   POST /device/deny   Tells the terminal no.
  *
  * Nothing changes on a GET but a passkey challenge, made for whoever
  * asks and good once (and, the first time an account asks to add a
@@ -99,20 +106,12 @@ import {
   MAX_LABEL, MAX_PASSKEYS, PAGE_SCRIPT, forgetPasskey, passkeyLabel, passkeysOf, register,
   registrationOptions, signIn, signinOptions,
 } from "./passkeys.js";
-import { away, data, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
+import { approve, deny, deviceLookup, devicePage } from "./device.js";
+import { away, data, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
 const PRICING = "https://ranwhat.com/pricing";
 const TALK = "mailto:hello@ranwhat.com?subject=ranwhat%20Team";
-
-/* A form's fields, or none when the body is not a form. */
-async function fields(request) {
-  try {
-    return await request.formData();
-  } catch {
-    return new FormData();
-  }
-}
 
 /* No session: to the sign-in page, dropping a cookie that no longer opens one. */
 const signedOut = (request) =>
@@ -687,6 +686,10 @@ const EVENTS = {
   passkey_added: "Passkey added, confirmed with an emailed code",
   passkey_removed: "Passkey removed",
   ways_removed: "Every Google, GitHub and passkey way in removed",
+  device_approved: "Terminal approved for ranwhat login, with a fresh code",
+  device_denied: "Terminal denied for ranwhat login",
+  machine_linked: "Terminal linked",
+  machine_logout: "Terminal unlinked with ranwhat logout",
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -1350,6 +1353,9 @@ const ROUTES = {
   "/signin/passkey": { GET: passkeySigninPage, POST: passkeySignin },
   "/passkeys/challenge": { GET: passkeyChallenge },
   "/passkeys.js": { GET: pageScript },
+  "/device": { GET: devicePage, POST: deviceLookup },
+  "/device/approve": { POST: approve },
+  "/device/deny": { POST: deny },
 };
 for (const provider of Object.keys(PROVIDERS)) {
   const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);

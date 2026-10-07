@@ -134,6 +134,15 @@ export async function script(text) {
 export const widget = (action) =>
   `<div class="cf-turnstile" data-sitekey="${SITEKEY}" data-action="${escape(action)}"></div>`;
 
+/* A form's fields, or none when the body is not a form. */
+export async function fields(request) {
+  try {
+    return await request.formData();
+  } catch {
+    return new FormData();
+  }
+}
+
 /* 303, so the browser follows a POST with a GET. Always a path on this
    host: nothing here redirects anywhere a request named. */
 export async function redirect(path, cookies = []) {

@@ -71,8 +71,9 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;   // 32 random bytes, base64url
    goes into an email's To. */
 const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
 
-/* Where a sign-in may send the browser on to. M3 adds /device. */
-const NEXT = new Set(["/"]);
+/* Where a sign-in may send the browser on to: the account, or the page
+   that approves a terminal (device.js). */
+const NEXT = new Set(["/", "/device"]);
 export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 /* ---------- secrets ---------- */

@@ -44,7 +44,8 @@ class BranchBuildsCanRun(unittest.TestCase):
         self.assertEqual(config["name"], "ranwhat-contact")
         self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL"])
         self.assertEqual([r["pattern"] for r in config["routes"]],
-                         ["ranwhat.com/api/*", "feed.ranwhat.com/v1/*", "account.ranwhat.com/*"])
+                         ["ranwhat.com/api/*", "feed.ranwhat.com/v1/*", "account.ranwhat.com/*",
+                          "ranwhat.com/device*"])
         # Routes, not custom domains, so a deploy needs no DNS permission.
         for route in config["routes"]:
             self.assertEqual(route["zone_name"], "ranwhat.com")

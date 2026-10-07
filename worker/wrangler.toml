@@ -41,6 +41,14 @@ zone_name = "ranwhat.com"
 pattern = "account.ranwhat.com/*"
 zone_name = "ranwhat.com"
 
+# ranwhat.com/device, the address `ranwhat login` prints: a redirect to
+# account.ranwhat.com/device, where the code is typed (src/device.js).
+# Ahead of Pages for this path only, as for /api/*. Until ACCOUNTS_ON is
+# set it answers 404, as an unknown path does.
+[[routes]]
+pattern = "ranwhat.com/device*"
+zone_name = "ranwhat.com"
+
 # TURNSTILE_SECRET, X_PIXEL_TOKEN, RESEND_API_KEY and LIST_SECRET are
 # encrypted secrets, set with `npx wrangler secret put <NAME>`, never here.
 # RESEND_API_KEY: a Full access key (the list makes contacts, a segment and
