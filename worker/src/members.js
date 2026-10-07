@@ -52,9 +52,9 @@
  * userForVerifiedEmail()). A link in someone else's hands opens nothing.
  * The address is kept while the invite waits, and cleared once it is
  * used or taken back (the cron clears an expired one's). Invite emails
- * have a day of their own ('invite', INVITE_MAIL_PER_DAY in accounts.js),
- * apart from sign-in codes, and an organisation sends at most
- * INVITES_PER_ORG_DAY a day.
+ * have a day of their own ('invite', their part of RESEND_DAILY:
+ * INVITE_MAIL_PER_DAY in accounts.js), apart from sign-in codes, and an
+ * organisation sends at most INVITES_PER_ORG_DAY a day.
  *
  * An invite is only as good as its sender's role: it joins nobody once
  * whoever sent it is no longer an owner or an admin of the organisation
@@ -86,8 +86,8 @@ import {
   ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SWITCHES_PER_DAY, canManage, event, joinedAt, now, seenAddress, spendAuthMail,
 } from "./accounts.js";
 import {
-  ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, current, formOk, formToken, fresh,
-  nextPath, orgFormOk, peek, randomToken, readCookie, setCookie, unbump,
+  ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, countWithin, current, formOk, formToken, fresh,
+  nextPath, orgFormOk, randomToken, readCookie, setCookie, unbump,
 } from "./session.js";
 import { fields, form, page, redirect, refused } from "./ui.js";
 import { billingEmailDue, billingEmailFollows } from "./billing.js";
@@ -901,8 +901,13 @@ export async function transferPost(request, env, ctx) {
 /* POST /org/switch: the session looks at another organisation its person
    is in, and goes on to `next`. Switching to the one it looks at already
    writes nothing, and an account switches SWITCHES_PER_DAY times a day at
-   most (accounts.js): read before, so that a refused switch writes
-   nothing, and counted once it is made. */
+   most (accounts.js). A switch is counted before it is made, in one
+   statement that counts nothing past the day's number (session.js's
+   countWithin()), so switches sent at once are held to it too and a
+   refused one writes nothing. The session and the event are written only
+   while the session still looks at another organisation, so of switches
+   sent at once to one organisation, one is made, and the rest write
+   nothing and give their count back. */
 export async function switchPost(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -913,15 +918,16 @@ export async function switchPost(request, env) {
     "SELECT org_id FROM memberships WHERE org_id = ? AND user_id = ?").bind(wanted, who.user).first() : null;
   if (!row) return trouble(env, who, 404, "You are not in that organisation, so nothing was changed.");
   if (row.org_id === who.org.id) return redirect(nextPath(f.get("next")));
-  if (await peek(env, "switch-user", who.user, DAY) >= SWITCHES_PER_DAY) {
+  if (!await countWithin(env, "switch-user", who.user, DAY, SWITCHES_PER_DAY)) {
     return trouble(env, who, 429,
       `You have switched organisation ${SWITCHES_PER_DAY} times today, the most one account can in a day, so nothing was changed. Try again tomorrow.`);
   }
   const db = env.LIST;
-  await db.batch([
-    db.prepare("UPDATE sessions SET org_id = ? WHERE id = ?").bind(row.org_id, who.id),
-    event(db, { org: row.org_id, user: who.user, what: "org_switched" }),
+  const lookingElsewhere = "EXISTS (SELECT 1 FROM sessions WHERE id = ? AND org_id IS NOT ?)";
+  const done = await db.batch([
+    eventIf(db, { org: row.org_id, user: who.user, what: "org_switched" }, lookingElsewhere, [who.id, row.org_id]),
+    db.prepare("UPDATE sessions SET org_id = ? WHERE id = ? AND org_id IS NOT ?").bind(row.org_id, who.id, row.org_id),
   ]);
-  await bump(env, "switch-user", who.user, DAY);
+  if (done[1].meta.changes !== 1) await unbump(env, "switch-user", who.user, DAY);
   return redirect(nextPath(f.get("next")));
 }

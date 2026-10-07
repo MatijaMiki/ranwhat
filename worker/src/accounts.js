@@ -45,38 +45,99 @@ const KEEP_COUNTS = 7 * DAY;            // the daily email counts
 
 /* What one account may do in a day that adds a row to the audit log and
    needs no fresh code: renames (of an organisation and of its machines,
-   together) and switches between its organisations. Past them it is
-   refused with nothing written, and a rename or switch that changes
-   nothing writes nothing either. So one account adds at most 90 such rows
-   a day to what the cron keeps for 13 months (about 36,000), and a
-   refused request costs the database a read, never a write. */
+   together) and switches between its organisations. Each is counted
+   before it is made, in one statement that counts nothing past these
+   (session.js's countWithin()), so requests sent at once are held to them
+   as requests sent one after another are. One past them is refused with
+   nothing written. One that changes nothing writes nothing to the audit
+   log: a rename to the name it has, or a switch to the organisation the
+   session looks at already, is turned back before it is counted, and of
+   several sent at once that would make the same change, the one that
+   makes it is written and the others give their count back. So one
+   account adds at most 90 such rows a day to what the cron keeps for 13
+   months (about 36,000), and a request refused at its count costs the
+   database a read, never a write. */
 export const RENAMES_PER_DAY = 30;
 export const SWITCHES_PER_DAY = 60;
 
-/* Sign-in codes, fresh-code checks, address checks, password resets and
-   the notices that a way in was added share Resend's free plan, 100
-   emails a day, with invites (INVITE_MAIL_PER_DAY, below), the email that
-   says Plus is on and the release list's confirmations (list.js sends at
-   most LIST_MAIL_PER_DAY, 10, of those a day while accounts are on). This
-   keeps the account's own mail to 60, so that with the 25 invites and the
-   10 confirmations a burst of sign-ups can never hold back someone's
-   token. */
-export const AUTH_MAIL_PER_DAY = 60;
+/* ---------- the day's email ---------- */
 
-/* Fifteen of those are kept for accounts already signed in: a step-up's
-   code (purpose 'stepup') and the notice that a way in was added. Codes
-   asked for from the sign-in, sign-up and reset forms, by anyone, stop
-   short of them, so strangers who use up the day's sign-in mail cannot
-   stop a signed-in person from approving a terminal or opening billing.
-   Only an account made at least a day ago draws on the reserve, and at
-   most RESERVE_PER_USER_DAY a day for one account and
-   RESERVE_PER_NETWORK_DAY for one network (an IPv4 /24, an IPv6 /48), so
-   neither accounts made today, nor a handful of older ones, nor many from
-   one network can empty it: emptying it takes eight accounts a day old or
-   more, on five networks. What an account causes past its share comes out
-   of the public forms' mail instead, under that mail's own limits, as a
-   code asked for there would (session.js's signedInMail()). */
-export const STEPUP_RESERVE = 15;
+/* Everything the Worker mails through Resend counts against the daily
+   limit of the Resend plan it is on: sign-in codes, fresh-code checks,
+   address checks, password resets and the notices that a way in was added
+   (the account's own mail, below), invites to an organisation, the
+   release list's confirmations (list.js) and the email a buyer gets when
+   Plus is on (stripe.js). RESEND_DAILY, an optional [vars] setting in
+   wrangler.toml, is that limit; unset, or not a whole number from 1 to
+   999,999,999, it is the free plan's 100. Each count below is a fixed
+   part of it, rounded down (mailBudget()), in one place for session.js,
+   members.js and list.js:
+
+     the account's own mail                 60 in 100 (AUTH_MAIL_PER_DAY)
+       of it, kept for accounts signed in   15 in 100 (STEPUP_RESERVE)
+     invites                                25 in 100 (INVITE_MAIL_PER_DAY)
+     the list's confirmations, accounts on  10 in 100 (LIST_MAIL_PER_DAY)
+     the list's confirmations, accounts off 90 in 100 (LIST_MAIL_ALONE)
+
+   So together they never come to more than RESEND_DAILY, and with it at
+   100 or more none is smaller than on the free plan. What is left, at
+   least 5 in 100 with accounts on and 10 in 100 with them off, is for the
+   buyers' emails, which have no count of their own. Each count is kept
+   apart from the others, so none, used up, holds back another: a burst of
+   sign-ups stops no invite, list confirmation or buyer's email, and a
+   burst of signups to the list stops no sign-in code. The constants are
+   the counts on the free plan, RESEND_DAILY unset. */
+export const RESEND_FREE_DAILY = 100;
+const SHARES = Object.freeze({ auth: 60, reserve: 15, invites: 25, list: 10, listAlone: 90 });
+
+/* RESEND_DAILY as a whole number from 1 to 999,999,999, or the free
+   plan's 100. A number in wrangler.toml and a string set elsewhere read
+   the same. */
+export function resendDaily(env) {
+  const raw = String(env?.RESEND_DAILY ?? "").trim();
+  return /^[1-9][0-9]{0,8}$/.test(raw) ? Number(raw) : RESEND_FREE_DAILY;
+}
+
+/* The day's counts for `env`, each its part of RESEND_DAILY rounded down:
+   { daily, auth, reserve, invites, list, listAlone }. */
+export function mailBudget(env) {
+  const daily = resendDaily(env);
+  const part = (share) => Math.floor((daily * share) / 100);
+  return Object.freeze({
+    daily, auth: part(SHARES.auth), reserve: part(SHARES.reserve), invites: part(SHARES.invites),
+    list: part(SHARES.list), listAlone: part(SHARES.listAlone),
+  });
+}
+
+export const {
+  auth: AUTH_MAIL_PER_DAY, reserve: STEPUP_RESERVE, invites: INVITE_MAIL_PER_DAY,
+  list: LIST_MAIL_PER_DAY, listAlone: LIST_MAIL_ALONE,
+} = mailBudget({});
+
+/* The account's own mail (AUTH_MAIL_PER_DAY on the free plan, 60): sign-in
+   codes, fresh-code checks, address checks, password resets and the
+   notices that a way in was added, counted apart from invites and the
+   list.
+
+   Its reserve (STEPUP_RESERVE on the free plan, 15) is kept for accounts
+   already signed in: a step-up's code (purpose 'stepup') and the notice
+   that a way in was added. Codes asked for from the sign-in, sign-up and
+   reset forms, by anyone, stop short of it, so strangers who use up the
+   day's sign-in mail cannot stop a signed-in person from approving a
+   terminal or opening billing. Only an account made at least a day ago
+   draws on the reserve, and at most RESERVE_PER_USER_DAY a day for one
+   account and RESERVE_PER_NETWORK_DAY for one network (an IPv4 /24, an
+   IPv6 /48). Both shares are counted before the email is taken, each in
+   one statement, so step-ups sent at once are held to them as step-ups
+   one after another are, and a step-up that sends nothing gives them
+   back (session.js's signedInMail()). So neither accounts made today, nor
+   a handful of older ones, nor many from one network can empty it:
+   emptying it takes the reserve divided by RESERVE_PER_USER_DAY accounts
+   a day old or more, on the reserve divided by RESERVE_PER_NETWORK_DAY
+   networks, each rounded up: eight accounts on five networks on the free
+   plan, and more on a larger one. What an account
+   causes past its share comes out of the public forms' mail instead,
+   under that mail's own limits, as a code asked for there would. */
 export const RESERVE_PER_USER_DAY = 2;
 export const RESERVE_PER_NETWORK_DAY = 3;
 
@@ -96,15 +157,14 @@ export const STEPUPS_PER_USER_DAY = 5;
    that day, and the account's activity lists every one. */
 export const NOTICES_PER_USER_DAY = 3;
 
-/* Invites to an organisation (members.js) have a day of their own, apart
-   from AUTH_MAIL_PER_DAY: however many organisations invite, nobody's
-   sign-in code or step-up waits on it, and a burst of sign-ins never stops
-   an invite. With the account mail that keeps Resend's 100 a day at 85,
-   leaving 15: the list's 10 confirmations and the emails that say Plus is
-   on. Each organisation also has its own share (INVITES_PER_ORG_DAY),
-   smaller than this, so one organisation's busy day leaves room for
-   another's. */
-export const INVITE_MAIL_PER_DAY = 25;
+/* Invites to an organisation (members.js) have their own count
+   (INVITE_MAIL_PER_DAY on the free plan, 25), apart from the account's
+   own mail: however many organisations invite, nobody's sign-in code or
+   step-up waits on it, and a burst of sign-ins never stops an invite.
+   Each organisation also has its own share (members.js's
+   INVITES_PER_ORG_DAY, 20), smaller than the day's invites whenever
+   RESEND_DAILY is 84 or more, the free plan's 100 included, so one
+   organisation's busy day leaves room for another's. */
 
 export const now = () => Math.floor(Date.now() / 1000);
 
@@ -629,18 +689,20 @@ export async function history(env, userId, limit = 10) {
 
 const today = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
 
-/* The day's account mail is three counters. The signed-in reserve
-   ('auth-stepup', STEPUP_RESERVE), which session.js draws on for an
-   older account's step-ups and notices within their shares; invites
-   ('invite', INVITE_MAIL_PER_DAY); and the rest of AUTH_MAIL_PER_DAY
-   ('auth'), for the public sign-in, sign-up and reset forms and for what
-   an account signed in causes past its share of the reserve. None can
-   spend another's, so a stranger draining the forms cannot stop an older
-   account's step-up or an invite, and a session spraying invites cannot
-   stop anyone signing in. */
+/* The day's account mail is three counters, each capped at its part of
+   RESEND_DAILY (mailBudget()). The signed-in reserve ('auth-stepup', the
+   reserve), which session.js draws on for an older account's step-ups and
+   notices within their shares; invites ('invite'); and the rest of the
+   account's own mail ('auth'), for the public sign-in, sign-up and reset
+   forms and for what an account signed in causes past its share of the
+   reserve. None can spend another's, so a stranger draining the forms
+   cannot stop an older account's step-up or an invite, and a session
+   spraying invites cannot stop anyone signing in. */
 const mailKind = (purpose) => (purpose === "invite" ? "invite" : purpose === "stepup" ? "auth-stepup" : "auth");
-const mailCap = (purpose) => (purpose === "invite" ? INVITE_MAIL_PER_DAY
-  : purpose === "stepup" ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+function mailCap(env, purpose) {
+  const budget = mailBudget(env);
+  return purpose === "invite" ? budget.invites : purpose === "stepup" ? budget.reserve : budget.auth - budget.reserve;
+}
 
 /* How many more account emails for `purpose` may go out today. Read before
    the per-address limits, so a day that is used up answers the same for
@@ -648,7 +710,7 @@ const mailCap = (purpose) => (purpose === "invite" ? INVITE_MAIL_PER_DAY
 export async function authMailLeft(env, purpose = "signin") {
   const row = await env.LIST.prepare("SELECT sent FROM mail_counts WHERE day = ? AND kind = ?")
     .bind(today(), mailKind(purpose)).first();
-  return Math.max(0, mailCap(purpose) - (row ? row.sent : 0));
+  return Math.max(0, mailCap(env, purpose) - (row ? row.sent : 0));
 }
 
 /* Takes one email for `purpose` from today's budget: the day it was taken
@@ -656,10 +718,12 @@ export async function authMailLeft(env, purpose = "signin") {
    statement, so two requests at once cannot both take the last. */
 export async function spendAuthMail(env, purpose = "signin") {
   const day = today();
+  const cap = mailCap(env, purpose);
+  if (cap <= 0) return false;
   const taken = await env.LIST.prepare(
     `INSERT INTO mail_counts (day, kind, sent) VALUES (?, ?, 1)
      ON CONFLICT(day, kind) DO UPDATE SET sent = sent + 1 WHERE sent < ?`)
-    .bind(day, mailKind(purpose), mailCap(purpose)).run();
+    .bind(day, mailKind(purpose), cap).run();
   return taken.meta.changes === 1 ? day : false;
 }
 

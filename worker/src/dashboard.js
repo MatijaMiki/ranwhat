@@ -127,7 +127,8 @@ import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, bump, checkCode,
   clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, orgFormOk, orgInput, orgToken,
-  holdNotice, peek, randomToken, readCookie, releaseNotice, requestCode, sameOrigin, setCookie, tellWayIn,
+  countWithin, holdNotice, randomToken, readCookie, releaseNotice, requestCode, sameOrigin, setCookie, tellWayIn,
+  unbump,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
@@ -1026,20 +1027,29 @@ async function rename(request, env) {
       error: "A name is 1 to 80 characters, with no control or formatting characters." });
   }
   if (name === who.org.name) return redirect("/");
-  if (!await renamesLeft(env, who)) return dashboard(env, who, { status: 429, error: TOO_MANY_RENAMES });
+  if (!await countRename(env, who)) return dashboard(env, who, { status: 429, error: TOO_MANY_RENAMES });
+  /* Written, with its event, only while the name is still another: of
+     renames to one name sent at once, one renames, and the rest write
+     nothing and give their count back. */
   const db = env.LIST;
-  await db.batch([
-    db.prepare("UPDATE orgs SET name = ? WHERE id = ?").bind(name, who.org.id),
-    event(db, { org: who.org.id, user: who.user, what: "org_renamed" }),
+  const done = await db.batch([
+    db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
+                SELECT ?, ?, 'org_renamed', NULL, ? WHERE EXISTS (SELECT 1 FROM orgs WHERE id = ? AND name IS NOT ?)`)
+      .bind(who.org.id, who.user, now(), who.org.id, name),
+    db.prepare("UPDATE orgs SET name = ? WHERE id = ? AND name IS NOT ?").bind(name, who.org.id, name),
   ]);
-  await bump(env, "rename-user", who.user, DAY);
+  if (done[1].meta.changes !== 1) await uncountRename(env, who);
   return redirect("/");
 }
 
 /* Renames, of the organisation and its machines together, are counted
-   per account per day (accounts.js's RENAMES_PER_DAY): read before one is
-   made, so that a refused one writes nothing, and counted once it is. */
-const renamesLeft = async (env, who) => await peek(env, "rename-user", who.user, DAY) < RENAMES_PER_DAY;
+   per account per day (accounts.js's RENAMES_PER_DAY). Counted before one
+   is made, in one statement that counts nothing past the day's number
+   (session.js's countWithin()), so renames sent at once are held to it
+   too and a refused one writes nothing; one that then changes nothing
+   gives its count back. */
+const countRename = (env, who) => countWithin(env, "rename-user", who.user, DAY, RENAMES_PER_DAY);
+const uncountRename = (env, who) => unbump(env, "rename-user", who.user, DAY);
 const TOO_MANY_RENAMES = `You have renamed things ${RENAMES_PER_DAY} times today, the most one account can in a
   day, so nothing was renamed. Try again tomorrow.`.replace(/\s+/g, " ");
 
@@ -1588,9 +1598,8 @@ async function renameMachinePost(request, env) {
       machinesError: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
   }
   if (label === machine.label) return redirect("/");
-  if (!await renamesLeft(env, who)) return dashboard(env, who, { status: 429, machinesError: TOO_MANY_RENAMES });
-  await renameMachine(env, who, machine, label);
-  await bump(env, "rename-user", who.user, DAY);
+  if (!await countRename(env, who)) return dashboard(env, who, { status: 429, machinesError: TOO_MANY_RENAMES });
+  if (!await renameMachine(env, who, machine, label)) await uncountRename(env, who);
   return redirect("/");
 }
 

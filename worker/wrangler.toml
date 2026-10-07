@@ -113,6 +113,18 @@ STRIPE_TAX = "managed"
 # (src/auth.js), and the cron keeps deleting what is out of date and
 # revoking idle terminals' tokens.
 ACCOUNTS_ON = "1"
+# RESEND_DAILY, not set here: how many emails a day the Resend plan sends,
+# e.g. RESEND_DAILY = 3000 on a paid plan. Unset, or not a whole number
+# from 1 to 999999999, it is the free plan's 100. Every daily count of email
+# is its fixed part of it, rounded down (src/accounts.js's mailBudget()):
+# account codes and notices 60 in 100, 15 of them kept for accounts signed
+# in, invites 25, the release list's confirmations 10 while accounts are
+# on and 90 while they are off, and the rest for the emails that say Plus
+# is on. So the counts never add up to more than it, and at 100 or more
+# none is lower than on the free plan. Set it no higher than the plan
+# sends in a day (for a plan with a monthly quota only, that quota divided
+# by the days in a month), or the counts let through more than the plan
+# sends.
 
 # Signups waiting to be confirmed, and which releases went out. No
 # database_id on purpose: the first deploy creates the database (Wrangler's
@@ -124,6 +136,6 @@ binding = "LIST"
 database_name = "ranwhat-list"
 
 # Reads /rss.xml and sends a new release as one broadcast; also sends the
-# confirmation emails the free plan's daily limit held back.
+# confirmation emails a day's limit held back, oldest first.
 [triggers]
 crons = ["7,22,37,52 * * * *"]

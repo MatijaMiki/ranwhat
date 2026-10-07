@@ -491,17 +491,22 @@ const WRONG_COUNTS = (request, who) => [
   ["device-wrong-net", network(request), HOUR, WRONG_PER_NETWORK],
 ];
 
-/* Which count stops this session typing another code: "session",
-   "account" or "network", or null when none does. The network's holds
+/* Which count stops this session typing another code: "account",
+   "network" or "session", or null when none does. The network's holds
    back only an account that has typed WRONG_BEFORE_NETWORK wrong codes
-   itself this hour. Read only: for drawing the form. A typed code is
+   itself this hour. When more than one does, the one whose lock lasts
+   longest, so that the page (tooMany()) states the real window: the
+   account's and the network's run an hour, the session's ten minutes, so
+   a session over its own count whose account is over its count too is
+   locked for the account's hour. Read only: for drawing the form, and for
+   naming the lock on a code countTry() turned away. A typed code is
    counted with countTry() before it is looked up. */
 async function overLimit(request, env, who) {
   const [session, account, net] = await Promise.all(WRONG_COUNTS(request, who)
     .map(([kind, key, window]) => peek(env, kind, key, window)));
-  if (session >= WRONG_PER_SESSION) return "session";
   if (account >= WRONG_PER_USER) return "account";
   if (net >= WRONG_PER_NETWORK && account >= WRONG_BEFORE_NETWORK) return "network";
+  if (session >= WRONG_PER_SESSION) return "session";
   return null;
 }
 
@@ -511,18 +516,23 @@ async function overLimit(request, env, who) {
    guesses sent at once: each gets its own count, and those past the limit
    are turned away unlooked. A count past its limit stops the counting
    there, so a locked session does not spend its account's or its
-   network's tries. left: the wrong codes this session may still type
-   should this one be wrong, and over: the count that stops it once none
-   are left. A code that turns out right gives its try back (refund()). */
+   network's tries; the lock it then names is read with overLimit(), as
+   its account may be over its count as well. left: the wrong codes this
+   session may still type should this one be wrong, and over: the count
+   that stops it once none are left, the account's or the network's
+   before the session's when more than one runs out on the same code, as
+   theirs is the longer lock. A code that turns out right gives its try
+   back (refund()). */
 async function countTry(request, env, who) {
   const s = await bump(env, "device-wrong", who.id, WRONG_WINDOW);
-  if (s > WRONG_PER_SESSION) return { ok: false, left: 0, over: "session" };
+  if (s > WRONG_PER_SESSION) return { ok: false, left: 0, over: await overLimit(request, env, who) || "session" };
   const a = await bump(env, "device-wrong-user", who.user, HOUR);
   if (a > WRONG_PER_USER) return { ok: false, left: 0, over: "account" };
   const n = await bump(env, "device-wrong-net", network(request), HOUR);
   if (n > WRONG_PER_NETWORK && a > WRONG_BEFORE_NETWORK) return { ok: false, left: 0, over: "network" };
-  const lefts = [[WRONG_PER_SESSION - s, "session"], [WRONG_PER_USER - a, "account"],
-    [n >= WRONG_PER_NETWORK ? Math.max(0, WRONG_BEFORE_NETWORK - a) : Infinity, "network"]];
+  const lefts = [[WRONG_PER_USER - a, "account"],
+    [n >= WRONG_PER_NETWORK ? Math.max(0, WRONG_BEFORE_NETWORK - a) : Infinity, "network"],
+    [WRONG_PER_SESSION - s, "session"]];
   const [left, over] = lefts.reduce((low, next) => (next[0] < low[0] ? next : low));
   return { ok: true, left, over };
 }
@@ -533,7 +543,8 @@ async function refund(request, env, who) {
 
 /* The page for a session that may type no more codes for now, saying
    which count stopped it and for how long at most: the session's runs
-   ten minutes, the account's and the network's an hour. */
+   ten minutes, the account's and the network's an hour. Its callers name
+   the longest lock that holds (overLimit(), countTry()). */
 function tooMany(over) {
   const why = {
     session: `Too many codes typed in this browser lately were not right,

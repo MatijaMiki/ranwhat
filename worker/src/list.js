@@ -18,17 +18,20 @@
  *
  * Releases: a cron trigger reads /rss.xml. A release it has not seen goes
  * out as one Resend broadcast to the segment. Broadcasts are not counted
- * against the free plan's 100 emails a day; confirmation emails are, so the
- * list sends only so many of them a day (LIST_MAIL_PER_DAY), and one past
+ * against Resend's daily sending limit (100 emails a day on the free
+ * plan); confirmation emails are, so the list sends only so many of them a
+ * day (its part of RESEND_DAILY: accounts.js's mailBudget()), and one past
  * that, or one Resend turns away at its own daily limit, waits here and the
- * cron sends it on a later day. The first run only notes what the feed
- * already holds: old releases are never sent.
+ * cron sends it on a later day, oldest first, for up to 30 days. The first
+ * run only notes what the feed already holds: old releases are never sent.
  *
  * The confirmation link carries a random id, never the address, with an
  * HMAC over it, so an id alone confirms nobody.
  */
 
-import { accountsOn } from "./accounts.js";
+import { LIST_MAIL_ALONE, LIST_MAIL_PER_DAY, accountsOn, mailBudget } from "./accounts.js";
+
+export { LIST_MAIL_ALONE, LIST_MAIL_PER_DAY };
 
 const ORIGIN = "https://ranwhat.com";
 const FEED = `${ORIGIN}/rss.xml`;
@@ -39,24 +42,34 @@ export const REPLY_TO = "hello@ranwhat.com";
 export const SEGMENT = "ranwhat releases";
 
 const DAY = 24 * 3600;
-const CONFIRM_FOR = 7 * DAY;     // a confirmation link works this long
+const CONFIRM_FOR = 7 * DAY;     // a confirmation link works this long, and a mailed signup is kept as long
 const RESEND_AFTER = 15 * 60;    // at most one confirmation email per address per 15 minutes
-const FORGET_AFTER = 7 * DAY;    // an address nobody confirmed is deleted after this
+const KEEP_QUEUED = 30 * DAY;    // a signup whose email has not gone is kept this long after signing up
+const KEEP_COUNTS = 7 * DAY;     // a day's count of confirmations is kept this long
 const FRESH_FOR = 14 * DAY;      // a release older than this when first seen is never sent
 export const QUEUE_BATCH = 20;   // queued confirmations a run sends, inside the free plan's 50 subrequests
 
-/* Confirmation emails the list sends in a UTC day. Resend's free plan
-   sends 100 a day for everything the Worker mails. While accounts are on,
-   their codes and notices take up to 60 (accounts.js's AUTH_MAIL_PER_DAY)
-   and invites up to 25 (INVITE_MAIL_PER_DAY), so the list sends at most
-   10, and 5 are left for the emails that say Plus is on: a burst of
-   signups never stops anyone getting a sign-in code. With accounts off
-   there is no account mail, and the list may send 90, leaving 10 for the
-   emails that carry a Plus token. A signup past the day's number waits
-   for a later day's cron run, oldest first; one still unsent after a week
-   is deleted with every other signup nobody confirmed. */
-export const LIST_MAIL_PER_DAY = 10;
-export const LIST_MAIL_ALONE = 90;
+/* Confirmation emails the list sends in a UTC day: its part of
+   RESEND_DAILY, Resend's daily limit for everything the Worker mails
+   (accounts.js's mailBudget()). While accounts are on, their codes and
+   notices take up to 60 in 100 and invites up to 25, so the list sends at
+   most 10 in 100 (LIST_MAIL_PER_DAY, 10 on the free plan), and at least 5
+   in 100 are left for the emails that say Plus is on: a burst of signups
+   never stops anyone getting a sign-in code. With accounts off there is
+   no account mail, and the list may send 90 in 100 (LIST_MAIL_ALONE, 90 on
+   the free plan), leaving at least 10 in 100 for the emails that carry a
+   Plus token.
+
+   A signup past the day's number waits for a later day's cron run, which
+   sends those waiting oldest first, while the day's number lasts. One
+   whose email has still not gone 30 days after it signed up (KEEP_QUEUED)
+   is deleted then, unsent; one whose email has gone is deleted a week
+   after it went, once its link no longer works, unless it was confirmed
+   first. */
+const listCap = (env) => {
+  const budget = mailBudget(env);
+  return accountsOn(env) ? budget.list : budget.listAlone;
+};
 
 const SCHEMA = [
   /* Only signups waiting to be confirmed. mailed_at 0: not mailed yet. */
@@ -74,8 +87,8 @@ const SCHEMA = [
      done_at INTEGER,
      broadcast TEXT)`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
-  /* Confirmation emails sent each UTC day (LIST_MAIL_PER_DAY); the cron
-     deletes a day's count a week later. */
+  /* Confirmation emails sent each UTC day (listCap()); the cron deletes a
+     day's count a week later. */
   `CREATE TABLE IF NOT EXISTS list_mail (day TEXT PRIMARY KEY, sent INTEGER NOT NULL)`,
 ];
 
@@ -185,7 +198,8 @@ const mailDay = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
    last. */
 async function takeMail(env) {
   const day = mailDay();
-  const cap = accountsOn(env) ? LIST_MAIL_PER_DAY : LIST_MAIL_ALONE;
+  const cap = listCap(env);
+  if (cap <= 0) return null;
   const taken = await env.LIST.prepare(
     `INSERT INTO list_mail (day, sent) VALUES (?, 1)
      ON CONFLICT(day) DO UPDATE SET sent = sent + 1 WHERE sent < ?`).bind(day, cap).run();
@@ -229,9 +243,10 @@ async function mailConfirmation(env, email, id) {
 /* Stores the address unconfirmed and mails it a confirmation link. An
    address mailed in the last few minutes gets nothing more, so the form
    cannot flood an inbox. Returns { queued: true } when the day's
-   confirmations (LIST_MAIL_PER_DAY) or Resend's own daily limit are used
-   up: the cron mails it on a later day. Throws when the email could not
-   be sent for any other reason. */
+   confirmations (listCap()) or Resend's own daily limit are used up: the
+   cron mails it on a later day, oldest first, or deletes it unsent 30
+   days after it signed up. Throws when the email could not be sent for
+   any other reason. */
 export async function subscribe(env, address) {
   const db = env.LIST;
   await schema(db);
@@ -350,8 +365,11 @@ export async function announce(env, fetcher = fetch) {
   const db = env.LIST;
   await schema(db);
   const t = now();
-  await db.prepare("DELETE FROM subscribers WHERE created_at < ?").bind(t - FORGET_AFTER).run();
-  await db.prepare("DELETE FROM list_mail WHERE day < ?").bind(mailDay(t - FORGET_AFTER)).run();
+  /* Unconfirmed: a week after its email went, when the link has stopped
+     working, or 30 days after signing up when it never went. */
+  await db.prepare("DELETE FROM subscribers WHERE (mailed_at > 0 AND mailed_at < ?) OR (mailed_at = 0 AND created_at < ?)")
+    .bind(t - CONFIRM_FOR, t - KEEP_QUEUED).run();
+  await db.prepare("DELETE FROM list_mail WHERE day < ?").bind(mailDay(t - KEEP_COUNTS)).run();
   await sendQueued(env);
 
   let items;

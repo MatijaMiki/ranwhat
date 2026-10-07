@@ -106,14 +106,20 @@ export async function machineIn(env, orgId, id) {
     .bind(id, orgId).first();
 }
 
-/* Renames it, with the event, in one batch. */
+/* Renames it, with the event, in one batch, only while its name is still
+   another: of renames to one name sent at once, one renames and the rest
+   write nothing. true when this request renamed it. */
 export async function renameMachine(env, who, machine, label) {
   const db = env.LIST;
-  await db.batch([
-    db.prepare("UPDATE machines SET label = ? WHERE id = ? AND org_id = ?").bind(label, machine.id, who.org.id),
-    db.prepare("INSERT INTO auth_events (org_id, user_id, event, subject, at) VALUES (?, ?, 'machine_renamed', ?, ?)")
-      .bind(who.org.id, who.user, machine.id, now()),
+  const done = await db.batch([
+    db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
+                SELECT ?, ?, 'machine_renamed', ?, ? WHERE EXISTS (
+                  SELECT 1 FROM machines WHERE id = ? AND org_id = ? AND label IS NOT ?)`)
+      .bind(who.org.id, who.user, machine.id, now(), machine.id, who.org.id, label),
+    db.prepare("UPDATE machines SET label = ? WHERE id = ? AND org_id = ? AND label IS NOT ?")
+      .bind(label, machine.id, who.org.id, label),
   ]);
+  return done[1].meta.changes === 1;
 }
 
 /* Revokes its token. The event is written only by the request that

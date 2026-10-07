@@ -651,6 +651,36 @@ test("with the day's invite mail used up, nobody is invited and the organisation
   assert.equal(await peek(e, "invite-org", acme, DAY), 0);
 });
 
+test("RESEND_DAILY raises the day's invite mail in proportion: a quarter of it", async () => {
+  const s = services();
+  const e = env({ RESEND_DAILY: "1000" });
+  const { ana, acme } = await acmeOwner(e, s);
+  const used = (n) => run(e, `INSERT INTO mail_counts (day, kind, sent) VALUES (?, 'invite', ?)
+          ON CONFLICT (day, kind) DO UPDATE SET sent = excluded.sent`, isoDay(unix()), n);
+  /* Past the free plan's 25, invites still go. */
+  used(INVITE_MAIL_PER_DAY);
+  assert.equal((await invite(ana, "bo@example.com")).status, 303);
+  assert.ok(lastTo(s, "bo@example.com"));
+  /* At a quarter of 1000, they stop. */
+  used(250);
+  const r = await invite(ana, "cy@example.com");
+  assert.equal(r.status, 503);
+  assert.match(r.text, /today's are used up/);
+  assert.equal(lastTo(s, "cy@example.com"), undefined);
+  assert.equal(invitesOf(e, acme).length, 1);
+});
+
+test("with RESEND_DAILY so low that invites' part of it rounds down to none, nobody is invited", async () => {
+  const s = services();
+  const e = env({ RESEND_DAILY: "3" });
+  const { ana, acme } = await acmeOwner(e, s);
+  const r = await invite(ana, "bo@example.com");
+  assert.equal(r.status, 503);
+  assert.equal(lastTo(s, "bo@example.com"), undefined);
+  assert.equal(invitesOf(e, acme).length, 0);
+  assert.equal(await peek(e, "invite-org", acme, DAY), 0);
+});
+
 test("invites and sign-in codes each have their own day: neither can use up the other's", async () => {
   const s = services();
   const e = env();

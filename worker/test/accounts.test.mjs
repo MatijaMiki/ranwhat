@@ -9,15 +9,16 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash, createHmac } from "node:crypto";
-import { d1 } from "./stand-ins.mjs";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { d1, slow } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
-const { NETWORK_MAIL_PER_DAY, formToken, network } = await import("../src/session.js");
+const { NETWORK_MAIL_PER_DAY, formToken, network, peek } = await import("../src/session.js");
+const accounts = await import("../src/accounts.js");
 const {
   AUTH_MAIL_PER_DAY, RENAMES_PER_DAY, RESERVE_PER_NETWORK_DAY, RESERVE_PER_USER_DAY, STEPUP_RESERVE,
   STEPUPS_PER_USER_DAY, SWITCHES_PER_DAY,
-} = await import("../src/accounts.js");
+} = accounts;
 
 const ORIGIN = "https://account.ranwhat.com";
 const SECRET = "an-account-test-secret-that-is-long-enough-0123456789";
@@ -951,6 +952,154 @@ test("an older account takes two of the reserve a day and one network three; pas
   assert.match(out.text, /No more codes today/);
 });
 
+test("step-ups sent at once are held to the reserve's shares, with D1's latency or without, and one that sends nothing gives its shares back", async () => {
+  for (const latency of [false, true]) {
+    /* At 01:00 UTC, a day after the accounts are made, so that it all falls on one day. */
+    later(DAY - (Math.floor(Date.now() / 1000) % DAY) + HOUR);
+    const s = services();
+    const e = env();
+    const people = {};
+    for (const [i, name] of ["ana", "bo", "cy", "old0", "old1", "old2"].entries()) {
+      people[name] = new Browser(e, { ip: `198.51.${100 + i}.10` });
+      await signIn(people[name], s, `${name}@example.com`);
+    }
+    later(DAY);
+    if (latency) e.LIST = slow(e.LIST);
+    const idOf = (name) => rows(e, "SELECT id FROM users WHERE email = ?", `${name}@example.com`)[0].id;
+    const stepups = async (b, ips) => {
+      const form = await formToken(e, sha(b.jar.get(SESSION)), "stepup");
+      return Promise.all(ips.map((ip) => {
+        const twin = b.clone();
+        twin.ip = ip;
+        return twin.post("/stepup", { form, next: "/" });
+      }));
+    };
+    const publicMail = sentOf(e, "auth");
+    const mailed = s.emails.length;
+
+    /* Three older accounts ask for every step-up they may, all at once, from
+       fifteen /64s of one /48: that network's share of the reserve, and the
+       rest from the public mail. */
+    const burst = await Promise.all(["old0", "old1", "old2"].map((name, i) =>
+      stepups(people[name], Array.from({ length: STEPUPS_PER_USER_DAY }, (_, k) => `2001:db8:77:${i * 8 + k}::1`))));
+    for (const r of burst.flat()) assert.equal(r.location, "/signin/code", r.text);
+    assert.equal(s.emails.length - mailed, 3 * STEPUPS_PER_USER_DAY);
+    assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_NETWORK_DAY, "one network's share, and no more");
+    assert.equal(sentOf(e, "auth") - publicMail, 3 * STEPUPS_PER_USER_DAY - RESERVE_PER_NETWORK_DAY);
+    assert.equal(await peek(e, "reserve-net", "2001:db8:77::/48", DAY), RESERVE_PER_NETWORK_DAY);
+    assert.equal((await Promise.all(["old0", "old1", "old2"].map((n) => peek(e, "reserve-user", idOf(n), DAY))))
+      .reduce((a, b) => a + b), RESERVE_PER_NETWORK_DAY, "what was counted is what was mailed");
+
+    /* One account asks for its five at once, from five /48s: its share of
+       the reserve, and the rest from the public mail. */
+    const own = await stepups(people.ana,
+      Array.from({ length: STEPUPS_PER_USER_DAY }, (_, k) => `2001:db8:${0xa0 + k}::1`));
+    for (const r of own) assert.equal(r.location, "/signin/code", r.text);
+    assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_NETWORK_DAY + RESERVE_PER_USER_DAY, "one account's share, and no more");
+    assert.equal(await peek(e, "reserve-user", idOf("ana"), DAY), RESERVE_PER_USER_DAY);
+    /* Past its own day, every one of an account's step-ups at once is refused, and the reserve is untouched. */
+    const past = await stepups(people.ana, ["2001:db8:b0::1", "2001:db8:b1::1", "2001:db8:b2::1"]);
+    for (const r of past) assert.equal(r.status, 429);
+    assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_NETWORK_DAY + RESERVE_PER_USER_DAY);
+
+    /* Two at once from one /64 for one address: the second is over the
+       address's minute, its code is never mailed, and its shares are given
+       back. */
+    const twice = await stepups(people.bo, ["192.0.2.50", "192.0.2.50"]);
+    for (const r of twice) assert.equal(r.location, "/signin/code", r.text);
+    assert.equal(s.emails.length - mailed, 3 * STEPUPS_PER_USER_DAY + STEPUPS_PER_USER_DAY + 1);
+    assert.equal(await peek(e, "reserve-user", idOf("bo"), DAY), 1);
+    assert.equal(await peek(e, "reserve-net", "192.0.2.0/24", DAY), 1);
+    assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_NETWORK_DAY + RESERVE_PER_USER_DAY + 1);
+
+    /* With the public mail used up by strangers, another older account's
+       step-up still comes from what is left of the reserve. */
+    e.LIST.sql.prepare("UPDATE mail_counts SET sent = ? WHERE day = ? AND kind = 'auth'")
+      .run(AUTH_MAIL_PER_DAY - STEPUP_RESERVE, today());
+    const [last] = await stepups(people.cy, ["203.0.113.70"]);
+    assert.equal(last.location, "/signin/code", last.text);
+    assert.equal(s.emails.length - mailed, 3 * STEPUPS_PER_USER_DAY + STEPUPS_PER_USER_DAY + 2);
+    assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_NETWORK_DAY + RESERVE_PER_USER_DAY + 2);
+  }
+});
+
+test("a network's codes a day hold for requests sent at once, with D1's latency or without, and one that sends nothing gives its count back", async () => {
+  for (const latency of [false, true]) {
+    later(DAY);
+    const s = services();
+    const e = env();
+    if (latency) e.LIST = slow(e.LIST);
+    const replies = await Promise.all(Array.from({ length: 3 * NETWORK_MAIL_PER_DAY }, (_, i) =>
+      askCode(new Browser(e, { ip: `198.51.100.${i + 1}` }), `n${i}@example.com`)));
+    assert.equal(s.emails.length, NETWORK_MAIL_PER_DAY, "one /24's codes for the day, and no more");
+    assert.equal(replies.filter((r) => r.location === "/signin/code").length, NETWORK_MAIL_PER_DAY);
+    for (const r of replies.filter((x) => x.location !== "/signin/code")) {
+      assert.equal(r.status, 429);
+      assert.match(r.text, /than we send to\s+one network in a day/);
+    }
+    assert.equal(await peek(e, "mail-net", "198.51.100.0/24", DAY), NETWORK_MAIL_PER_DAY);
+    assert.equal(sentOf(e, "auth"), NETWORK_MAIL_PER_DAY);
+
+    /* Another network still gets its own; one asking twice at once for one
+       address gets one code, and is counted once. */
+    const pair = await Promise.all([1, 2].map(() => askCode(new Browser(e, { ip: "203.0.113.90" }), "z@example.com")));
+    for (const r of pair) assert.equal(r.location, "/signin/code");
+    assert.equal(s.emails.length, NETWORK_MAIL_PER_DAY + 1);
+    assert.equal(await peek(e, "mail-net", "203.0.113.0/24", DAY), 1);
+  }
+});
+
+test("RESEND_DAILY sets every day's count of email in proportion, never past it in all; unset or not a whole number is the free plan's 100", () => {
+  const { mailBudget } = accounts;
+  const free = { daily: 100, auth: 60, reserve: 15, invites: 25, list: 10, listAlone: 90 };
+  assert.deepEqual({ ...mailBudget({}) }, free);
+  assert.deepEqual({ AUTH_MAIL_PER_DAY, STEPUP_RESERVE, INVITE_MAIL_PER_DAY: accounts.INVITE_MAIL_PER_DAY,
+                     LIST_MAIL_PER_DAY: accounts.LIST_MAIL_PER_DAY, LIST_MAIL_ALONE: accounts.LIST_MAIL_ALONE },
+                   { AUTH_MAIL_PER_DAY: 60, STEPUP_RESERVE: 15, INVITE_MAIL_PER_DAY: 25, LIST_MAIL_PER_DAY: 10,
+                     LIST_MAIL_ALONE: 90 });
+  for (const bad of [undefined, null, "", " ", "0", "-5", "abc", "3000.5", "3,000", "1e4", "0x10", "1000000000", 0, -1, 2.5]) {
+    assert.deepEqual({ ...mailBudget({ RESEND_DAILY: bad }) }, free, String(bad));
+  }
+  assert.deepEqual({ ...mailBudget({ RESEND_DAILY: "3000" }) },
+                   { daily: 3000, auth: 1800, reserve: 450, invites: 750, list: 300, listAlone: 2700 });
+  assert.deepEqual({ ...mailBudget({ RESEND_DAILY: 3000 }) }, { ...mailBudget({ RESEND_DAILY: " 3000 " }) });
+  assert.deepEqual({ ...mailBudget({ RESEND_DAILY: "50000" }) },
+                   { daily: 50000, auth: 30000, reserve: 7500, invites: 12500, list: 5000, listAlone: 45000 });
+  for (let daily = 1; daily <= 20000; daily += daily < 300 ? 1 : 37) {
+    const b = mailBudget({ RESEND_DAILY: String(daily) });
+    assert.equal(b.daily, daily);
+    for (const k of ["auth", "reserve", "invites", "list", "listAlone"]) assert.ok(Number.isInteger(b[k]) && b[k] >= 0);
+    assert.ok(b.auth + b.invites + b.list <= daily, `${daily}: accounts on`);
+    assert.ok(b.listAlone <= daily, `${daily}: accounts off`);
+    assert.ok(b.reserve <= b.auth);
+    if (daily >= 100) for (const k of Object.keys(free)) assert.ok(b[k] >= free[k], `${daily}: ${k}`);
+  }
+});
+
+test("with RESEND_DAILY raised, sign-in codes and the reserve go on past the free plan's counts", async () => {
+  /* At 01:00 UTC, so that what follows falls on one day. */
+  later(DAY - (Math.floor(Date.now() / 1000) % DAY) + HOUR);
+  const s = services();
+  const e = env({ RESEND_DAILY: "3000" });
+  const bob = new Browser(e, { ip: "203.0.113.20" });
+  await signIn(bob, s, "bob@example.com");
+  later(DAY);
+  const set = (kind, n) => e.LIST.sql.prepare(`INSERT INTO mail_counts (day, kind, sent) VALUES (?, ?, ?)
+    ON CONFLICT (day, kind) DO UPDATE SET sent = excluded.sent`).run(today(), kind, n);
+  set("auth", AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+  set("auth-stepup", STEPUP_RESERVE);
+  const asked = await askCode(new Browser(e, { ip: "198.51.102.1" }), "dan@example.com");
+  assert.equal(asked.location, "/signin/code", asked.text);
+  const r = await bob.post("/stepup", { form: await formToken(e, sha(bob.jar.get(SESSION)), "stepup") });
+  assert.equal(r.location, "/signin/code", r.text);
+  assert.equal(sentOf(e, "auth-stepup"), STEPUP_RESERVE + 1, "from the larger reserve");
+  /* At their parts of 3000, they stop. */
+  set("auth", 1800 - 450);
+  const out = await askCode(new Browser(e, { ip: "198.51.103.1" }), "eve@example.com");
+  assert.equal(out.status, 503);
+  assert.match(out.text, /No more codes today/);
+});
+
 test("account email stops at the day's cap, for every address alike, and starts again the next day", async () => {
   const s = services();
   const e = env();
@@ -1162,6 +1311,70 @@ test("renames and organisation switches write only what changes, and only so man
   later(DAY + 1);
   assert.equal((await rename("Tomorrow")).location, "/");
   assert.equal((await to(SWITCHES_PER_DAY % 2 ? org : other)).location, "/");
+});
+
+test("renames and switches sent at once are held to the day's count, and those that change nothing write and cost nothing, with D1's latency or without", async () => {
+  for (const latency of [false, true]) {
+    later(DAY + 1);
+    const s = services();
+    const e = env();
+    const ana = new Browser(e, { ip: "203.0.113.5" });
+    await signIn(ana, s, "ana@example.com");
+    const [{ id: user }] = rows(e, "SELECT id FROM users WHERE email = 'ana@example.com'");
+    const home = await ana.get("/");
+    const org = home.text.match(/<form method="post" action="\/org">[\s\S]*?name="org" value="([^"]+)"/)[1];
+    const form = tokenFor(home.text, "/org");
+    const other = crypto.randomUUID();
+    e.LIST.sql.prepare("INSERT INTO orgs (id, name, personal, created_at) VALUES (?, 'Acme', 0, 0)").run(other);
+    e.LIST.sql.prepare("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', 0)").run(other, user);
+    if (latency) e.LIST = slow(e.LIST, 7);
+    const events = (what) => rows(e, "SELECT count(*) AS n FROM auth_events WHERE event = ?", what)[0].n;
+    const at = (r, where) => r.filter((x) => x.location === where).length;
+
+    /* Ten renames at once to one new name: one is made, and counted once. */
+    let replies = await Promise.all(Array.from({ length: 10 }, () => ana.post("/org", { form, org, name: "Acme Two" })));
+    assert.equal(at(replies, "/"), 10);
+    assert.equal(events("org_renamed"), 1);
+    assert.equal(await peek(e, "rename-user", user, DAY), 1);
+
+    /* Twice the day's renames at once, each to a name of its own: the rest
+       of the day's are made, every other one is refused, and the count is
+       the day's number. */
+    replies = await Promise.all(Array.from({ length: 2 * RENAMES_PER_DAY }, (_, i) =>
+      ana.post("/org", { form, org, name: `Name ${i}` })));
+    assert.equal(at(replies, "/"), RENAMES_PER_DAY - 1);
+    assert.equal(replies.filter((r) => r.status === 429).length, RENAMES_PER_DAY + 1);
+    assert.equal(events("org_renamed"), RENAMES_PER_DAY);
+    assert.equal(await peek(e, "rename-user", user, DAY), RENAMES_PER_DAY);
+
+    /* Twenty switches at once from one session to the other organisation:
+       one is made, and counted once. */
+    const sw = await formToken(e, sha(ana.jar.get(SESSION)), "org-switch");
+    replies = await Promise.all(Array.from({ length: 20 }, () => ana.post("/org/switch", { form: sw, org: other, next: "/" })));
+    assert.equal(at(replies, "/"), 20);
+    assert.equal(events("org_switched"), 1);
+    assert.equal(await peek(e, "switch-user", user, DAY), 1);
+
+    /* Ten more than the day's switches, from as many sessions of the
+       account, at once: the rest of the day's are made, and the count is
+       the day's number. */
+    const t = Math.floor(Date.now() / 1000);
+    const sessions = Array.from({ length: SWITCHES_PER_DAY + 10 }, () => {
+      const value = randomBytes(32).toString("base64url");
+      e.LIST.sql.prepare(`INSERT INTO sessions (id, user_id, org_id, created_at, seen_at, authed_at, expires_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(sha(value), user, org, t, t, t, t + DAY);
+      const b = new Browser(e, { ip: "203.0.113.5" });
+      b.jar.set(SESSION, value);
+      return b;
+    });
+    replies = await Promise.all(sessions.map(async (b) =>
+      b.post("/org/switch", { form: await formToken(e, sha(b.jar.get(SESSION)), "org-switch"), org: other, next: "/" })));
+    assert.equal(at(replies, "/"), SWITCHES_PER_DAY - 1);
+    assert.equal(replies.filter((r) => r.status === 429).length, 11);
+    assert.equal(events("org_switched"), SWITCHES_PER_DAY);
+    assert.equal(await peek(e, "switch-user", user, DAY), SWITCHES_PER_DAY);
+    assert.equal(rows(e, "SELECT count(*) AS n FROM sessions WHERE org_id = ?", other)[0].n, SWITCHES_PER_DAY);
+  }
 });
 
 /* ---------- logs and the cron ---------- */

@@ -254,6 +254,26 @@ export async function bump(env, kind, who, window) {
   return row.count;
 }
 
+/* Counts one more in the window only while that keeps the count within
+   `limit`: true when it was counted, false when the count is at the limit
+   already, which writes nothing. One statement, as bump() is, so of
+   requests sent at once exactly as many are counted as the limit has room
+   for, and none is counted past it. A caller that counts more than one
+   thing gives back with unbump() what it counted when a later count, or
+   what it was counted for, does not go through. */
+export async function countWithin(env, kind, who, window, limit) {
+  if (!(limit > 0)) return false;
+  const t = now();
+  const key = await throttleKey(env, kind, who);
+  const counted = await env.LIST.prepare(
+    `INSERT INTO throttle (key, window_start, count) VALUES (?, ?, 1)
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN window_start <= ? THEN 1 ELSE count + 1 END,
+       window_start = CASE WHEN window_start <= ? THEN excluded.window_start ELSE window_start END
+     WHERE window_start <= ? OR count < ?`).bind(key, t, t - window, t - window, t - window, limit).run();
+  return counted.meta.changes === 1;
+}
+
 /* The count so far in the window, without adding to it. */
 export async function peek(env, kind, who, window) {
   const key = await throttleKey(env, kind, who);
@@ -264,7 +284,8 @@ export async function peek(env, kind, who, window) {
 
 /* One fewer in the window, for a count bumped before the thing it limits
    turned out not to be one (a right code, counted as a try before it was
-   looked up). Never below nothing. */
+   looked up; a share of the day's mail counted for an email that was not
+   sent). Never below nothing. */
 export async function unbump(env, kind, who, window) {
   const key = await throttleKey(env, kind, who);
   await env.LIST.prepare("UPDATE throttle SET count = count - 1 WHERE key = ? AND window_start > ? AND count > 0")
@@ -287,15 +308,17 @@ export async function forget(env, kind, who) {
    account has asked for STEPUPS_PER_USER_DAY today.
 
    The order matters. The network's requests this hour are counted first,
-   then the day's mail for this purpose and the network's share of it are
-   read (for a step-up, the account's share of the reserve too:
-   signedInMail()), before anything about the address; mail is taken from
-   them only when a code is mailed, so they say no more about an address
-   than the day's budget always has. Then the address, as asked for from
-   this network (a minute, an hour) and from everywhere (an hour). A
-   stranger's requests for someone's address therefore use up the
-   stranger's own limits, not theirs, until there are enough of them to
-   reach the address's hourly cap on mail.
+   then the day's mail for this purpose is read and the network's share of
+   it counted (for a step-up from the reserve, the account's share and its
+   network's: signedInMail()), before anything about the address. A share
+   is counted before the code is mailed, so that requests sent at once are
+   held to it too, and given back when no code is mailed; the day's mail is
+   taken only when one is. So they say no more about an address than the
+   day's budget always has. Then the address, as asked for from this
+   network (a minute, an hour) and from everywhere (an hour). A stranger's
+   requests for someone's address therefore use up the stranger's own
+   limits, not theirs, until there are enough of them to reach the
+   address's hourly cap on mail.
 
    previous: the browser's last attempt, cancelled by this one. When the
    address is over its limits, the browser keeps a live attempt it already
@@ -333,6 +356,7 @@ export async function requestCode(request, env, ctx, {
   const before = previous ? await db.prepare(
     "SELECT email_mac, purpose, expires_at, tries, used_at FROM signins WHERE id = ?")
     .bind(await sha256(previous)).first() : null;
+  if (limited) await release(env, draw);
   if (limited && before && before.email_mac === emailMac && before.purpose === purpose &&
       !before.used_at && before.tries < CODE_TRIES && before.expires_at > t) {
     if (passwordHash) {
@@ -370,12 +394,13 @@ export async function requestCode(request, env, ctx, {
 
 /* Where a code from the public sign-in, sign-up and reset forms comes
    from: the day's public mail ('auth'), under this network's share of it
-   (an IPv4 /24, an IPv6 /64). { from: "public", net }, or { refused }. */
+   (an IPv4 /24, an IPv6 /64), which is counted here: { from: "public",
+   counts }, or { refused }. */
 async function publicMail(request, env) {
   const wide = network(request, { v4: 24 });
   if (await authMailLeft(env, "signin") <= 0) return { refused: "budget" };
-  if (await peek(env, "mail-net", wide, DAY) >= NETWORK_MAIL_PER_DAY) return { refused: "network-day" };
-  return { from: "public", net: wide };
+  if (!await countWithin(env, "mail-net", wide, DAY, NETWORK_MAIL_PER_DAY)) return { refused: "network-day" };
+  return { from: "public", counts: [["mail-net", wide]] };
 }
 
 /* Where an email that an account signed in causes comes from: a
@@ -384,47 +409,56 @@ async function publicMail(request, env) {
    share of the reserve today (RESERVE_PER_USER_DAY) and its network has
    (RESERVE_PER_NETWORK_DAY, an IPv4 /24 or an IPv6 /48, so that one
    holder of many /64s is one network); otherwise the public mail, as a
-   code asked for from the forms would. So accounts made today, and those
-   past their share, never spend what the reserve keeps for everyone
-   else, and a stranger who uses up the public mail still leaves the
-   reserve to older accounts. { from, ... }, or { refused }. */
+   code asked for from the forms would. Both shares are counted here,
+   before the email is taken, each in one statement (countWithin()), so
+   that step-ups sent at once are held to them as step-ups one after
+   another are; a share counted for an email that is then not taken is
+   given back (release()). So accounts made today, and those past their
+   share, never spend what the reserve keeps for everyone else, and a
+   stranger who uses up the public mail still leaves the reserve to older
+   accounts. { from, counts }, or { refused }. */
 async function signedInMail(request, env, user) {
   const net = network(request, { v4: 24, v6: 48 });
   const account = await env.LIST.prepare("SELECT created_at FROM users WHERE id = ?").bind(user).first();
-  if (account && account.created_at <= now() - DAY &&
-      await peek(env, "reserve-user", user, DAY) < RESERVE_PER_USER_DAY &&
-      await peek(env, "reserve-net", net, DAY) < RESERVE_PER_NETWORK_DAY &&
-      await authMailLeft(env, "stepup") > 0) {
-    return { from: "reserve", user, net };
+  if (account && account.created_at <= now() - DAY && await authMailLeft(env, "stepup") > 0 &&
+      await countWithin(env, "reserve-user", user, DAY, RESERVE_PER_USER_DAY)) {
+    if (await countWithin(env, "reserve-net", net, DAY, RESERVE_PER_NETWORK_DAY)) {
+      return { from: "reserve", counts: [["reserve-user", user], ["reserve-net", net]] };
+    }
+    await unbump(env, "reserve-user", user, DAY);
   }
   return publicMail(request, env);
 }
 
-/* Takes the email `draw` names from today's mail, and counts it against
-   the shares it was read under. A reserve another request took the last
-   of meanwhile gives way to the public mail. What was taken, for
-   giveBack(), or null when nothing could be. */
+/* The shares a draw counted, given back, for an email that is not going
+   to be taken. */
+async function release(env, draw) {
+  for (const [kind, who] of draw.counts || []) await unbump(env, kind, who, DAY);
+}
+
+/* Takes the email `draw` names from today's mail; the shares it was
+   counted against stay counted. A reserve another request took the last
+   of meanwhile gives its shares back and gives way to the public mail.
+   What was taken, for giveBack(), or null when nothing could be, with
+   every share given back. */
 async function take(request, env, draw) {
   if (draw.from === "reserve") {
     const day = await spendAuthMail(env, "stepup");
-    if (day) {
-      await bump(env, "reserve-user", draw.user, DAY);
-      await bump(env, "reserve-net", draw.net, DAY);
-      return { purpose: "stepup", day, counts: [["reserve-user", draw.user], ["reserve-net", draw.net]] };
-    }
+    if (day) return { purpose: "stepup", day, counts: draw.counts };
+    await release(env, draw);
     draw = await publicMail(request, env);
     if (draw.refused) return null;
   }
   const day = await spendAuthMail(env, "signin");
-  if (!day) return null;
-  await bump(env, "mail-net", draw.net, DAY);
-  return { purpose: "signin", day, counts: [["mail-net", draw.net]] };
+  if (day) return { purpose: "signin", day, counts: draw.counts };
+  await release(env, draw);
+  return null;
 }
 
 /* What take() took, back, for an email that is not going to be sent. */
 async function giveBack(env, taken) {
   await giveBackAuthMail(env, taken.purpose, taken.day);
-  for (const [kind, who] of taken.counts) await unbump(env, kind, who, DAY);
+  await release(env, taken);
 }
 
 export const ACCOUNT_FROM = "ranwhat <account@ranwhat.com>";
