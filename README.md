@@ -76,7 +76,8 @@ Python 3.9+. No dependencies, and nothing is built on your machine.
 
 ### `ranwhat check`: everything worth knowing, in one read-only pass
 
-Runs watch and clean together and changes nothing.
+Runs watch and clean together and changes nothing. Its last lines suggest
+`reach` for the MCP servers and credential files your agents can reach.
 
 On a terminal, check, watch and clean keep one status line on stderr while
 they read, counting transcripts through each pass: `indexing secrets`
@@ -218,6 +219,69 @@ A copy the mask missed is then still hidden where it stands apart from
 what is around it, and where it is glued into a command `check` or `watch`
 shows, if it is no longer than 64 characters. Glued into anything else, it
 is not. So keep the index unless you are starting over.
+
+### `ranwhat reach`: MCP servers and credential files your agents can reach
+
+Reads the configuration your agents keep on disk and reports two things,
+then the Claude Code deny rules that would close what it found. It only
+reads, and writes no settings.
+
+**MCP servers.** Every server in Claude Code's `~/.claude.json` (user
+scope, and each project's local scope), each project's `.mcp.json`, and
+`managed-mcp.json`; plus Claude Desktop's `claude_desktop_config.json`,
+Cursor's `~/.cursor/mcp.json` and `.cursor/mcp.json`, VS Code's
+`.vscode/mcp.json`, Gemini CLI's and Qwen Code's `settings.json`, GitHub
+Copilot CLI's `~/.copilot/mcp-config.json`, Windsurf's `mcp_config.json`
+and Codex's `~/.codex/config.toml` (on Python 3.11 and later). For each:
+what it runs or connects to, and
+
+- a secret written inline, in `env`, an argument, a header or the URL,
+  found by the rules `clean` uses and shown the way `clean` shows one
+  (`<ghp…x4>`), never whole. `${VAR}` references are left alone.
+- a package fetched at its newest version on every start: `npx`, `uvx`,
+  `bunx`, `pnpm dlx`, `pipx run` and the like with no exact version
+- a remote URL, plain `http`, or a URL on this machine
+- a project `.mcp.json` whose servers Claude Code starts without asking,
+  because `enableAllProjectMcpServers` is on
+
+It reads the configuration, not the server: it does not inspect a
+server's code or its tool descriptions for malicious content.
+
+**Credential files.** `.env` and `.env.*` (not `.env.example` and other
+templates), private keys, `.npmrc`, `.pypirc`, `.netrc` and
+`.git-credentials` under the directories your agents work in (the current
+one, every project in `~/.claude.json`, and `additionalDirectories`), and
+`~/.aws/credentials`, `~/.ssh/id_*`, `~/.netrc`, `~/.npmrc`,
+`~/.docker/config.json`, `~/.kube/config`, `~/.config/gh/hosts.yml` and
+Google Cloud's application default credentials, each only when it holds a
+credential and no Claude Code `Read(...)` deny rule covers it. Only paths
+are printed, never what is in them.
+
+```bash
+ranwhat reach               # every project Claude Code knows, and the current directory
+ranwhat reach ~/code/app    # one project
+ranwhat reach --json
+```
+
+The report ends with a `permissions.deny` block to paste into
+`~/.claude/settings.json`, one rule for each file found:
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Read(~/.aws/credentials)",
+      "Read(~/.ssh/**)",
+      "Read(//**/.env.local)"
+    ]
+  }
+}
+```
+
+A Read rule stops Claude's file tools and the Bash file commands Claude
+Code recognises, not a script that opens the file itself; the
+[`.env` guide](https://ranwhat.com/guides/claude-code-env-secrets) covers
+the sandbox for that.
 
 ### `ranwhat scan`: score what an agent's credentials can do
 

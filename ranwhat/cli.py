@@ -235,6 +235,7 @@ COMMANDS = (
     ("watch", "what your agents already ran on this machine"),
     ("clean", "credentials sitting in plaintext in agent transcripts"),
     ("sources", "every agent ranwhat reads, and where it looked"),
+    ("reach", "MCP servers and credential files your agents can reach"),
     ("scan", "the authority a set of credentials carries"),
     ("live", "the same, asked of each token's own provider"),
     ("demo", "see the output without setting anything up"),
@@ -871,6 +872,7 @@ def _check(args):
                       + _carried(args, "days", "root", "state_dir", "source",
                                  "path"),
                       "the actions and secrets, machine readable"))
+    steps.append((["reach"], "MCP servers and credential files agents can reach"))
     # Not `scan profile.json`: nothing writes one, so on a first run it
     # failed with "no such file". demo runs anywhere.
     steps.append((["demo"], "an authority scan, on an example"))
@@ -1322,6 +1324,33 @@ def _sources(args):
     return 0
 
 
+def _reach(p, args):
+    """ranwhat reach: the MCP servers agents are configured with, the
+    credential files no Claude Code Read deny rule covers, and the rules
+    that would. Read-only: the rules are printed, never written."""
+    from . import reach as reach_mod
+    # reach reads configuration, not history: --days, --source, --apply
+    # and the rest would be taken and ignored, and --apply above all must
+    # not look as if it wrote the rules.
+    for action in p._actions:
+        if (action.option_strings and action.dest not in ("help", "json")
+                and getattr(args, action.dest, action.default) != action.default):
+            p.error("%s is not for reach, which takes only a project "
+                    "directory and --json" % action.option_strings[-1])
+    projects = None
+    if args.profile is not None:
+        if not os.path.isdir(args.profile):
+            p.error("reach takes a project directory; %s is not one"
+                    % args.profile)
+        projects = [args.profile]
+    result = reach_mod.audit(projects=projects)
+    if args.json:
+        print(_json_text(reach_mod.as_json(result)))
+    else:
+        print(reach_mod.render(result))
+    return 0
+
+
 def _n_files(n):
     return agents_mod.plural(n, "file")
 
@@ -1391,9 +1420,11 @@ def _main(argv=None):
                                        "a terminal. None is printed with --json.")
     p.add_argument("command", nargs="?",
                    choices=["check", "demo", "scan", "live", "watch",
-                            "clean", "sources", "update", "login", "whoami",
-                            "logout"])
-    p.add_argument("profile", nargs="?", help="path to a profile JSON")
+                            "clean", "sources", "reach", "update", "login",
+                            "whoami", "logout"])
+    p.add_argument("profile", nargs="?",
+                   help="scan: path to a profile JSON; reach: a project "
+                        "directory to look at")
     p.add_argument("--json", action="store_true", help="emit raw JSON")
     p.add_argument("--html", metavar="PATH",
                    help="demo, scan, live: also write the report as HTML")
@@ -1465,7 +1496,7 @@ def _main(argv=None):
     # refused the path as an unrecognized argument.
     args = p.parse_intermixed_args(argv)
 
-    if args.profile is not None and args.command != "scan":
+    if args.profile is not None and args.command not in ("scan", "reach"):
         # Taken and ignored, `check DIR` reported on the default history as
         # if it were DIR, and `clean DIR --apply` would have masked it.
         p.error(_takes_no_path(args.command, args.profile))
@@ -1491,6 +1522,9 @@ def _main(argv=None):
 
     if args.command in _ACCOUNT_COMMANDS:
         return _account(p, args)
+
+    if args.command == "reach":
+        return _reach(p, args)
 
     if args.days is not None and args.days < 1:
         p.error("--days must be at least 1")

@@ -1162,7 +1162,8 @@ class NextSteps(_Base):
         steps, root, st, out = self.tail(ACTION + SECRET)
         self.assertNotIn("profile.json", out)
         self.assertIn("ranwhat demo", steps)
-        self.assertEqual(len(steps), 3, steps)
+        self.assertIn("ranwhat reach", steps)
+        self.assertEqual(len(steps), 4, steps)
         for step in steps:
             with mock.patch("sys.stdin", io.StringIO()), \
                  mock.patch.object(watch, "CLAUDE_PROJECTS", root), \
@@ -1172,7 +1173,7 @@ class NextSteps(_Base):
 
     def test_demo_is_offered_even_with_nothing_found(self):
         steps, _, _, _ = self.tail([tool_use("ls", 1)])
-        self.assertEqual(steps, ["ranwhat demo"])
+        self.assertEqual(steps, ["ranwhat reach", "ranwhat demo"])
 
     def test_a_long_command_puts_its_reason_underneath(self):
         # uvx at 60 columns: "check --json" and its reason do not fit on
@@ -1180,7 +1181,7 @@ class NextSteps(_Base):
         steps, _, _, out = self.tail(ACTION + SECRET, cmd="uvx ranwhat")
         limit = term.width()
         self.assertEqual(steps, ["uvx ranwhat clean", "uvx ranwhat check --json",
-                                 "uvx ranwhat demo"])
+                                 "uvx ranwhat reach", "uvx ranwhat demo"])
         lines = self.lines(out.split("  What to do with this", 1)[1])
         for i, line in enumerate(lines):
             self.assertLessEqual(len(line), limit, line)
@@ -1212,12 +1213,13 @@ class NextStepsReadWhatCheckRead(_Base):
         steps, doc, _ = self.run_check(root, st, "--days", "365")
         self.assertEqual((len(doc["actions"]), len(doc["secrets"])), (1, 1))
         argv = {s.split()[1]: shell_words(s)[1:] for s in steps}
-        self.assertEqual(sorted(argv), ["check", "clean", "demo"])
+        self.assertEqual(sorted(argv), ["check", "clean", "demo", "reach"])
         # Refuse to run a step that would read the default directory.
         for name in ("clean", "check"):
             self.assertIn(root, argv[name], argv[name])
         self.assertIn(st, argv["check"])
         self.assertEqual(argv["demo"], ["demo"])
+        self.assertEqual(argv["reach"], ["reach"])
 
         _, checked, _ = self.run_cli(argv["check"])
         self.assertEqual(json.loads(checked), doc)
@@ -1305,7 +1307,7 @@ class NextStepsReadWhatCheckRead(_Base):
             with mock.patch.dict(os.environ, {"RANWHAT_WIDTH": width}):
                 limit = term.width()
                 steps, _, out = self.run_check(root, st, "--days", "365")
-            self.assertEqual(len(steps), 3)
+            self.assertEqual(len(steps), 4)
             lines = out.split("\n")
             commands = ["    " + step for step in steps]
             for line in lines:

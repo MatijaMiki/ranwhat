@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat commands: check, watch, clean, scan and every flag</title>
-<meta name="description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<meta name="description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
 <link rel="canonical" href="https://ranwhat.com/commands">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/commands">
 <meta property="og:title" content="ranwhat commands: check, watch, clean, scan and every flag">
-<meta property="og:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<meta property="og:description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat commands: check, watch, clean, scan and every flag">
-<meta name="twitter:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<meta name="twitter:description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -75,6 +75,7 @@
     <li><a class="cmdname" href="/watch">watch</a></li>
     <li><a class="cmdname" href="/clean">clean</a></li>
     <li><a class="cmdname" href="/commands#sources">sources</a></li>
+    <li><a class="cmdname" href="/commands#reach">reach</a></li>
     <li><a class="cmdname" href="/scan">scan</a></li>
     <li><a class="cmdname" href="/commands#live">live</a></li>
     <li><a class="cmdname" href="/commands#demo">demo</a></li>
@@ -92,7 +93,7 @@
     <p class="eyebrow">Commands</p>
     <h1>Every ranwhat command</h1>
     <p class="lede">
-      Eight commands in one tool, and no account for any of them. Start
+      Nine commands in one tool, and no account for any of them. Start
       with <span class="icode">check</span>: it reads what your agents ran and what they left
       on disk, and changes nothing.
     </p>
@@ -106,7 +107,7 @@
       <h2>A bare ranwhat lists them all.</h2>
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
-        page of their own. The other five are below, and every flag is at the end.
+        page of their own. The other six are below, and every flag is at the end.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -116,6 +117,7 @@
   <span class="c-b">watch</span>    what your agents already ran on this machine
   <span class="c-b">clean</span>    credentials sitting in plaintext in agent transcripts
   <span class="c-b">sources</span>  every agent ranwhat reads, and where it looked
+  <span class="c-b">reach</span>    MCP servers and credential files your agents can reach
   <span class="c-b">scan</span>     the authority a set of credentials carries
   <span class="c-b">live</span>     the same, asked of each token's own provider
   <span class="c-b">demo</span>     see the output without setting anything up
@@ -204,9 +206,84 @@
   </div>
 </section>
 
-<section class="mark-4" id="live">
+<section class="mark-4" id="reach">
   <div class="shell band split">
-    <div class="marginal">04 / live</div>
+    <div class="marginal">04 / reach</div>
+    <div>
+      <h2>reach: MCP servers and credential files your agents can reach.</h2>
+      <p class="lede">
+        <span class="icode">reach</span> reads the MCP server configuration agents keep on
+        disk and says what each server launches or connects to. Then it lists the
+        credential files an agent could read that no Claude Code deny rule covers,
+        and prints the rules that would.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="run-reach">uvx ranwhat reach</span>
+        <button class="copy" data-copy="#run-reach">Copy</button>
+      </div>
+      <div class="term" aria-label="Part of what ranwhat reach prints">
+        <div class="term-bar"><span>ranwhat reach</span></div>
+        <div class="term-body"><pre>  <span class="c-b">ranwhat reach</span>  <span class="c-mut">· what your agents can reach</span>
+
+  MCP servers  <span class="c-mut">2</span>
+
+    github  Claude Code, user scope
+<span class="c-mut">      ~/.claude.json</span>
+      runs npx -y @modelcontextprotocol/server-github
+      ! secret inline in env GITHUB_PERSONAL_ACCESS_TOKEN: &lt;ghp…x4&gt;
+        (GitHub personal access token). Move it to the environment and
+        rotate it.
+      ! unpinned: npx fetches @modelcontextprotocol/server-github at its
+        newest version on every start
+<span class="c-mut">  …</span>
+
+  Credential files an agent can read  <span class="c-mut">2</span>
+    ~/.aws/credentials  AWS credentials
+    ~/code/app/.env  env file
+
+  Deny them
+    Add these to permissions.deny in ~/.claude/settings.json (nothing was
+    written):
+
+    {
+      "permissions": {
+        "deny": [
+          "Read(~/.aws/credentials)",
+          "Read(//**/.env)"
+        ]
+      }
+    }</pre></div>
+      </div>
+      <p class="cmdnote">
+        Servers come from Claude Code's <span class="icode">~/.claude.json</span>,
+        <span class="icode">managed-mcp.json</span> and each project's
+        <span class="icode">.mcp.json</span>, and the MCP configs of Claude Desktop, Cursor, VS Code, Gemini CLI, Qwen
+        Code, GitHub Copilot CLI, Windsurf and Codex. It flags a secret written
+        inline in <span class="icode">env</span>, an argument, a header or the URL, masked
+        the way <a href="/clean">clean</a> masks one; a package <span class="icode">npx</span> or
+        <span class="icode">uvx</span> fetches with no exact version; a remote URL; and a
+        project <span class="icode">.mcp.json</span> Claude Code starts without asking. It
+        reads the configuration, not the server's code or its tool descriptions.
+      </p>
+      <p class="cmdnote">
+        Credential files are <span class="icode">.env</span> files, private keys and token
+        files under each project Claude Code knows and the current directory, and
+        <span class="icode">~/.aws/credentials</span>, <span class="icode">~/.ssh/id_*</span> and the like
+        in your home folder. Only paths are printed, never what is in them. It
+        writes no settings: copy the block into place yourself. A Read rule stops
+        Claude's file tools and the Bash file commands Claude Code recognises; the
+        <a href="/guides/claude-code-env-secrets">.env guide</a> covers the rest.
+        <span class="icode">reach DIR</span> looks at one project.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5" id="live">
+  <div class="shell band split">
+    <div class="marginal">05 / live</div>
     <div>
       <h2>live: the same scan, asked of each token's provider.</h2>
       <p class="lede">
@@ -233,9 +310,9 @@
   </div>
 </section>
 
-<section class="mark-5" id="demo">
+<section class="mark-1" id="demo">
   <div class="shell band split">
-    <div class="marginal">05 / demo</div>
+    <div class="marginal">06 / demo</div>
     <div>
       <h2>demo: a whole report, with nothing to set up.</h2>
       <p class="lede">
@@ -259,9 +336,9 @@
   </div>
 </section>
 
-<section class="mark-1" id="update">
+<section class="mark-2" id="update">
   <div class="shell band split">
-    <div class="marginal">06 / update</div>
+    <div class="marginal">07 / update</div>
     <div>
       <h2>update: a newer capability catalogue.</h2>
       <p class="lede">
@@ -294,9 +371,9 @@
   </div>
 </section>
 
-<section class="mark-2" id="flags">
+<section class="mark-3" id="flags">
   <div class="shell band split">
-    <div class="marginal">07 / Flags</div>
+    <div class="marginal">08 / Flags</div>
     <div>
       <h2>Every flag, and the commands that take it.</h2>
       <p class="lede">

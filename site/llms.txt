@@ -6,7 +6,7 @@ Run it without installing: `uvx ranwhat check`. Or install it: `pipx install ran
 
 What goes online: `live` and `--pull-usage` ask only the provider that issued each token, and `update` only fetches the capability catalogue, sending the subscription token and nothing else. Everything else reads locally and sends nothing. There is no telemetry.
 
-Where it fits: ranwhat is the after-the-fact side of AI agent security and developer OPSEC. It shows what already ran, what leaked to disk, and what the tokens still allow. It does not block actions while an agent works, detect prompt injection, or scan MCP servers and skills for malicious content.
+Where it fits: ranwhat is the after-the-fact side of AI agent security and developer OPSEC. It shows what already ran, what leaked to disk, and what the tokens still allow. It does not block actions while an agent works or detect prompt injection. `reach` reads the MCP server configuration agents keep on disk and flags risky shapes in it, but it does not inspect a server's code, its tool descriptions or skills for malicious content.
 
 Commands:
 
@@ -14,6 +14,7 @@ Commands:
 - `ranwhat watch`: nine rules over what the agent ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, and local files uploaded with curl. `--json` prints one record per flagged call.
 - `ranwhat clean`: finds credentials in every agent's transcripts, passwords typed into commands (`mysql -pPASSWORD`, `curl -u user:password`) among them, says what to rotate, and masks them only when asked (`--apply`, or `mask` in the review session). Backups go to `~/.ranwhat/backups`.
 - `ranwhat sources`: every coding agent ranwhat reads, where it looked for each one's history, and whether it found any. `check`, `watch` and `clean` read them all by default; `--source ID` reads one, and `--path ID=PATH` reads one from elsewhere.
+- `ranwhat reach`: the MCP servers agents are configured with (Claude Code's `~/.claude.json` and `.mcp.json`, and the configs of Claude Desktop, Cursor, VS Code, Gemini CLI, Qwen Code, GitHub Copilot CLI, Windsurf and Codex), what each launches or connects to, and risky shapes: a secret inline in `env`, args, headers or the URL (masked the way `clean` masks it), a package fetched by `npx` or `uvx` with no exact version, a remote URL. Then the credential files (`.env`, `~/.aws/credentials`, `~/.ssh/id_*` and others) an agent could read from its working directories that no Claude Code `Read(...)` deny rule covers, paths only, and a `permissions.deny` block to paste into `~/.claude/settings.json`. It writes nothing. `ranwhat reach DIR` looks at one project.
 - `ranwhat scan profile.json`: scores authority, observability and reversibility for the credentials an agent holds. `--html report.html` writes a report. `--pull-usage` checks which grants were used, against the provider's own audit trail.
 - `ranwhat live`: the same, from read-only token introspection. Pass tokens in the environment (`RANWHAT_GITHUB_TOKEN`, `RANWHAT_GOOGLE_TOKEN`, `RANWHAT_SLACK_TOKEN`, `RANWHAT_STRIPE_TOKEN`), not as flags.
 - `ranwhat demo`: an authority scan on a bundled example, with no setup.
