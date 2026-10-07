@@ -4,14 +4,19 @@
  * cookies as a browser does. The Worker's own fetch and scheduled
  * handlers run over a real SQLite database (node:sqlite, which is what D1
  * runs), with Resend and Turnstile answered by stand-ins, as in
- * accounts.test.mjs.
+ * accounts.test.mjs. And end to end: the real `ranwhat login`, `whoami`,
+ * `logout` and `update` (ranwhat/account.py) against the Worker over
+ * node:http, as feed.test.mjs runs `update`.
  *
  *     node --test --test-timeout=60000 worker/test/device.test.mjs
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { d1 } from "./stand-ins.mjs";
@@ -911,5 +916,130 @@ test("nothing logged carries a code or a token", async () => {
   for (const line of lines) {
     for (const secret of secrets) assert.ok(!line.includes(secret));
     assert.doesNotMatch(line, /rw_|@/);
+  }
+});
+
+/* ---------- end to end, with the real CLI ---------- */
+
+/* The Worker on a port of this machine, answering as feed.ranwhat.com,
+   and `python3 -m ranwhat` run against it with a home of its own. */
+async function overHttp(e) {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const headers = new Headers({ "cf-connecting-ip": "203.0.113.9" });
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (!["host", "connection", "content-length", "transfer-encoding"].includes(k)) headers.set(k, v);
+    }
+    const reply = await worker.fetch(new Request(`${FEED}${req.url}`, {
+      method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined,
+    }), e, ctx);
+    res.writeHead(reply.status, Object.fromEntries(reply.headers));
+    res.end(Buffer.from(await reply.arrayBuffer()));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const home = mkdtempSync(join(tmpdir(), "ranwhat-login-"));
+  const base = `http://127.0.0.1:${server.address().port}/v1`;
+  const childEnv = { ...process.env, RANWHAT_HOME: home, HOME: home, USERPROFILE: home,
+    RANWHAT_ACCOUNT_URL: base, RANWHAT_FEED_URL: `${base}/catalogue`, RANWHAT_NO_HINTS: "1",
+    NO_COLOR: "1", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+  for (const k of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "RANWHAT_TOKEN",
+                   "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]) delete childEnv[k];
+  /* { done, until(re) }: done resolves to { stdout, stderr, status }, and
+     until(re) to re's match in stdout once it is printed. */
+  const start = (...args) => {
+    const out = { stdout: "", stderr: "" };
+    const waiting = [];
+    const p = spawn("python3", ["-m", "ranwhat", ...args], { cwd: ROOT, env: childEnv });
+    p.stdout.on("data", (d) => {
+      out.stdout += d;
+      for (const w of waiting.splice(0)) {
+        const m = out.stdout.match(w.re);
+        if (m) w.resolve(m); else waiting.push(w);
+      }
+    });
+    p.stderr.on("data", (d) => (out.stderr += d));
+    const done = new Promise((resolve) => p.on("close", (status) => resolve({ ...out, status })));
+    const until = (re) => new Promise((resolve, reject) => {
+      const m = out.stdout.match(re);
+      if (m) return resolve(m);
+      waiting.push({ re, resolve });
+      done.then((r) => reject(new Error(`exited ${r.status} first: ${r.stdout} ${r.stderr}`)));
+    });
+    return { done, until };
+  };
+  const run = (...args) => start(...args).done;
+  const close = () => {
+    server.close();
+    rmSync(home, { recursive: true, force: true });
+  };
+  return { home, start, run, close };
+}
+
+test("the real ranwhat login, whoami, update and logout, against the Worker over HTTP", async () => {
+  const s = services();
+  const e = env();
+  const cli = await overHttp(e);
+  try {
+    const none = await cli.run("whoami");
+    assert.equal(none.status, 1);
+    assert.match(none.stderr, /Not logged in/);
+
+    const b = new Browser(e);
+    await signIn(b, s);
+    const login = cli.start("login", "--no-browser");
+    const [, userCode] = await login.until(/^ {4}([BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4})$/m);
+    const { done } = await approve(b, userCode);
+    assert.equal(done.status, 200, done.text);
+    const linkedRun = await login.done;
+    assert.equal(linkedRun.status, 0, linkedRun.stderr);
+    assert.match(linkedRun.stdout, /^ {4}https:\/\/ranwhat\.com\/device$/m, "the page, as the Worker names it");
+    assert.ok(!linkedRun.stdout.split("\n").some((l) => l.includes("http") && l.includes(userCode)),
+      "the code is never in a link");
+    assert.match(linkedRun.stdout, /Linked to Personal as ana@example\.com \(Free\)\./);
+    assert.match(linkedRun.stdout, /need Plus:\s+https:\/\/account\.ranwhat\.com\//);
+
+    const token = readFileSync(join(cli.home, "token"), "utf8").trim();
+    assert.match(token, /^rw_m_[A-Za-z0-9_-]{43}$/);
+    assert.ok(!dump(e).includes(token), "D1 holds the token's hash, never the token");
+    assert.equal(one(e, "SELECT kind FROM machines WHERE hash = ?", sha(token)).kind, "device");
+    const cache = readFileSync(join(cli.home, "account.json"), "utf8");
+    assert.ok(!cache.includes(token));
+    assert.equal(JSON.parse(cache).plan, "free");
+
+    const again = await cli.run("login");
+    assert.equal(again.status, 1);
+    assert.match(again.stderr, /already has a saved token \(ana@example\.com, Personal, Free\)/);
+
+    const who = await cli.run("whoami");
+    assert.equal(who.status, 0, who.stderr);
+    for (const line of [/Account\s+ana@example\.com/, /Organisation\s+Personal/, /Role\s+owner/, /Plan\s+Free/,
+                        /Machine\s+not named yet/]) {
+      assert.match(who.stdout, line);
+    }
+
+    const free = await cli.run("update");
+    assert.equal(free.status, 1);
+    assert.match(free.stderr, /linked to Personal, which is on Free/);
+    assert.match(free.stderr, /part of Plus: https:\/\/account\.ranwhat\.com\//);
+
+    grant(e, orgOf(e, "ana@example.com"));
+    const plus = await cli.run("update");
+    assert.equal(plus.status, 0, plus.stderr);
+    assert.match(plus.stdout, /Updated to feed/);
+    assert.equal(JSON.parse(readFileSync(join(cli.home, "account.json"), "utf8")).plan, "plus");
+
+    const out = await cli.run("logout");
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /revoked and deleted/);
+    assert.ok(!existsSync(join(cli.home, "token")));
+    assert.ok(one(e, "SELECT revoked_at FROM tokens WHERE hash = ?", sha(token)).revoked_at);
+    assert.equal((await feed(e, token)).status, 403);
+
+    for (const r of [linkedRun, again, who, free, plus, out]) {
+      assert.ok(!r.stdout.includes(token) && !r.stderr.includes(token), "no command prints the token");
+    }
+  } finally {
+    cli.close();
   }
 });

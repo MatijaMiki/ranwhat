@@ -1024,7 +1024,7 @@ class ThePrefilterKnowsEveryShape(unittest.TestCase):
                   _r3("0123456789abcdef", 32), "A" * 40]
         prefixes = ["sk_" "live_", "rk_" "live_", "sk" "-", "gh" "p_", "gh" "o_",
                     "gh" "u_", "gh" "s_", "gh" "r_", "github_" "pat_",
-                    "xox" "b-", "AKIA", "ASIA", "AC", "SG.", "eyJ"]
+                    "xox" "b-", "AKIA", "ASIA", "AC", "SG.", "eyJ", "rw_", "rw_" "c_"]
         checked = 0
         for prefix in prefixes:
             for body in bodies:
@@ -1062,6 +1062,7 @@ class ThePrefilterKnowsEveryShape(unittest.TestCase):
                            "-----END RSA PRIVATE KEY-----" % _r3(B62 + "+/", 64),
             "JSON Web Token": "eyJ" + _r3(B64URL, 20) + ".eyJ" + _r3(B64URL, 30)
                               + "." + _r3(B64URL, 43),
+            "ranwhat token": "rw_" "m_" + _r3(B62, 20) + "-" + _r3(B62, 22),
         }
         # a shape added without a sample here fails this line
         self.assertEqual(set(samples), {name for _p, name in clean._SHAPES_NAMED})
@@ -1070,6 +1071,28 @@ class ThePrefilterKnowsEveryShape(unittest.TestCase):
             self.assertFalse(set(text) & set("=:"), name)
             with self.subTest(shape=name):
                 self.assertIn((value, name), find_secrets(text))
+
+
+class RanwhatsOwnTokens(unittest.TestCase):
+    """A subscriber's emailed rw_ token, a terminal's rw_m_ from ranwhat
+    login and a pipeline's rw_c_ are credentials like any other: clean
+    finds each, names it, and says where it is revoked."""
+
+    def test_each_kind_is_found_and_named(self):
+        for prefix in ("rw_", "rw_" "m_", "rw_" "c_"):
+            value = prefix + _r3(B62, 21) + "_" + _r3(B62, 21)
+            with self.subTest(prefix=prefix):
+                self.assertIn((value, "ranwhat token"),
+                              find_secrets("the token " + value + " was pasted" + PAD))
+                found = find_secrets("export RANWHAT_TOKEN=" + value + PAD)
+                self.assertIn(value, [v for v, _name in found])
+        for label in ("ranwhat token", "RANWHAT_TOKEN"):
+            self.assertTrue(clean._provider_for(label).startswith("ranwhat: "), label)
+        for label in ("RANWHAT_STRIPE_TOKEN", "RANWHAT_GITHUB_TOKEN"):
+            self.assertFalse(clean._provider_for(label).startswith("ranwhat: "), label)
+
+    def test_a_short_name_with_the_prefix_is_not_one(self):
+        self.assertEqual(find_secrets("cookie __Host-rw_session and rw_signin" + PAD), [])
 
 
 def _grep_transcript(command, output):

@@ -35,6 +35,11 @@ DEFAULT_ENDPOINT = "https://feed.ranwhat.com/v1/catalogue"
 USER_AGENT = "ranwhat-feed/1"
 TIMEOUT = 20
 
+# Where a token whose organisation is on Free is sent to upgrade
+# (worker/src/auth.js's UPGRADE). The server names it in its refusal, and
+# that is printed only when it is an https address on ranwhat.com.
+UPGRADE = "https://account.ranwhat.com/"
+
 SCHEMA = 1
 
 # A catalogue is a few hundred kilobytes. Anything past this is not one, and
@@ -119,6 +124,17 @@ def save_token(token):
     return path
 
 
+def delete_token():
+    """Remove the saved token. unlink never follows a symlink: a link at
+    ~/.ranwhat/token goes, and whatever it points to stays as it was.
+    True when there was something to remove."""
+    try:
+        os.unlink(token_path())
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def digest(payload):
     """Hash over the catalogue only, so metadata can change without breaking it."""
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -127,6 +143,49 @@ def digest(payload):
 
 class FeedError(Exception):
     pass
+
+
+class PlusRequired(FeedError):
+    """The token was read and is good, but its organisation's plan does not
+    include the feed: a machine linked to a Free organisation. `needs` is
+    the plan that does, `upgrade` where to get it."""
+
+    def __init__(self, needs="Plus", upgrade=UPGRADE):
+        self.needs, self.upgrade = needs, upgrade
+        super().__init__(
+            "This token's organisation is on Free. The catalogue feed is part "
+            "of %s: %s" % (needs, upgrade))
+
+
+def _upgrade_link(value):
+    """The server's upgrade address when it is an https one on ranwhat.com
+    with nothing in it a terminal would act on; UPGRADE otherwise."""
+    if not isinstance(value, str) or len(value) > 200 or not _plain(value):
+        return UPGRADE
+    try:
+        parts = urllib.parse.urlsplit(value)
+        host, port = parts.hostname or "", parts.port
+    except ValueError:
+        return UPGRADE
+    if (parts.scheme == "https" and port is None and not parts.username
+            and (host == "ranwhat.com" or host.endswith(".ranwhat.com"))):
+        return value
+    return UPGRADE
+
+
+def _refused(exc):
+    """A 403's body, when it says why: {"error": "plus_required", "upgrade":
+    ...} from a server that knows plans. 0.5.0's server, and any body that
+    is not that, is the plain refusal it always was."""
+    try:
+        body = exc.read(64 * 1024 + 1)
+        doc = json.loads(body.decode("utf-8")) if len(body) <= 64 * 1024 else None
+    except Exception:
+        doc = None
+    if isinstance(doc, dict) and doc.get("error") in ("plus_required", "team_required"):
+        return PlusRequired("Plus" if doc["error"] == "plus_required" else "Team",
+                            _upgrade_link(doc.get("upgrade")))
+    return None
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -187,6 +246,9 @@ def fetch(token, url=None, timeout=TIMEOUT):
         with _open(req, timeout, ctx) as resp:
             body = resp.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
+        why = _refused(exc) if exc.code == 403 else None
+        if why is not None:
+            raise why from None
         if exc.code in (401, 403):
             raise FeedError(
                 "That token was not accepted. Check it at ranwhat.com/contact.")
