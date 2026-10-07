@@ -49,6 +49,16 @@ zone_name = "ranwhat.com"
 pattern = "ranwhat.com/device*"
 zone_name = "ranwhat.com"
 
+# Turns away a burst of requests for device codes from one network before
+# the database is touched (src/device.js): ten a minute, where `ranwhat
+# login` asks for one. namespace_id is any number not used by another
+# rate limit on this Cloudflare account. The counts in D1 still hold
+# without it, as in a Preview, which inherits no binding.
+[[ratelimits]]
+name = "DEVICE_RL"
+namespace_id = "8628"
+simple = { limit = 10, period = 60 }
+
 # TURNSTILE_SECRET, X_PIXEL_TOKEN, RESEND_API_KEY and LIST_SECRET are
 # encrypted secrets, set with `npx wrangler secret put <NAME>`, never here.
 # RESEND_API_KEY: a Full access key (the list makes contacts, a segment and

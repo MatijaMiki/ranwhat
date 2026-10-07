@@ -68,8 +68,8 @@ def device_doc(plan="plus", label="laptop", kind="device"):
 
 class Server:
     """Answers from a script: each (method, path) has a list of (status,
-    body) answers, given in turn, the last one for good. Records every
-    request it is sent."""
+    body) or (status, body, headers) answers, given in turn, the last one
+    for good. Records every request it is sent."""
 
     def __init__(self):
         self.script = {}
@@ -85,11 +85,15 @@ class Server:
                                    "body": body})
                 answers = outer.script.get((self.command, self.path))
                 if not answers:
-                    status, doc = 404, {"error": "Not found"}
+                    status, doc, extra = 404, {"error": "Not found"}, {}
                 else:
-                    status, doc = answers.pop(0) if len(answers) > 1 else answers[0]
+                    answer = answers.pop(0) if len(answers) > 1 else answers[0]
+                    status, doc = answer[0], answer[1]
+                    extra = answer[2] if len(answer) > 2 else {}
                 data = doc if isinstance(doc, bytes) else json.dumps(doc).encode("utf-8")
                 self.send_response(status)
+                for name, value in extra.items():
+                    self.send_header(name, value)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -724,22 +728,58 @@ class Logout(AccountCase):
         self.assertIn("still", out)
         self.assertFalse(os.path.lexists(self.token_file()))
 
-    def test_with_no_server_it_is_deleted_here_and_said_to_stay_listed(self):
-        for base in ("http://127.0.0.1:%d/v1" % closed_port(), None):
-            with self.subTest(base=base):
-                self.save(made())
-                if base:
-                    os.environ["RANWHAT_ACCOUNT_URL"] = base
-                else:
-                    # Up, but not answering for accounts (ACCOUNTS_ON unset).
-                    os.environ["RANWHAT_ACCOUNT_URL"] = self.server.base
-                    self.server.on("POST", "/logout", (404, {"error": "Not found"}))
+    def test_a_token_the_server_did_not_revoke_is_kept_and_logout_fails(self):
+        # Deleted here and still live on the server, the token's only copy
+        # would be gone while it still worked, and `ranwhat logout && ...`
+        # would carry on as if it were revoked.
+        elsewhere = "https://elsewhere.example/v1/logout"
+        answers = [
+            ("no server", "http://127.0.0.1:%d/v1" % closed_port(), None),
+            # Up, but not answering for accounts (ACCOUNTS_ON unset).
+            ("404", None, (404, {"error": "Not found"})),
+            ("500", None, (500, {"error": "server_error"})),
+            ("503", None, (503, {"error": "temporarily_unavailable",
+                                 "error_description": "Not available just now."})),
+            ("302", None, (302, {}, {"Location": elsewhere})),
+            ("307", None, (307, {}, {"Location": elsewhere})),
+            ("308", None, (308, {}, {"Location": elsewhere})),
+        ]
+        for name, base, answer in answers:
+            with self.subTest(answer=name):
+                token = self.save(made())
+                account.remember(token, "plus", "Acme", "ana@example.com")
+                os.environ["RANWHAT_ACCOUNT_URL"] = base or self.server.base
+                if answer:
+                    self.server.on("POST", "/logout", answer)
                 status, out, err = self.run_cli("logout")
-                self.assertEqual(status, 0)
-                self.assertIn("Deleted the saved token", out)
-                self.assertIn("stays listed", err)
+                self.assertEqual(status, 1, err)
+                self.assertEqual(self.saved().strip(), token, "kept, to be revoked later")
+                self.assertTrue(os.path.lexists(account.cache_path()))
+                self.assertNotIn("Deleted", out)
+                self.assertIn("may still work", err)
+                self.assertIn("ranwhat logout --local", err)
                 self.assertIn("https://account.ranwhat.com/", err)
-                self.assertFalse(os.path.lexists(self.token_file()))
+                self.assertNotShown(token, out, err)
+        # Run again once the server answers, it revokes and deletes it.
+        os.environ["RANWHAT_ACCOUNT_URL"] = self.server.base
+        self.server.on("POST", "/logout", (200, {"revoked": True}))
+        status, out, err = self.run_cli("logout")
+        self.assertEqual(status, 0, err)
+        self.assertIn("revoked and deleted", out)
+        self.assertFalse(os.path.lexists(self.token_file()))
+
+    def test_local_deletes_without_asking_the_server(self):
+        token = self.save(made())
+        account.remember(token, "plus", "Acme", "ana@example.com")
+        status, out, err = self.run_cli("logout", "--local")
+        self.assertEqual(status, 0, err)
+        self.assertEqual(self.server.seen, [], "the server was not asked")
+        self.assertIn("Deleted the saved token", out)
+        self.assertIn("nothing was revoked", " ".join(err.split()))
+        self.assertIn("https://account.ranwhat.com/", err)
+        self.assertFalse(os.path.lexists(self.token_file()))
+        self.assertFalse(os.path.lexists(account.cache_path()))
+        self.assertNotShown(token, out, err)
 
     def test_one_the_server_no_longer_accepts_is_deleted(self):
         self.save(made())
@@ -866,6 +906,7 @@ class Flags(AccountCase):
     def test_each_flag_is_refused_where_it_means_nothing(self):
         for argv in (("whoami", "--force"), ("logout", "--no-browser"), ("update", "--force"),
                      ("login", "--token", "x"), ("logout", "--token", "x"),
+                     ("login", "--local"), ("whoami", "--local"), ("update", "--local"),
                      ("login", "somewhere")):
             with self.subTest(argv=argv):
                 with self.assertRaises(SystemExit) as caught:
@@ -873,11 +914,24 @@ class Flags(AccountCase):
                 self.assertEqual(caught.exception.code, 2)
         self.assertEqual(self.server.seen, [])
 
-    def test_the_overview_lists_them(self):
+    def test_nothing_offers_them_until_accounts_go_live(self):
+        # The server answers them 404 until ACCOUNTS_ON is set. The change
+        # that sets it lists them in the overview, NETWORK, install.html
+        # (which quotes NETWORK), commands.html, llms.txt and the README,
+        # together: none of them may promise a command that cannot work yet.
         names = [name for name, _what in cli.COMMANDS]
-        for name in ("login", "whoami", "logout"):
-            self.assertIn(name, names)
-        self.assertIn("login, whoami and logout", cli.NETWORK)
+        for name in cli._ACCOUNT_COMMANDS:
+            self.assertNotIn(name, names)
+            self.assertNotIn(name, cli.NETWORK)
+        for path in (os.path.join(ROOT, "README.md"),
+                     os.path.join(ROOT, "site", "llms.txt"),
+                     os.path.join(ROOT, "site", "install.html"),
+                     os.path.join(ROOT, "site", "commands.html")):
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            for name in cli._ACCOUNT_COMMANDS:
+                self.assertNotRegex(text, r"ranwhat %s\b|>%s<" % (name, name), path)
+            self.assertNotIn("ranwhat.com/device", text, path)
 
 
 class TheModule(unittest.TestCase):

@@ -15,7 +15,9 @@ never load it or the HTTP stack it uses, and none of them needs an account.
           approval returns this machine's own token, which is saved where
           `update` reads it (0600, never written through a symlink).
   whoami  the account, organisation and plan a token belongs to.
-  logout  asks the server to revoke this machine's token, then deletes it.
+  logout  asks the server to revoke this machine's token, then deletes it;
+          when the server cannot say it did, keeps it and exits 1, and
+          with --local deletes it without asking.
 
 What is sent: client_id=ranwhat-cli to ask for a code, the device code to
 poll with, and the token, as a Bearer header, to whoami and logout. No
@@ -612,9 +614,16 @@ def whoami(token=None, out=None, err=None):
     return 0
 
 
-def logout(out=None, err=None):
+def logout(local=False, out=None, err=None):
     """Revoke and delete the token saved on this machine. One in
-    RANWHAT_TOKEN is the environment's, and is left as it is."""
+    RANWHAT_TOKEN is the environment's, and is left as it is.
+
+    The token is deleted only once it is dead or shared: revoked now, no
+    longer accepted, or one the server leaves alone. When the server cannot
+    be asked, or answers anything else (an error, a redirect, or not
+    linking terminals yet), it would still work, and this is its only copy
+    here: it is kept, and logout exits 1, to be run again. local=True
+    (--local) deletes it without asking the server."""
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
     path = feed.token_path()
@@ -628,20 +637,29 @@ def logout(out=None, err=None):
 
     revoked = None
     note = None
-    if token is not None:
+    if why == "symlink":
+        note = ("It was a symlink: the link was removed, and what it points to was\n"
+                "  neither read nor changed. Nothing was revoked on the server.")
+    elif token is None:
+        note = "It could not be read, so nothing was revoked on the server."
+    elif local:
+        note = ("The server was not asked, so nothing was revoked: the machine stays\n"
+                "  listed, and its token keeps working, until you revoke it at\n"
+                "  %s" % ACCOUNT_PAGE)
+    else:
         try:
             revoked = revoke(token)
         except Rejected:
             note = "The server no longer accepted it, so there was nothing to revoke."
         except feed.FeedError as exc:
-            note = ("%s\n  So it was only deleted here: the machine stays listed, and its\n"
-                    "  token keeps working, until you revoke it at %s"
-                    % (exc, ACCOUNT_PAGE))
-    elif why == "symlink":
-        note = ("It was a symlink: the link was removed, and what it points to was\n"
-                "  neither read nor changed. Nothing was revoked on the server.")
-    else:
-        note = "It could not be read, so nothing was revoked on the server."
+            err.write("  %s\n"
+                      "  The server did not say it revoked the token, so it may still work,\n"
+                      "  and it is kept at %s.\n"
+                      "  Run ranwhat logout again once the server answers, or revoke it at\n"
+                      "  %s and then run ranwhat logout --local\n"
+                      "  to delete it here without asking.\n"
+                      % (exc, path, ACCOUNT_PAGE))
+            return 1
 
     try:
         feed.delete_token()

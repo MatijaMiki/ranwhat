@@ -220,11 +220,13 @@ TAGLINE = "Flight recorder and authority scanner for AI agents."
 # What reaches the network, said once for the overview and --help. "Nothing is
 # transmitted" was false for live and --pull-usage, which send each token to
 # the provider that issued it, and for update, which fetches the catalogue.
-# login, whoami and logout are opt-in: nothing else ever needs an account.
+# site/install.html quotes it word for word. It names login, whoami and
+# logout, as COMMANDS lists them, in the change that switches accounts on
+# (with install.html, commands.html, llms.txt and the README): until then
+# the server answers them 404, and no page or overview offers them.
 NETWORK = ("No account needed. live and --pull-usage ask only the provider "
-           "that issued each token; update, login, whoami and logout talk "
-           "only to ranwhat.com. Everything else reads locally and sends "
-           "nothing.")
+           "that issued each token, and update only fetches the catalogue. "
+           "Everything else reads locally and sends nothing.")
 
 # Descriptions wrap under their own column on a narrow terminal, rather than
 # being folded again by the terminal into ragged half-lines.
@@ -237,12 +239,10 @@ COMMANDS = (
     ("live", "the same, asked of each token's own provider"),
     ("demo", "see the output without setting anything up"),
     ("update", "refresh the capability catalogue (needs a subscription)"),
-    ("login", "link this machine to your ranwhat.com account"),
-    ("whoami", "which account, organisation and plan this machine uses"),
-    ("logout", "unlink this machine and delete its token"),
 )
 
 # The opt-in commands that link this machine to an account (account.py).
+# They run, but are not listed above until accounts go live (see NETWORK).
 _ACCOUNT_COMMANDS = ("login", "whoami", "logout")
 
 # The commands whose report html_report can write.
@@ -563,7 +563,7 @@ def _account(p, args):
     if args.command == "login":
         return account_mod.login(force=args.force, no_browser=args.no_browser)
     if args.command == "logout":
-        return account_mod.logout()
+        return account_mod.logout(local=args.local)
     if token:
         sys.stderr.write(
             "  Warning: a token in the command line is readable by every user\n"
@@ -1442,6 +1442,9 @@ def _main(argv=None):
     p.add_argument("--no-browser", action="store_true",
                    help="login: print the page to open without opening a "
                         "browser")
+    p.add_argument("--local", action="store_true",
+                   help="logout: delete the saved token without asking the "
+                        "server to revoke it")
     # Intermixed, so a flag may come before scan's path: on Python 3.9,
     # `scan --json profile.json` ended the positionals at --json and then
     # refused the path as an unrecognized argument.
@@ -1462,9 +1465,11 @@ def _main(argv=None):
         _overview(p)
         return 0
 
-    for flag, value in (("--force", args.force), ("--no-browser", args.no_browser)):
-        if value and args.command != "login":
-            p.error("%s is only for login" % flag)
+    for flag, value, command in (("--force", args.force, "login"),
+                                 ("--no-browser", args.no_browser, "login"),
+                                 ("--local", args.local, "logout")):
+        if value and args.command != command:
+            p.error("%s is only for %s" % (flag, command))
 
     if args.command == "update":
         return _update(args)

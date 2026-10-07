@@ -202,15 +202,16 @@ const feed = (e, token) => call(e, "/v1/catalogue", { method: "GET", token });
 const whoami = (e, token) => call(e, "/v1/whoami", { method: "GET", token });
 
 /* A terminal linked to the organisation `b`'s session is looking at,
-   approved by `b` (whose session must be fresh): its token and machine. */
-async function linkTerminal(e, b) {
+   approved by `b` (whose session must be fresh) under the name `label`:
+   its token and machine. */
+async function linkTerminal(e, b, label = "Work laptop") {
   const cli = (await call(e, "/v1/device/code", { form: { client_id: "ranwhat-cli" } })).json;
   const box = await b.get("/device");
   const shown = await b.post("/device", { form: tokenFor(box.text, "/device"), user_code: cli.user_code });
   assert.equal(shown.status, 200, shown.text);
   const done = await b.post("/device/approve", { form: tokenFor(shown.text, "/device/approve"),
     user_code: shown.text.match(/name="user_code" value="([^"]+)"/)[1],
-    org: shown.text.match(/name="org" value="([^"]+)"/)[1] });
+    org: shown.text.match(/name="org" value="([^"]+)"/)[1], label });
   assert.equal(done.status, 200, done.text);
   later(device.INTERVAL);
   const got = await call(e, "/v1/device/token", { form: { client_id: "ranwhat-cli", grant_type: GRANT,
@@ -293,7 +294,7 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   let html = (await ana.get("/")).text;
   assert.match(section(html), /None yet\. Run <strong>ranwhat login<\/strong>/);
 
-  const terminal = await linkTerminal(e, ana);
+  const terminal = await linkTerminal(e, ana, "Ana's <laptop>");
   grant(e, org, "plus");
   const ci = await makeCi(ana, { label: "GitHub Actions", expires: "90" });
   assert.equal(ci.r.status, 200, ci.r.text);
@@ -312,7 +313,8 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   assert.ok(!html.includes(theirs.id), "another organisation's machine is not listed");
   const today = isoDay(unix());
 
-  assert.match(items[terminal.id], /^<strong>Unnamed terminal<\/strong> <span class="tag">terminal<\/span>/);
+  assert.match(items[terminal.id], /^<strong>Ana's &lt;laptop&gt;<\/strong> <span class="tag">terminal<\/span>/,
+               "named as it was on the page that approved it, escaped");
   assert.ok(items[terminal.id].includes(`Linked by ana@example.com on ${today}.`));
   assert.ok(items[terminal.id].includes(`Last used ${today}.`));
   assert.match(items[ciId], /^<strong>GitHub Actions<\/strong> <span class="tag">CI<\/span>/);
@@ -351,7 +353,7 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   assert.equal(one(e, "SELECT org_id FROM machines WHERE id = ?", bos.id).org_id, acme, "Bo linked it to Acme");
   const mallory = new Browser(e, { ip: "203.0.113.66" });
   await signIn(mallory, s, "mallory@example.com");
-  const theirs = await linkTerminal(e, mallory);
+  const theirs = await linkTerminal(e, mallory, "Mallory's");
 
   const rename = async (b, id, label, form) => b.post("/machines/rename",
     { form: form || tokenFor((await b.get("/")).text, "/machines/rename"), id, label });
@@ -401,7 +403,7 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
     assert.equal(r.status, 404, id);
     assert.match(r.text, /not one of this organisation's/);
   }
-  assert.equal(labelOf(theirs.id), "");
+  assert.equal(labelOf(theirs.id), "Mallory's");
 
   /* Another form's token, another session's, or another site's post renames nothing. */
   const anaRevoke = tokenFor((await ana.get("/")).text, "/machines/revoke");

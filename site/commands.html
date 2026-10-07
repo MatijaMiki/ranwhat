@@ -107,7 +107,6 @@
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
         page of their own. The other five are below, and every flag is at the end.
-        login, whoami and logout, which link this machine to an account, are optional.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -121,17 +120,14 @@
   <span class="c-b">live</span>     the same, asked of each token's own provider
   <span class="c-b">demo</span>     see the output without setting anything up
   <span class="c-b">update</span>   refresh the capability catalogue (needs a subscription)
-  <span class="c-b">login</span>    link this machine to your ranwhat.com account
-  <span class="c-b">whoami</span>   which account, organisation and plan this machine uses
-  <span class="c-b">logout</span>   unlink this machine and delete its token
 
   Start here:
     uvx ranwhat check
     uvx ranwhat demo
 
 <span class="c-mut">  No account needed. live and --pull-usage ask only the provider that
-  issued each token; update, login, whoami and logout talk only to
-  ranwhat.com. Everything else reads locally and sends nothing.
+  issued each token, and update only fetches the catalogue. Everything
+  else reads locally and sends nothing.
   Full options: uvx ranwhat --help</span></pre></div>
       </div>
     </div>

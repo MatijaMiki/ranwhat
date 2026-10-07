@@ -242,9 +242,11 @@ const SCHEMA = [
      revocation stays. id: what forms name it by, never the hash. user_id:
      who approved a terminal (kind 'device', device.js) or made a CI token
      (kind 'ci', machines.js); NULL for a subscription's emailed token
-     ('legacy'). label: what it is called on the web; a terminal sends
-     none, so its row keeps '' until it is named there, which auth.js reads
-     as no label. last_used_day: the start of the UTC day a device or ci
+     ('legacy'). label: what it is called on the web, never by the machine
+     itself: a terminal's is typed on the page that approves it (device.js,
+     kept in device_codes.label until the token is minted), a CI token's
+     when it is made; '' is read by auth.js as no label. last_used_day: the
+     start of the UTC day a device or ci
      token was last used (auth.js). */
   `CREATE TABLE IF NOT EXISTS machines (
      id TEXT PRIMARY KEY,
@@ -302,7 +304,9 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS signins_email ON signins (email_mac, created_at)`,
 
   /* Linking a terminal (RFC 8628). country, from Cloudflare, is the only
-     thing kept about where the request came from, and goes with the row. */
+     thing kept about where the request came from, and goes with the row.
+     label: the name typed with the approval, on the web, copied onto the
+     machine when its token is minted. */
   `CREATE TABLE IF NOT EXISTS device_codes (
      device_hash TEXT PRIMARY KEY,
      user_code_mac TEXT NOT NULL UNIQUE,

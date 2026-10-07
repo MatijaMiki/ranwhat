@@ -193,13 +193,14 @@ async function typeDevice(b, userCode) {
   return b.post("/device", { form: tokenFor(page.text, "/device"), user_code: userCode });
 }
 
-/* Types the code and approves it from the page that shows. */
-async function approve(b, userCode) {
+/* Types the code, names the terminal and approves it from the page that
+   shows. */
+async function approve(b, userCode, label = "Work laptop") {
   const shown = await typeDevice(b, userCode);
   assert.equal(shown.status, 200, shown.text);
   const org = shown.text.match(/name="org" value="([^"]+)"/)[1];
   const code = shown.text.match(/name="user_code" value="([^"]+)"/)[1];
-  const done = await b.post("/device/approve", { form: tokenFor(shown.text, "/device/approve"), user_code: code, org });
+  const done = await b.post("/device/approve", { form: tokenFor(shown.text, "/device/approve"), user_code: code, org, label });
   return { shown, done };
 }
 
@@ -361,33 +362,124 @@ test("a device code: RFC 8628's answer, a code to type and no link, and nothing 
   }
 });
 
-test("device codes: twenty an hour for a network, an IPv6 /64 being one, and a cap on those waiting at once", async () => {
+test("device codes: five in ten minutes and twenty an hour for a network, an IPv6 /48 being one", async () => {
   const e = env();
-  for (let i = 0; i < device.CODES_PER_NETWORK; i++) assert.equal((await askDevice(e, {}, { ip: "203.0.113.9" })).status, 200);
-  const limited = await askDevice(e, {}, { ip: "203.0.113.9" });
-  assert.equal(limited.status, 429);
-  assert.equal(limited.json.error, "rate_limited");
-  assert.equal(limited.headers.get("retry-after"), "3600");
-  assert.equal((await askDevice(e, {}, { ip: "203.0.113.10" })).status, 200, "another network still gets one");
-  for (let i = 0; i < device.CODES_PER_NETWORK; i++) {
-    assert.equal((await askDevice(e, {}, { ip: `2001:db8:1:2::${i + 1}` })).status, 200);
-  }
-  assert.equal((await askDevice(e, {}, { ip: "2001:db8:1:2:ffff::9" })).status, 429, "one /64 is one network");
-  later(HOUR + 1);
-  assert.equal((await askDevice(e, {}, { ip: "203.0.113.9" })).status, 200);
+  const ask = (ip) => askDevice(e, {}, { ip });
+  for (let i = 0; i < device.WAITING_PER_NETWORK; i++) assert.equal((await ask("203.0.113.9")).status, 200);
+  const waiting = await ask("203.0.113.9");
+  assert.equal(waiting.status, 429);
+  assert.equal(waiting.json.error, "rate_limited");
+  assert.equal(waiting.headers.get("retry-after"), String(device.DEVICE_FOR));
+  assert.equal((await ask("203.0.113.10")).status, 200, "another network still gets one");
 
-  /* The cap counts codes still waiting, from everywhere. */
-  const t = unix();
+  /* Five every ten minutes, up to twenty in the hour. */
+  for (let round = 0; round < device.CODES_PER_NETWORK / device.WAITING_PER_NETWORK; round++) {
+    for (let i = 0; i < device.WAITING_PER_NETWORK; i++) assert.equal((await ask("203.0.113.20")).status, 200);
+    later(device.DEVICE_FOR);
+  }
+  const hourly = await ask("203.0.113.20");
+  assert.equal(hourly.status, 429);
+  assert.equal(hourly.headers.get("retry-after"), String(HOUR));
+  later(HOUR);
+  assert.equal((await ask("203.0.113.20")).status, 200);
+
+  /* IPv6: every /64 of one /48 is the same network here. */
+  for (let i = 0; i < device.WAITING_PER_NETWORK; i++) {
+    assert.equal((await ask(`2001:db8:1:${(i * 4099).toString(16)}::${i + 1}`)).status, 200);
+  }
+  assert.equal((await ask("2001:db8:1:ffff::9")).status, 429, "another /64 of the same /48");
+  assert.equal((await ask("2001:db8:2::1")).status, 200, "another /48 is another network");
+});
+
+test("50 /64s of one /48 cannot fill the cap on waiting codes, and past the cap only networks already waiting are refused", async () => {
+  const e = env();
+  /* The review's attack: every /64 of 2001:db8:abcd::/48 asks for all the
+     codes it is allowed. */
+  const statuses = {};
+  for (let n = 0; n < device.MAX_PENDING / device.CODES_PER_NETWORK; n++) {
+    for (let i = 0; i < device.CODES_PER_NETWORK; i++) {
+      const r = await askDevice(e, {}, { ip: `2001:db8:abcd:${n.toString(16)}::1` });
+      statuses[r.status] = (statuses[r.status] || 0) + 1;
+    }
+  }
+  assert.deepEqual(statuses, { 200: device.WAITING_PER_NETWORK, 429: device.MAX_PENDING - device.WAITING_PER_NETWORK });
+  assert.equal(count(e, "device_codes"), device.WAITING_PER_NETWORK);
+  assert.equal((await askDevice(e, {}, { ip: "198.51.100.200" })).status, 200, "ranwhat login elsewhere still works");
+
+  /* Filled anyway, from a thousand networks: a network with nothing
+     waiting still gets a code; one that asked in the last ten minutes,
+     and so filled it, does not. */
   const insert = e.LIST.sql.prepare(`INSERT INTO device_codes (device_hash, user_code_mac, created_at, expires_at)
                                      VALUES (?, ?, ?, ?)`);
-  const waiting = e.LIST.sql.prepare("SELECT count(*) AS n FROM device_codes WHERE expires_at > ?").get(t).n;
-  assert.equal(waiting, 1, "the codes from an hour ago have expired");
-  for (let i = waiting; i < device.MAX_PENDING; i++) insert.run(`h${i}`, `m${i}`, t, t + 600);
-  const full = await askDevice(e, {}, { ip: "203.0.113.11" });
+  const fill = (to, tag) => {
+    const t = unix();
+    const n = e.LIST.sql.prepare("SELECT count(*) AS n FROM device_codes WHERE expires_at > ?").get(t).n;
+    for (let i = n; i < to; i++) insert.run(`${tag}${i}`, `${tag}${i}`, t, t + 600);
+  };
+  fill(device.MAX_PENDING, "a");
+  const fresh = await askDevice(e, {}, { ip: "198.51.100.201" });
+  assert.equal(fresh.status, 200, fresh.text);
+  for (const ip of ["198.51.100.201", "198.51.100.200"]) {
+    const r = await askDevice(e, {}, { ip });
+    assert.equal(r.status, 503, ip);
+    assert.equal(r.json.error, "temporarily_unavailable");
+    assert.match(r.json.error_description, /one from your network already is/);
+  }
+  assert.equal((await askDevice(e, {}, { ip: "2001:db8:abcd:77::1" })).status, 429, "and the /48 is still over its own");
+  later(device.DEVICE_FOR + 1);
+  assert.equal((await askDevice(e, {}, { ip: "198.51.100.201" })).status, 200, "ten minutes on, its codes have expired");
+
+  /* The ceiling: past it, nobody gets one. */
+  fill(device.PENDING_CEILING, "b");
+  const full = await askDevice(e, {}, { ip: "198.51.100.202" });
   assert.equal(full.status, 503);
   assert.equal(full.json.error, "temporarily_unavailable");
-  e.LIST.sql.prepare("UPDATE device_codes SET expires_at = ? WHERE device_hash = 'h999'").run(t - 1);
-  assert.equal((await askDevice(e, {}, { ip: "203.0.113.11" })).status, 200, "an expired code no longer counts");
+  assert.doesNotMatch(full.json.error_description, /your network/);
+  e.LIST.sql.prepare("UPDATE device_codes SET expires_at = ? WHERE device_hash = 'b9999'").run(unix() - 1);
+  assert.equal((await askDevice(e, {}, { ip: "198.51.100.203" })).status, 200, "an expired code no longer counts");
+});
+
+test("no web page can ask for or poll a device code: a request with Origin, or from a browser's fetch, is refused", async () => {
+  const e = env();
+  const cli = await newCode(e);
+  const before = dump(e);
+  const fromPages = [
+    { origin: "https://evil.example", "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors" },
+    { origin: "https://evil.example" },
+    { origin: "null" },
+    { origin: "https://ranwhat.com" },
+    { origin: ORIGIN, "sec-fetch-site": "same-site" },
+    { "sec-fetch-site": "cross-site" },
+    { "sec-fetch-site": "same-origin" },
+  ];
+  for (const headers of fromPages) {
+    for (let n = 0; n < 3; n++) {
+      const code = await askDevice(e, {}, { headers, ip: `2001:db8:abcd:${n}::1` });
+      assert.deepEqual([code.status, code.json.error], [403, "invalid_request"], JSON.stringify(headers));
+      const polled = await poll(e, cli.device_code, { headers });
+      assert.deepEqual([polled.status, polled.json.error], [403, "invalid_request"], JSON.stringify(headers));
+    }
+  }
+  assert.equal(dump(e), before, "nothing was counted, made or polled");
+  /* A browser's own navigation, typed in its address bar, is no page's doing. */
+  assert.equal((await askDevice(e, {}, { headers: { "sec-fetch-site": "none" } })).status, 200);
+});
+
+test("DEVICE_RL turns a burst from one network away before the database is touched", async () => {
+  const keys = [];
+  let allowed = 2;
+  const e = env({ DEVICE_RL: { async limit({ key }) { keys.push(key); return { success: allowed-- > 0 }; } } });
+  assert.equal((await askDevice(e, {}, { ip: "2001:db8:abcd:1::1" })).status, 200);
+  assert.equal((await askDevice(e, {}, { ip: "2001:db8:abcd:2::1" })).status, 200);
+  const before = dump(e);
+  const burst = await askDevice(e, {}, { ip: "2001:db8:abcd:3::1" });
+  assert.deepEqual([burst.status, burst.json.error, burst.headers.get("retry-after")], [429, "rate_limited", "60"]);
+  assert.equal(dump(e), before, "nothing was written");
+  assert.equal(new Set(keys).size, 1, "one /48, one key");
+  assert.ok(!keys[0].includes("2001") && !keys[0].includes("db8"), "keyed by an HMAC, not by the address");
+  /* A binding that fails lets the request through to the counts in D1. */
+  const broken = env({ DEVICE_RL: { async limit() { throw new Error("down"); } } });
+  assert.equal((await askDevice(broken)).status, 200);
 });
 
 /* ---------- the whole way through ---------- */
@@ -432,17 +524,20 @@ test("typed at ranwhat.com/device, approved with a fresh code, minted once, and 
     assert.ok(shown.text.includes(text), text);
   }
   assert.doesNotMatch(shown.text, /<script/i);
+  assert.match(shown.text, /<input id="label" name="label" type="text" maxlength="60" required/, "a name is typed here");
   assert.equal(stateOf(e, cli.device_code).state, "pending", "looking a code up approves nothing");
 
   const org = orgOf(e, "ana@example.com");
   const user = one(e, "SELECT id FROM users").id;
   const ok = await b.post("/device/approve", { form: tokenFor(shown.text, "/device/approve"),
-    user_code: cli.user_code.replace("-", ""), org });
+    user_code: cli.user_code.replace("-", ""), org, label: "  Ana's <laptop>  " });
   assert.equal(ok.status, 200, ok.text);
   assert.match(ok.text, /Approved/);
   assert.match(ok.text, /ana@example\.com/);
+  assert.ok(ok.text.includes("Ana's &lt;laptop&gt;") && !ok.text.includes("<laptop>"), "the name, escaped");
   const approved = stateOf(e, cli.device_code);
-  assert.deepEqual([approved.state, approved.user_id, approved.org_id, approved.label], ["approved", user, org, null]);
+  assert.deepEqual([approved.state, approved.user_id, approved.org_id, approved.label],
+                   ["approved", user, org, "Ana's <laptop>"]);
   assert.equal(count(e, "machines"), 0, "nothing is made until the terminal asks");
 
   later(15);
@@ -461,10 +556,11 @@ test("typed at ranwhat.com/device, approved with a fresh code, minted once, and 
   assert.deepEqual([again.status, again.json.error], [400, "invalid_grant"], "the token is handed out once");
   assert.ok(!again.text.includes(token));
 
-  /* Kept as hashes only, a machine of the organisation, no label yet. */
+  /* Kept as hashes only, a machine of the organisation, named as it was
+     on the web. */
   const machine = one(e, "SELECT * FROM machines");
   assert.deepEqual([machine.hash, machine.org_id, machine.user_id, machine.kind, machine.label, machine.last_used_day],
-                   [sha(token), org, user, "device", "", null]);
+                   [sha(token), org, user, "device", "Ana's <laptop>", null]);
   const tokenRow = one(e, "SELECT * FROM tokens WHERE hash = ?", sha(token));
   assert.deepEqual([tokenRow.note, tokenRow.revoked_at, tokenRow.expires_at], [`device ${machine.id}`, null, null]);
   assert.equal(stateOf(e, cli.device_code).state, "issued");
@@ -474,7 +570,7 @@ test("typed at ranwhat.com/device, approved with a fresh code, minted once, and 
   const me = await whoami(e, token);
   assert.equal(me.status, 200);
   assert.deepEqual(me.json, { kind: "device", email: "ana@example.com", org: "Personal", role: "owner", plan: "free",
-                              machine: { label: null, created_at: machine.created_at } });
+                              machine: { label: "Ana's <laptop>", created_at: machine.created_at } });
   for (const secret of [token, sha(token), machine.id, org, user]) assert.ok(!me.text.includes(secret));
 
   /* Free: linked, and the feed says where Plus is. */
@@ -669,6 +765,51 @@ test("approving needs a session, a fresh code, this page's form, and the organis
   assert.equal(taken.status, 400);
   assert.match(taken.text, /already approved/);
   assert.equal(stateOf(e, cli.device_code).user_id, user);
+});
+
+test("a terminal is named on the page that approves it: without a good name nothing is approved, and the machine carries it", async () => {
+  const s = services();
+  const e = env();
+  const b = new Browser(e);
+  await signIn(b, s);
+  const asked = await askDevice(e, { label: "named-by-the-terminal", hostname: "box.local" });
+  assert.equal(asked.status, 200, asked.text);
+  const cli = asked.json;
+  const shown = await typeDevice(b, cli.user_code);
+  assert.equal(shown.status, 200, shown.text);
+  assert.ok(!shown.text.includes("named-by-the-terminal"), "nothing the terminal sent is shown");
+  const org = shown.text.match(/name="org" value="([^"]+)"/)[1];
+  const code = shown.text.match(/name="user_code" value="([^"]+)"/)[1];
+  const form = tokenFor(shown.text, "/device/approve");
+
+  for (const bad of [undefined, "", "   ", "x".repeat(61), "evil‮gnp.exe", "bell\u0007", "zero​width"]) {
+    const sent = { form, user_code: code, org };
+    if (bad !== undefined) sent.label = bad;
+    const r = await b.post("/device/approve", sent);
+    assert.equal(r.status, 400, JSON.stringify(bad));
+    assert.match(r.text, /Give the terminal a name of 1 to 60 printable characters/);
+    assert.match(r.text, /Nothing was approved/);
+    assert.equal(tokenFor(r.text, "/device/approve"), form, "the same page again, to name it and approve");
+    const row = stateOf(e, cli.device_code);
+    assert.deepEqual([row.state, row.label, row.user_id], ["pending", null, null]);
+  }
+  later(device.INTERVAL);
+  assert.equal((await poll(e, cli.device_code)).json.error, "authorization_pending");
+
+  const ok = await b.post("/device/approve", { form, user_code: code, org, label: " Build\tbox " });
+  assert.equal(ok.status, 200, ok.text);
+  assert.equal(stateOf(e, cli.device_code).label, "Build box");
+  later(device.INTERVAL);
+  const got = await poll(e, cli.device_code);
+  assert.equal(got.status, 200, got.text);
+  const machine = one(e, "SELECT * FROM machines WHERE hash = ?", sha(got.json.access_token));
+  assert.equal(machine.label, "Build box");
+  assert.equal((await whoami(e, got.json.access_token)).json.machine.label, "Build box");
+  const home = await b.get("/");
+  assert.ok(home.text.includes("<strong>Build box</strong>"), "listed by that name");
+  assert.ok(!home.text.includes("Unnamed terminal"));
+  const all = dump(e);
+  assert.ok(!all.includes("named-by-the-terminal") && !all.includes("box.local"), "what the terminal sent is kept nowhere");
 });
 
 test("a token is minted only while its approver is still a member of the organisation", async () => {
@@ -989,7 +1130,7 @@ test("the real ranwhat login, whoami, update and logout, against the Worker over
     await signIn(b, s);
     const login = cli.start("login", "--no-browser");
     const [, userCode] = await login.until(/^ {4}([BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4})$/m);
-    const { done } = await approve(b, userCode);
+    const { done } = await approve(b, userCode, "Ana's laptop");
     assert.equal(done.status, 200, done.text);
     const linkedRun = await login.done;
     assert.equal(linkedRun.status, 0, linkedRun.stderr);
@@ -1014,7 +1155,7 @@ test("the real ranwhat login, whoami, update and logout, against the Worker over
     const who = await cli.run("whoami");
     assert.equal(who.status, 0, who.stderr);
     for (const line of [/Account\s+ana@example\.com/, /Organisation\s+Personal/, /Role\s+owner/, /Plan\s+Free/,
-                        /Machine\s+not named yet/]) {
+                        /Machine\s+Ana's laptop/]) {
       assert.match(who.stdout, line);
     }
 

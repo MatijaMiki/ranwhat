@@ -24,7 +24,8 @@
  * where someone signed in, with an emailed code typed in the last 15
  * minutes, types the user code, sees the organisation the terminal will
  * belong to and the warning to approve only a terminal they started
- * themselves, and approves or denies (dashboard.js routes them here).
+ * themselves, names the terminal, and approves or denies (dashboard.js
+ * routes them here).
  *
  * At rest. The device code is 32 random bytes, kept as its SHA-256. The
  * user code is kept as two HMACs under ACCOUNT_SECRET, of its first four
@@ -43,11 +44,16 @@
  * SHA-256 only, like every feed token (auth.js), with a machines row of
  * kind 'device' that says which organisation it belongs to and who
  * approved it; auth.js's identify() reads it as that organisation's, on
- * its plan. Its label is left empty until it is named on the web. It
+ * its plan. Its label is the name typed on the approval page, beside the
+ * Approve button, and never anything the terminal sent. It
  * gives nothing on account.ranwhat.com, which never takes a Bearer token.
  *
- * Limits. Device codes per network an hour, and a cap on the codes
- * waiting at once; polls per network an hour, and slow_down for a code
+ * Limits. Device codes per network an hour and per ten minutes, an IPv6
+ * network being its /48 for these, behind a burst limit (DEVICE_RL); a
+ * soft cap on the codes waiting at once, past which only a network with
+ * none waiting gets one, and a ceiling past which nobody does; neither
+ * device path answers a browser, so no web page can spend its visitors'
+ * networks on them; polls per network an hour, and slow_down for a code
  * polled sooner than its interval, which then grows by five seconds; wrong
  * user codes per session (five in ten minutes lock the form), per account
  * and per network; and five wrong tries at one waiting code lock that
@@ -57,6 +63,7 @@ import { identify, plan, schema as feedSchema, sha256 } from "./auth.js";
 import { ACCOUNT_ORIGIN, HOUR, event, now, ready, schema as accountsSchema } from "./accounts.js";
 import { PLAN_NAMES } from "./features.js";
 import { escape, same } from "./list.js";
+import { MAX_LABEL, machineLabel } from "./machines.js";
 import {
   FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formOk, formToken, fresh, mac, network, peek, randomToken,
   readCookie,
@@ -75,7 +82,10 @@ export const INTERVAL = 5;                // seconds between polls, to begin wit
 const SLOWER = 5;                         // added to the interval by each slow_down (RFC 8628 3.5)
 const MAX_INTERVAL = 60;
 export const CODES_PER_NETWORK = 20;      // device codes one network may ask for an hour
-export const MAX_PENDING = 1000;          // codes waiting to be approved at once, from everywhere
+export const WAITING_PER_NETWORK = 5;     // and in DEVICE_FOR, so about as many waiting at once
+export const CODE_NET_V6 = 48;            // for these two, an IPv6 network is its /48, not its /64
+export const MAX_PENDING = 1000;          // codes waiting at once past which only networks with none waiting get one
+export const PENDING_CEILING = 10 * MAX_PENDING; // and past which nobody does
 export const POLLS_PER_NETWORK = 1200;    // token polls from one network an hour
 export const WRONG_PER_SESSION = 5;       // wrong user codes one session may type in WRONG_WINDOW
 export const WRONG_WINDOW = 10 * 60;
@@ -169,23 +179,72 @@ async function tables(db) {
   await accountsSchema(db);
 }
 
+/* A request a browser made. The terminal sends neither Origin nor
+   Sec-Fetch-Site, and every browser sends one or the other with a POST,
+   including the form-encoded, no-cors POST that any page on any site can
+   make without a preflight: without this, a page could spend its
+   visitors' networks on device codes. Sec-Fetch-Site: none is a browser's
+   own navigation, typed or bookmarked, which no page can cause. */
+function fromBrowser(request) {
+  const site = request.headers.get("sec-fetch-site");
+  return request.headers.get("origin") !== null || (site !== null && site !== "none");
+}
+
+const notForBrowsers = () => oauthError(403, "invalid_request",
+  "This address takes requests from ranwhat in a terminal, not from a web page.");
+
+/* DEVICE_RL (wrangler.toml), Workers' rate limiting binding: a burst from
+   one network is turned away before the database is touched. Keyed by an
+   HMAC of the network, as the throttle rows are. Where the binding is
+   missing (a preview, the tests) or fails, the counts in D1 still hold. */
+async function burstOk(env, net) {
+  const limiter = env.DEVICE_RL;
+  if (!limiter || typeof limiter.limit !== "function") return true;
+  try {
+    const { success } = await limiter.limit({ key: await mac(env, `device-rl:${net}`) });
+    return success !== false;
+  } catch {
+    return true;
+  }
+}
+
+const tooManyCodes = (retry) => oauthError(429, "rate_limited",
+  "More terminals were linked from your network lately than we take. Try again later.",
+  {}, { "retry-after": String(retry) });
+
 /* POST /v1/device/code. Only client_id is read; a label, a hostname or
-   anything else sent with it is dropped. */
+   anything else sent with it is dropped.
+
+   Limits, so that no one source can keep everyone else from linking a
+   terminal. An IPv6 network counts here by its /48 (CODE_NET_V6), so that
+   the 65,536 /64s one holder is given are still one network: twenty codes
+   an hour for it, and five in ten minutes, which is about as many as
+   it can have waiting at once. MAX_PENDING waiting from everywhere is a
+   soft cap: past it, a network that already asked for a code in the last
+   ten minutes is refused, and one that did not still gets one, so filling
+   the table locks out only those who filled it. PENDING_CEILING, ten times
+   that, bounds the table for everyone. */
 export async function deviceCode(request, env) {
   if (!ready(env)) return unavailable();
+  if (fromBrowser(request)) return notForBrowsers();
+  const net = network(request, { v6: CODE_NET_V6 });
+  if (!await burstOk(env, net)) return tooManyCodes(60);
   const f = await body(request);
   if (f.get("client_id") !== CLIENT_ID) return oauthError(401, "invalid_client", "Unknown client. Update ranwhat and try again.");
   const db = env.LIST;
   await tables(db);
-  if (await bump(env, "device-code-net", network(request), HOUR) > CODES_PER_NETWORK) {
-    return oauthError(429, "rate_limited",
-      "More terminals were linked from your network in the last hour than we take. Try again later.",
-      {}, { "retry-after": String(HOUR) });
-  }
+  if (await bump(env, "device-code-net", net, HOUR) > CODES_PER_NETWORK) return tooManyCodes(HOUR);
+  const recent = await bump(env, "device-code-wait", net, DEVICE_FOR);
+  if (recent > WAITING_PER_NETWORK) return tooManyCodes(DEVICE_FOR);
   const t = now();
   const waiting = await db.prepare("SELECT count(*) AS n FROM device_codes WHERE state = 'pending' AND expires_at > ?")
     .bind(t).first();
-  if (waiting.n >= MAX_PENDING) return unavailable();
+  if (waiting.n >= PENDING_CEILING) return unavailable();
+  if (waiting.n >= MAX_PENDING && recent > 1) {
+    return oauthError(503, "temporarily_unavailable",
+      "Many terminals are waiting to be linked just now, and one from your network already is. " +
+      "Type its code, or try again in ten minutes.", {}, { "retry-after": String(DEVICE_FOR) });
+  }
 
   const deviceCode = randomToken();
   const hash = await sha256(deviceCode);
@@ -233,7 +292,7 @@ export async function mint(env, hash) {
     db.prepare(`INSERT INTO tokens (hash, note, created_at) SELECT ?, ?, ? FROM device_codes WHERE ${MINTABLE}`)
       .bind(tokenHash, `device ${machine}`, t, hash, t),
     db.prepare(`INSERT INTO machines (id, hash, org_id, user_id, kind, label, created_at)
-                SELECT ?, ?, org_id, user_id, 'device', '', ? FROM device_codes WHERE ${MINTABLE}`)
+                SELECT ?, ?, org_id, user_id, 'device', COALESCE(label, ''), ? FROM device_codes WHERE ${MINTABLE}`)
       .bind(machine, tokenHash, t, hash, t),
     db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
                 SELECT org_id, user_id, 'machine_linked', ?, ? FROM device_codes WHERE ${MINTABLE}`)
@@ -248,6 +307,7 @@ export async function mint(env, hash) {
 /* POST /v1/device/token. */
 export async function deviceToken(request, env) {
   if (!ready(env)) return unavailable();
+  if (fromBrowser(request)) return notForBrowsers();
   const f = await body(request);
   if (f.get("client_id") !== CLIENT_ID) return oauthError(401, "invalid_client", "Unknown client. Update ranwhat and try again.");
   if (f.get("grant_type") !== GRANT_TYPE) {
@@ -523,8 +583,10 @@ const approveAction = (code, org) => `device-approve:${code}:${org}`;
 const denyAction = (code) => `device-deny:${code}`;
 
 /* Only what the server knows: the organisation, its plan, and when and
-   from which country the code was asked for. Nothing the terminal wrote. */
-async function confirmPage(env, who, code, row) {
+   from which country the code was asked for. Nothing the terminal wrote.
+   The name the terminal goes by on the account page is typed here, with
+   the approval: a terminal sends none. */
+async function confirmPage(env, who, code, row, { error = "", status = 200 } = {}) {
   const org = who.org;
   const onPlan = await plan(env, org.id);
   const where = countryName(row.country);
@@ -539,24 +601,31 @@ async function confirmPage(env, who, code, row) {
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
       <dt>Plan</dt><dd>${PLAN_NAMES[onPlan]}</dd>
     </dl>
-    <p>The terminal gets a token of its own for <strong>${escape(org.name)}</strong>. Running
-       <strong>ranwhat logout</strong> there revokes it, as Revoke under Machines on your account
-       page does, where you can name it too.</p>
+    <p>The terminal gets a token of its own for <strong>${escape(org.name)}</strong>, listed
+       under Machines on your account page by the name you give it here. Running
+       <strong>ranwhat logout</strong> there revokes it, as Revoke on your account page does.</p>
     ${free}
     ${form("/device/approve", await formToken(env, who.id, approveAction(code, org.id)), `
       <input type="hidden" name="user_code" value="${escape(code)}">
       <input type="hidden" name="org" value="${escape(org.id)}">
-      <button type="submit">Approve</button>`, "row")}
+      <label for="label">Name this terminal, to tell it apart later</label>
+      <input id="label" name="label" type="text" maxlength="${MAX_LABEL}" required autocomplete="off"
+             placeholder="Work laptop">
+      ${problem(error)}
+      <button type="submit">Approve</button>`)}
     ${form("/device/deny", await formToken(env, who.id, denyAction(code)), `
       <input type="hidden" name="user_code" value="${escape(code)}">
       <button type="submit">Deny</button>`, "row")}
-    <p><a href="/device">Type another code</a></p>`);
+    <p><a href="/device">Type another code</a></p>`, { status });
 }
 
 /* POST /device/approve: with a fresh code, for the organisation the page
-   showed, which must still be the one this session is looking at. The
-   form token is bound to the code and that organisation, so neither can
-   be swapped in the form. */
+   showed, which must still be the one this session is looking at, and
+   with a name for the terminal (machines.js machineLabel()). The form
+   token is bound to the code and that organisation, so neither can be
+   swapped in the form. The name is written with the approval, in the one
+   UPDATE that moves the code from pending, and mint() copies it onto the
+   machine. */
 export async function approve(request, env) {
   const who = await current(request, env);
   if (!who) return toSignin(request);
@@ -574,12 +643,18 @@ export async function approve(request, env) {
     error: "Your last emailed code is too old, so nothing was approved. Confirm with a new one, then type the code again." });
   const { row } = await find(env, code);
   if (!row) return notWaiting({ expires_at: 0 });
+  if (row.state !== "pending" || row.expires_at <= now()) return notWaiting(row);
+  const label = machineLabel(f.get("label"));
+  if (!label) {
+    return confirmPage(env, who, code, row, { status: 400,
+      error: `Give the terminal a name of 1 to ${MAX_LABEL} printable characters, to tell it apart on your account page. Nothing was approved.` });
+  }
   const t = now();
   const db = env.LIST;
   const done = await db.prepare(
-    `UPDATE device_codes SET state = 'approved', user_id = ?, org_id = ?, decided_at = ?
+    `UPDATE device_codes SET state = 'approved', user_id = ?, org_id = ?, label = ?, decided_at = ?
      WHERE device_hash = ? AND state = 'pending' AND expires_at > ?`)
-    .bind(who.user, who.org.id, t, row.device_hash, t).run();
+    .bind(who.user, who.org.id, label, t, row.device_hash, t).run();
   if (done.meta.changes !== 1) {
     return notWaiting(await db.prepare("SELECT * FROM device_codes WHERE device_hash = ?").bind(row.device_hash).first()
       || { expires_at: 0 });
@@ -589,6 +664,7 @@ export async function approve(request, env) {
     <p>Go back to your terminal. Within a few seconds it says it is linked to
        <strong>${escape(who.org.name)}</strong> as <strong>${escape(who.email)}</strong>. If it names
        anything else, run <strong>ranwhat logout</strong> there.</p>
+    <p>It is listed under Machines on your account page as <strong>${escape(label)}</strong>.</p>
     <p><a href="/">Your account</a></p>`);
 }
 

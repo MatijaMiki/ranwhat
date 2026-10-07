@@ -266,18 +266,6 @@ On a terminal, `scan`, `live` and `update --status` may add one dim line
 about the feed, on stderr and never with `--json`. `RANWHAT_NO_HINTS=1` turns
 it off.
 
-### `ranwhat login`, `whoami`, `logout`: link this machine to an account
-
-Optional: nothing that runs locally needs an account. `ranwhat login` prints a
-code and https://ranwhat.com/device; type the code there, signed in, and
-approve. This machine then gets a token of its own, saved where `update`
-reads it (`~/.ranwhat/token`, mode 0600), which you can name or revoke on the
-web. `ranwhat whoami` says which account, organisation and plan it belongs
-to, and `ranwhat logout` revokes it and deletes it. They send the code or the
-token and nothing else: no hostname, operating system or machine identifier.
-On a Free organisation the feed and the other server features need Plus.
-`RANWHAT_TOKEN` and `--token` still work, and come first.
-
 ## Precision is the feature
 
 A watcher that cries wolf gets muted in a day, and a muted watcher records
@@ -331,10 +319,10 @@ agent's entire authority surface, which is useful to somebody other than you.
 ## What goes online
 
 No account needed. live and --pull-usage ask only the provider that issued
-each token; update, login, whoami and logout talk only to ranwhat.com.
-Everything else reads locally and sends nothing.
+each token, and update only fetches the catalogue. Everything else reads
+locally and sends nothing.
 
-- Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own subscription token, only with `update --save-token`, or the machine token from `ranwhat login` (mode 0600).
+- Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own subscription token, and only with `update --save-token` (mode 0600).
 - Live introspection talks only to the credential's own issuer
 - Scans never exercise a permission and never need a write-scoped token
 - No runtime dependencies, so there is nothing to audit before you point this at your keys

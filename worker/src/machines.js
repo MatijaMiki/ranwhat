@@ -14,12 +14,14 @@
  *   legacy  A subscription's emailed token, once the subscription is
  *           attached to the organisation. user_id NULL.
  *
- * Each can be named (1 to 60 printable characters, set only here: a
- * terminal sends none) and revoked, by an owner or an admin, or by whoever
- * linked or made it. Revoking needs a fresh code, as making a CI token
- * does, and sets tokens.revoked_at, the one switch every feed token has:
- * from the next request on, the feed refuses it. The machines row stays,
- * so the organisation's history keeps naming it.
+ * Each is named on the web and never by itself (1 to 60 printable
+ * characters: a terminal's on the page that approves it, device.js, a CI
+ * token's when it is made), and can be renamed and revoked here, by an
+ * owner or an admin, or by whoever linked or made it. Revoking needs a
+ * fresh code, as making a CI token does, and sets tokens.revoked_at, the
+ * one switch every feed token has: from the next request on, the feed
+ * refuses it. The machines row stays, so the organisation's history
+ * keeps naming it.
  *
  * Last use. auth.js's identify() writes the start of the UTC day a
  * terminal or CI token was last accepted, at most once a day, in one

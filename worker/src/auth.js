@@ -176,8 +176,8 @@ export async function identify(request, env) {
     return {
       ok: true, kind: row.kind, account: `org:${row.machine_org}`, org: row.machine_org,
       plan: await plan(env, row.machine_org),
-      /* label: null until it is named on the web; a terminal's machines
-         row keeps '' until then (device.js). */
+      /* label: the name given on the web, a terminal's on the page that
+         approved it (device.js); null for an empty one. */
       machine: { id: row.machine, user: row.user_id, label: row.label || null, linked_at: row.linked_at },
     };
   }
