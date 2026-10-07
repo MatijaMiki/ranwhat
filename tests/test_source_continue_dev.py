@@ -876,7 +876,7 @@ class Damaged(ContinueCase):
                    os.path.join(self.root, "sessions", "loop.json"))
         self.assertEqual(self.stores(), [])
         other = _tempdir(self, "continue-file-")
-        with open(os.path.join(other, "sessions"), "w") as fh:
+        with open(os.path.join(other, "sessions"), "w", encoding="utf-8") as fh:
             fh.write("x")
         self.assertEqual(self.stores(override=other), [])
 

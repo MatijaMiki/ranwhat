@@ -456,7 +456,7 @@ class Discovery(GooseCase):
         new = self.legacy("named", [], age=60)
         for name in ("x.jsonl.backup", "x.jsonl.tmp", ".hidden.jsonl",
                      "notes.txt", "sessions.db-journal"):
-            with open(os.path.join(self.folder, name), "w") as fh:
+            with open(os.path.join(self.folder, name), "w", encoding="utf-8") as fh:
                 fh.write("{}\n")
         os.makedirs(os.path.join(self.folder, "dir.jsonl"))
         os.utime(db, (time.time(), time.time()))
@@ -952,10 +952,10 @@ class Secrets(GooseCase):
     def test_nothing_outside_sessions_is_read(self):
         config = os.path.join(self.home, ".config", "goose")
         os.makedirs(config)
-        with open(os.path.join(config, "secrets.yaml"), "w") as fh:
+        with open(os.path.join(config, "secrets.yaml"), "w", encoding="utf-8") as fh:
             fh.write("OPENAI_API_KEY: " + SECRET + "\n")
         self.database([(SID, CWD, "", "{}")])
-        with open(os.path.join(self.data, "x.jsonl"), "w") as fh:
+        with open(os.path.join(self.data, "x.jsonl"), "w", encoding="utf-8") as fh:
             fh.write(_dump({"working_dir": CWD, "k": SECRET}) + "\n")
         for store in self.stores():
             self.assertTrue(store.path.startswith(self.folder))
