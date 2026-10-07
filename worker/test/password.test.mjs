@@ -227,7 +227,7 @@ test("the count comes from PBKDF2_ITERATIONS, 600,000 by default, and a lower on
   for (const bad of ["", "abc", "999", "2.5", "1e9", "-5", "600k"]) {
     assert.equal(iterations({ PBKDF2_ITERATIONS: bad }), 600000, bad);
   }
-  assert.match(await hashPassword({}, ANA_PASSWORD), /^pbkdf2-sha256\$600000\$/);
+  assert.match(await hashPassword({}, ANA_PASSWORD), /^pbkdf2-sha256-chained\$600000\$/);
 
   const old = await hashPassword(LOW, ANA_PASSWORD);
   assert.equal(needsRehash(LOW, old), false);
@@ -235,6 +235,60 @@ test("the count comes from PBKDF2_ITERATIONS, 600,000 by default, and a lower on
   assert.equal(needsRehash({}, old), true);
   assert.equal(await verifyPassword(old, ANA_PASSWORD), true, "an older count still verifies");
   assert.equal(needsRehash(LOW, "not a hash"), true);
+});
+
+/* Workers' WebCrypto refuses one PBKDF2 call above 100,000 iterations, in
+   production only; this stands in for it, so the limit holds here too. */
+async function asWorkers(fn) {
+  const real = crypto.subtle.deriveBits.bind(crypto.subtle);
+  const calls = [];
+  crypto.subtle.deriveBits = async (params, key, length) => {
+    calls.push(params.iterations);
+    if (params.iterations > 100000) {
+      throw new DOMException("Pbkdf2 failed: iteration counts above 100000 are not supported", "NotSupportedError");
+    }
+    return real(params, key, length);
+  };
+  try { return { value: await fn(), calls }; } finally { delete crypto.subtle.deriveBits; }
+}
+
+test("600,000 iterations run as six chained calls Workers accepts, and verify", async () => {
+  const { value: stored, calls } = await asWorkers(() => hashPassword({}, ANA_PASSWORD));
+  assert.match(stored, /^pbkdf2-sha256-chained\$600000\$/);
+  assert.deepEqual(calls, [100000, 100000, 100000, 100000, 100000, 100000]);
+  const { value: ok } = await asWorkers(() => verifyPassword(stored, ANA_PASSWORD));
+  const { value: wrong } = await asWorkers(() => verifyPassword(stored, ANA_PASSWORD + "x"));
+  assert.equal(ok, true);
+  assert.equal(wrong, false);
+  // A count that is not a multiple of a round ends on the remainder.
+  const { calls: odd } = await asWorkers(() => hashPassword({ PBKDF2_ITERATIONS: "250000" }, ANA_PASSWORD));
+  assert.deepEqual(odd, [100000, 100000, 50000]);
+});
+
+test("up to 100,000 a hash is one standard PBKDF2 call; above it, a chain no single call reproduces", async () => {
+  const salt = new Uint8Array(16);
+  const pbkdf2 = async (password, iterations) => {
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+    return Buffer.from(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256))
+      .toString("base64url");
+  };
+  // The same salt the stored hash used, read back out of it.
+  const one = await hashPassword({ PBKDF2_ITERATIONS: "100000" }, ANA_PASSWORD);
+  const [, , saltText, hashText] = one.split("$");
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(ANA_PASSWORD.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
+  const expect = Buffer.from(await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: Buffer.from(saltText, "base64url"), iterations: 100000 }, key, 256)).toString("base64url");
+  assert.match(one, /^pbkdf2-sha256\$100000\$/);
+  assert.equal(hashText, expect, "one standard call, byte for byte");
+  assert.notEqual(await pbkdf2(ANA_PASSWORD, 200000), await pbkdf2(ANA_PASSWORD, 100000));
+});
+
+test("a label that does not match its count is not a hash", async () => {
+  const salt = "A".repeat(22), hash = "A".repeat(43);
+  assert.equal(isPasswordHash(`pbkdf2-sha256$600000$${salt}$${hash}`), false, "one call above Workers' limit");
+  assert.equal(isPasswordHash(`pbkdf2-sha256-chained$100000$${salt}$${hash}`), false, "a chain of one round");
+  assert.equal(isPasswordHash(`pbkdf2-sha256-chained$600000$${salt}$${hash}`), true);
+  assert.equal(isPasswordHash(`pbkdf2-sha256$100000$${salt}$${hash}`), true);
 });
 
 test("a stored value that is not a hash made here verifies nothing", async () => {

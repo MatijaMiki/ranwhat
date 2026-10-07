@@ -3,7 +3,9 @@
  *
  * Kept. PBKDF2-HMAC-SHA256 through WebCrypto, with a 16-byte random salt,
  * stored as "pbkdf2-sha256$<iterations>$<salt>$<hash>", salt and hash in
- * base64url. Each hash carries its own count, so the count can be raised
+ * base64url, or, above Workers' 100,000-iteration limit, as
+ * "pbkdf2-sha256-chained$<iterations>$<salt>$<hash>" (see derive()). Each
+ * hash carries its own count, so the count can be raised
  * later: older hashes still verify, and needsRehash() says which to hash
  * again when their owner next signs in with the password. The password is
  * NFKC-normalised first (NIST SP 800-63B), so the same characters typed on
@@ -47,22 +49,20 @@ import { HOUR, event, now } from "./accounts.js";
 import { b64url, bump, forget, network, peek } from "./session.js";
 
 /* OWASP's 2023 count for PBKDF2-HMAC-SHA256. PBKDF2_ITERATIONS sets
-   another, for two limits on Workers:
-   - Workers' WebCrypto refuses PBKDF2 above 100,000 iterations
-     (NotSupportedError, "iteration counts above 100000 are not
-     supported"), on the Free and the Paid plan alike, and only in
-     production: Node, wrangler dev and Miniflare all run 600,000. Until
-     Cloudflare lifts it, production needs PBKDF2_ITERATIONS = "100000",
-     which wrangler.toml's [vars] sets, or no password can be set (the
-     sign-up page then says passwords are not available, and the emailed
-     code still works).
-   - CPU: 100,000 iterations take about 10 ms, 600,000 about 50 ms. Workers
-     Free allows 10 ms of CPU a request, so even the lower count may not
-     fit, and the owner may need Workers Paid for passwords at all.
-   A value that is not a whole number from 1,000 to 10,000,000 is ignored. */
+   another; a value that is not a whole number from 1,000 to 10,000,000 is
+   ignored. Two limits on Workers shape how it is run:
+   - Workers' WebCrypto refuses a single PBKDF2 call above 100,000
+     iterations (NotSupportedError), on the Free and the Paid plan alike,
+     and only in production: Node, wrangler dev and Miniflare run 600,000.
+     derive() therefore never asks for more than ROUND at once (below).
+   - CPU: 600,000 iterations take about 50 ms. Workers Free allows 10 ms of
+     CPU a request, so passwords need Workers Paid. */
 export const ITERATIONS = 600000;
 const MIN_ITERATIONS = 1000;
 const MAX_ITERATIONS = 10000000;
+
+/* The most iterations Workers' WebCrypto runs in one PBKDF2 call. */
+export const ROUND = 100000;
 
 export const MIN_LENGTH = 12;
 export const MAX_LENGTH = 128;
@@ -89,19 +89,47 @@ function unb64url(text) {
   return Uint8Array.from(s, (c) => c.charCodeAt(0));
 }
 
-async function derive(password, salt, count) {
-  const key = await crypto.subtle.importKey("raw", enc.encode(normal(password)), "PBKDF2", false, ["deriveBits"]);
+async function pbkdf2(keyBytes, salt, iterations) {
+  const key = await crypto.subtle.importKey("raw", keyBytes, "PBKDF2", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: count }, key, 256));
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256));
 }
 
-/* 16 bytes of salt are 22 base64url characters, 32 of hash 43. */
-const STORED = /^pbkdf2-sha256\$([1-9][0-9]{0,7})\$([A-Za-z0-9_-]{22})\$([A-Za-z0-9_-]{43})$/;
+/* `count` iterations of PBKDF2-HMAC-SHA256 over the password, never more
+   than ROUND in one call. Up to ROUND it is one standard PBKDF2 call.
+   Above it, the work is a chain: the first round is PBKDF2 over the
+   password with the salt; each later round is PBKDF2 keyed with the
+   previous round's 32 bytes, its salt the stored salt followed by the
+   round's number (big-endian, so no two rounds share one), for ROUND
+   iterations or what is left. Each round needs the one before it, so a
+   guess costs all `count` iterations in sequence, as one PBKDF2 call of
+   that count would; only WebCrypto's per-call limit is worked around, and
+   the hash is labelled "chained" so it is never mistaken for one call. */
+async function derive(password, salt, count) {
+  let bits = await pbkdf2(enc.encode(normal(password)), salt, Math.min(count, ROUND));
+  for (let done = ROUND, round = 1; done < count; done += ROUND, round++) {
+    const roundSalt = new Uint8Array(salt.length + 4);
+    roundSalt.set(salt);
+    new DataView(roundSalt.buffer).setUint32(salt.length, round);
+    bits = await pbkdf2(bits, roundSalt, Math.min(ROUND, count - done));
+  }
+  return bits;
+}
 
+/* The label a hash of `count` iterations is stored under. */
+const scheme = (count) => (count > ROUND ? "pbkdf2-sha256-chained" : "pbkdf2-sha256");
+const format = (count, salt, hash) => `${scheme(count)}$${count}$${salt}$${hash}`;
+
+/* 16 bytes of salt are 22 base64url characters, 32 of hash 43. */
+const STORED = /^(pbkdf2-sha256(?:-chained)?)\$([1-9][0-9]{0,7})\$([A-Za-z0-9_-]{22})\$([A-Za-z0-9_-]{43})$/;
+
+/* A label that does not match its count is refused: a "pbkdf2-sha256" hash
+   above ROUND could not have been made here, and a chained one at or below
+   it would be one call under the wrong name. */
 function parse(stored) {
   const m = typeof stored === "string" ? STORED.exec(stored) : null;
-  if (!m || Number(m[1]) > MAX_ITERATIONS) return null;
-  return { count: Number(m[1]), salt: unb64url(m[2]), hash: unb64url(m[3]) };
+  if (!m || Number(m[2]) > MAX_ITERATIONS || m[1] !== scheme(Number(m[2]))) return null;
+  return { count: Number(m[2]), salt: unb64url(m[3]), hash: unb64url(m[4]) };
 }
 
 export const isPasswordHash = (stored) => parse(stored) !== null;
@@ -110,7 +138,7 @@ export async function hashPassword(env, password) {
   const count = iterations(env);
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await derive(password, salt, count);
-  return `pbkdf2-sha256$${count}$${b64url(salt)}$${b64url(hash)}`;
+  return format(count, b64url(salt), b64url(hash));
 }
 
 /* Whether a password is the one a stored hash was made from. The two
@@ -220,7 +248,7 @@ export const WRONG_PER_NETWORK = 10;     // wrong passwords from one network, fo
 /* What a password is checked against when the address has none: the
    current count, and a salt and hash of zero bytes. Never accepted, even
    in the impossible case that a password derives to it. */
-const decoy = (env) => `pbkdf2-sha256$${iterations(env)}$${"A".repeat(22)}$${"A".repeat(43)}`;
+const decoy = (env) => format(iterations(env), "A".repeat(22), "A".repeat(43));
 
 /* The account an address belongs to, with its password hash if it has a
    usable one. */

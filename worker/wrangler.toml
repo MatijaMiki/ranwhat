@@ -74,11 +74,6 @@ X_EVENT_LEAD = "tw-rfz6t-rfz7z"
 # it. "off": no tax in checkout. site/terms.html and privacy.html describe
 # "managed": change them with it.
 STRIPE_TAX = "managed"
-# The PBKDF2 count for account passwords (src/password.js). Workers' WebCrypto
-# refuses more than 100,000 in production, so without this no password could
-# be set or checked there. When Cloudflare lifts that limit, raise it: older
-# hashes still verify, and are hashed again as their owners sign in.
-PBKDF2_ITERATIONS = "100000"
 
 # Signups waiting to be confirmed, and which releases went out. No
 # database_id on purpose: the first deploy creates the database (Wrangler's
