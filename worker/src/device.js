@@ -72,6 +72,7 @@ import {
   readCookie, unbump,
 } from "./session.js";
 import { fields, form, page, redirect, refused } from "./ui.js";
+import { switcher } from "./members.js";
 
 export const FEED_HOST = "feed.ranwhat.com";
 export const SITE_HOST = "ranwhat.com";
@@ -533,13 +534,16 @@ async function needsCode(env, who, { status = 200, error = "" } = {}) {
     <p><a href="/">Your account</a></p>`, { status });
 }
 
-/* The box the code is typed in. */
+/* The box the code is typed in, saying which organisation the terminal
+   will be linked to, and, for someone in more than one, the switcher that
+   picks another (members.js) and comes back here. */
 async function codeBox(request, env, who, { error = "", status = 200 } = {}) {
   if (!fresh(who)) return needsCode(env, who, { status: status === 200 ? 200 : 403, error });
   if (await overLimit(request, env, who)) return tooMany();
   return page("Link a terminal", `<h1>Link a terminal</h1>
     <p>Type the code your terminal printed after <strong>ranwhat login</strong>. The terminal is
        linked to <strong>${escape(who.org.name)}</strong>.</p>
+    ${await switcher(env, who, "/device")}
     ${WARNING}
     ${form("/device", await formToken(env, who.id, "device"), `
       <label for="user_code">Code from your terminal</label>

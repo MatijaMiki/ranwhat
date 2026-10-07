@@ -517,7 +517,8 @@ export const event = (db, { org = null, user = null, what, subject = null }) =>
     .bind(org, user, what, subject, now());
 
 /* One person's own history, newest first. Other members' sign-ins are
-   theirs, so an organisation's shared events wait until it has members. */
+   theirs: what an organisation shares is who came, went and changed role,
+   which members.js lists for its owner and admins. */
 export async function history(env, userId, limit = 10) {
   const { results } = await env.LIST.prepare(
     "SELECT event, at FROM auth_events WHERE user_id = ? ORDER BY at DESC, id DESC LIMIT ?")

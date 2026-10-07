@@ -86,6 +86,22 @@
  *   POST /claim/find    page's or the email's link, or found by the email
  *                       just confirmed, for an owner or admin with a fresh
  *                       code.
+ *   POST /members/invite   Invites someone by email to a Plus or Team
+ *                       organisation, as an owner or admin with a fresh
+ *                       code (members.js).
+ *   GET  /invite/<token>   The invite from the email: what it is for, and
+ *   GET  /invite        Join for whoever is signed in as the address it
+ *                       was sent to. Never joins on a GET.
+ *   POST /invite        Joins, as a member.
+ *   POST /invites/revoke   Takes a waiting invite back (owner or admin).
+ *   POST /members/role  Makes a member an admin or an admin a member (the
+ *                       owner, with a fresh code).
+ *   POST /members/remove   Removes someone, revoking the terminals they
+ *                       linked (owner or admin, with a fresh code).
+ *   POST /members/leave    Leaves the organisation (anyone but its owner).
+ *   POST /members/transfer Makes an admin the owner (the owner, with a
+ *                       fresh code), after a page that says what it does.
+ *   POST /org/switch    Looks at another of one's organisations.
  *
  * Nothing changes on a GET but a passkey challenge, made for whoever
  * asks and good once (and, the first time an account asks to add a
@@ -93,7 +109,9 @@
  * whose start (an oauth_flows row, its cookie and the count for the
  * network) and callback (which uses the flow up, and may make the
  * account, link it and sign in) are GETs because the provider sends the
- * browser back with one. Every POST passes the origin check here and its
+ * browser back with one. An invite's link only shows the invite, and may
+ * leave the cookie that brings the browser back to it after signing in:
+ * joining is a POST. Every POST passes the origin check here and its
  * form token in its handler (session.js says what both are); the passkey
  * forms are posted by /passkeys.js as the page's own form, token and all. Every form
  * that mails a code (/signin, /signup, /reset, /signin/again) also passes
@@ -129,6 +147,10 @@ import {
 import { approve, deny, deviceLookup, devicePage } from "./device.js";
 import { billingPanel, billingPost, upgradePage, upgradePost } from "./billing.js";
 import { CLAIM_EVENTS, claimFind, claimPage, claimPost } from "./claim.js";
+import {
+  MEMBER_EVENTS, acceptPost, inviteAgain, invitePage, invitePost, leavePost, membersPanel, removePost,
+  revokeInvitePost, rolePost, switchPost, switcher, transferPost,
+} from "./members.js";
 import {
   EXPIRIES, IDLE_DAYS, MAX_CI, MAX_LABEL as MAX_MACHINE_LABEL, liveCi, machineIn, machineLabel, machinesOf,
   mayChange, mintCi, renameMachine, revokeMachine,
@@ -724,6 +746,7 @@ const EVENTS = {
   billing_opened: "Billing opened, with a fresh code",
   plus_linked: "Plus subscription linked to the organisation",
   ...CLAIM_EVENTS,
+  ...MEMBER_EVENTS,
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -903,10 +926,12 @@ async function dashboard(env, who, {
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd id="plan">${PLAN_NAMES[onPlan]}</dd>
     </dl>
+    ${await switcher(env, who)}
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
     ${billing.html}
     ${await machinesPanel(env, who, onPlan, machinesError)}
+    ${await membersPanel(env, who, onPlan)}
     ${await methods(env, who, passwordError, providerError, passkeyError)}
     ${rename}
     <h2>Recent activity</h2>
@@ -1584,6 +1609,7 @@ const ROUTES = {
   "/signout": { POST: signout },
   "/signout-all": { POST: signoutAll },
   "/org": { POST: rename },
+  "/org/switch": { POST: switchPost },
   "/passkeys/add": { GET: addPasskeyPage },
   "/passkeys/new": { GET: passkeyOptions },
   "/passkeys": { POST: addPasskey },
@@ -1601,6 +1627,13 @@ const ROUTES = {
   "/billing": { POST: billingPost },
   "/claim": { GET: claimPage, POST: claimPost },
   "/claim/find": { POST: claimFind },
+  "/members/invite": { POST: invitePost },
+  "/invite": { GET: inviteAgain, POST: acceptPost },
+  "/invites/revoke": { POST: revokeInvitePost },
+  "/members/role": { POST: rolePost },
+  "/members/remove": { POST: removePost },
+  "/members/leave": { POST: leavePost },
+  "/members/transfer": { POST: transferPost },
 };
 for (const provider of Object.keys(PROVIDERS)) {
   const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);
@@ -1623,7 +1656,10 @@ export async function account(request, env, ctx) {
   const via = /^\/auth\/([^/]+)/.exec(url.pathname);
   if (via && !configured(env, via[1]) &&
       !(Object.hasOwn(PROVIDERS, via[1]) && url.pathname === `/auth/${via[1]}/unlink`)) return notFound();
-  const route = Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
+  /* The link in an invite email carries its token in the path. */
+  const link = /^\/invite\/([^/]+)$/.exec(url.pathname);
+  const route = link ? { GET: (rq, e) => invitePage(rq, e, link[1]) }
+    : Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
   if (!route) return notFound();
   const handle = Object.hasOwn(route, request.method) ? route[request.method] : null;
   if (!handle) return wrongMethod(Object.keys(route));

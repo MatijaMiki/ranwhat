@@ -211,10 +211,11 @@ async function upgradeForm(env, who, { error = "", status = 200 } = {}) {
       ? " Manage billing on your account page changes the plan or the card." : ""}</p>
     ${problem(error)}${back}`, { status });
   }
-  const served = featuresOf("plus").filter((f) => f.status === "live").map((f) => escape(f.name));
+  /* Members are who "everyone" is, so they get a sentence of their own. */
+  const served = featuresOf("plus").filter((f) => f.status === "live" && f.key !== "members").map((f) => escape(f.name));
   const about = `<p>Plus adds what needs a server, for everyone in <strong>${name}</strong>:
        ${served.join(" and ")} now, and the rest of the <a href="/#plus">Plus panel</a> as it comes.
-       Everything ranwhat does on your machines stays free.</p>
+       Invite as many of your team as you like. Everything ranwhat does on your machines stays free.</p>
     <p>${PRICES.monthly}, or ${PRICES.yearly} (two months free), one price for the organisation.
        Stripe takes the payment and shows the total, with any tax, before you pay. Cancel any time
        with Manage billing on your account page; Plus stays on to the end of the period paid for.</p>`;

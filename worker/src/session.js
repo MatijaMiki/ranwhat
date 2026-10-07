@@ -74,10 +74,12 @@ const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".
 
 /* Where a sign-in may send the browser on to: the account, the page that
    approves a terminal (device.js), the one that upgrades to Plus
-   (billing.js), or the one that attaches a subscription (claim.js), which
+   (billing.js), the invite waiting in the browser's cookie (members.js,
+   which keeps the invite's token out of `next` and so out of the
+   database), or the one that attaches a subscription (claim.js), which
    may carry the id of the Checkout it came from, of the shape Stripe
    makes and nothing else, so it stays a path on this host. */
-const NEXT = new Set(["/", "/device", "/upgrade", "/claim"]);
+const NEXT = new Set(["/", "/device", "/upgrade", "/claim", "/invite"]);
 const CLAIM_NEXT = /^\/claim\?session_id=(cs_[A-Za-z0-9_]+)$/;
 export const nextPath = (value) => {
   if (NEXT.has(value)) return value;
