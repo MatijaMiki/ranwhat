@@ -1,5 +1,6 @@
 /* What each plan unlocks on the server, in one place: auth.js's entitled()
- * refuses from it, and the dashboard draws its Plus and Team panels from
+ * and the account page's forms (making a CI token) refuse from it, and the
+ * dashboard draws its Plus and Team panels and its locked CI tokens from
  * it, so a refusal and a locked panel can never disagree.
  *
  * Only what needs a server is here. Everything ranwhat works out on a
@@ -25,7 +26,7 @@ export const FEATURES = Object.freeze({
     says: "Scopes rated since the last release, fetched by ranwhat update.",
   }),
   ci_tokens: Object.freeze({
-    plan: "plus", status: "coming", name: "CI tokens",
+    plan: "plus", status: "live", name: "CI tokens",
     says: "A token for a pipeline, made and revoked here.",
   }),
   push: Object.freeze({

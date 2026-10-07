@@ -755,6 +755,15 @@ test("one network asks for at most twenty codes an hour, and every address in an
   assert.equal(at("2001:DB8:1:1:0:0:0:1"), at("2001:db8:1:1::ffff"));
   assert.notEqual(at("2001:db8:1:1::1"), at("2001:db8:1:2::1"));
   assert.equal(at("::ffff:192.0.2.1"), at("192.0.2.1"));
+  /* Wider IPv6 prefixes, for a limit (device.js) that one holder of many
+     /64s must not multiply. */
+  const wide = (ip, v6) => network(new Request(ORIGIN, { headers: { "cf-connecting-ip": ip } }), { v6 });
+  assert.equal(at("2001:db8:abcd:12ff::1"), "2001:db8:abcd:12ff::/64");
+  assert.equal(wide("2001:db8:abcd:12ff::1", 56), "2001:db8:abcd:1200::/56");
+  assert.equal(wide("2001:db8:abcd:12ff::1", 48), "2001:db8:abcd::/48");
+  assert.equal(wide("2001:db8:abcd:1::1", 48), wide("2001:db8:abcd:ffff:1:2:3:4", 48));
+  assert.notEqual(wide("2001:db8:abcd:1::1", 48), wide("2001:db8:abce:1::1", 48));
+  assert.equal(wide("192.0.2.1", 48), "192.0.2.1", "an IPv4 address is still itself");
 });
 
 test("one network has ten codes mailed a day, an IPv4 /24 or an IPv6 /64, and other networks still get theirs", async () => {
@@ -968,7 +977,7 @@ test("an owner renames the organisation; a name is escaped, and a member cannot"
   assert.ok(home.text.includes("Acme &lt;b&gt;&amp; Co"));
   assert.ok(!home.text.includes("<b>&"));
   assert.equal(rows(e, "SELECT name FROM orgs")[0].name, "Acme <b>& Co");
-  for (const bad of ["", "   ", "x".repeat(81), "evil‮gnp.exe", "bell\u0007"]) {
+  for (const bad of ["", "   ", "x".repeat(81), "evil\u202egnp.exe", "bell\u0007"]) {
     r = await ana.post("/org", { form: tokenFor(home.text, "/org"), name: bad });
     assert.equal(r.status, 400, JSON.stringify(bad));
   }

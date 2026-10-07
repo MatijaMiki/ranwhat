@@ -40,9 +40,9 @@
  * cookies' SameSite=Lax is a second layer, not the check.
  */
 import { sha256 } from "./auth.js";
-import { REPLY_TO, mail, resend, same } from "./list.js";
+import { REPLY_TO, escape, mail, resend, same } from "./list.js";
 import {
-  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, NOTICES_PER_USER_DAY, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
   authMailLeft, now, orgFor, spendAuthMail,
 } from "./accounts.js";
 
@@ -71,8 +71,9 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;   // 32 random bytes, base64url
    goes into an email's To. */
 const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
 
-/* Where a sign-in may send the browser on to. M3 adds /device. */
-const NEXT = new Set(["/"]);
+/* Where a sign-in may send the browser on to: the account, or the page
+   that approves a terminal (device.js). */
+const NEXT = new Set(["/", "/device"]);
 export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 /* ---------- secrets ---------- */
@@ -157,6 +158,20 @@ export function sameOrigin(request) {
   return new URL(request.url).hostname === ACCOUNT_HOST;
 }
 
+/* For the two JSON answers /passkeys.js fetches with GET, which a browser
+   sends without Origin: refused when the browser says the request comes
+   from another site, or names another origin. A browser that sends
+   neither header is let through, as no other site could read the answer
+   (no CORS header) and what it holds is a challenge for the caller's own
+   session or cookie. */
+export function notCrossSite(request) {
+  const site = request.headers.get("sec-fetch-site");
+  const origin = request.headers.get("origin");
+  if (site !== null && site !== "same-origin") return false;
+  if (origin !== null && origin !== ACCOUNT_ORIGIN) return false;
+  return new URL(request.url).hostname === ACCOUNT_HOST;
+}
+
 /* The token a form carries: what it does, bound to the session or the
    sign-in attempt it was shown to. */
 export const formToken = (env, binding, action) => mac(env, `form:${action}:${binding}`);
@@ -172,9 +187,11 @@ export async function formOk(env, form, binding, action) {
 /* The network a request comes from, as the limits count it: an IPv4
    address by itself (with `v4: 24`, its /24), and an IPv6 address by its
    /64, which is what one home, phone or server is given, so that walking
-   through the addresses of one /64 is still one network. An address that
-   cannot be read is counted as itself. */
-export function network(request, { v4 = 32 } = {}) {
+   through the addresses of one /64 is still one network. With `v6: 56` or
+   `v6: 48`, an IPv6 address counts by that wider prefix instead, for a
+   limit that a holder of many /64s (a /48 has 65,536 of them) must not
+   multiply. An address that cannot be read is counted as itself. */
+export function network(request, { v4 = 32, v6 = 64 } = {}) {
   const ip = (request.headers.get("cf-connecting-ip") || "unknown").trim().toLowerCase();
   const four = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
   if (four) return v4 === 24 ? `${four[1]}.${four[2]}.${four[3]}.0/24` : four.slice(1).join(".");
@@ -186,7 +203,12 @@ export function network(request, { v4 = 32 } = {}) {
   if (halves.length === 1 ? gap !== 0 : gap < 1) return ip;
   const groups = [...head, ...Array(halves.length === 2 ? gap : 0).fill("0"), ...tail];
   if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return ip;
-  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
+  const bits = v6 === 48 || v6 === 56 ? v6 : 64;
+  const kept = groups.slice(0, Math.ceil(bits / 16)).map((g, i) => {
+    const left = bits - 16 * i;    // bits of this group inside the prefix
+    return (parseInt(g, 16) & (left >= 16 ? 0xffff : (0xffff << (16 - left)) & 0xffff)).toString(16);
+  });
+  return `${kept.join(":")}::/${bits}`;
 }
 
 /* One key for two things counted together, such as an address as asked
@@ -215,6 +237,15 @@ export async function peek(env, kind, who, window) {
   const row = await env.LIST.prepare("SELECT count FROM throttle WHERE key = ? AND window_start > ?")
     .bind(key, now() - window).first();
   return row ? row.count : 0;
+}
+
+/* One fewer in the window, for a count bumped before the thing it limits
+   turned out not to be one (a right code, counted as a try before it was
+   looked up). Never below nothing. */
+export async function unbump(env, kind, who, window) {
+  const key = await throttleKey(env, kind, who);
+  await env.LIST.prepare("UPDATE throttle SET count = count - 1 WHERE key = ? AND window_start > ? AND count > 0")
+    .bind(key, now() - window).run();
 }
 
 /* The statement that starts a count again from nothing, for the caller's
@@ -354,6 +385,50 @@ async function mailCode(env, email, code, purpose) {
          chat or phone.</p>
       <p style="color:#5a6672">If you did not ask for a code, ignore this email: nothing happens
          without it.</p>`),
+  });
+}
+
+/* ---------- telling an account what was added to it ---------- */
+
+const ADDED = {
+  google: "A Google account was linked to",
+  github: "A GitHub account was linked to",
+  passkey: "A passkey was added to",
+};
+
+/* Mails `user`'s address that a way in was just added to the account
+   (`what`: google, github or passkey), after the reply has gone, so that
+   one its owner did not add is noticed. Out of the signed-in reserve,
+   at most NOTICES_PER_USER_DAY a day for one account (accounts.js), and
+   skipped past either: the account's activity lists it all the same. It
+   names the kind of way in and nothing else, no provider id, label or
+   address but the account's own. All of it runs after the reply, so a
+   notice that fails never undoes what it tells of. */
+export function tellWayIn(env, ctx, { user, what }) {
+  ctx.waitUntil((async () => {
+    const row = await env.LIST.prepare("SELECT email FROM users WHERE id = ?").bind(user).first();
+    if (!row || !Object.hasOwn(ADDED, what)) return;
+    if (await bump(env, "notice-user", user, DAY) > NOTICES_PER_USER_DAY) return;
+    if (!await spendAuthMail(env, "notice")) return;
+    await mailWayIn(env, row.email, what);
+  })().catch((err) => {
+    console.log(`account notice mail: ${err.code || err.name || "error"}`);
+  }));
+}
+
+async function mailWayIn(env, email, what) {
+  const said = `${ADDED[what]} your ranwhat account (${email}), and can now sign in to it.`;
+  const ifNot = `If that was not you, sign in at ${ACCOUNT_HOST} with an emailed code, and choose Sign out everywhere and remove every other way in. Then change or reset your password if you have one.`;
+  await resend(env, "POST", "/emails", {
+    from: FROM,
+    to: [email],
+    reply_to: REPLY_TO,
+    subject: "A new way into your ranwhat account",
+    text: [said, "", "If that was you, there is nothing to do.", "", ifNot, "", "ranwhat.com"].join("\n"),
+    html: mail(`
+      <p>${escape(said)}</p>
+      <p>If that was you, there is nothing to do.</p>
+      <p>${escape(ifNot)}</p>`),
   });
 }
 

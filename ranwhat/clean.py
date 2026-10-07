@@ -208,6 +208,9 @@ _SHAPES_NAMED = [
     (re.compile(r"ASIA[0-9A-Z]{16}"), "AWS temporary access key"),
     (re.compile(r"AC[0-9a-f]{32}"), "Twilio account SID"),
     (re.compile(r"SG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"), "SendGrid API key"),
+    # ranwhat's own: a subscription's rw_, a terminal's rw_m_ (ranwhat
+    # login) and a pipeline's rw_c_, each 32 random bytes in base64url.
+    (re.compile(r"rw_[A-Za-z0-9_-]{40,}"), "ranwhat token"),
     (_PrivateKey(), "private key"),
     (_JsonWebToken(), "JSON Web Token"),
 ]
@@ -225,6 +228,7 @@ _SHAPE_MARKS = {
     "AWS access key ID": "AKIA", "AWS temporary access key": "ASIA",
     "Twilio account SID": "AC", "SendGrid API key": "SG.",
     "private key": "-----BEGIN ", "JSON Web Token": "eyJ",
+    "ranwhat token": "rw_",
 }
 
 # KEY=value / "key": "value" assignments.
@@ -377,7 +381,7 @@ _CHEAP = ("=", ":", "sk_", "rk_", "sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_",
           "github_pat_", "xox", "AKIA", "ASIA", "AC", "SG.", "eyJ", "BEGIN",
           "mysql", "mariadb", "sshpass", "redis-cli", "-password", "docker login",
           "sqlcmd", "mongo", "ldap", "htpasswd", "storepass", "keypass",
-          "SecureString", "smb", "rpcclient")
+          "SecureString", "smb", "rpcclient", "rw_")
 
 # A single string longer than this is a data blob -- a build log, a base64
 # payload, a file dump. Secrets in the first megabyte are still found.
@@ -3486,6 +3490,10 @@ def _help():
 
 # Which provider a key name points at, for the rotation checklist.
 _PROVIDER = [
+    # The shape's name, or the variable update reads. Not any RANWHAT_ name:
+    # RANWHAT_STRIPE_TOKEN holds a Stripe key, for live.
+    (re.compile(r"^ranwhat[ _]token$", re.I),
+     "ranwhat: revoke it at account.ranwhat.com, or write to ranwhat.com/contact"),
     (re.compile(r"aws|akia|asia", re.I), "AWS: IAM console, deactivate then delete the old key"),
     (re.compile(r"openai|anthropic", re.I), "OpenAI / Anthropic: dashboard > API keys > revoke"),
     (re.compile(r"slack", re.I), "Slack: api.slack.com > your app > reinstall"),

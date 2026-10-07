@@ -82,6 +82,7 @@ const LEGACY = `SELECT t.expires_at, t.revoked_at, l.subscription, s.status FROM
      WHERE t.hash = ?`;
 const LINKED = `SELECT t.expires_at, t.revoked_at, l.subscription, s.status,
        m.id AS machine, m.kind, m.org_id AS machine_org, m.user_id, m.label, m.created_at AS linked_at,
+       m.last_used_day,
        o.org_id AS claimed_by
      FROM tokens t
        LEFT JOIN token_subscriptions l ON l.hash = t.hash
@@ -91,6 +92,11 @@ const LINKED = `SELECT t.expires_at, t.revoked_at, l.subscription, s.status,
      WHERE t.hash = ?`;
 
 const unix = () => Math.floor(Date.now() / 1000);
+
+/* The start (00:00 UTC) of the day a time falls in: when a machine was
+   last used, to the day and no finer. */
+const DAY = 24 * 3600;
+const dayOf = (t) => Math.floor(t / DAY) * DAY;
 
 /* Whether a database has the accounts tables (machines among them). Asked
    of sqlite_master, which is the schema, not one of their tables, so a
@@ -160,10 +166,19 @@ export async function identify(request, env) {
   const refused = { ok: false, status: 403, error: "That token was not accepted." };
   if (!row || row.revoked_at || (row.expires_at && row.expires_at <= t)) return refused;
   if (row.machine) {
+    /* The day it was last used, written at most once a day, and only for
+       a machine (device or ci): never for a shared or hand-made token. */
+    const day = dayOf(t);
+    if (row.last_used_day === null || row.last_used_day < day) {
+      await db.prepare("UPDATE machines SET last_used_day = ? WHERE id = ? AND (last_used_day IS NULL OR last_used_day < ?)")
+        .bind(day, row.machine, day).run();
+    }
     return {
       ok: true, kind: row.kind, account: `org:${row.machine_org}`, org: row.machine_org,
       plan: await plan(env, row.machine_org),
-      machine: { id: row.machine, user: row.user_id, label: row.label, linked_at: row.linked_at },
+      /* label: the name given on the web, a terminal's on the page that
+         approved it (device.js); null for an empty one. */
+      machine: { id: row.machine, user: row.user_id, label: row.label || null, linked_at: row.linked_at },
     };
   }
   if (row.subscription) {
