@@ -250,8 +250,10 @@ server's code or its tool descriptions for malicious content.
 **Credential files.** `.env` and `.env.*` (not `.env.example` and other
 templates), private keys, `.npmrc`, `.pypirc`, `.netrc` and
 `.git-credentials` under the directories your agents work in (the current
-one, every project in `~/.claude.json`, and `additionalDirectories`), and
-`~/.aws/credentials`, `~/.ssh/id_*`, `~/.netrc`, `~/.npmrc`,
+one, every project in `~/.claude.json`, and `additionalDirectories`,
+six levels deep, past `node_modules` and `.git` and into only the top of
+`build/` and `dist/`; the report says when a project goes deeper), and
+`~/.env`, `~/.aws/credentials`, `~/.ssh/id_*`, `~/.netrc`, `~/.npmrc`,
 `~/.docker/config.json`, `~/.kube/config`, `~/.config/gh/hosts.yml` and
 Google Cloud's application default credentials, each only when it holds a
 credential and no Claude Code `Read(...)` deny rule covers it. Only paths

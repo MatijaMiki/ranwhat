@@ -41,13 +41,18 @@ MAX_CREDENTIAL = 1 << 20
 # how many directories at most in one project: a monorepo keeps the .env
 # with the live keys in apps/web/, not at the top, but a walk of every
 # node_modules would take minutes.
-WALK_DEPTH = 4
+WALK_DEPTH = 6
 WALK_DIRS = 2000
+# Dependencies and version control: what is under them is someone else's.
 SKIP_DIRS = frozenset((
     ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__",
-    ".tox", ".nox", ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist",
-    "build", "target", ".next", ".nuxt", ".turbo", ".cache", "vendor",
-    "site-packages", ".gradle", ".idea", ".terraform", "coverage",
+    ".tox", ".nox", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".turbo",
+    ".cache", "site-packages", ".gradle", ".idea", ".terraform",
+))
+# Build output: a deploy step copies .env.production into dist/, so the
+# files directly inside are looked at, but not the tree below them.
+SHALLOW_DIRS = frozenset((
+    "dist", "build", "target", "out", ".next", ".nuxt", "vendor", "coverage",
 ))
 
 GUIDE = "https://ranwhat.com/guides/claude-code-env-secrets"
@@ -89,7 +94,7 @@ def _load_toml(path):
         if len(data) > MAX_CONFIG:
             return None
         return toml.loads(data.decode("utf-8", "replace"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
 
 
@@ -195,7 +200,10 @@ PROJECT_CONFIGS = (
 # ----------------------------------------------------------------------
 # Secrets in an MCP server's definition, found by clean's rules
 
-_REFERENCE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}?$|^\{env:")
+_REFERENCE = re.compile(r"^(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\{(?:env|input):[^}]*\}|\{env:[^}]*\})$")
+# ${VAR:-default}: the default is a literal, and may be the secret itself.
+_DEFAULTED = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:?-([^}]*)\}$")
+_HEADER = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(\S.*)$", re.S)
 _AUTH_SCHEME = re.compile(r"^\s*(?:Bearer|Basic|Token|token|bearer|basic)\s+(\S+)\s*$")
 _FLAG = re.compile(r"^--?([A-Za-z][A-Za-z0-9_-]*)(?:=(.*))?$", re.S)
 
@@ -210,6 +218,11 @@ def _secrets_in(key, value):
     """[(value, label)] clean finds in value, read as the value of key."""
     if not isinstance(value, str) or not value or _REFERENCE.match(value):
         return []
+    defaulted = _DEFAULTED.match(value)
+    if defaulted:
+        value = defaulted.group(1)
+        if not value:
+            return []
     found = []
     if key:
         found = clean_mod.find_secrets("%s=%s" % (_as_key(key), value))
@@ -236,6 +249,43 @@ def _header_secrets(name, value):
     return _secrets_in(name, value)
 
 
+def _value_secrets(key, value):
+    """_secrets_in, but a value shaped as a header ("Authorization: Bearer
+    X", "X-API-Key: X", as mcp-remote's --header takes one) is read as
+    that header."""
+    header = _HEADER.match(value)
+    if header and "://" not in value:
+        found = _header_secrets(header.group(1), header.group(2))
+        if found:
+            return found
+    return _secrets_in(key, value)
+
+
+_QUERY = re.compile(r"[?&#]([A-Za-z0-9_.-]+)=([^&#\s]+)")
+_SEGMENT = re.compile(r"(?<=/)([A-Za-z0-9_-]{20,})(?=/|\?|#|$)")
+
+
+def _url_secrets(url):
+    """What clean misses in a hosted MCP server's URL, judged by clean's
+    rules all the same: ?key=X, which clean leaves alone as an index's
+    name, and a token as a path segment (https://host/mcp/TOKEN/sse)."""
+    out = []
+    path = url.split("://", 1)[-1]
+    path = path[path.find("/"):] if "/" in path else ""
+    for name, value in _QUERY.findall(url):
+        if name.lower() in ("key", "k", "auth", "access", "sig", "signature"):
+            out += [(v, "key in URL") for v, _l in _secrets_in("API_KEY", value)]
+    for segment in _SEGMENT.findall(path.split("?", 1)[0].split("#", 1)[0]):
+        # One unbroken run of 16 or more, letters and digits mixed: not a
+        # slug (server-github2) and not a UUID, whose parts are 12 at most.
+        if any(len(part) >= 16 and re.search(r"[0-9]", part)
+               and re.search(r"[A-Za-z]", part)
+               for part in re.split(r"[-_]", segment)):
+            out += [(v, "token in URL path")
+                    for v, _l in _secrets_in("ACCESS_TOKEN", segment)]
+    return out
+
+
 def _arg_secrets(args):
     """[(where, value, label)] in a server's args: --api-key=X, --api-key X,
     and anything clean finds in an argument on its own."""
@@ -245,12 +295,12 @@ def _arg_secrets(args):
             continue
         m = _FLAG.match(arg)
         if m and m.group(2) is not None:
-            found = _secrets_in(m.group(1), m.group(2))
+            found = _value_secrets(m.group(1), m.group(2))
         elif m and i + 1 < len(args) and isinstance(args[i + 1], str) \
                 and not args[i + 1].startswith("-"):
-            found = _secrets_in(m.group(1), args[i + 1])
+            found = _value_secrets(m.group(1), args[i + 1])
         else:
-            found = _secrets_in(None, arg)
+            found = _value_secrets(None, arg)
         out += [("arg %s" % arg.split("=", 1)[0] if m else "args", v, label)
                 for v, label in found]
     return out
@@ -286,6 +336,8 @@ _RUNNERS = (
     (("uv", "tool", "run"), _UV_VALUE_FLAGS, ("--from",), "pypi"),
     (("uv", "tool", "x"), _UV_VALUE_FLAGS, ("--from",), "pypi"),
     (("pipx", "run"), _PIPX_VALUE_FLAGS, ("--spec",), "pypi"),
+    # What the Python MCP SDK's `mcp install` writes: uv run --with mcp ...
+    (("uv", "run"), _UV_VALUE_FLAGS, ("--with",), "pypi"),
 )
 
 
@@ -304,8 +356,9 @@ def _argv(server):
         words = [w for w in command if isinstance(w, str)]
     elif isinstance(command, str) and command:
         # A command written with its arguments in one string.
-        words = command.split() if not isinstance(args, list) or not args \
-            else [command]
+        # A path with a space in it (C:\\Program Files\\...) is one word.
+        words = [command] if os.path.isabs(command) or re.match(
+            r"^[A-Za-z]:[\\/]", command) else command.split()
     else:
         words = []
     if isinstance(args, list):
@@ -333,10 +386,13 @@ def _pypi_pinned(spec):
     if spec.startswith((".", "/", "~", "file:")) or re.match(r"^[A-Za-z]:[\\/]", spec):
         return True
     if spec.startswith("git+") or "://" in spec:
-        ref = spec.rsplit("@", 1)[1] if "@" in spec.split("://", 1)[1] else ""
+        ref = spec.rsplit("@", 1)[1] if "@" in spec.split("://", 1)[-1] else ""
         return bool(_COMMIT.match(ref))
-    m = re.match(r"^[A-Za-z0-9._-]+(?:\[[^\]]*\])?\s*(==|@)\s*(\S+)$", spec)
-    return bool(m and _EXACT_VERSION.match(m.group(2)) and "*" not in m.group(2))
+    m = re.match(r"^[A-Za-z0-9._-]+(?:\[[^\]]*\])?\s*(===?|@)\s*(\S+)$", spec)
+    if not m or "*" in m.group(2) or "," in m.group(2):
+        return False
+    # == (PEP 440) is exact whatever the version looks like: 0.6, 1.0rc1.
+    return m.group(1) != "@" or bool(re.match(r"^v?\d+(?:\.\d+)*\S*$", m.group(2)))
 
 
 def unpinned(server):
@@ -365,6 +421,8 @@ def unpinned(server):
             if word.startswith("-"):
                 i += 2 if (flag in value_flags and not inline) else 1
                 continue
+            if start == ("uv", "run"):
+                break         # uv run's word is a script or a command, not a package
             spec = word
             break
         if not spec:
@@ -444,7 +502,7 @@ def describe(name, server, agent, scope, path, project=None):
         risks.append({"kind": "inline-secret", "where": "bearer_token",
                       "secret": v, "label": label})
     if url:
-        for v, label in _secrets_in(None, url):
+        for v, label in _secrets_in(None, url) + _url_secrets(url):
             values.append(v)
             risks.append({"kind": "inline-secret", "where": "url", "secret": v,
                           "label": label})
@@ -534,7 +592,8 @@ class Rule(object):
 def _slashed(path):
     """path with / between its parts, and a Windows drive as /c, the way
     Claude Code writes an absolute path in a rule (//c/Users/...)."""
-    path = path.replace("\\", "/")
+    if os.sep == "\\":
+        path = path.replace("\\", "/")
     m = re.match(r"^([A-Za-z]):(/.*)?$", path)
     if m:
         path = "/" + m.group(1).lower() + (m.group(2) or "")
@@ -572,7 +631,14 @@ def _glob_regex(pattern):
                 inner = pattern[i + 1:end]
                 if inner.startswith("!"):
                     inner = "^" + inner[1:]
-                out.append("[" + inner.replace("\\", "\\\\") + "]")
+                cls = "[" + inner.replace("\\", "\\\\") + "]"
+                try:
+                    re.compile(cls)
+                except re.error:
+                    # [z-a], []: not a class Claude Code could match either;
+                    # read as the characters written.
+                    cls = re.escape(pattern[i:end + 1])
+                out.append(cls)
                 i = end + 1
         elif c == "\\" and i + 1 < n:
             out.append(re.escape(pattern[i + 1]))
@@ -616,7 +682,7 @@ def read_rules(settings):
                 continue
             m = re.match(r"^Read\((.*)\)$", entry, re.S)
             if m and m.group(1).strip():
-                rules.append(Rule(m.group(1).strip(), settings_dir))
+                rules.append(Rule(m.group(1), settings_dir))
     return rules, read
 
 
@@ -641,7 +707,7 @@ def denied(rules, path, cwd, home):
 # Credential files
 
 _ENV_TEMPLATES = clean_mod._NOT_SECRET
-_ASSIGN = re.compile(r"""^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*[=:]\s*(.*?)\s*$""",
+_ASSIGN = re.compile(r"""^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:][ \t]*(.*?)[ \t]*$""",
                      re.M)
 _PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 _NETRC_PASSWORD = re.compile(r"(?:^|\s)password\s+\S", re.M)
@@ -727,7 +793,9 @@ def home_candidates(env, home):
     folder by a tool an agent may drive. rule is the Read deny rule to
     suggest for it."""
     out = []
-    aws = _env(env, "AWS_SHARED_CREDENTIALS_FILE") or os.path.join(home, ".aws", "credentials")
+    aws = _env(env, "AWS_SHARED_CREDENTIALS_FILE")
+    aws = os.path.abspath(os.path.expanduser(aws)) if aws \
+        else os.path.join(home, ".aws", "credentials")
     out.append((aws, "aws", None))
     ssh = os.path.join(home, ".ssh")
     try:
@@ -737,6 +805,13 @@ def home_candidates(env, home):
     for name in names:
         if name.startswith("id_") and not name.endswith(".pub"):
             out.append((os.path.join(ssh, name), "private key", "Read(~/.ssh/**)"))
+    try:
+        top = sorted(os.listdir(home))
+    except OSError:
+        top = []
+    for name in top:
+        if _is_env_name(name):
+            out.append((os.path.join(home, name), "env file", None))
     for parts, kind in (((".netrc",), "credentials"), (("_netrc",), "credentials"),
                         ((".git-credentials",), "credentials"),
                         ((".npmrc",), "credentials"), ((".pypirc",), "credentials"),
@@ -749,7 +824,8 @@ def home_candidates(env, home):
     kube = _env(env, "KUBECONFIG")
     if kube:
         for path in kube.split(os.pathsep):
-            if path and os.path.abspath(path) != os.path.join(home, ".kube", "config"):
+            path = os.path.abspath(os.path.expanduser(path)) if path else path
+            if path and path != os.path.join(home, ".kube", "config"):
                 out.append((path, "kubeconfig", None))
     return out
 
@@ -767,14 +843,15 @@ def _glob_escape(text):
 
 def walk_project(root, depth=WALK_DEPTH, limit=WALK_DIRS):
     """(path, kind) for each candidate credential file under root, and
-    whether the walk stopped at its limit before seeing everything."""
-    found, seen, cut = [], 0, False
+    why the walk did not see everything: "dirs" when it stopped at its
+    limit, "depth" when a directory was deeper than it looks, else None."""
+    found, seen, cut = [], 0, None
     stack = [(root, 0)]
     while stack:
         folder, level = stack.pop()
         seen += 1
         if seen > limit:
-            cut = True
+            cut = "dirs"
             break
         try:
             entries = sorted(os.scandir(folder), key=lambda e: e.name)
@@ -784,8 +861,13 @@ def walk_project(root, depth=WALK_DEPTH, limit=WALK_DIRS):
         for entry in entries:
             try:
                 if entry.is_dir(follow_symlinks=False):
-                    if level + 1 < depth and entry.name not in SKIP_DIRS:
-                        subdirs.append(entry.path)
+                    if entry.name in SKIP_DIRS or level < 0:
+                        continue
+                    if level + 1 >= depth:
+                        cut = cut or "depth"
+                        continue
+                    subdirs.append((entry.path, -1 if entry.name in SHALLOW_DIRS
+                                    else level + 1))
                     continue
                 if not entry.is_file():
                     continue
@@ -794,7 +876,7 @@ def walk_project(root, depth=WALK_DEPTH, limit=WALK_DIRS):
             kind = project_kind(entry.name)
             if kind:
                 found.append((entry.path, kind))
-        stack.extend((d, level + 1) for d in reversed(subdirs))
+        stack.extend(reversed(subdirs))
     return found, cut
 
 
@@ -954,7 +1036,7 @@ def audit(env=None, home=None, cwd=None, projects=None, platform=None):
         settings_read += read_here
         found, cut = walk_project(project)
         if cut:
-            cut_short.append(project)
+            cut_short.append({"project": project, "why": cut})
         for path, kind in found:
             key = os.path.normcase(os.path.realpath(path))
             if key in seen or not holds_credential(path, kind):
@@ -1007,7 +1089,7 @@ def masker(values):
     ordered = sorted(set(v for v in values if v), key=len, reverse=True)
 
     def mask(text):
-        if not isinstance(text, str) or not ordered:
+        if not isinstance(text, str):
             return text
         for v in ordered:
             if v in text:
@@ -1083,11 +1165,16 @@ def render(result, home=None):
 
     servers = result["servers"]
     L.append(BOLD("  MCP servers") + DIM("  %d" % len(servers)))
+    read = [c for c in result["configs_read"] if not c.get("note")]
+    unread = [c for c in result["configs_read"] if c.get("note")]
     if not servers:
         L += [DIM(line) for line in term.wrap(
             "None found in %d configuration file%s read."
-            % (len(result["configs_read"]),
-               "" if len(result["configs_read"]) == 1 else "s"), indent="    ")]
+            % (len(read), "" if len(read) == 1 else "s"), indent="    ")]
+    for c in unread:
+        L += [YEL(line) for line in term.wrap(
+            "Not read: %s (%s), %s." % (_short(c["file"], home), c["agent"],
+                                        c["note"]), indent="    ")]
     for s in servers:
         where = "%s, %s scope" % (s["agent"], s["scope"])
         if s["scope"] == "local" and s.get("project"):
@@ -1101,7 +1188,7 @@ def render(result, home=None):
         if s["url"]:
             what = "connects to " + mask(s["url"])
         elif s["command"]:
-            what = "runs " + mask(" ".join(_quote_word(w) for w in s["command"]))
+            what = "runs " + " ".join(_quote_word(mask(w)) for w in s["command"])
         else:
             what = "launches nothing ranwhat can read"
         L += term.wrap(what, indent="        ", first="      ")
@@ -1140,10 +1227,14 @@ def render(result, home=None):
         for f in files:
             L += term.wrap(f["kind"], first="    %s  " % _short(f["path"], home),
                            indent="      ")
-    for project in result["cut_short"]:
+    for cut in result["cut_short"]:
+        if cut["why"] == "dirs":
+            why = ("holds more than %d directories; only the first were "
+                   "looked in." % WALK_DIRS)
+        else:
+            why = "goes deeper than %d levels; nothing below that was looked in." % WALK_DEPTH
         L += [DIM(line) for line in term.wrap(
-            "%s holds more than %d directories; only the first were looked in."
-            % (_short(project, home), WALK_DIRS), indent="    ")]
+            "%s %s" % (_short(cut["project"], home), why), indent="    ")]
     L.append("")
 
     if result["deny"]:

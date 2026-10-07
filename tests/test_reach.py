@@ -421,6 +421,137 @@ class DenyRules(_Home):
         self.assertEqual(self.audit()["files"], [])
 
 
+class ReviewFindings(_Home):
+    """Each proven by a script in the adversarial review of reach."""
+
+    def leaks(self, servers, *values):
+        self.claude_json({"mcpServers": servers})
+        result = self.audit()
+        out = reach.render(result, self.home) + json.dumps(reach.as_json(result))
+        return [v for v in values if v in out]
+
+    def test_a_header_passed_as_an_argument_is_masked(self):
+        # mcp-remote's shape: --header "Authorization: Bearer X".
+        for args in (["--header", "Authorization: Bearer " + BEARER],
+                     ["--header", "Authorization:Bearer " + BEARER],
+                     ["--header", "X-API-Key: " + BEARER],
+                     ["--header=X-API-Key:" + BEARER]):
+            self.assertEqual(self.leaks({"r": {
+                "command": "npx", "args": ["-y", "mcp-remote@0.1.29",
+                                           "https://m.example.com/sse"] + args}},
+                BEARER), [], args)
+
+    def test_a_secret_holding_a_quote_is_masked_in_text(self):
+        password = 'hunter2Passw0rdXy"x9'
+        self.assertEqual(self.leaks({"p": {"command": "node", "args": [
+            "postgresql://admin:%s@db.example.com/prod" % password]}},
+            password, "hunter2Passw0rd"), [])
+
+    def test_a_default_after_a_reference_and_a_secret_name_are_masked(self):
+        self.assertEqual(self.leaks({
+            "d": {"command": "node", "args": ["--token", "${GH:-%s}" % GH]},
+            "e": {"command": "node", "args": ["{env:X}" + GH]},
+            GH: {"command": "node"}}, GH), [])
+
+    def test_a_git_spec_without_a_scheme_does_not_crash(self):
+        self.assertTrue(reach.unpinned({"command": "uvx", "args": [
+            "--from", "git+github.com/o/r", "cmd"]}))
+
+    def test_a_malformed_deny_rule_does_not_crash(self):
+        write(os.path.join(self.project, ".env"), "API_KEY=%s\n" % API)
+        self.user_settings({"permissions": {"deny": ["Read(.env.[z-a])",
+                                                     "Read(a[]b)"]}})
+        self.assertEqual(len(self.audit()["files"]), 1)
+
+    def test_a_config_it_could_not_read_is_said_in_text(self):
+        write(os.path.join(self.home, ".codex", "config.toml"), "[mcp_servers]\n")
+        write(os.path.join(self.project, ".mcp.json"), "{broken")
+        with mock.patch.object(reach, "_tomllib", return_value=None):
+            text = reach.render(self.audit(), self.home)
+        self.assertIn("None found in 0 configuration files read.", text)
+        self.assertIn("Not read: ~/.codex/config.toml (Codex), needs Python 3.11",
+                      " ".join(text.split()))
+        self.assertIn("could not be parsed", text)
+
+    def test_deep_and_build_directories(self):
+        deep = write(os.path.join(self.project, *("abcdefgh")), "API_KEY=%s\n" % API)
+        os.rename(deep, os.path.join(os.path.dirname(deep), ".env"))
+        write(os.path.join(self.project, "build", ".env.production"),
+              "API_KEY=%s\n" % API)
+        write(os.path.join(self.project, "dist", "deeper", ".env"), "API_KEY=%s\n" % API)
+        result = self.audit()
+        self.assertEqual(self.paths(result),
+                         [os.path.join("code", "app", "build", ".env.production")])
+        self.assertEqual(result["cut_short"], [{"project": self.project, "why": "depth"}])
+        self.assertIn("deeper than %d levels" % reach.WALK_DEPTH,
+                      " ".join(reach.render(result, self.home).split()))
+
+    def test_a_dot_env_in_home(self):
+        write(os.path.join(self.home, ".env"), "API_KEY=%s\n" % API)
+        result = self.audit()
+        self.assertEqual(self.paths(result), [".env"])
+        self.assertEqual(result["deny"], ["Read(~/.env)"])
+
+    def test_relative_paths_from_the_environment_round_trip(self):
+        here = os.path.join(self.tmp, "cwd")
+        write(os.path.join(here, "relkube"),
+              "users:\n- user:\n    token: %s\n" % BEARER)
+        old = os.getcwd()
+        os.chdir(here)
+        self.addCleanup(os.chdir, old)
+        env = {"KUBECONFIG": "relkube"}
+        first = self.audit(env=env)
+        self.assertEqual([os.path.realpath(f["path"]) for f in first["files"]],
+                         [os.path.realpath(os.path.join(here, "relkube"))])
+        self.user_settings(json.loads(reach.snippet(first["deny"])))
+        self.assertEqual(self.audit(env=env)["files"], [])
+
+    @unittest.skipIf(os.name == "nt", "names Windows cannot hold")
+    def test_odd_names_round_trip(self):
+        for name in (".env.local ", ".env.back\\slash", ".env.[x]*?"):
+            write(os.path.join(self.project, name), "API_KEY=%s\n" % API)
+        first = self.audit()
+        self.assertEqual(len(first["files"]), 3)
+        self.user_settings(json.loads(reach.snippet(first["deny"])))
+        self.assertEqual(self.audit()["files"], [])
+
+    def test_a_token_under_a_yaml_header(self):
+        path = write(os.path.join(self.home, ".config", "gh", "hosts.yml"),
+                     "ghe.corp.example.com:\n    oauth_token: %s\n" % BEARER)
+        self.assertTrue(reach.holds_credential(path, "credentials"))
+
+    def test_exact_pypi_versions_and_more_runners(self):
+        for spec in ("mcp-server-time==0.6", "pkg==1.0.0rc1", "pkg==2.0.0.post1"):
+            self.assertIsNone(reach.unpinned({"command": "uvx", "args": [spec]}), spec)
+        self.assertTrue(reach.unpinned({"command": "uvx", "args": ["pkg==1.*"]}))
+        self.assertTrue(reach.unpinned({"command": "uv", "args": [
+            "run", "--with", "mcp", "mcp", "run", "server.py"]}))
+        self.assertIsNone(reach.unpinned({"command": "uv", "args": [
+            "run", "--with", "mcp==1.2.0", "server.py"]}))
+        self.assertIsNone(reach.unpinned({"command": "uv", "args": ["run", "server.py"]}))
+        self.assertTrue(reach.unpinned({"command": "npx -y pkg", "args": ["--foo"]}))
+
+    def test_a_flag_inside_a_command_string_is_masked(self):
+        self.assertEqual(self.leaks({"c": {"command": "node server.js --api-key " + API,
+                                           "args": ["--verbose"]}}, API), [])
+
+    def test_a_key_or_token_in_a_hosted_server_url(self):
+        self.assertEqual(self.leaks({
+            "q": {"type": "sse", "url": "https://mcp.example.com/sse?key=" + BEARER},
+            "z": {"type": "sse", "url": "https://actions.zapier.com/mcp/sk-ak-%s/sse"
+                                        % BEARER}}, BEARER), [])
+        for url in ("https://mcp.example.com/servers/"
+                    "123e4567-e89b-12d3-a456-426614174000/sse",
+                    "https://example.com/a/modelcontextprotocol-server-github2/sse",
+                    "https://mcp.example.com/sse?key=changeme"):
+            self.assertEqual(reach._url_secrets(url), [], url)
+
+    def test_deeply_nested_toml_does_not_crash(self):
+        write(os.path.join(self.home, ".codex", "config.toml"),
+              "x = " + "[" * 100000 + "]" * 100000 + "\n")
+        self.audit()
+
+
 class Command(_Home):
 
     def test_it_writes_nothing(self):
