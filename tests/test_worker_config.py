@@ -56,8 +56,10 @@ class BranchBuildsCanRun(unittest.TestCase):
             config = tomllib.load(fh)
         # ACCOUNTS_ON is added in the change that switches accounts on.
         self.assertNotIn("ACCOUNTS_ON", config["vars"])
-        # Workers' WebCrypto refuses PBKDF2 above 100,000 iterations.
-        self.assertEqual(config["vars"]["PBKDF2_ITERATIONS"], "100000")
+        # Workers' WebCrypto refuses one PBKDF2 call above 100,000
+        # iterations, so password.js runs its 600,000 as a chain of calls
+        # within that. An override here could only lower the count.
+        self.assertNotIn("PBKDF2_ITERATIONS", config["vars"])
 
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
     def test_the_contact_binding_reaches_one_inbox(self):
