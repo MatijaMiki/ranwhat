@@ -95,6 +95,15 @@ function services() {
       s.sessions.set(id, session);
       return reply(200, session);
     }
+    if (key === "POST /v1/customers") {
+      const id = `cus_test${s.customers.size + 1}org`;
+      s.customers.set(id, { id, object: "customer", email: form.email, metadata: under(form, "metadata") });
+      return reply(200, s.customers.get(id));
+    }
+    if (key === "GET /v1/checkout/sessions") {
+      return reply(200, { object: "list", data: [...s.sessions.values()].filter((x) =>
+        (!form.customer || x.customer === form.customer) && (!form.status || x.status === form.status)) });
+    }
     if (key === "GET /v1/customers") {
       /* Stripe's filter: the email exactly as the customer has it. */
       return reply(200, { object: "list", data: [...s.customers.values()]
@@ -194,6 +203,18 @@ function tokenFor(html, action) {
   return m[1];
 }
 
+/* The first form on a page that posts to `action`, as its hidden fields:
+   the token, the organisation it was drawn for, and what else it carries. */
+function hidden(html, action) {
+  const m = html.match(new RegExp(`<form method="post" action="${action}"[^>]*>([\\s\\S]*?)</form>`));
+  assert.ok(m, `no form for ${action}`);
+  return Object.fromEntries([...m[1].matchAll(/<input type="hidden" name="([a-z_-]+)" value="([^"]*)">/g)]
+    .map((x) => [x[1], x[2]]));
+}
+
+/* A form token for `action` drawn for `org`, as a page would make it, with the organisation it names. */
+const bound = async (e, b, action, org) => ({ form: await formToken(e, b.session, `${action}:${org}`), org });
+
 const codeIn = (mail) => mail.text.match(/^ {4}([0-9A-Z]{4}-[0-9A-Z]{4})$/m)[1];
 
 async function typeCode(b, code) {
@@ -278,7 +299,7 @@ async function bought(s, e, { email = "buyer@example.com", mailed = true, ...opt
 async function attachByCheckout(b, id) {
   const page = await b.get(`/claim?session_id=${id}`);
   assert.equal(page.status, 200, page.text);
-  return b.post("/claim", { form: tokenFor(page.text, "/claim"), session_id: id });
+  return b.post("/claim", { ...hidden(page.text, "/claim"), session_id: id });
 }
 
 /* ---------- the links ---------- */
@@ -352,13 +373,14 @@ test("the checkout's link signs in first, comes back, and attaches with one clic
   assert.match(home.text, /<a href="\/claim">Attach it to Personal<\/a>/);
 
   const org = orgOf(e, "ana@example.com");
-  const res = await ana.post("/claim", { form: tokenFor(page.text, "/claim"), session_id: id });
+  const res = await ana.post("/claim", { ...hidden(page.text, "/claim"), session_id: id });
   assert.equal(res.status, 200, res.text);
   assert.match(res.text, /data-claimed/);
   assert.match(res.text, /The subscription is attached to Personal, for good\./);
   assert.ok(s.calls.some((c) => c.key === `GET /v1/checkout/sessions/${id}`), "the checkout is fetched again");
   assert.deepEqual(links(e), [{ subscription: sub.id, org_id: org, how: "session", linked_by: userId(e, "ana@example.com") }]);
-  assert.equal(one(e, "SELECT customer FROM orgs WHERE id = ?", org).customer, sub.customer);
+  assert.equal(one(e, "SELECT customer FROM orgs WHERE id = ?", org).customer, null,
+    "the buyer's Stripe customer is never made the organisation's");
   assert.deepEqual(claims(e), [{ org_id: org, user_id: userId(e, "ana@example.com"), event: "plus_claimed_checkout", subject: sub.id }]);
 
   /* Plus now; the old token keeps working, named as the organisation's, and is listed as a machine. */
@@ -385,7 +407,7 @@ test("the checkout's link signs in first, comes back, and attaches with one clic
 
   /* Pressed again: already here, nothing new, no second notice. */
   const mails = s.emails.length;
-  const again = await ana.post("/claim", { form: tokenFor(page.text, "/claim"), session_id: id });
+  const again = await ana.post("/claim", { ...hidden(page.text, "/claim"), session_id: id });
   assert.equal(again.status, 200);
   assert.match(again.text, /That subscription was attached to Personal already\./);
   assert.equal(s.emails.length, mails);
@@ -408,7 +430,7 @@ test("a stale session is asked for a fresh code first, and comes back to the sam
   assert.doesNotMatch(page.text, /action="\/claim\/find"/);
 
   /* A form made for the session, as a forged one would be: refused before Stripe is asked. */
-  const forged = await ana.post("/claim", { form: await formToken(e, ana.session, "claim"), session_id: id });
+  const forged = await ana.post("/claim", { ...await bound(e, ana, "claim", orgOf(e, "ana@example.com")), session_id: id });
   assert.equal(forged.status, 403);
   assert.match(forged.text, /so nothing was looked up/);
   assert.equal(stripeCalls(s), calls);
@@ -442,11 +464,11 @@ test("refused proofs: forged, a day old, unpaid, from an account, inactive, link
   const page = await ana.get("/claim");
   assert.match(page.text, /action="\/claim\/find"/);
   assert.doesNotMatch(page.text, /action="\/claim"/);
-  const claimToken = await formToken(e, ana.session, "claim");
+  const claimToken = await bound(e, ana, "claim", anaOrg);
   const calls = stripeCalls(s);
   for (const body of [{ session_id: token }, { subscription: token }, { token }, {},
     { session_id: shared, subscription: sub.id }, { session_id: `${shared}x/../` }]) {
-    const r = await ana.post("/claim", { form: claimToken, ...body });
+    const r = await ana.post("/claim", { ...claimToken, ...body });
     assert.equal(r.status, 400, JSON.stringify(Object.keys(body)));
     assert.match(r.text, /a feed token included, shows that a subscription is yours/);
   }
@@ -476,7 +498,7 @@ test("refused proofs: forged, a day old, unpaid, from an account, inactive, link
 
   /* Bought from an account: it is that organisation's, linked by the webhook or not yet. */
   const upgrade = await bo.get("/upgrade");
-  const went = await bo.post("/upgrade", { form: tokenFor(upgrade.text, "/upgrade"), plan: "monthly" });
+  const went = await bo.post("/upgrade", { ...hidden(upgrade.text, "/upgrade"), plan: "monthly" });
   const fromAccount = went.location.split("/").pop();
   pay(s, fromAccount, { email: "ana@example.com" });
   const theirs = await attachByCheckout(ana, fromAccount);
@@ -522,7 +544,7 @@ test("only an owner or an admin attaches, and only from this host", async () => 
   assert.doesNotMatch(page.text, /action="\/claim/);
   for (const [path, action, body] of [["/claim", "claim", { session_id: id }], ["/claim", "claim", { subscription: sub.id }],
     ["/claim/find", "claim-find", {}]]) {
-    const r = await bo.post(path, { form: await formToken(e, bo.session, action), ...body });
+    const r = await bo.post(path, { ...await bound(e, bo, action, org), ...body });
     assert.equal(r.status, 403, path);
     assert.match(r.text, /Only an owner or an admin/);
   }
@@ -581,16 +603,16 @@ test("Find my subscription runs only on a click with a fresh code, lists the liv
   later(FRESH_FOR + 1);
   const stale = await ana.get("/claim");
   assert.doesNotMatch(stale.text, /action="\/claim\/find"/);
-  const refused = await ana.post("/claim/find", { form: await formToken(e, ana.session, "claim-find") });
+  const refused = await ana.post("/claim/find", await bound(e, ana, "claim-find", org));
   assert.equal(refused.status, 403);
-  const blind = await ana.post("/claim", { form: await formToken(e, ana.session, "claim"), subscription: first.id });
+  const blind = await ana.post("/claim", { ...await bound(e, ana, "claim", org), subscription: first.id });
   assert.equal(blind.status, 403);
   assert.equal(lookups(s).length, before);
   assert.doesNotMatch(refused.text + blind.text, new RegExp(`${first.id}|${second.id}|monthly|yearly`));
 
   /* With a fresh code, the click lists Ana's two live, unattached ones. */
   await stepUp(ana, s, stale.text);
-  const found = await ana.post("/claim/find", { form: tokenFor((await ana.get("/claim")).text, "/claim/find") });
+  const found = await ana.post("/claim/find", { ...hidden((await ana.get("/claim")).text, "/claim/find") });
   assert.equal(found.status, 200, found.text);
   assert.match(found.text, /data-found="2"/);
   const listed = [...found.text.matchAll(/<li data-subscription="([^"]+)">([^<]*)/g)].map((m) => [m[1], m[2].trim()]);
@@ -600,26 +622,26 @@ test("Find my subscription runs only on a click with a fresh code, lists the liv
   assert.equal(lookups(s).filter((c) => c.key === "GET /v1/customers").at(-1).form.email, "ana@example.com");
 
   /* Choosing one attaches it, by the email's proof. */
-  const chosen = await ana.post("/claim", { form: tokenFor(found.text, "/claim"), subscription: second.id });
+  const chosen = await ana.post("/claim", { ...hidden(found.text, "/claim"), subscription: second.id });
   assert.equal(chosen.status, 200, chosen.text);
   assert.deepEqual(links(e).filter((l) => l.org_id === org).map((l) => [l.subscription, l.how]), [[second.id, "email"]]);
   assert.deepEqual(claims(e).at(-1), { org_id: org, user_id: userId(e, "ana@example.com"), event: "plus_claimed_email", subject: second.id });
   assert.deepEqual(s.emails.at(-1).to, ["ana@example.com"]);
 
   /* A subscription id posted by hand is checked against the address too: another's is not found, as an unknown one is not. */
-  const form = tokenFor(found.text, "/claim");
-  const another = await ana.post("/claim", { form, subscription: someoneElse.id });
-  const unknown = await ana.post("/claim", { form, subscription: "sub_test999nothing" });
+  const form = hidden(found.text, "/claim");
+  const another = await ana.post("/claim", { ...form, subscription: someoneElse.id });
+  const unknown = await ana.post("/claim", { ...form, subscription: "sub_test999nothing" });
   assert.equal(another.status, 404);
   assert.equal(another.text, unknown.text);
   assert.ok(!links(e).some((l) => l.subscription === someoneElse.id));
   /* And one of Ana's own attached elsewhere is said to be, and stays there. */
-  const moved = await ana.post("/claim", { form, subscription: takenSub.id });
+  const moved = await ana.post("/claim", { ...form, subscription: takenSub.id });
   assert.equal(moved.status, 409);
   assert.match(moved.text, /never moved/);
 
   /* Looked for again, one is left. */
-  const again = await ana.post("/claim/find", { form: tokenFor((await ana.get("/claim")).text, "/claim/find") });
+  const again = await ana.post("/claim/find", { ...hidden((await ana.get("/claim")).text, "/claim/find") });
   assert.match(again.text, /data-found="1"/);
   assert.match(again.text, new RegExp(`data-subscription="${first.id}"`));
 });
@@ -630,7 +652,7 @@ test("Find my subscription with nothing to find says to write to us", async () =
   await bought(s, e, { email: "zed@example.com" });
   const ana = new Browser(e);
   await signIn(ana, s);
-  const found = await ana.post("/claim/find", { form: tokenFor((await ana.get("/claim")).text, "/claim/find") });
+  const found = await ana.post("/claim/find", { ...hidden((await ana.get("/claim")).text, "/claim/find") });
   assert.equal(found.status, 200);
   assert.match(found.text, /data-found="0"/);
   assert.match(found.text, /We found no live Plus subscription paid with <strong>ana@example\.com<\/strong>/);
@@ -644,7 +666,7 @@ test("Find my subscription with nothing to find says to write to us", async () =
   console.log = (...a) => lines.push(a.join(" "));
   try {
     s.fail["GET /v1/customers"] = [500, { error: { type: "api_error" } }];
-    const down = await ana.post("/claim/find", { form: tokenFor((await ana.get("/claim")).text, "/claim/find") });
+    const down = await ana.post("/claim/find", { ...hidden((await ana.get("/claim")).text, "/claim/find") });
     assert.equal(down.status, 502);
     assert.match(down.text, /Stripe did not answer just now/);
   } finally {
@@ -655,12 +677,12 @@ test("Find my subscription with nothing to find says to write to us", async () =
 
   /* Each person looks things up only so often an hour. */
   delete s.fail["GET /v1/customers"];
-  const token = tokenFor((await ana.get("/claim")).text, "/claim/find");
+  const token = hidden((await ana.get("/claim")).text, "/claim/find");
   let last;
-  for (let i = 0; i < CLAIM_LOOKUPS_PER_HOUR; i++) last = await ana.post("/claim/find", { form: token });
+  for (let i = 0; i < CLAIM_LOOKUPS_PER_HOUR; i++) last = await ana.post("/claim/find", token);
   assert.equal(last.status, 429);
   const calls = stripeCalls(s);
-  assert.equal((await ana.post("/claim/find", { form: token })).status, 429);
+  assert.equal((await ana.post("/claim/find", token)).status, 429);
   assert.equal(stripeCalls(s), calls);
 });
 
@@ -752,4 +774,86 @@ test("sign-in carries only a checkout id of Stripe's shape on to the claim", asy
     const done = await signIn(b, s, `n${s.emails.length}@example.com`, asked);
     assert.equal(done.location, landed, asked);
   }
+});
+
+/* ---------- bound to the organisation ---------- */
+
+/* `b` looks at `orgId`, with the switcher on the account page. */
+async function switchTo(b, orgId) {
+  const home = await b.get("/");
+  const r = await b.post("/org/switch", { ...hidden(home.text, "/org/switch"), org: orgId });
+  assert.equal(r.status, 303, r.text);
+}
+
+test("a claim page drawn for one organisation attaches nothing once another is switched to in a second tab", async () => {
+  const s = services();
+  const e = env();
+  const { id, sub } = await bought(s, e, { email: "ana@example.com" });
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const own = orgOf(e, "ana@example.com");
+  const bea = new Browser(e, { ip: "203.0.113.70" });
+  await signIn(bea, s, "bea@example.com");
+  const corp = orgOf(e, "bea@example.com");
+  run(e, "UPDATE orgs SET name = 'Bea Corp' WHERE id = ?", corp);
+  run(e, "INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'admin', ?)",
+    corp, userId(e, "ana@example.com"), unix());
+
+  /* Tab 1: the checkout's page, and Find my subscription's list, drawn for Ana's own organisation. */
+  const page = await ana.get(`/claim?session_id=${id}`);
+  assert.match(page.text, /<button type="submit">Attach to Personal<\/button>/);
+  const attachForm = hidden(page.text, "/claim");
+  assert.equal(attachForm.org, own);
+  const findForm = hidden(page.text, "/claim/find");
+  assert.equal(findForm.org, own);
+  const found = await ana.post("/claim/find", findForm);
+  assert.match(found.text, /data-found="1"/);
+  const chooseForm = hidden(found.text, "/claim");
+  assert.deepEqual([chooseForm.org, chooseForm.subscription], [own, sub.id]);
+
+  /* Tab 2: Ana switches to Bea Corp, where she is an admin too. */
+  await switchTo(ana, corp);
+  const calls = stripeCalls(s);
+  for (const [path, form] of [["/claim", attachForm], ["/claim", chooseForm], ["/claim/find", findForm]]) {
+    const r = await ana.post(path, form);
+    assert.equal(r.status, 409, path);
+    assert.match(r.text, /That form was for another of your organisations/);
+  }
+  assert.equal(stripeCalls(s), calls, "nothing was asked of Stripe");
+  assert.deepEqual(links(e), [], "and nothing attached, to either");
+  assert.deepEqual(claims(e), []);
+
+  /* Back on her own, the same page attaches it there. */
+  await switchTo(ana, own);
+  const r = await ana.post("/claim", attachForm);
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual(links(e).map((l) => [l.subscription, l.org_id]), [[sub.id, own]]);
+});
+
+test("an attached purchase never makes its buyer the organisation's Stripe customer", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const acme = orgOf(e, "ana@example.com");
+  run(e, "UPDATE orgs SET name = 'Acme' WHERE id = ?", acme);
+  /* Yan, an admin of Acme, attaches what he bought on the pricing page. */
+  const { id, sub } = await bought(s, e, { email: "yan@example.com" });
+  const yan = new Browser(e, { ip: "203.0.113.71" });
+  await signIn(yan, s, "yan@example.com");
+  join(e, "yan@example.com", acme, "admin");
+  assert.equal((await attachByCheckout(yan, id)).status, 200);
+  assert.equal(one(e, "SELECT customer FROM orgs WHERE id = ?", acme).customer, null);
+
+  /* It ends; the owner's next upgrade is on a customer of Acme's own, with her address, never Yan's. */
+  sub.status = "canceled";
+  assert.equal((await deliver(e, { id: "evt_gone", type: "customer.subscription.deleted",
+    data: { object: { ...sub } } })).status, 200);
+  const up = await ana.get("/upgrade");
+  const went = await ana.post("/upgrade", { ...hidden(up.text, "/upgrade"), plan: "yearly" });
+  assert.equal(went.status, 303, went.text);
+  const made = s.calls.filter((c) => c.key === "POST /v1/checkout/sessions").at(-1).form;
+  assert.notEqual(made.customer, sub.customer);
+  assert.equal(made.customer, one(e, "SELECT customer FROM orgs WHERE id = ?", acme).customer);
+  assert.equal(s.customers.get(made.customer).email, "ana@example.com");
 });

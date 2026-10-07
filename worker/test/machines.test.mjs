@@ -115,6 +115,14 @@ function tokenFor(html, action) {
   return m[1];
 }
 
+/* The first form on a page that posts to `action`, as its hidden fields. */
+function hidden(html, action) {
+  const m = html.match(new RegExp(`<form method="post" action="${action}"[^>]*>([\\s\\S]*?)</form>`));
+  assert.ok(m, `no form for ${action}`);
+  return Object.fromEntries([...m[1].matchAll(/<input type="hidden" name="([a-z_-]+)" value="([^"]*)">/g)]
+    .map((x) => [x[1], x[2]]));
+}
+
 const codeIn = (mail) => mail.text.match(/^ {4}([0-9A-Z]{4}-[0-9A-Z]{4})$/m)[1];
 
 async function typeCode(b, code) {
@@ -235,18 +243,22 @@ const listed = (html) => Object.fromEntries([...section(html).matchAll(/<li data
 /* Makes a CI token with the form on the account page. */
 async function makeCi(b, { label = "deploy", expires = "never" } = {}) {
   const home = await b.get("/");
-  const form = tokenFor(home.text, "/tokens/ci");
-  const sent = { form, nonce: home.text.match(/name="nonce" value="([^"]+)"/)[1], label, expires };
+  const sent = { ...hidden(home.text, "/tokens/ci"), label, expires };
   const r = await b.post("/tokens/ci", sent);
   const m = r.text.match(CI_TOKEN);
   return { r, sent, token: m ? m[1] : null };
 }
 
+/* The organisation `b`'s session is looking at. */
+const seen = (e, b) => one(e, "SELECT org_id FROM sessions WHERE id = ?", b.session).org_id;
+
+/* The token a CI form drawn for nonce `n`, in the organisation `b` looks at, carries, with that organisation. */
+const ciForm = async (e, b, n) => ({ form: await formToken(e, b.session, `ci-token:${n}:${seen(e, b)}`), org: seen(e, b) });
+
 /* A CI form this session could have been shown, with a nonce of its own. */
 async function forgedCi(e, b, fields = {}) {
   const n = nonce();
-  return b.post("/tokens/ci", { form: await formToken(e, b.session, `ci-token:${n}`), nonce: n,
-    label: "forged", expires: "never", ...fields });
+  return b.post("/tokens/ci", { ...await ciForm(e, b, n), nonce: n, label: "forged", expires: "never", ...fields });
 }
 
 const cron = async (e) => {
@@ -558,14 +570,12 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   grant(e, acme, "plus");
   for (const headers of [{ "sec-fetch-site": "same-site" }, { origin: "https://ranwhat.com" }, {}]) {
     const n = nonce();
-    r = await ana.post("/tokens/ci", { form: await formToken(e, ana.session, `ci-token:${n}`), nonce: n,
-      label: "x", expires: "never" }, headers);
+    r = await ana.post("/tokens/ci", { ...await ciForm(e, ana, n), nonce: n, label: "x", expires: "never" }, headers);
     assert.equal(r.status, 403);
   }
   /* The form's token is bound to its nonce. */
   const n = nonce();
-  r = await ana.post("/tokens/ci", { form: await formToken(e, ana.session, `ci-token:${n}`), nonce: nonce(),
-    label: "x", expires: "never" });
+  r = await ana.post("/tokens/ci", { ...await ciForm(e, ana, n), nonce: nonce(), label: "x", expires: "never" });
   assert.equal(r.status, 403);
   assert.equal(count(e, "machines"), 2);
 });

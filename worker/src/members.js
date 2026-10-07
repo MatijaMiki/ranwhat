@@ -55,12 +55,22 @@
  * come out of the day's account mail ('auth', accounts.js), and an
  * organisation sends at most INVITES_PER_ORG_DAY a day.
  *
+ * An invite is only as good as its sender's role: it joins nobody once
+ * whoever sent it is no longer an owner or an admin of the organisation
+ * (acceptPost() checks it in the batch that joins), and leaving, being
+ * removed and being made a member take back, in the same batch, every
+ * invite the person sent that is still waiting, so that nobody can leave
+ * a way back in for themselves before they go.
+ *
  * Leaving and being removed revoke, in the same batch, every terminal the
  * person linked to that organisation (machines.js): a laptop that leaves
  * with them stops reading the feed. CI tokens they made are the
  * organisation's and stay, listed under Machines for an owner or an admin
  * to revoke. Someone left with no organisation at all gets a new personal
- * one in that batch, as at their first sign-in.
+ * one in that batch, as at their first sign-in. Whoever stops being an
+ * owner or an admin, by any of these or by handing on ownership, stops
+ * being the organisation's billing email in Stripe if they were
+ * (billing.js's billingEmailFollows()).
  *
  * Everything is written to the audit log in the batch that does it: for
  * whoever did it, and, when it was done to someone else, for them too.
@@ -71,9 +81,10 @@ import { FEATURES, PLAN_NAMES, allows } from "./features.js";
 import { ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, canManage, event, now, spendAuthMail } from "./accounts.js";
 import {
   ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, current, formOk, formToken, fresh,
-  nextPath, randomToken, readCookie, setCookie, unbump,
+  nextPath, orgFormOk, randomToken, readCookie, setCookie, unbump,
 } from "./session.js";
 import { fields, form, page, redirect, refused } from "./ui.js";
+import { billingEmailFollows } from "./billing.js";
 
 export const INVITE_COOKIE = "__Host-rw_invite";
 export const INVITE_FOR = 7 * DAY;          // an invite works this long
@@ -102,6 +113,7 @@ export const MEMBER_EVENTS = Object.freeze({
   removed_from_org: "Removed from an organisation",
   org_left: "Left an organisation",
   machine_left_org: "Terminal revoked, as whoever linked it left the organisation",
+  invite_left_org: "Invite taken back, as whoever sent it is no longer an owner or admin of the organisation",
   ownership_transferred: "Made an admin the owner of the organisation, with a fresh code",
   ownership_received: "Made the owner of an organisation",
   org_switched: "Switched organisation",
@@ -168,14 +180,20 @@ export async function orgsOf(env, userId) {
   return results;
 }
 
+/* Whether whoever sent the invite (the row `invites`, or as aliased) is
+   an owner or an admin of its organisation still: an invite from anyone
+   else joins nobody. */
+const SENDER_MANAGES = (i = "invites") => `EXISTS (SELECT 1 FROM memberships s
+  WHERE s.org_id = ${i}.org_id AND s.user_id = ${i}.invited_by AND s.role IN ('owner', 'admin'))`;
+
 /* The invite a link's token is for, in whatever state, with its
-   organisation's name and the address of whoever sent it; null for a
-   token that is no invite's. */
+   organisation's name, the address of whoever sent it and whether they
+   may still invite; null for a token that is no invite's. */
 async function inviteBy(env, token) {
   if (typeof token !== "string" || !TOKEN.test(token)) return null;
   return env.LIST.prepare(
     `SELECT i.id, i.org_id, i.email, i.expires_at, i.accepted_at, i.revoked_at, o.name AS org_name,
-            u.email AS by_email
+            u.email AS by_email, ${SENDER_MANAGES("i")} AS by_manager
      FROM invites i JOIN orgs o ON o.id = i.org_id LEFT JOIN users u ON u.id = i.invited_by
      WHERE i.token_hash = ?`).bind(await sha256(token)).first();
 }
@@ -354,10 +372,9 @@ async function posted(request, env, action) {
   const who = await current(request, env);
   if (!who) return { response: signedOut(request) };
   const f = await fields(request);
-  const orgId = f.get("org");
-  if (typeof orgId !== "string" || !orgId || orgId.length > 100 ||
-      !await formOk(env, f, who.id, `${action}:${orgId}`)) return { response: refused() };
-  if (orgId !== who.org.id) {
+  const bound = await orgFormOk(env, f, who, action);
+  if (bound === "refused") return { response: refused() };
+  if (bound === "elsewhere") {
     return { response: trouble(env, who, 409,
       "That form was for another of your organisations than the one this page is looking at now, so nothing was done. Reload your account page and try again.") };
   }
@@ -388,19 +405,35 @@ function keepAnOrg(db, user) {
   ];
 }
 
+/* The invites `user` sent to `org` that are still waiting, taken back
+   (each with an event of their own) while `where` holds, for a batch that
+   ends their being an owner or an admin there: two statements. */
+function theirInvitesBack(db, { org, user }, where, w) {
+  const t = now();
+  const waiting = "org_id = ? AND invited_by = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?";
+  return [
+    db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
+                SELECT org_id, invited_by, 'invite_left_org', id, ? FROM invites WHERE ${waiting} AND ${where}`)
+      .bind(t, org, user, t, ...w),
+    db.prepare(`UPDATE invites SET revoked_at = ?, email = NULL WHERE ${waiting} AND ${where}`)
+      .bind(t, org, user, t, ...w),
+  ];
+}
+
 /* `user`, in `org` as `role`, leaving it or being removed: the events, the
-   terminals they linked to it revoked (each with an event of its own),
-   the membership ended and, if it was their last, a personal organisation
-   made. guard and binds: what must hold of whoever is doing it. Every
-   statement holds the same conditions, so either all of it happens or,
-   when the person has gone or changed role meanwhile, none. The DELETE is
-   at index events.length + 2. Never the owner. */
+   terminals they linked to it revoked (each with an event of its own), the
+   invites they sent that are still waiting taken back, the membership
+   ended and, if it was their last, a personal organisation made. guard
+   and binds: what must hold of whoever is doing it. Every statement holds
+   the same conditions, so either all of it happens or, when the person
+   has gone or changed role meanwhile, none. { statements, deleted }:
+   deleted is the DELETE's index. Never the owner. */
 function departure(db, { org, user, role, events, guard = "1", binds = [] }) {
   const t = now();
   const where = `${IS} AND ${guard}`;
   const w = [org, user, role, ...binds];
   const theirs = "SELECT m.hash FROM machines m WHERE m.org_id = ? AND m.user_id = ? AND m.kind = 'device'";
-  return [
+  const statements = [
     ...events.map((e) => eventIf(db, e, where, w)),
     db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
                 SELECT m.org_id, m.user_id, 'machine_left_org', m.id, ? FROM machines m JOIN tokens k ON k.hash = m.hash
@@ -408,11 +441,24 @@ function departure(db, { org, user, role, events, guard = "1", binds = [] }) {
       .bind(t, org, user, ...w),
     db.prepare(`UPDATE tokens SET revoked_at = ? WHERE revoked_at IS NULL AND hash IN (${theirs}) AND ${where}`)
       .bind(t, org, user, ...w),
+    ...theirInvitesBack(db, { org, user }, where, w),
+  ];
+  const deleted = statements.length;
+  statements.push(
     db.prepare(`DELETE FROM memberships WHERE org_id = ? AND user_id = ? AND role = ? AND role != 'owner' AND ${guard}`)
       .bind(org, user, role, ...binds),
     ...keepAnOrg(db, user),
-  ];
+  );
+  return { statements, deleted };
 }
+
+/* Stripe's billing email for the organisation, moved off `email` once
+   they are no longer an owner or an admin of it, after the response. */
+const billingFollows = (env, ctx, orgId, email) => {
+  ctx.waitUntil(billingEmailFollows(env, orgId, email).catch((err) => {
+    console.log(`billing email: ${err.code || err.name || "error"}`);
+  }));
+};
 
 /* ---------- inviting ---------- */
 
@@ -509,6 +555,9 @@ function unusable(inv, t = now()) {
   }
   if (inv.accepted_at) return [410, "That invite was used already. Each invite works once."];
   if (inv.revoked_at) return [410, "That invite was taken back. Ask whoever invited you for a new one."];
+  if (!inv.by_manager) {
+    return [410, "That invite no longer works: whoever sent it can no longer invite people there. Ask an owner or an admin of it for a new one."];
+  }
   if (inv.expires_at <= t) {
     return [410, `That invite has expired: each works for ${INVITE_FOR / DAY} days. Ask whoever invited you for a new one.`];
   }
@@ -581,9 +630,11 @@ export async function inviteAgain(request, env) {
 
 /* POST /invite: joins. Every check the page made is made again, and the
    invite is used, the membership made and the event written in one batch,
-   each only while the invite is waiting and for this address: two Joins
-   at once make one membership, and a used, expired or taken-back invite
-   makes none. The session then looks at the organisation joined. */
+   each only while the invite is waiting, for this address, and from
+   someone still an owner or an admin of the organisation: two Joins at
+   once make one membership, and a used, expired or taken-back invite, or
+   one from someone since removed or made a member, makes none. The
+   session then looks at the organisation joined. */
 export async function acceptPost(request, env) {
   const who = await current(request, env);
   const f = await fields(request);
@@ -607,7 +658,8 @@ export async function acceptPost(request, env) {
   if (!allows(await plan(env, inv.org_id), "members")) return lapsed(inv);
   const db = env.LIST;
   const t = now();
-  const open = "id = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ? AND email = ?";
+  const open = `id = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ? AND email = ?
+                AND ${SENDER_MANAGES()}`;
   const w = [inv.id, t, who.email];
   const done = await db.batch([
     db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
@@ -617,7 +669,9 @@ export async function acceptPost(request, env) {
                 ON CONFLICT (org_id, user_id) DO NOTHING`).bind(who.user, t, ...w),
     db.prepare(`UPDATE invites SET accepted_at = ?, email = NULL WHERE ${open}`).bind(t, ...w),
   ]);
-  if (done[2].meta.changes !== 1) return gone([410, "That invite was used already. Each invite works once."]);
+  if (done[2].meta.changes !== 1) {
+    return gone(unusable(await inviteBy(env, token)) || [410, "That invite was used already. Each invite works once."]);
+  }
   await db.prepare("UPDATE sessions SET org_id = ? WHERE id = ?").bind(inv.org_id, who.id).run();
   return redirect("/", [clearCookie(INVITE_COOKIE)]);
 }
@@ -656,8 +710,9 @@ const notIn = (env, who) => trouble(env, who, 404,
 
 /* POST /members/role: the owner, with a fresh code, makes a member an
    admin or an admin a member. Never their own role: the owner stays the
-   owner until they hand it on. */
-export async function rolePost(request, env) {
+   owner until they hand it on. An admin made a member has the invites
+   they sent that are still waiting taken back in the same batch. */
+export async function rolePost(request, env, ctx) {
   const got = await posted(request, env, "member-role");
   if (got.response) return got.response;
   const { who, f } = got;
@@ -680,15 +735,19 @@ export async function rolePost(request, env) {
   const db = env.LIST;
   const where = `${IS} AND ${IS}`;
   const w = [org.id, who.user, "owner", org.id, target.user_id, target.role];
-  const done = await db.batch([
+  const statements = [
     eventIf(db, { org: org.id, user: who.user, what: `member_made_${role}`, subject: target.user_id }, where, w),
     eventIf(db, { org: org.id, user: target.user_id, what: `role_now_${role}`, subject: who.user }, where, w),
-    db.prepare(`UPDATE memberships SET role = ? WHERE org_id = ? AND user_id = ? AND role = ? AND ${IS}`)
-      .bind(role, org.id, target.user_id, target.role, org.id, who.user, "owner"),
-  ]);
-  if (done[2].meta.changes !== 1) {
+    ...(role === "member" ? theirInvitesBack(db, { org: org.id, user: target.user_id }, where, w) : []),
+  ];
+  const changed = statements.length;
+  statements.push(db.prepare(`UPDATE memberships SET role = ? WHERE org_id = ? AND user_id = ? AND role = ? AND ${IS}`)
+    .bind(role, org.id, target.user_id, target.role, org.id, who.user, "owner"));
+  const done = await db.batch(statements);
+  if (done[changed].meta.changes !== 1) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
+  if (role === "member") billingFollows(env, ctx, org.id, target.email);
   return redirect("/");
 }
 
@@ -696,7 +755,7 @@ export async function rolePost(request, env) {
    a member, with a fresh code; never the owner, and never oneself (that
    is Leave). The terminals they linked to the organisation are revoked
    with it (departure()). */
-export async function removePost(request, env) {
+export async function removePost(request, env, ctx) {
   const got = await posted(request, env, "member-remove");
   if (got.response) return got.response;
   const { who, f } = got;
@@ -718,7 +777,7 @@ export async function removePost(request, env) {
   const db = env.LIST;
   await feedSchema(db);
   const by = Object.keys(REMOVABLE).filter((r) => mayRemove(r, target.role));
-  const statements = departure(db, {
+  const { statements, deleted } = departure(db, {
     org: org.id, user: target.user_id, role: target.role,
     guard: IS_ONE_OF(by), binds: [org.id, who.user, ...by],
     events: [
@@ -727,16 +786,17 @@ export async function removePost(request, env) {
     ],
   });
   const done = await db.batch(statements);
-  if (done[4].meta.changes !== 1) {
+  if (done[deleted].meta.changes !== 1) {
     return trouble(env, who, 409, "They left, or their role changed, a moment ago, so nothing was done. Reload your account page.");
   }
+  billingFollows(env, ctx, org.id, target.email);
   return redirect("/");
 }
 
 /* POST /members/leave: anyone but the owner leaves the organisation this
    session is looking at, and their terminals linked to it are revoked. No
    fresh code: leaving takes away only one's own access. */
-export async function leavePost(request, env) {
+export async function leavePost(request, env, ctx) {
   const got = await posted(request, env, "member-leave");
   if (got.response) return got.response;
   const { who } = got;
@@ -747,10 +807,12 @@ export async function leavePost(request, env) {
   }
   const db = env.LIST;
   await feedSchema(db);
-  await db.batch(departure(db, {
+  const { statements, deleted } = departure(db, {
     org: org.id, user: who.user, role: org.role,
     events: [{ org: org.id, user: who.user, what: "org_left" }],
-  }));
+  });
+  const done = await db.batch(statements);
+  if (done[deleted].meta.changes === 1) billingFollows(env, ctx, org.id, who.email);
   return redirect("/");
 }
 
@@ -760,7 +822,7 @@ export async function leavePost(request, env) {
    the admin is promoted (one_owner allows no two), each only while both
    still hold their roles, so the organisation has one owner after it
    whatever else happens at the same time. */
-export async function transferPost(request, env) {
+export async function transferPost(request, env, ctx) {
   const got = await posted(request, env, "member-transfer");
   if (got.response) return got.response;
   const { who, f } = got;
@@ -803,6 +865,7 @@ export async function transferPost(request, env) {
   if (done[3].meta.changes !== 1) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
+  billingFollows(env, ctx, org.id, who.email);
   return redirect("/");
 }
 

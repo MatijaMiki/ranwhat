@@ -263,8 +263,7 @@ async function linkTerminal(e, b, label = "Laptop") {
 /* A CI token made with the account page's form. */
 async function makeCi(b, label = "deploy") {
   const home = await b.get("/");
-  const r = await b.post("/tokens/ci", { form: tokenFor(home.text, "/tokens/ci"),
-    nonce: home.text.match(/name="nonce" value="([^"]+)"/)[1], label, expires: "never" });
+  const r = await b.post("/tokens/ci", { ...forms(home.text, "/tokens/ci")[0], label, expires: "never" });
   assert.equal(r.status, 200, r.text);
   return r.text.match(/<code class="secret">(rw_c_[A-Za-z0-9_-]{43})<\/code>/)[1];
 }
@@ -1056,4 +1055,94 @@ test("someone in several organisations switches between them, on the account pag
   await signIn(carl, s, "carl@example.com");
   assert.equal(forms((await carl.get("/")).text, "/org/switch").length, 0);
   assert.equal(forms((await carl.get("/device")).text, "/org/switch").length, 0);
+});
+
+test("an invite is only as good as its sender's role: removed, made a member or gone, their waiting invites go too", async () => {
+  const s = services();
+  const e = env();
+  const { ana, acme } = await acmeOwner(e, s);
+  const bob = await inOrg(e, s, acme, "bob@example.com", "admin");
+  const cy = await inOrg(e, s, acme, "cy@example.com", "admin");
+  const dee = await inOrg(e, s, acme, "dee@example.com", "admin");
+  const [bobId, cyId, deeId] = ["bob", "cy", "dee"].map((n) => userId(e, `${n}@example.com`));
+  const waiting = (email) => one(e, "SELECT * FROM invites WHERE org_id = ? AND invited_by = ? ORDER BY created_at DESC",
+    acme, userId(e, email));
+
+  /* Each admin, expecting to lose the role, first invites an address of their own. */
+  for (const [b, alt] of [[bob, "bob.alt@example.net"], [cy, "cy.alt@example.net"], [dee, "dee.alt@example.net"]]) {
+    assert.equal((await invite(b, alt)).location, "/");
+    assert.ok(inviteFor(s, alt));
+  }
+  /* An invite of Ana's own, to someone else, which none of this touches. */
+  assert.equal((await invite(ana, "eve@example.com")).location, "/");
+
+  /* Removed: Bob's waiting invite is taken back in the same batch, and the link joins nobody. */
+  assert.equal((await submit(ana, "/members/remove", (f) => f.user === bobId)).location, "/");
+  assert.equal(roleIn(e, acme, "bob@example.com"), null);
+  let row = waiting("bob@example.com");
+  assert.ok(row.revoked_at, "taken back");
+  assert.equal(row.email, null, "and its address cleared");
+  assert.deepEqual(eventsOf(e, "invite_left_org"), [{ org_id: acme, user_id: bobId, subject: row.id }]);
+  const alt = new Browser(e);
+  await signIn(alt, s, "bob.alt@example.net");
+  const link = inviteFor(s, "bob.alt@example.net");
+  let r = await alt.get(`/invite/${link}`);
+  assert.equal(r.status, 410);
+  assert.match(r.text, /taken back/);
+  assert.doesNotMatch(r.text, /action="\/invite"/);
+  r = await alt.post("/invite", { form: await formToken(e, alt.session, `invite-accept:${row.id}`), token: link });
+  assert.equal(r.status, 410);
+  assert.equal(roleIn(e, acme, "bob.alt@example.net"), null);
+
+  /* Made a member: Cy's waiting invite goes with the role. */
+  assert.equal((await submit(ana, "/members/role", (f) => f.user === cyId)).location, "/");
+  assert.equal(roleIn(e, acme, "cy@example.com"), "member");
+  row = waiting("cy@example.com");
+  assert.ok(row.revoked_at);
+  assert.equal(row.email, null);
+  const cyAlt = new Browser(e);
+  await signIn(cyAlt, s, "cy.alt@example.net");
+  assert.equal((await cyAlt.get(`/invite/${inviteFor(s, "cy.alt@example.net")}`)).status, 410);
+  assert.equal(roleIn(e, acme, "cy.alt@example.net"), null);
+
+  /* Leaving: Dee's goes too. */
+  assert.equal((await submit(dee, "/members/leave")).location, "/");
+  assert.ok(waiting("dee@example.com").revoked_at);
+  assert.deepEqual(eventsOf(e, "invite_left_org").map((x) => x.user_id).sort(), [bobId, cyId, deeId].sort());
+
+  /* The owner's own invite is untouched, and still joins. */
+  const eveRow = waiting("ana@example.com");
+  assert.equal(eveRow.revoked_at, null);
+  assert.equal(eveRow.email, "eve@example.com");
+  const eve = new Browser(e);
+  await signIn(eve, s, "eve@example.com");
+  const join = forms((await eve.get(`/invite/${inviteFor(s, "eve@example.com")}`)).text, "/invite")[0];
+  assert.equal((await eve.post("/invite", join)).location, "/");
+  assert.equal(roleIn(e, acme, "eve@example.com"), "member");
+});
+
+test("Join checks, in its own batch, that whoever sent the invite is still an owner or an admin", async () => {
+  const s = services();
+  const e = env();
+  const { acme } = await acmeOwner(e, s);
+  const fay = await inOrg(e, s, acme, "fay@example.com", "admin");
+  assert.equal((await invite(fay, "gus@example.com")).location, "/");
+  const gus = new Browser(e);
+  await signIn(gus, s, "gus@example.com");
+  const join = forms((await gus.get(`/invite/${inviteFor(s, "gus@example.com")}`)).text, "/invite")[0];
+
+  /* Fay stops being an admin between the page and the click, by a way that does not take her invites back. */
+  run(e, "UPDATE memberships SET role = 'member' WHERE org_id = ? AND user_id = ?", acme, userId(e, "fay@example.com"));
+  let r = await gus.post("/invite", join);
+  assert.equal(r.status, 410);
+  assert.match(r.text, /can no longer invite people there/);
+  assert.equal(roleIn(e, acme, "gus@example.com"), null);
+  assert.equal(eventsOf(e, "invite_accepted").length, 0);
+  assert.equal(invitesOf(e, acme)[0].accepted_at, null);
+
+  /* An admin again, and the same invite joins. */
+  run(e, "UPDATE memberships SET role = 'admin' WHERE org_id = ? AND user_id = ?", acme, userId(e, "fay@example.com"));
+  r = await gus.post("/invite", join);
+  assert.equal(r.location, "/", r.text);
+  assert.equal(roleIn(e, acme, "gus@example.com"), "member");
 });

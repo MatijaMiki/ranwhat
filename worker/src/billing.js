@@ -9,7 +9,8 @@
  *   POST /upgrade   An owner or an admin, of an organisation on neither
  *                   Plus nor Team, with an emailed code typed in the last
  *                   15 minutes: makes the Checkout (stripe.js's
- *                   orgCheckout()) and sends the browser to it.
+ *                   orgCheckout()), on the organisation's own Stripe
+ *                   customer, and sends the browser to it.
  *   POST /billing   An owner or an admin, with a fresh code, naming a
  *                   subscription linked to this organisation: a portal
  *                   session for that subscription's customer, and off to
@@ -19,6 +20,19 @@
  * login behind /api/billing are stripe.js's and unchanged. A subscription
  * bought there and attached to an organisation later is billed here like
  * any other.
+ *
+ * Both forms are bound to the organisation they were drawn for (session.js's
+ * orgFormOk()): one left open in a tab acts on nothing once the session
+ * looks at another organisation, and a Checkout or a portal is never
+ * opened for an organisation the page did not name.
+ *
+ * The organisation's Stripe customer is its own, made here before its
+ * first Checkout with its owner's address (customerFor()), and every
+ * Checkout is on it: never one Stripe makes from the address whoever pays
+ * types, whom Stripe's billing-page login (/api/billing) would then let in
+ * for good. When someone stops being an owner or an admin (members.js),
+ * billingEmailFollows() moves that customer's address to the owner's if it
+ * was theirs.
  *
  * Both POSTs leave this host only for an address Stripe gave back, and
  * only for checkout.stripe.com or billing.stripe.com; a page whose form
@@ -32,10 +46,13 @@ import { escape } from "./list.js";
 import { PLAN_NAMES, atLeast, featuresOf } from "./features.js";
 import { HOUR, canManage, event, now } from "./accounts.js";
 import {
-  FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formOk, formToken, fresh, readCookie,
+  FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formToken, fresh, orgFormOk, orgInput, orgToken, readCookie,
 } from "./session.js";
-import { away, fields, form, page, redirect, refused } from "./ui.js";
-import { INTERVALS, SUBSCRIPTION, orgCheckout, portalSession, sellable, subscriptionNow } from "./stripe.js";
+import { away, elsewhere, fields, form, page, redirect, refused } from "./ui.js";
+import {
+  CUSTOMER, INTERVALS, SUBSCRIPTION, customerEmail, orgCheckout, orgCustomer, portalSession, sellable,
+  setCustomerEmail, subscriptionNow,
+} from "./stripe.js";
 
 export const CHECKOUT_ORIGIN = "https://checkout.stripe.com";
 export const PORTAL_ORIGIN = "https://billing.stripe.com";
@@ -123,7 +140,7 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
   const live = linked.filter((s) => LIVE.has(s.status));
   const shown = live.length ? live : linked.slice(0, 1);
   const canOpen = manager && confirmed && Boolean(env.STRIPE_SECRET_KEY);
-  const billingToken = canOpen ? await formToken(env, who.id, "billing") : null;
+  const billingToken = canOpen ? await orgToken(env, who, "billing") : null;
 
   const items = [];
   for (const sub of shown) {
@@ -140,7 +157,7 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
     const when = !known ? "<dt>Renews</dt><dd>Not known just now</dd>"
       : known.renews_at ? `<dt>Renews</dt><dd data-renews>${day(known.renews_at)}</dd>`
         : known.ends_at ? `<dt>${known.ends_at > t ? "Ends" : "Ended"}</dt><dd data-ends>${day(known.ends_at)}</dd>` : "";
-    const manage = canOpen ? form("/billing", billingToken, `
+    const manage = canOpen ? form("/billing", billingToken, `${orgInput(who)}
         <input type="hidden" name="subscription" value="${escape(sub.id)}">
         <button type="submit">Manage billing</button>`) : "";
     items.push(`<div data-subscription="${escape(sub.id)}"><dl>
@@ -175,6 +192,14 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
       : `<p>${name} is on Free. An owner or an admin of it can upgrade it to Plus.</p>`;
   }
 
+  /* Two Checkouts paid, or one besides an attached purchase: the
+     organisation pays twice until one is cancelled. */
+  const twice = live.length > 1 ? `<p class="bad" data-twice="${live.length}">${name} has ${live.length} live Plus
+       subscriptions, and needs one. ${manager ? "Cancel the one you do not want with its Manage billing, and"
+        : "An owner or an admin can cancel the one it does not want with Manage billing;"} write to
+       <a href="mailto:hello@ranwhat.com?subject=ranwhat%20Plus%20paid%20twice">hello@ranwhat.com</a> for a refund
+       of it.</p>` : "";
+
   let notice = "";
   if (upgraded) {
     notice = atLeast(onPlan, "plus")
@@ -187,6 +212,7 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
     html: `<section class="panel" id="billing">
     <h2>Billing</h2>
     ${notice}
+    ${twice}
     ${items.join("\n    ")}
     ${standing}
     ${problem(error)}
@@ -239,8 +265,8 @@ async function upgradeForm(env, who, { error = "", status = 200 } = {}) {
       <button type="submit">Email me a code</button>`)}
     ${back}`, { status });
   }
-  const token = await formToken(env, who.id, "upgrade");
-  const choice = (interval, label) => form("/upgrade", token, `
+  const token = await orgToken(env, who, "upgrade");
+  const choice = (interval, label) => form("/upgrade", token, `${orgInput(who)}
       <input type="hidden" name="plan" value="${interval}">
       <button type="submit">${label}, ${PRICES[interval]}</button>`, "row");
   return page("Upgrade to Plus", `${head}${about}
@@ -257,14 +283,36 @@ export async function upgradePage(request, env) {
   return upgradeForm(env, who);
 }
 
-/* POST /upgrade: a Checkout bound to the organisation being looked at,
-   never one a form names. Who may, the plan and the fresh code are each
-   checked before anything is asked of Stripe. */
+/* The organisation's own Stripe customer: the one kept for it, or, for its
+   first Checkout (or `replacing` the kept one, which Stripe turned down),
+   a new one with its owner's address, kept unless another request kept
+   one first, whose then serves. Throws as stripe() does. */
+async function customerFor(env, org, { replacing = null } = {}) {
+  const db = env.LIST;
+  const row = await db.prepare("SELECT customer FROM orgs WHERE id = ?").bind(org.id).first();
+  const kept = row && CUSTOMER.test(String(row.customer)) ? row.customer : null;
+  if (kept && kept !== replacing) return kept;
+  const owner = await db.prepare(
+    `SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.role = 'owner'`)
+    .bind(org.id).first();
+  if (!owner) throw Object.assign(new Error("no owner"), { code: "no_owner", status: 0 });
+  const made = await orgCustomer(env, { org: org.id, email: owner.email });
+  await db.prepare("UPDATE orgs SET customer = ? WHERE id = ? AND customer IS ?").bind(made, org.id, kept).run();
+  const held = await db.prepare("SELECT customer FROM orgs WHERE id = ?").bind(org.id).first();
+  return held && CUSTOMER.test(String(held.customer)) ? held.customer : made;
+}
+
+/* POST /upgrade: a Checkout bound to the organisation the form was drawn
+   for, which must be the one being looked at, never one a form names.
+   Who may, the plan and the fresh code are each checked before anything
+   is asked of Stripe. */
 export async function upgradePost(request, env) {
   const who = await current(request, env);
   if (!who) return toSignin(request);
   const f = await fields(request);
-  if (!await formOk(env, f, who.id, "upgrade")) return refused();
+  const bound = await orgFormOk(env, f, who, "upgrade");
+  if (bound === "refused") return refused();
+  if (bound === "elsewhere") return elsewhere();
   const org = who.org;
   if (!canManage(org)) {
     return upgradeForm(env, who, { status: 403, error: "Only an owner or an admin can upgrade it, so checkout did not open." });
@@ -284,10 +332,18 @@ export async function upgradePost(request, env) {
       error: "Checkout was opened for this organisation too many times in the last hour. Try again later." });
   }
   const db = env.LIST;
-  const row = await db.prepare("SELECT customer FROM orgs WHERE id = ?").bind(org.id).first();
   let session;
   try {
-    session = await orgCheckout(env, { org: org.id, interval, customer: row ? row.customer : null });
+    let customer = await customerFor(env, org);
+    try {
+      session = await orgCheckout(env, { org: org.id, interval, customer });
+    } catch (err) {
+      /* A customer deleted in Stripe since: a new one, once. */
+      if (err.status !== 400 || err.param !== "customer") throw err;
+      console.log(`stripe org checkout: ${err.code}, with a new customer`);
+      customer = await customerFor(env, org, { replacing: customer });
+      session = await orgCheckout(env, { org: org.id, interval, customer });
+    }
   } catch (err) {
     console.log(`stripe org checkout: ${err.code || "error"}`);
     return upgradeForm(env, who, { status: 502,
@@ -300,6 +356,32 @@ export async function upgradePost(request, env) {
   }
   await event(db, { org: org.id, user: who.user, what: "upgrade_started", subject: interval }).run();
   return away(session.url);
+}
+
+/* After `lost` (an address) stops being an owner or an admin of the
+   organisation, by being removed, made a member, leaving or handing on
+   ownership (members.js): if Stripe's email for the organisation's
+   customer is theirs, it becomes the owner's, so that Stripe's
+   billing-page login no longer mails them a way in. Any other address
+   there is the one an owner or an admin chose in Manage billing, and
+   stays. Best effort, after the change is made: a failure is logged. */
+export async function billingEmailFollows(env, orgId, lost) {
+  if (!env.STRIPE_SECRET_KEY || typeof lost !== "string" || !lost) return;
+  const row = await env.LIST.prepare(
+    `SELECT o.customer, u.email AS owner FROM orgs o
+     JOIN memberships m ON m.org_id = o.id AND m.role = 'owner' JOIN users u ON u.id = m.user_id
+     WHERE o.id = ?`).bind(orgId).first();
+  if (!row || !CUSTOMER.test(String(row.customer))) return;
+  const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  if (same(row.owner, lost)) return;
+  try {
+    const email = await customerEmail(env, row.customer);
+    if (!email || !same(email, lost)) return;
+    await setCustomerEmail(env, row.customer, row.owner);
+    console.log("stripe billing email: moved to the owner");
+  } catch (err) {
+    console.log(`stripe billing email: ${err.code || "error"}`);
+  }
 }
 
 /* ---------- Manage billing ---------- */
@@ -316,13 +398,16 @@ async function billingProblem(env, who, status, text, { stepup = false, fallback
 }
 
 /* POST /billing: Stripe's billing portal for the customer of a
-   subscription linked to this organisation, looked up here, never taken
-   from the form. */
+   subscription linked to the organisation the form was drawn for, which
+   must be the one being looked at: looked up here, never taken from the
+   form. */
 export async function billingPost(request, env) {
   const who = await current(request, env);
   if (!who) return redirect("/signin", readCookie(request, SESSION_COOKIE) ? [clearCookie(SESSION_COOKIE)] : []);
   const f = await fields(request);
-  if (!await formOk(env, f, who.id, "billing")) return refused();
+  const bound = await orgFormOk(env, f, who, "billing");
+  if (bound === "refused") return refused();
+  if (bound === "elsewhere") return elsewhere();
   const org = who.org;
   if (!canManage(org)) {
     return billingProblem(env, who, 403, `Only an owner or an admin of ${org.name} can open its billing.`);

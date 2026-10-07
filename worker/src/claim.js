@@ -24,8 +24,11 @@
  *                       us. Never run but on this click.
  *
  * Every one of these is for an owner or an admin, with an emailed code
- * typed in the last 15 minutes, checked in that order before anything is
- * asked of Stripe, so that nothing says whether an address has a
+ * typed in the last 15 minutes, on a form drawn for the organisation the
+ * session is looking at when it is sent (session.js's orgFormOk(): a page
+ * left open in one tab attaches nothing to another organisation switched
+ * to, or joined, in a second, as an attachment is for good), checked in
+ * that order before anything is asked of Stripe, so that nothing says whether an address has a
  * subscription until the person asking has just shown the address is
  * theirs. A feed token is never proof: it is shared with every machine it
  * is on, and says nothing about who paid. Nothing is ever attached by
@@ -39,7 +42,10 @@
  * working, now named as the organisation's (auth.js), and is listed
  * among its machines as an old subscription token (kind 'legacy',
  * machines.js), where it can be revoked; revoked, it stays revoked, even
- * when the welcome page makes it again (stripe.js's issue()). The claim is
+ * when the welcome page makes it again (stripe.js's issue()). The
+ * organisation's own Stripe customer is never the buyer's: it stays the one
+ * billing.js makes it, with its owner's address, for its own Checkouts.
+ * The claim is
  * in the organisation's activity, and a notice goes to the Stripe
  * customer's email, out of the signed-in share of the day's account mail
  * (accounts.js): a claim that could not send it is not made. That address
@@ -51,11 +57,12 @@
 import { escape, mail, resend, REPLY_TO } from "./list.js";
 import { ACCOUNT_HOST, HOUR, canManage, now, spendAuthMail } from "./accounts.js";
 import {
-  ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formOk, formToken, fresh, readCookie,
+  ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formToken, fresh, orgFormOk, orgInput, orgToken,
+  readCookie,
 } from "./session.js";
-import { fields, form, page, redirect, refused } from "./ui.js";
+import { elsewhere, fields, form, page, redirect, refused } from "./ui.js";
 import {
-  CHECKOUT_ID, CUSTOMER, SUBSCRIPTION, checkoutClaim, issue, subscriptionClaim, subscriptionsFor,
+  CHECKOUT_ID, SUBSCRIPTION, checkoutClaim, issue, subscriptionClaim, subscriptionsFor,
 } from "./stripe.js";
 
 /* Lookups in Stripe one person makes an hour, Find my subscription and
@@ -111,7 +118,7 @@ async function claimForm(env, who, { checkout = null, error = "", status = 200 }
   }
   const fromCheckout = checkout ? `<h2>From your checkout</h2>
     <p>The checkout you came from shows which subscription is yours, for a day after paying.</p>
-    ${form("/claim", await formToken(env, who.id, "claim"), `
+    ${form("/claim", await orgToken(env, who, "claim"), `${orgInput(who)}
       <input type="hidden" name="session_id" value="${escape(checkout)}">
       <button type="submit">Attach to ${name}</button>`)}` : "";
   return page("Attach a subscription", `${head}
@@ -120,7 +127,7 @@ async function claimForm(env, who, { checkout = null, error = "", status = 200 }
     <h2>Find my subscription</h2>
     <p>Look in Stripe for live subscriptions paid with <strong>${escape(who.email)}</strong>, the address
        you just confirmed with a code, and choose the one to attach.</p>
-    ${form("/claim/find", await formToken(env, who.id, "claim-find"), `
+    ${form("/claim/find", await orgToken(env, who, "claim-find"), `${orgInput(who)}
       <button type="submit">Find my subscription</button>`)}
     <p><small>Paid with another address? <a href="${WRITE}">Write to us</a> from that address, and we
        attach it for you.</small></p>
@@ -137,12 +144,15 @@ export async function claimPage(request, env, ctx, url) {
 }
 
 /* What both POSTs check, in this order, before anything is asked of
-   Stripe: the form, the role, the fresh code, what the form names
+   Stripe: the form, and that it was drawn for the organisation being
+   looked at now, the role, the fresh code, what the form names
    (`named`: true, or why not, for POST /claim), and this person's
    lookups this hour, counted only for a form that gets this far. A
    Response to send back, or null to go on. */
 async function gate(env, who, f, action, { checkout = null, named = true } = {}) {
-  if (!await formOk(env, f, who.id, action)) return refused();
+  const bound = await orgFormOk(env, f, who, action);
+  if (bound === "refused") return refused();
+  if (bound === "elsewhere") return elsewhere();
   if (!canManage(who.org)) {
     return claimForm(env, who, { checkout, status: 403,
       error: `Only an owner or an admin of ${who.org.name} can attach a subscription to it, so nothing was attached.` });
@@ -193,10 +203,10 @@ export async function claimFind(request, env) {
        <a href="${WRITE}">write to us</a> from the address you paid with, and we attach it for you.</p>
     <p><a href="/claim">Back</a></p>`);
   }
-  const token = await formToken(env, who.id, "claim");
+  const token = await orgToken(env, who, "claim");
   const items = open.map((s) => `<li data-subscription="${escape(s.id)}">Plus${s.interval ? `, ${s.interval}` : ""}${
     s.since ? `, since ${day(s.since)}` : ""}
-      ${form("/claim", token, `
+      ${form("/claim", token, `${orgInput(who)}
         <input type="hidden" name="subscription" value="${escape(s.id)}">
         <button type="submit">Attach to ${name}</button>`)}</li>`).join("\n    ");
   return page("Find my subscription", `<h1>Find my subscription</h1>
@@ -250,9 +260,11 @@ export async function claimPost(request, env, ctx) {
 
 /* Links `proof.sub` to `who`'s organisation: "attached" when this request
    did, "here" when it was already this organisation's, otherwise why not.
-   The link, the old token's machine rows, the organisation's Stripe
-   customer (when it has none yet) and the event are one batch, and all
-   but the link are written only once the link is this request's own. */
+   The link, the old token's machine rows and the event are one batch, and
+   all but the link are written only once the link is this request's own.
+   The buyer's Stripe customer is not made the organisation's: whoever
+   paid on the pricing page keeps Stripe's billing-page login to that
+   subscription, and should never have it to the organisation's own. */
 async function attach(env, ctx, who, { sub, email }, how) {
   const db = env.LIST;
   const org = who.org;
@@ -281,10 +293,6 @@ async function attach(env, ctx, who, { sub, email }, how) {
     ...hashes.map(({ hash }) => db.prepare(
       `INSERT OR IGNORE INTO machines (id, hash, org_id, user_id, kind, label, created_at)
        SELECT ?, ?, ?, NULL, 'legacy', '', ? WHERE ${mine}`).bind(crypto.randomUUID(), hash, org.id, t, ...mineArgs)),
-    ...(CUSTOMER.test(String(sub.customer)) ? [
-      db.prepare(`UPDATE orgs SET customer = ? WHERE id = ? AND customer IS NULL AND ${mine}`)
-        .bind(sub.customer, org.id, ...mineArgs),
-    ] : []),
     db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
                 SELECT ?, ?, ?, ?, ? WHERE ${mine}`)
       .bind(org.id, who.user, how === "session" ? "plus_claimed_checkout" : "plus_claimed_email", sub.id, t, ...mineArgs),

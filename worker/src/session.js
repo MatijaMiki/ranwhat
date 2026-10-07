@@ -193,6 +193,23 @@ export async function formOk(env, form, binding, action) {
   return same(sent, await formToken(env, binding, action));
 }
 
+/* A form that acts on the organisation it was drawn for: its token is for
+   `${action}:${org}`, and the organisation is in a hidden field, so a form
+   left open in one tab cannot act on another organisation switched to (or
+   joined) in a second. orgToken() and orgInput() draw one for the
+   organisation `who` is looking at; orgFormOk() answers "ok" when the form
+   is right and for that organisation, "elsewhere" when it is right but was
+   drawn for another, and "refused" otherwise. */
+export const orgToken = (env, who, action) => formToken(env, who.id, `${action}:${who.org.id}`);
+export const orgInput = (who) => `<input type="hidden" name="org" value="${escape(who.org.id)}">`;
+
+export async function orgFormOk(env, form, who, action) {
+  const orgId = form.get("org");
+  if (typeof orgId !== "string" || !orgId || orgId.length > 100 ||
+      !await formOk(env, form, who.id, `${action}:${orgId}`)) return "refused";
+  return orgId === who.org.id ? "ok" : "elsewhere";
+}
+
 /* ---------- limits ---------- */
 
 /* The network a request comes from, as the limits count it: an IPv4

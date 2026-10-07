@@ -971,14 +971,16 @@ test("an owner renames the organisation; a name is escaped, and a member cannot"
   const ana = new Browser(e);
   await signIn(ana, s, "ana@example.com");
   let home = await ana.get("/");
-  let r = await ana.post("/org", { form: tokenFor(home.text, "/org"), name: "  Acme <b>&\n Co  " });
+  /* The form names the organisation it was drawn for. */
+  const drawnFor = home.text.match(/<form method="post" action="\/org">[\s\S]*?name="org" value="([^"]+)"/)[1];
+  let r = await ana.post("/org", { form: tokenFor(home.text, "/org"), org: drawnFor, name: "  Acme <b>&\n Co  " });
   assert.equal(r.location, "/");
   home = await ana.get("/");
   assert.ok(home.text.includes("Acme &lt;b&gt;&amp; Co"));
   assert.ok(!home.text.includes("<b>&"));
   assert.equal(rows(e, "SELECT name FROM orgs")[0].name, "Acme <b>& Co");
   for (const bad of ["", "   ", "x".repeat(81), "evil\u202egnp.exe", "bell\u0007"]) {
-    r = await ana.post("/org", { form: tokenFor(home.text, "/org"), name: bad });
+    r = await ana.post("/org", { form: tokenFor(home.text, "/org"), org: drawnFor, name: bad });
     assert.equal(r.status, 400, JSON.stringify(bad));
   }
   assert.equal(rows(e, "SELECT name FROM orgs")[0].name, "Acme <b>& Co");
@@ -993,8 +995,9 @@ test("an owner renames the organisation; a name is escaped, and a member cannot"
   const theirs = await bo.get("/");
   assert.ok(theirs.text.includes("Acme &lt;b&gt;&amp; Co") && theirs.text.includes("Member"));
   assert.doesNotMatch(theirs.text, /action="\/org"/);
-  r = await bo.post("/org", { form: await formToken(e, sha(bo.jar.get(SESSION)), "org"), name: "Taken" });
+  r = await bo.post("/org", { form: await formToken(e, sha(bo.jar.get(SESSION)), `org:${acme}`), org: acme, name: "Taken" });
   assert.equal(r.status, 403);
+  assert.match(r.text, /Only an owner or an admin can rename it/);
   assert.equal(rows(e, "SELECT name FROM orgs WHERE id = ?", acme)[0].name, "Acme <b>& Co");
 
   // Removed from it, Bo is back in his own on the next request.

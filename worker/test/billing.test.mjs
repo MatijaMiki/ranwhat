@@ -55,9 +55,8 @@ function services() {
       { id: "bpc_other", metadata: {} },
       { id: "bpc_plus", metadata: PLUS, login_page: { enabled: true, url: "https://billing.stripe.com/p/login/plus" } },
     ],
-    sessions: new Map(), subscriptions: new Map(), emails: [], calls: [],
+    sessions: new Map(), subscriptions: new Map(), customers: new Map(), emails: [], calls: [],
     fail: {},               // "METHOD /path" prefix -> [status, body]
-    refuseCustomer: false,  // Checkout turns down a customer, as a deleted one would be
   };
   const reply = (status, body) => new Response(JSON.stringify(body), { status });
   const missing = () => reply(404, { error: { type: "invalid_request_error", code: "resource_missing" } });
@@ -89,19 +88,47 @@ function services() {
       return reply(200, { data: Object.values(s.prices).filter((p) => p.lookup_key === form["lookup_keys[0]"] && p.active) });
     }
     if (key === "POST /v1/checkout/sessions") {
-      if (s.refuseCustomer && form.customer) {
+      /* A customer deleted, or never made, is turned down as Stripe does. */
+      if (form.customer && (!s.customers.has(form.customer) || s.customers.get(form.customer).deleted)) {
         return reply(400, { error: { type: "invalid_request_error", code: "resource_missing", param: "customer" } });
       }
       const id = `cs_test_${"b".repeat(20)}${s.sessions.size}`;
       const session = { id, object: "checkout.session", url: `https://checkout.stripe.com/c/pay/${id}`,
         mode: form.mode, status: "open", payment_status: "unpaid", created: unix(),
+        expires_at: form.expires_at ? Number(form.expires_at) : unix() + DAY,
         metadata: under(form, "metadata"), client_reference_id: form.client_reference_id ?? null,
         customer: form.customer ?? null, subscription: null, customer_details: null,
         price: form["line_items[0][price]"], subscription_metadata: under(form, "subscription_data[metadata]") };
       s.sessions.set(id, session);
       return reply(200, session);
     }
-    let m = u.pathname.match(/^\/v1\/checkout\/sessions\/([^/]+)$/);
+    if (key === "GET /v1/checkout/sessions") {
+      /* hideOpen: two Checkouts opened at once, before either could see the other. */
+      if (s.hideOpen) return reply(200, { object: "list", data: [] });
+      return reply(200, { object: "list", data: [...s.sessions.values()].filter((x) =>
+        (!form.customer || x.customer === form.customer) && (!form.status || x.status === form.status)) });
+    }
+    if (key === "POST /v1/customers") {
+      const id = `cus_test${s.customers.size + 1}org`;
+      s.customers.set(id, { id, object: "customer", email: form.email, metadata: under(form, "metadata") });
+      return reply(200, s.customers.get(id));
+    }
+    let m = u.pathname.match(/^\/v1\/customers\/([^/]+)$/);
+    if (m) {
+      const c = s.customers.get(m[1]);
+      if (!c) return missing();
+      if (method === "POST") c.email = form.email ?? c.email;
+      return reply(200, c.deleted ? { id: c.id, object: "customer", deleted: true } : c);
+    }
+    m = u.pathname.match(/^\/v1\/checkout\/sessions\/([^/]+)\/expire$/);
+    if (method === "POST" && m) {
+      const x = s.sessions.get(m[1]);
+      if (!x) return missing();
+      if (x.status !== "open") return reply(400, { error: { type: "invalid_request_error", code: "checkout_session_not_open" } });
+      x.status = "expired";
+      return reply(200, x);
+    }
+    m = u.pathname.match(/^\/v1\/checkout\/sessions\/([^/]+)$/);
     if (method === "GET" && m) return s.sessions.has(m[1]) ? reply(200, s.sessions.get(m[1])) : missing();
     m = u.pathname.match(/^\/v1\/subscriptions\/([^/]+)$/);
     if (method === "GET" && m) return s.subscriptions.has(m[1]) ? reply(200, s.subscriptions.get(m[1])) : missing();
@@ -118,9 +145,13 @@ function services() {
 
 /* What Stripe does when someone pays for a session: a subscription with
    the session's subscription metadata, on the session's customer or a new
-   one, and the session complete. */
+   one, and the session complete. On a customer's session Stripe takes the
+   customer's email, and the payer cannot change it; otherwise `email` is
+   what the payer typed. */
 function pay(s, sessionId, { email = "payer@example.com", status = "active" } = {}) {
   const session = s.sessions.get(sessionId);
+  assert.equal(session.status, "open", "Stripe takes payment only on an open session");
+  if (session.customer) email = s.customers.get(session.customer).email;
   const n = s.subscriptions.size + 1;
   const sub = {
     id: `sub_test${n}billing`, object: "subscription", customer: session.customer || `cus_test${n}billing`,
@@ -185,6 +216,21 @@ function tokenFor(html, action) {
   return m[1];
 }
 
+/* Every form on a page that posts to `action`, as its hidden fields: the
+   token, the organisation it was drawn for, and what else it carries. */
+function formsOf(html, action) {
+  const re = new RegExp(`<form method="post" action="${action}"[^>]*>([\\s\\S]*?)</form>`, "g");
+  return [...html.matchAll(re)].map((m) => Object.fromEntries(
+    [...m[1].matchAll(/<input type="hidden" name="([a-z_-]+)" value="([^"]*)">/g)].map((x) => [x[1], x[2]])));
+}
+
+/* The first of them. */
+function hidden(html, action) {
+  const [first] = formsOf(html, action);
+  assert.ok(first, `no form for ${action}`);
+  return first;
+}
+
 const codeIn = (mail) => mail.text.match(/^ {4}([0-9A-Z]{4}-[0-9A-Z]{4})$/m)[1];
 
 async function typeCode(b, code) {
@@ -219,6 +265,9 @@ const eventsOf = (e, org) => rows(e, "SELECT user_id, event, subject FROM auth_e
   .filter((r) => ["upgrade_started", "billing_opened", "plus_linked"].includes(r.event));
 const checkouts = (s) => s.calls.filter((c) => c.key === "POST /v1/checkout/sessions");
 const portals = (s) => s.calls.filter((c) => c.key === "POST /v1/billing_portal/sessions");
+const customerOf = (e, org) => one(e, "SELECT customer FROM orgs WHERE id = ?", org).customer;
+/* A form token for `action` drawn for `org`, as a page would make it, with the organisation it names. */
+const bound = async (e, b, action, org) => ({ form: await formToken(e, b.session, `${action}:${org}`), org });
 
 /* `email` joins `orgId` as `role`, and their session looks at it. */
 function join(e, email, orgId, role = "member") {
@@ -261,7 +310,7 @@ const feed = (e, token) => worker.fetch(new Request(`${FEED}/v1/catalogue`,
 async function upgrade(b, s, plan = "monthly") {
   const page = await b.get("/upgrade");
   assert.equal(page.status, 200, page.text);
-  const res = await b.post("/upgrade", { form: tokenFor(page.text, "/upgrade"), plan });
+  const res = await b.post("/upgrade", { ...hidden(page.text, "/upgrade"), plan });
   assert.equal(res.status, 303, res.text);
   assert.match(res.location, /^https:\/\/checkout\.stripe\.com\/c\/pay\/cs_test_/);
   return res.location.split("/").pop();
@@ -330,7 +379,13 @@ test("an owner's upgrade is a Checkout bound to the organisation, at the pricing
     assert.equal(form["subscription_data[metadata][org]"], org);
     assert.equal(form.success_url, "https://account.ranwhat.com/?upgraded=1");
     assert.equal(form.cancel_url, "https://account.ranwhat.com/upgrade");
-    assert.equal(form.customer, undefined, "a first checkout has no customer to reuse");
+    /* The organisation's own customer, made before its first checkout with the owner's address. */
+    assert.equal(form.customer, customerOf(e, org));
+    assert.deepEqual(s.customers.get(form.customer),
+      { id: form.customer, object: "customer", email: "ana@example.com", metadata: { product: "ranwhat-plus", org } });
+    assert.equal(form["customer_update[address]"], "auto");
+    const expires = Number(form.expires_at) - unix();
+    assert.ok(expires >= 30 * MINUTE && expires <= 32 * MINUTE, String(expires));
     // The pricing page's own settings, as STRIPE_TAX says.
     assert.match(form["custom_text[submit][message]"], /14 days/);
     assert.equal(form["tax_id_collection[enabled]"], "true");
@@ -338,13 +393,14 @@ test("an owner's upgrade is a Checkout bound to the organisation, at the pricing
   }
   const lookups = s.calls.filter((c) => c.key === "GET /v1/prices").map((c) => c.form["lookup_keys[0]"]);
   assert.deepEqual(lookups, ["ranwhat_plus_monthly", "ranwhat_plus_annual"]);
+  assert.equal(s.calls.filter((c) => c.key === "POST /v1/customers").length, 1, "one customer, reused");
   assert.deepEqual(eventsOf(e, org).map((r) => [r.event, r.subject, r.user_id]),
     [["upgrade_started", "monthly", userId(e, "ana@example.com")], ["upgrade_started", "yearly", userId(e, "ana@example.com")]]);
 
   /* A plan that is not one of the two opens nothing. */
   const before = s.calls.length;
   for (const plan of ["", "annual", "lifetime", "__proto__"]) {
-    const r = await ana.post("/upgrade", { form: tokenFor(page.text, "/upgrade"), plan });
+    const r = await ana.post("/upgrade", { ...hidden(page.text, "/upgrade"), plan });
     assert.equal(r.status, 400, plan);
   }
   assert.equal(s.calls.length, before);
@@ -355,14 +411,14 @@ test("an owner's upgrade is a Checkout bound to the organisation, at the pricing
   await signIn(bo, s, "bo@example.com");
   await upgrade(bo, s, "monthly");
   assert.deepEqual(Object.keys(checkouts(s).at(-1).form).sort(), [
-    "cancel_url", "client_reference_id", "line_items[0][price]", "line_items[0][quantity]", "managed_payments[enabled]",
-    "metadata[org]", "metadata[product]", "mode", "subscription_data[metadata][org]",
+    "cancel_url", "client_reference_id", "customer", "expires_at", "line_items[0][price]", "line_items[0][quantity]",
+    "managed_payments[enabled]", "metadata[org]", "metadata[product]", "mode", "subscription_data[metadata][org]",
     "subscription_data[metadata][product]", "success_url",
   ]);
 
   /* Stripe down: nothing charged, said so, and the page offers it again. */
   s.fail["POST /v1/checkout"] = [500, { error: { type: "api_error" } }];
-  const down = await ana.post("/upgrade", { form: tokenFor(page.text, "/upgrade"), plan: "monthly" });
+  const down = await ana.post("/upgrade", { ...hidden(page.text, "/upgrade"), plan: "monthly" });
   assert.equal(down.status, 502);
   assert.match(down.text, /Checkout did not open\. Nothing was charged/);
   assert.match(down.text, /action="\/upgrade"/);
@@ -386,8 +442,7 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   assert.match((await bo.get("/")).text, /Personal is on Free\. An owner or an admin of it can upgrade it to Plus\./);
 
   /* A form made for the member's own session, as a forged one would be: refused before Stripe is asked. */
-  const forged = await formToken(e, bo.session, "upgrade");
-  const r = await bo.post("/upgrade", { form: forged, plan: "monthly" });
+  const r = await bo.post("/upgrade", { ...await bound(e, bo, "upgrade", org), plan: "monthly" });
   assert.equal(r.status, 403);
   assert.match(r.text, /Only an owner or an admin/);
   assert.equal(s.calls.length, 0);
@@ -409,7 +464,7 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   assert.match(home.text, /An owner or an admin of Personal manages its billing\./);
   assert.doesNotMatch(home.text, /action="\/billing"/);
   assert.doesNotMatch(home.headers.get("content-security-policy"), /billing\.stripe\.com/);
-  const tried = await bo.post("/billing", { form: await formToken(e, bo.session, "billing"), subscription: sub.id });
+  const tried = await bo.post("/billing", { ...await bound(e, bo, "billing", org), subscription: sub.id });
   assert.equal(tried.status, 403);
   assert.match(tried.text, /Only an owner or an admin of Personal can open its billing\./);
   assert.equal(portals(s).length, 0);
@@ -421,7 +476,7 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   const ana = new Browser(e);
   await signIn(ana, s);
   const org = orgOf(e, "ana@example.com");
-  const kept = tokenFor((await ana.get("/upgrade")).text, "/upgrade");
+  const kept = hidden((await ana.get("/upgrade")).text, "/upgrade");
 
   later(FRESH_FOR + 1);
   const stale = await ana.get("/upgrade");
@@ -429,7 +484,7 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   assert.doesNotMatch(stale.text, /action="\/upgrade"/);
   assert.match(stale.text, /<input type="hidden" name="next" value="\/upgrade">/);
   assert.doesNotMatch(stale.headers.get("content-security-policy"), /stripe/);
-  const r = await ana.post("/upgrade", { form: kept, plan: "monthly" });
+  const r = await ana.post("/upgrade", { ...kept, plan: "monthly" });
   assert.equal(r.status, 403);
   assert.match(r.text, /so it did not open/);
   assert.equal(s.calls.length, 0);
@@ -439,7 +494,7 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   assert.equal(asked.location, "/signin/code");
   assert.equal((await typeCode(ana, codeIn(s.emails.at(-1)))).location, "/upgrade");
   /* A fresh code is a new session, so the forms are the new page's. */
-  const form = tokenFor((await ana.get("/upgrade")).text, "/upgrade");
+  const form = hidden((await ana.get("/upgrade")).text, "/upgrade");
   const { sub } = await upgraded(ana, s, e);
 
   /* On Plus: nothing more to buy, before anything is asked of Stripe. */
@@ -447,7 +502,7 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   const page = await ana.get("/upgrade");
   assert.match(page.text, /Personal is on Plus already, so there is nothing to buy\./);
   assert.doesNotMatch(page.text, /action="\/upgrade"/);
-  const again = await ana.post("/upgrade", { form, plan: "yearly" });
+  const again = await ana.post("/upgrade", { ...form, plan: "yearly" });
   assert.equal(again.status, 409);
   assert.equal(checkouts(s).length, calls);
 
@@ -456,7 +511,7 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   await deliver(e, subEvent(sub, "customer.subscription.deleted"));
   grant(e, org, "team");
   assert.match((await ana.get("/upgrade")).text, /Personal is on Team already/);
-  assert.equal((await ana.post("/upgrade", { form, plan: "monthly" })).status, 409);
+  assert.equal((await ana.post("/upgrade", { ...form, plan: "monthly" })).status, 409);
   assert.equal(checkouts(s).length, calls);
 });
 
@@ -466,8 +521,7 @@ test("an organisation opens only so many checkouts an hour", async () => {
   const ana = new Browser(e);
   await signIn(ana, s);
   for (let i = 0; i < UPGRADES_PER_HOUR; i++) await upgrade(ana, s);
-  const token = tokenFor((await ana.get("/upgrade")).text, "/upgrade");
-  const r = await ana.post("/upgrade", { form: token, plan: "monthly" });
+  const r = await ana.post("/upgrade", { ...hidden((await ana.get("/upgrade")).text, "/upgrade"), plan: "monthly" });
   assert.equal(r.status, 429);
   assert.equal(checkouts(s).length, UPGRADES_PER_HOUR);
 });
@@ -505,7 +559,7 @@ test("the webhook links the subscription once, in any order and however often St
   /* One email, saying Plus is on and to run ranwhat login: no token in it, and none made. */
   const sent = s.emails.slice(mails);
   assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].to, ["payer@example.com"]);
+  assert.deepEqual(sent[0].to, ["ana@example.com"], "the organisation's customer's address, the owner's");
   assert.equal(sent[0].subject, "ranwhat Plus is on for Personal");
   assert.match(sent[0].text, /^ {2}uvx ranwhat login$/m);
   assert.match(sent[0].html, /uvx ranwhat login/);
@@ -521,8 +575,6 @@ test("the webhook links the subscription once, in any order and however often St
   assert.doesNotMatch(shown, /rw_/);
   assert.equal(count(e, "tokens"), 0);
 
-  /* The address Stripe took is in no table. */
-  assert.ok(!dump(e).includes("payer@example.com"));
 
   /* The account page: Plus, yearly, active, and the day it renews. */
   const home = await ana.get("/?upgraded=1");
@@ -599,7 +651,7 @@ test("Manage billing opens the portal for the organisation's own customer, with 
   const home = await ana.get("/");
   assert.match(home.headers.get("content-security-policy"), /form-action 'self' https:\/\/billing\.stripe\.com; /);
   assert.doesNotMatch(home.text, /<script/);
-  const r = await ana.post("/billing", { form: tokenFor(home.text, "/billing"), subscription: sub.id });
+  const r = await ana.post("/billing", hidden(home.text, "/billing"));
   assert.equal(r.status, 303, r.text);
   assert.match(r.location, /^https:\/\/billing\.stripe\.com\/p\/session\/test_/);
   assert.deepEqual(portals(s).at(-1).form,
@@ -608,7 +660,7 @@ test("Manage billing opens the portal for the organisation's own customer, with 
 
   /* Stripe's portal down: said so, with the portal's own login as the way round. */
   s.fail["POST /v1/billing_portal/sessions"] = [403, { error: { type: "invalid_request_error" } }];
-  const down = await ana.post("/billing", { form: tokenFor(home.text, "/billing"), subscription: sub.id });
+  const down = await ana.post("/billing", hidden(home.text, "/billing"));
   assert.equal(down.status, 502);
   assert.match(down.text, /<a href="https:\/\/ranwhat\.com\/api\/billing">/);
   delete s.fail["POST /v1/billing_portal/sessions"];
@@ -620,7 +672,7 @@ test("Manage billing opens the portal for the organisation's own customer, with 
   assert.match(stale.text, /Manage billing needs an emailed code typed in the last 15 minutes/);
   assert.doesNotMatch(stale.headers.get("content-security-policy"), /stripe/);
   const n = portals(s).length;
-  const refused = await ana.post("/billing", { form: tokenFor(home.text, "/billing"), subscription: sub.id });
+  const refused = await ana.post("/billing", hidden(home.text, "/billing"));
   assert.equal(refused.status, 403);
   assert.match(refused.text, /Opening billing needs an emailed code/);
   assert.match(refused.text, /action="\/stepup"/);
@@ -635,29 +687,32 @@ test("a portal session is only for a subscription linked to the organisation", a
   const { sub } = await upgraded(ana, s, e);
   const bo = new Browser(e, { ip: "203.0.113.50" });
   await signIn(bo, s, "bo@example.com");
-  const token = await formToken(e, bo.session, "billing");
+  const token = await bound(e, bo, "billing", orgOf(e, "bo@example.com"));
   const before = s.calls.length;
   for (const named of [sub.id, "sub_test9neverlinked", "", "cus_test1billing", "../../v1/customers"]) {
-    const r = await bo.post("/billing", { form: token, subscription: named });
+    const r = await bo.post("/billing", { ...token, subscription: named });
     assert.equal(r.status, 404, named);
     assert.match(r.text, /is not linked to Personal, so billing did not open/);
   }
   assert.equal(s.calls.length, before, "nothing was asked of Stripe");
   assert.equal(portals(s).length, 0);
   /* Nor does a form token for another action, or a request from another site, open it. */
-  assert.equal((await ana.post("/billing", { form: await formToken(e, ana.session, "upgrade"), subscription: sub.id })).status, 403);
-  assert.equal((await ana.post("/billing", { form: await formToken(e, ana.session, "billing"), subscription: sub.id },
+  const anaOrg = orgOf(e, "ana@example.com");
+  assert.equal((await ana.post("/billing", { ...await bound(e, ana, "upgrade", anaOrg), subscription: sub.id })).status, 403);
+  assert.equal((await ana.post("/billing", { form: await formToken(e, ana.session, "billing"), org: anaOrg, subscription: sub.id })).status, 403);
+  assert.equal((await ana.post("/billing", { ...await bound(e, ana, "billing", anaOrg), subscription: sub.id },
     { "sec-fetch-site": "same-site", origin: "https://ranwhat.com" })).status, 403);
   assert.equal(portals(s).length, 0);
 });
 
-test("the next upgrade reuses the organisation's customer, and goes on without it when Stripe turns it down", async () => {
+test("the next upgrade reuses the organisation's customer, and makes it a new one when Stripe has deleted it", async () => {
   const s = services();
   const e = env();
   const ana = new Browser(e);
   await signIn(ana, s);
   const org = orgOf(e, "ana@example.com");
   const { sub } = await upgraded(ana, s, e, "monthly");
+  assert.equal(sub.customer, customerOf(e, org));
   sub.status = "canceled";
   sub.ended_at = unix() - 60;
   await deliver(e, subEvent(sub, "customer.subscription.deleted"));
@@ -675,27 +730,29 @@ test("the next upgrade reuses the organisation's customer, and goes on without i
   assert.equal(form.customer, sub.customer);
   assert.equal(form["customer_update[address]"], "auto");
   assert.equal(form["customer_update[name]"], "auto");
+  assert.equal(s.calls.filter((c) => c.key === "POST /v1/customers").length, 1);
 
-  s.refuseCustomer = true;
+  /* Deleted in Stripe since: a new customer, with the owner's address, kept, and never none. */
+  s.customers.get(sub.customer).deleted = true;
   const n = checkouts(s).length;
   await upgrade(ana, s, "yearly");
   assert.equal(checkouts(s).length, n + 2);
   ({ form } = checkouts(s).at(-1));
-  assert.equal(form.customer, undefined);
-  assert.equal(form["customer_update[address]"], undefined);
+  assert.notEqual(form.customer, sub.customer);
+  assert.equal(form.customer, customerOf(e, org));
+  assert.equal(s.customers.get(form.customer).email, "ana@example.com");
   assert.equal(form["metadata[org]"], org);
-  assert.equal(one(e, "SELECT customer FROM orgs WHERE id = ?", org).customer, sub.customer, "the first customer stays");
+  assert.ok(checkouts(s).every((c) => c.form.customer), "no checkout for an organisation is made without its customer");
 
   /* Under Managed Payments the customer goes alone. */
-  s.refuseCustomer = false;
   const m = { ...e, STRIPE_TAX: "managed" };
   const res = await worker.fetch(new Request(`${ORIGIN}/upgrade`, { method: "POST",
     headers: { ...FROM_PAGE, "content-type": "application/x-www-form-urlencoded", "cf-connecting-ip": ana.ip,
       cookie: `${SESSION}=${ana.jar.get(SESSION)}` },
-    body: new URLSearchParams({ form: await formToken(e, ana.session, "upgrade"), plan: "monthly" }).toString() }), m, ctx);
+    body: new URLSearchParams({ ...await bound(e, ana, "upgrade", org), plan: "monthly" }).toString() }), m, ctx);
   assert.equal(res.status, 303);
   ({ form } = checkouts(s).at(-1));
-  assert.equal(form.customer, sub.customer);
+  assert.equal(form.customer, customerOf(e, org));
   assert.equal(form["customer_update[address]"], undefined);
 });
 
@@ -765,4 +822,221 @@ test("with accounts on, the pricing page's anonymous checkout, welcome and billi
   const billing = await site(e, "/api/billing");
   assert.equal(billing.status, 302);
   assert.equal(billing.headers.get("location"), "https://billing.stripe.com/p/login/plus");
+});
+
+/* ---------- bound to the organisation ---------- */
+
+/* `b` looks at `orgId`, with the switcher on the account page. */
+async function switchTo(b, orgId) {
+  const home = await b.get("/");
+  const r = await b.post("/org/switch", { ...hidden(home.text, "/org/switch"), org: orgId });
+  assert.equal(r.status, 303, r.text);
+}
+
+test("a form drawn for one organisation does nothing once another is switched to in a second tab", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const acme = orgOf(e, "ana@example.com");
+  run(e, "UPDATE orgs SET name = 'Acme' WHERE id = ?", acme);
+  const bo = new Browser(e, { ip: "203.0.113.80" });
+  await signIn(bo, s, "bo@example.com");
+  const own = orgOf(e, "bo@example.com");
+  join(e, "bo@example.com", acme, "admin");
+
+  /* Tab 1: the upgrade and the account page, drawn for Acme. */
+  const upgradePage = await bo.get("/upgrade");
+  assert.match(upgradePage.text, /everyone in <strong>Acme<\/strong>/);
+  const upgradeForm = hidden(upgradePage.text, "/upgrade");
+  assert.equal(upgradeForm.org, acme);
+  const renameForm = hidden((await bo.get("/")).text, "/org");
+  assert.equal(renameForm.org, acme);
+
+  /* Tab 2: Bo switches to his own organisation. */
+  await switchTo(bo, own);
+  const before = s.calls.length;
+  const stale = await bo.post("/upgrade", { ...upgradeForm, plan: "yearly" });
+  assert.equal(stale.status, 409);
+  assert.match(stale.text, /That form was for another of your organisations/);
+  assert.equal(s.calls.length, before, "nothing was asked of Stripe");
+  assert.equal(checkouts(s).length, 0);
+  assert.deepEqual(eventsOf(e, own), []);
+  const renamed = await bo.post("/org", { ...renameForm, name: "Renamed" });
+  assert.equal(renamed.status, 409);
+  assert.deepEqual(rows(e, "SELECT name FROM orgs ORDER BY name").map((r) => r.name), ["Acme", "Personal"]);
+
+  /* A form that names no organisation, or another than its token was made for, is refused outright. */
+  const { org: _drop, ...bare } = upgradeForm;
+  assert.equal((await bo.post("/upgrade", { ...bare, plan: "yearly" })).status, 403);
+  assert.equal((await bo.post("/upgrade", { ...upgradeForm, org: own, plan: "yearly" })).status, 403);
+  assert.equal(s.calls.length, before);
+
+  /* Back on Acme, now on Plus: Manage billing and a CI token, drawn for Acme. */
+  await switchTo(bo, acme);
+  const { sub } = await upgraded(ana, s, e);
+  const acmeHome = (await bo.get("/")).text;
+  const billingForm = hidden(acmeHome, "/billing");
+  assert.equal(billingForm.org, acme);
+  assert.equal(billingForm.subscription, sub.id);
+  const ciForm = hidden(acmeHome, "/tokens/ci");
+  assert.equal(ciForm.org, acme);
+  await switchTo(bo, own);
+  const n = s.calls.length;
+  const portal = await bo.post("/billing", billingForm);
+  assert.equal(portal.status, 409);
+  assert.equal(portals(s).length, 0);
+  assert.equal(s.calls.length, n);
+  const ci = await bo.post("/tokens/ci", { ...ciForm, label: "deploy", expires: "never" });
+  assert.equal(ci.status, 409);
+  assert.doesNotMatch(ci.text, /rw_c_/);
+  assert.equal(count(e, "machines"), 0);
+
+  /* Drawn again for the organisation looked at, they work. */
+  await switchTo(bo, acme);
+  const again = await bo.post("/billing", hidden((await bo.get("/")).text, "/billing"));
+  assert.equal(again.status, 303, again.text);
+  assert.equal(portals(s).length, 1);
+});
+
+/* ---------- the organisation's own customer ---------- */
+
+test("the organisation's Stripe customer is its own, with the owner's address, and follows the owner", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const acme = orgOf(e, "ana@example.com");
+  run(e, "UPDATE orgs SET name = 'Acme' WHERE id = ?", acme);
+  const yan = new Browser(e, { ip: "203.0.113.90" });
+  await signIn(yan, s, "yan@example.com");
+  join(e, "yan@example.com", acme, "admin");
+  const carl = new Browser(e, { ip: "203.0.113.91" });
+  await signIn(carl, s, "carl@example.com");
+  join(e, "carl@example.com", acme, "admin");
+  const [yanId, carlId] = [userId(e, "yan@example.com"), userId(e, "carl@example.com")];
+
+  /* Yan, an admin, upgrades and pays: the Checkout is on Acme's customer, made with Ana's address,
+     which the payer cannot change, so the "Plus is on" email and Stripe's billing login are Ana's. */
+  const mails = s.emails.length;
+  const id = await upgrade(yan, s, "monthly");
+  const cus = customerOf(e, acme);
+  assert.equal(s.sessions.get(id).customer, cus);
+  assert.equal(s.customers.get(cus).email, "ana@example.com");
+  const sub = pay(s, id, { email: "yan@example.com" });
+  assert.equal((await deliver(e, completedEvent(s, id))).status, 200);
+  assert.equal(sub.customer, cus);
+  assert.deepEqual(s.emails.slice(mails).map((m) => m.to[0]), ["ana@example.com"]);
+  assert.equal(customerOf(e, acme), cus, "the webhook keeps the organisation's own customer");
+
+  const lines = [];
+  const real = console.log;
+  console.log = (...a) => lines.push(a.join(" "));
+  const updates = () => s.calls.filter((c) => c.key === `POST /v1/customers/${cus}`).map((c) => c.form.email);
+  try {
+    /* Yan, while an admin, makes the billing email his own in Stripe's billing page; made a member, it is Ana's again. */
+    s.customers.get(cus).email = "yan@example.com";
+    let r = await ana.post("/members/role", formsOf((await ana.get("/")).text, "/members/role").find((f) => f.user === yanId));
+    assert.equal(r.status, 303, r.text);
+    assert.equal(s.customers.get(cus).email, "ana@example.com");
+    assert.deepEqual(updates(), ["ana@example.com"]);
+
+    /* An admin again, the same, and removed: Ana's again. */
+    r = await ana.post("/members/role", formsOf((await ana.get("/")).text, "/members/role").find((f) => f.user === yanId));
+    assert.equal(r.status, 303, r.text);
+    s.customers.get(cus).email = "Yan@Example.com";
+    r = await ana.post("/members/remove", formsOf((await ana.get("/")).text, "/members/remove").find((f) => f.user === yanId));
+    assert.equal(r.status, 303, r.text);
+    assert.equal(s.customers.get(cus).email, "ana@example.com");
+    assert.equal(updates().length, 2);
+
+    /* An address an owner chose, someone else's, stays when an admin goes. */
+    s.customers.get(cus).email = "billing@acme.example";
+    const dee = new Browser(e, { ip: "203.0.113.92" });
+    await signIn(dee, s, "dee@example.com");
+    join(e, "dee@example.com", acme, "admin");
+    r = await ana.post("/members/remove", formsOf((await ana.get("/")).text, "/members/remove")
+      .find((f) => f.user === userId(e, "dee@example.com")));
+    assert.equal(r.status, 303, r.text);
+    assert.equal(s.customers.get(cus).email, "billing@acme.example");
+    assert.equal(updates().length, 2);
+
+    /* Ownership handed on: the owner's address becomes the new owner's. */
+    s.customers.get(cus).email = "ana@example.com";
+    const asked = await ana.post("/members/transfer",
+      formsOf((await ana.get("/")).text, "/members/transfer").find((f) => f.user === carlId));
+    assert.equal(asked.status, 200, asked.text);
+    r = await ana.post("/members/transfer", hidden(asked.text, "/members/transfer"));
+    assert.equal(r.status, 303, r.text);
+    assert.equal(s.customers.get(cus).email, "carl@example.com");
+
+    /* Stripe down: the change is made, and the failure only logged. */
+    s.customers.get(cus).email = "ana@example.com";
+    s.fail[`POST /v1/customers/${cus}`] = [500, { error: { type: "api_error" } }];
+    r = await carl.post("/members/remove", formsOf((await carl.get("/")).text, "/members/remove")
+      .find((f) => f.user === userId(e, "ana@example.com")));
+    assert.equal(r.status, 303, r.text);
+    assert.equal(rows(e, "SELECT 1 FROM memberships WHERE org_id = ? AND user_id = ?", acme, userId(e, "ana@example.com")).length, 0);
+    assert.ok(lines.includes("stripe billing email: api_error"), lines.join("\n"));
+  } finally {
+    console.log = real;
+  }
+  for (const line of lines) assert.doesNotMatch(line, /@|cus_|sub_|sk_/);
+});
+
+/* ---------- paying twice ---------- */
+
+test("a new checkout expires the organisation's open one, and two paid at once are flagged", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const org = orgOf(e, "ana@example.com");
+
+  /* Monthly opened, then yearly: the monthly one is expired before the yearly one is made. */
+  const first = await upgrade(ana, s, "monthly");
+  const second = await upgrade(ana, s, "yearly");
+  assert.equal(s.sessions.get(first).status, "expired");
+  assert.equal(s.sessions.get(second).status, "open");
+  const expired = s.calls.filter((c) => c.key.endsWith("/expire")).map((c) => c.key);
+  assert.deepEqual(expired, [`POST /v1/checkout/sessions/${first}/expire`]);
+  assert.ok(s.calls.findIndex((c) => c.key === `POST /v1/checkout/sessions/${first}/expire`) <
+    s.calls.findLastIndex((c) => c.key === "POST /v1/checkout/sessions"));
+  assert.throws(() => pay(s, first), /open session/, "Stripe takes no payment on it");
+  /* Another site's open session on the same customer is left alone. */
+  const theirs = `cs_test_${"x".repeat(20)}`;
+  s.sessions.set(theirs, { id: theirs, status: "open", customer: customerOf(e, org), metadata: { product: "other" } });
+  await upgrade(ana, s, "monthly");
+  assert.equal(s.sessions.get(theirs).status, "open");
+  assert.equal(s.sessions.get(second).status, "expired");
+
+  /* Two opened at once, before either could see the other, and both paid. */
+  s.hideOpen = true;
+  const a = await upgrade(ana, s, "monthly");
+  const b = await upgrade(ana, s, "yearly");
+  const lines = [];
+  const real = console.log;
+  console.log = (...x) => lines.push(x.join(" "));
+  const mails = s.emails.length;
+  try {
+    const subA = pay(s, a);
+    assert.equal((await deliver(e, completedEvent(s, a))).status, 200);
+    const subB = pay(s, b);
+    assert.equal((await deliver(e, subEvent(subB, "customer.subscription.created"))).status, 200);
+    assert.equal((await deliver(e, completedEvent(s, b))).status, 200);
+    assert.deepEqual(links(e).map((l) => l.subscription).sort(), [subA.id, subB.id].sort());
+  } finally {
+    console.log = real;
+  }
+  assert.deepEqual(lines, ["stripe checkout: org has another live subscription"]);
+  const sent = s.emails.slice(mails);
+  assert.equal(sent.length, 2);
+  assert.doesNotMatch(sent[0].text, /two Plus subscriptions/);
+  assert.match(sent[1].text, /Personal now has two Plus subscriptions, and needs one\. Cancel the one you do not want with Manage billing/);
+  assert.match(sent[1].html, /two Plus subscriptions/);
+
+  /* The billing panel says so too, with Manage billing for each. */
+  const billing = (await ana.get("/")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  assert.match(billing, /<p class="bad" data-twice="2">Personal has 2 live Plus\s+subscriptions, and needs one\./);
+  assert.equal(formsOf(billing, "/billing").length, 2);
 });

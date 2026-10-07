@@ -166,6 +166,15 @@ class SetupScript(unittest.TestCase):
         self.assertIn(cfg["login_page"]["url"], out)
         self.assertIn("4242 4242 4242 4242", out)
 
+    def test_a_restricted_key_is_told_every_permission_the_worker_uses(self):
+        # The account page makes and reads customers (an organisation's own, and a
+        # claim's Find my subscription), opens portal sessions and Checkouts, and reads
+        # prices and subscriptions: a key without one of these gets a 403 from Stripe.
+        said = " ".join(self.run_tool().split())
+        self.assertIn("Checkout Sessions, Customers and Customer portal: Write, "
+                      "and Prices and Subscriptions: Read", said)
+        self.assertIn("Write includes Read", said)
+
     def test_a_second_run_makes_nothing_new_and_shows_no_secret(self):
         self.run_tool()
         out = self.run_tool()

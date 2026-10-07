@@ -130,8 +130,8 @@ import {
 import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, bump, checkCode,
-  clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, randomToken, readCookie,
-  requestCode, sameOrigin, setCookie, tellWayIn,
+  clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, orgFormOk, orgInput, orgToken,
+  randomToken, readCookie, requestCode, sameOrigin, setCookie, tellWayIn,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
@@ -155,7 +155,9 @@ import {
   EXPIRIES, IDLE_DAYS, MAX_CI, MAX_LABEL as MAX_MACHINE_LABEL, liveCi, machineIn, machineLabel, machinesOf,
   mayChange, mintCi, renameMachine, revokeMachine,
 } from "./machines.js";
-import { away, data, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
+import {
+  away, data, elsewhere, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod,
+} from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
 const UPGRADE = "/upgrade";
@@ -911,7 +913,7 @@ async function dashboard(env, who, {
   const onPlan = await plan(env, org.id);
   const billing = await billingPanel(env, who, onPlan, { upgraded });
   const rename = canManage(org) ? `<h2>Organisation name</h2>
-    ${form("/org", await formToken(env, who.id, "org"), `
+    ${form("/org", await orgToken(env, who, "org"), `${orgInput(who)}
       <label for="name">Name</label>
       <input id="name" name="name" type="text" maxlength="80" required value="${escape(org.name)}">
       ${problem(error)}
@@ -1002,7 +1004,11 @@ async function rename(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
   const f = await fields(request);
-  if (!await formOk(env, f, who.id, "org")) return refused();
+  /* Bound to the organisation it was drawn for, so a page left open in
+     another tab renames nothing else. */
+  const bound = await orgFormOk(env, f, who, "org");
+  if (bound === "refused") return refused();
+  if (bound === "elsewhere") return elsewhere();
   if (!canManage(who.org)) {
     return page("Not allowed", `<h1>Only an owner or an admin can rename it.</h1>
       <p><a href="/">Your account</a></p>`, { status: 403 });
@@ -1476,7 +1482,7 @@ async function machinesPanel(env, who, onPlan, error) {
     const options = EXPIRY_CHOICES.map(([value, text]) => `<option value="${value}">${text}</option>`).join("");
     ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
       <p>${escape(feature.says)} The token is shown once, on the next page, and never again.</p>
-      ${form("/tokens/ci", await formToken(env, who.id, ciAction(nonce)), `
+      ${form("/tokens/ci", await orgToken(env, who, ciAction(nonce)), `${orgInput(who)}
         <input type="hidden" name="nonce" value="${nonce}">
         <label for="ci-label">Name</label>
         <input id="ci-label" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required placeholder="GitHub Actions">
@@ -1549,7 +1555,12 @@ async function ciTokenPost(request, env) {
   if (!who) return signedOut(request);
   const f = await fields(request);
   const nonce = f.get("nonce");
-  if (typeof nonce !== "string" || !NONCE.test(nonce) || !await formOk(env, f, who.id, ciAction(nonce))) return refused();
+  /* Bound to the nonce and to the organisation it was drawn for: a token
+     made from a page left open in another tab would be for an
+     organisation the page did not name. */
+  const bound = typeof nonce === "string" && NONCE.test(nonce) ? await orgFormOk(env, f, who, ciAction(nonce)) : "refused";
+  if (bound === "refused") return refused();
+  if (bound === "elsewhere") return elsewhere();
   if (!canManage(who.org)) {
     return dashboard(env, who, { status: 403, machinesError: "Only an owner or an admin can make a CI token." });
   }

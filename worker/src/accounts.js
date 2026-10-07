@@ -182,8 +182,9 @@ const SCHEMA = [
      expires_at INTEGER NOT NULL,
      used_at INTEGER)`,
 
-  /* What a plan belongs to. customer: the Stripe cus_ id, once a checkout
-     made from the account has one. */
+  /* What a plan belongs to. customer: the organisation's own Stripe cus_
+     id, made with its owner's address before its first checkout from the
+     account (billing.js); never a buyer's, whatever they paid. */
   `CREATE TABLE IF NOT EXISTS orgs (
      id TEXT PRIMARY KEY,
      name TEXT NOT NULL,

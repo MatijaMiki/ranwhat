@@ -184,3 +184,10 @@ export async function wrongMethod(methods) {
 export const refused = () => page("Not accepted", `<h1>That form was not accepted.</h1>
   <p>It may have been open too long, or come from another site. Go back,
      reload the page and try again.</p><p><a href="/">Your account</a></p>`, { status: 403 });
+
+/* A form drawn for another of the person's organisations than the one the
+   session looks at now (session.js's orgFormOk()): nothing was done. */
+export const elsewhere = () => page("Another organisation", `<h1>Nothing was done.</h1>
+  <p class="bad">That form was for another of your organisations than the one this page is looking at now,
+     so nothing was done. Reload your account page and try again.</p>
+  <p><a href="/">Your account</a></p>`, { status: 409 });
