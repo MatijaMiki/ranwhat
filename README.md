@@ -269,24 +269,25 @@ it off.
 
 ### `ranwhat hook install`: ask before a flagged Claude Code call
 
-Everything above reads what an agent already did, and the agent never knows.
+Every other command works after the fact, and the agent never knows.
 The hook is the one opt-in exception. `ranwhat hook install` adds a
 PreToolUse hook to Claude Code's settings, and from the next session each
-tool call watch's rules would flag waits for your yes before it runs.
+tool call watch's rules rate high or critical waits for your yes before it
+runs.
 
 ```bash
 uv tool install ranwhat        # or pipx install ranwhat; uvx is refused
-ranwhat hook install           # ~/.claude/settings.json
+ranwhat hook install           # ~/.claude/settings.json, or $CLAUDE_CONFIG_DIR's
 ranwhat hook status
 ranwhat hook uninstall
 ```
 
 - It judges each call on your machine and sends nothing anywhere. A call no
-  rule flags gets no answer, so Claude Code decides as it would have without
+  rule rates high or critical gets no answer, so Claude Code decides as it would have without
   the hook.
 - It fails open: if the hook itself breaks, the call goes ahead.
 - `--mode deny` refuses critical calls outright and still asks for high
-  ones, for an agent nobody is watching.
+  ones, for an agent you check on only now and then.
 - `--scope project` writes `.claude/settings.json` for everyone on the
   repository; `--scope local` writes `.claude/settings.local.json` for you.
 - `RANWHAT_HOOK=0` in Claude Code's environment lets every call through.

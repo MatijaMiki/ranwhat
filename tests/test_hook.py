@@ -97,6 +97,16 @@ class Decisions(unittest.TestCase):
                              (0, None), value)
         self.assertIsNotNone(answer(event("cat .env"), env={hook.OFF_ENV: "1"})[1])
 
+    def test_utf8_is_read_as_utf8_whatever_stdins_encoding(self):
+        # Windows reads a pipe in its ANSI code page; the 0x81 in an emoji's
+        # UTF-8 is not cp1252, and the call went through unjudged.
+        data = event("cat ~/.aws/credentials  # \U0001F4C1 \u00c1").encode("utf-8")
+        stdin = io.TextIOWrapper(io.BytesIO(data), encoding="cp1252")
+        out = io.StringIO()
+        hook.run(stdin=stdin, stdout=out, env={})
+        self.assertEqual(json.loads(out.getvalue())["hookSpecificOutput"]
+                         ["permissionDecision"], "ask")
+
     def test_an_unknown_mode_is_the_default_not_a_failure(self):
         with mock.patch.object(sys, "stdin", io.StringIO(event("cat .env"))), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
@@ -198,6 +208,53 @@ class Settings(unittest.TestCase):
         self.assertEqual(hook.installed(self.path), [])
         self.assertEqual(hook.uninstall(self.path), 0)
 
+    def test_entries_written_by_hand_are_ours_too(self):
+        for command in ("/usr/local/bin/ranwhat hook run",
+                        "~/.local/bin/ranwhat hook run --mode deny",
+                        '"C:/Tools/ranwhat.exe" hook run',
+                        "ranwhat hook run;echo done"):
+            self.write({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
+                {"type": "command", "command": command}]}]}})
+            self.assertEqual(hook.installed(self.path), [command], command)
+            hook.install(self.path, "p -I -m ranwhat hook run")
+            self.assertEqual(hook.installed(self.path),
+                             ["p -I -m ranwhat hook run"], command)
+            self.assertEqual(hook.uninstall(self.path), 1, command)
+
+    def test_a_byte_order_mark_is_not_a_reason_to_refuse(self):
+        os.makedirs(os.path.dirname(self.path))
+        with open(self.path, "w", encoding="utf-8-sig") as fh:
+            fh.write('{"model": "x"}')
+        hook.install(self.path, "p -m ranwhat hook run")
+        self.assertEqual(self.read()["model"], "x")
+
+    def test_status_says_a_broken_file_is_broken(self):
+        self.write('{"hooks": {"PreToolUse": [],}}')
+        with self.assertRaises(hook.SettingsError):
+            hook.installed(self.path)
+
+    @unittest.skipIf(os.name == "nt", "symbolic links need privileges")
+    def test_a_linked_settings_file_stays_a_link(self):
+        dotfiles = os.path.join(self.dir, "dotfiles", "settings.json")
+        os.makedirs(os.path.dirname(dotfiles))
+        with open(dotfiles, "w", encoding="utf-8") as fh:
+            fh.write('{"model": "x"}')
+        os.makedirs(os.path.dirname(self.path))
+        os.symlink(dotfiles, self.path)
+        hook.install(self.path, "p -m ranwhat hook run")
+        self.assertTrue(os.path.islink(self.path))
+        self.assertEqual(hook.installed(dotfiles), ["p -m ranwhat hook run"])
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "POSIX permissions, which root ignores")
+    def test_a_read_only_file_is_refused(self):
+        self.write({"model": "x"})
+        os.chmod(self.path, 0o444)
+        self.addCleanup(os.chmod, self.path, 0o644)
+        with self.assertRaises(hook.SettingsError):
+            hook.install(self.path, "p -m ranwhat hook run")
+        self.assertEqual(self.read(), {"model": "x"})
+
     @unittest.skipIf(os.name == "nt", "POSIX permissions")
     def test_the_files_permissions_are_kept(self):
         self.write({})
@@ -210,15 +267,19 @@ class Command(unittest.TestCase):
     def test_the_interpreter_is_named_by_its_full_path(self):
         self.assertEqual(hook.command_for("ask", "/opt/my tools/bin/python3",
                                           windows=False),
-                         "'/opt/my tools/bin/python3' -m ranwhat hook run")
+                         "'/opt/my tools/bin/python3' -I -m ranwhat hook run")
         self.assertEqual(hook.command_for("deny", "/usr/bin/python3", windows=False),
-                         "/usr/bin/python3 -m ranwhat hook run --mode deny")
+                         "/usr/bin/python3 -I -m ranwhat hook run --mode deny")
 
     def test_on_windows_the_path_survives_git_bash(self):
         cmd = hook.command_for("ask", r"C:\Users\Ana B\uv\tools\ranwhat\Scripts"
                                       r"\python.exe", windows=True)
-        self.assertEqual(cmd, '"C:/Users/Ana B/uv/tools/ranwhat/Scripts/'
-                              'python.exe" -m ranwhat hook run')
+        self.assertEqual(cmd, "'C:/Users/Ana B/uv/tools/ranwhat/Scripts/"
+                              "python.exe' -I -m ranwhat hook run")
+        # Git Bash expands $ and ` inside double quotes.
+        self.assertEqual(hook.command_for("ask", r"C:\Users\a$HOME`id`\py.exe",
+                                          windows=True),
+                         "'C:/Users/a$HOME`id`/py.exe' -I -m ranwhat hook run")
 
     def test_the_hook_runs_as_claude_code_runs_it(self):
         # From another directory, through python -m, as install writes it.
@@ -238,6 +299,42 @@ class Command(unittest.TestCase):
             else:
                 self.assertEqual(json.loads(out)["hookSpecificOutput"]
                                  ["permissionDecision"], decision)
+
+
+class ProjectFilesCannotRunInTheHook(unittest.TestCase):
+    """Claude Code runs the hook in the project's directory. Run as plain
+    python -m, a json.py there ran in the hook on every call, and could
+    answer "allow" for all of them."""
+
+    @unittest.skipIf(os.name == "nt", "a POSIX shell runs the command")
+    def test_the_installed_command_ignores_the_projects_modules(self):
+        import shutil
+        project = tempfile.mkdtemp(prefix="ranwhat-hook-project-")
+        self.addCleanup(shutil.rmtree, project, True)
+        for name in ("json", "string", "re", "ranwhat"):
+            with open(os.path.join(project, name + ".py"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("import sys\nsys.stderr.write('PROJECT CODE RAN')\n"
+                         "sys.exit(0)\n")
+        # -I ignores PYTHONPATH, so the checkout is installed the way a
+        # package would be: linked into a venv's site-packages.
+        venv = tempfile.mkdtemp(prefix="ranwhat-hook-venv-")
+        self.addCleanup(shutil.rmtree, venv, True)
+        import venv as venv_mod
+        venv_mod.EnvBuilder(with_pip=False).create(venv)
+        python = os.path.join(venv, "bin", "python")
+        site = subprocess.run(
+            [python, "-I", "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+            stdout=subprocess.PIPE, check=True).stdout.decode().strip()
+        os.symlink(os.path.join(REPO, "ranwhat"), os.path.join(site, "ranwhat"))
+        command = hook.command_for("deny", python, windows=False)
+        proc = subprocess.run(command, shell=True, cwd=project,
+                              input=event("cat .env").encode(),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              timeout=60)
+        self.assertNotIn(b"PROJECT CODE RAN", proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["hookSpecificOutput"]
+                         ["permissionDecision"], "deny")
 
 
 class CommandLine(unittest.TestCase):
@@ -294,6 +391,34 @@ class CommandLine(unittest.TestCase):
         self.assertIn("not valid JSON", err)
         with open(self.path, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "{oops")
+
+    def test_the_probe_does_not_count_pythonpath(self):
+        # -I ignores PYTHONPATH, so a checkout found only through it would
+        # have been installed as a hook that never runs.
+        with mock.patch.dict(os.environ, {"PYTHONPATH": REPO}), \
+                mock.patch.object(cli, "_ephemeral", return_value=None):
+            problem = cli._hook_cannot_find_us()
+        probe = subprocess.run([sys.executable, "-I", "-c", "import ranwhat"],
+                               cwd=tempfile.gettempdir(),
+                               stderr=subprocess.DEVNULL)
+        self.assertEqual(problem is None, probe.returncode == 0)
+
+    def test_other_commands_flags_are_refused(self):
+        for argv in (["hook", "install", "--json"], ["hook", "install", "--apply"],
+                     ["hook", "uninstall", "--mode", "deny"],
+                     ["hook", "status", "--days", "3"],
+                     ["check", "--scope", "project"], ["watch", "--mode", "deny"]):
+            status, _, err = self.cli(*argv)
+            self.assertEqual(status, 2, argv)
+            self.assertIn("--", err, argv)
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_status_reports_an_unreadable_file(self):
+        with open(self.path, "w", encoding="utf-8") as fh:
+            fh.write("{oops")
+        status, out, _ = self.cli("hook", "status", "--scope", "user")
+        self.assertEqual(status, 0)
+        self.assertIn("unreadable", out)
 
     def test_an_unknown_action_is_refused(self):
         status, _, err = self.cli("hook", "enable")

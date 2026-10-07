@@ -4,8 +4,9 @@ An opt-in guard for Claude Code: watch's rules, asked before a call runs.
 Everything else ranwhat does reads what an agent already wrote, after the
 fact, and the agent never knows. This is the one exception, and only once
 someone runs `ranwhat hook install`: Claude Code then hands each tool call
-to `ranwhat hook run` as a PreToolUse hook, before it runs, and the call
-watch would flag waits for the user's yes, or is refused.
+to `ranwhat hook run` as a PreToolUse hook, before it runs, and a call
+watch rates high or critical waits for the user's yes, or is refused. A
+medium hit is left to watch to report afterwards.
 
 It fails open. A guard that stops an agent because the guard itself broke
 gets uninstalled the same day, so anything it cannot read or judge is let
@@ -24,7 +25,7 @@ import sys
 import tempfile
 
 # What a flagged call gets, by mode. "ask" is the default: every call watch
-# would flag waits for the user. "deny" refuses the critical ones outright,
+# rates high or critical waits for the user. "deny" refuses the critical ones outright,
 # which is what someone running an agent unattended wants, and still asks
 # for the rest. A medium hit is never stopped; watch reports it later.
 MODES = {
@@ -38,11 +39,17 @@ DEFAULT_SCOPE = "user"
 
 # The words that make a settings entry ours, wherever ranwhat was installed:
 # install and uninstall find their own entry by them and nothing else.
-_OURS = re.compile(r"(?:^|\s)ranwhat\s+hook\s+run(?:\s|$)")
+# `-m ranwhat hook run` as install writes it, and `ranwhat hook run` or
+# /usr/local/bin/ranwhat.exe hook run as someone may have written it by hand:
+# missed, a second install ran the hook twice, and uninstall left one.
+_OURS = re.compile(r"""(?:^|[\s/\\"'])ranwhat(?:\.exe)?["']?\s+hook\s+run(?:[\s;&|]|$)""")
 
 # Seconds Claude Code gives the hook before going on without it. A judgement
 # takes a fifth of a second; this is for a machine under load.
 TIMEOUT = 10
+
+# The interpreter flags the hook runs with: see command_for.
+ISOLATED = ("-I",)
 
 # Set to 0 to let every call through without uninstalling, for one session.
 OFF_ENV = "RANWHAT_HOOK"
@@ -70,19 +77,27 @@ def command_for(mode, executable=None, windows=None):
     """The command Claude Code runs: this interpreter, by its full path, so
     the hook works whatever PATH Claude Code was started with.
 
+    -I, isolated mode: Claude Code runs the hook in the project's
+    directory, and python -m puts that directory first on sys.path, so a
+    json.py or string.py in any repository opened would have run in the
+    hook, on every call, and could have answered "allow" for all of them.
+    -I keeps it off sys.path, on every Python ranwhat supports, and leaves
+    out PYTHON* variables and the user's site-packages too; install checks
+    that ranwhat still imports that way before writing anything.
+
     Claude Code runs a hook's command through a POSIX shell, Git Bash on
     Windows, where a bare C:\\Users\\... loses its backslashes. So on
     Windows the path is written with forward slashes, which Windows takes
-    too, inside double quotes."""
+    too, quoted as for any POSIX shell."""
     executable = executable or sys.executable
     if windows is None:
         windows = os.name == "nt"
     if windows:
-        program = '"%s"' % executable.replace("\\", "/").replace('"', "")
-    else:
-        import shlex
-        program = shlex.quote(executable)
-    words = [program, "-m", "ranwhat", "hook", "run"]
+        # Single quotes: inside double ones, Git Bash still expands $ and `.
+        executable = executable.replace("\\", "/")
+    import shlex
+    program = shlex.quote(executable)
+    words = [program] + list(ISOLATED) + ["-m", "ranwhat", "hook", "run"]
     if mode != DEFAULT_MODE:
         words += ["--mode", mode]
     return " ".join(words)
@@ -91,7 +106,8 @@ def command_for(mode, executable=None, windows=None):
 def _read(path):
     """The settings in path as a dict, {} when there is no file."""
     try:
-        with open(path, encoding="utf-8") as fh:
+        # utf-8-sig: an editor's byte order mark is not a reason to refuse.
+        with open(path, encoding="utf-8-sig") as fh:
             text = fh.read()
     except FileNotFoundError:
         return {}
@@ -113,7 +129,14 @@ def _read(path):
 
 def _write(path, settings):
     """Write settings to path through a file beside it, so an interrupted
-    write leaves the old file whole. The old file's permissions are kept."""
+    write leaves the old file whole. The old file's permissions are kept.
+
+    A settings.json that is a link, as a dotfiles manager leaves it, has
+    the file it points to written, and stays a link. A file its owner made
+    read-only is refused: os.replace would have replaced it regardless."""
+    path = os.path.realpath(path)
+    if os.path.exists(path) and not os.access(path, os.W_OK):
+        raise SettingsError("%s is read-only; nothing changed" % path)
     folder = os.path.dirname(path)
     os.makedirs(folder, exist_ok=True)
     try:
@@ -173,11 +196,9 @@ def _without_ours(groups):
 
 def installed(path):
     """The command of each hook of ours in path's settings; [] when there
-    is none, or no file."""
-    try:
-        groups = _groups(_read(path), path)
-    except SettingsError:
-        return []
+    is none, or no file. Raises SettingsError for a file Claude Code could
+    not read either, rather than calling the hook not installed."""
+    groups = _groups(_read(path), path)
     return [h["command"] for g in groups if isinstance(g, dict)
             and isinstance(g.get("hooks"), list)
             for h in g["hooks"] if _is_ours(h)]
@@ -255,7 +276,11 @@ def run(stdin=None, stdout=None, mode=DEFAULT_MODE, env=None):
     try:
         if env.get(OFF_ENV, "").strip().lower() in ("0", "off", "false", "no"):
             return 0
-        event = json.loads(stdin.read())
+        # Bytes where there are any: Claude Code sends UTF-8, and read as
+        # text in Windows' ANSI code page, a call with an emoji in it failed
+        # to decode and went through unjudged. json.loads takes UTF-8 bytes.
+        raw = getattr(stdin, "buffer", None)
+        event = json.loads(raw.read() if raw is not None else stdin.read())
         if not isinstance(event, dict):
             return 0
         if event.get("hook_event_name", "PreToolUse") != "PreToolUse":
