@@ -241,6 +241,8 @@ class EveryAgentWatched(_Cli):
 
     def test_the_days_window(self):
         for agent in af.AGENTS:
+            if not agent.timed:
+                continue        # its calls are as old as their file
             with self.subTest(agent=agent.id):
                 root = self.agent_root(agent)
                 old = time.time() - 400 * 86400
@@ -303,9 +305,12 @@ class EveryAgentCleaned(_Cli):
                 plan = _rewrite._plan([SECRET])
                 self.assertEqual(text, _rewrite._replace_text(
                     before.decode("utf-8"), plan, agent.byte_arrays))
-                for line in text.splitlines():
-                    if line.strip():
-                        json.loads(line)
+                if agent.json_lines:
+                    for line in text.splitlines():
+                        if line.strip():
+                            json.loads(line)
+                else:
+                    json.loads(text)
                 self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), mode)
                 backups = [b for b in self.backup_files() if _read(b) == before]
                 self.assertEqual(len(backups), 1)
@@ -477,7 +482,7 @@ class Flags(_Cli):
         return " ".join(err.split())
 
     def test_the_source_choices_are_the_registry_ids(self):
-        said = self.argparse_error("watch", "--source", "cursor")
+        said = self.argparse_error("watch", "--source", "zed")
         listed = said.split("choose from ")[1].split(")")[0]
         self.assertEqual([c.strip(" '") for c in listed.split(",")],
                          list(sources.ids()))
@@ -500,8 +505,8 @@ class Flags(_Cli):
                     command, "--source", "meta-muse"))
 
     def test_path_for_an_agent_ranwhat_does_not_know_is_an_error(self):
-        said = self.argparse_error("watch", "--path", "cursor=" + self.tmp)
-        self.assertIn("no agent 'cursor'", said)
+        said = self.argparse_error("watch", "--path", "zed=" + self.tmp)
+        self.assertIn("no agent 'zed'", said)
         self.assertIn("codex", said)
 
     def test_path_takes_an_id_and_a_path(self):
@@ -1017,7 +1022,13 @@ class AbsentAgentsCostAStatOrTwo(_Cli):
         for source in agents.adapters():
             with self.subTest(source=source.id):
                 n = self.count(lambda: agents.discover(source))
-                self.assertLessEqual(n, 4)
+                limit = 4
+                if source.id == "aider":
+                    # Aider writes into the repository it ran in, so it
+                    # also looks at the current directory's git root: one
+                    # stat of each folder on the way up to it.
+                    limit += len(os.path.abspath(os.getcwd()).split(os.sep))
+                self.assertLessEqual(n, limit)
 
     def test_a_whole_run(self):
         """check looks for them three times (its read for secrets, the
@@ -1107,7 +1118,7 @@ class SourcesCommand(_Cli):
         elsewhere = [(e["name"], e["status"]) for e in entries if e["id"] is None]
         self.assertEqual(elsewhere, [("Meta Muse", "cloud only"),
                                      ("Grok Bot", "cloud only"),
-                                     ("Amp", "cloud only"), ("Cursor", "next")])
+                                     ("Amp", "cloud only")])
         for entry in entries:
             if entry["id"] is not None:
                 self.assertEqual(entry["status"], "not found")
@@ -1159,7 +1170,8 @@ class SourcesCommand(_Cli):
         self.assertIn("Meta Muse:", text)
         self.assertIn("--source muse-code", text)
         self.assertIn("--source grok", text)
-        self.assertIn("Cursor:", text)
+        self.assertIn("Amp:", text)
+        self.assertIn("Cursor (cursor):", text)
         self.assertNotIn("clean does not search it", text)
 
     def test_openclaw_is_searched_read_only(self):
@@ -1221,7 +1233,7 @@ class Review(_Cli):
         self.assertAllMasked(_read(path).decode("utf-8"), SECRET)
 
     def test_mask_of_a_read_only_finding_says_why_and_what_to_do(self):
-        qwen = af.AGENTS[3]
+        [qwen] = [a for a in af.AGENTS if a.id == "qwen"]
         root = self.agent_root(qwen)
         qwen.write(root, _calls(self.now)[:1])
         held = qwen.read_only(root, OTHER)

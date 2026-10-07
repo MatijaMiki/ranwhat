@@ -1038,7 +1038,10 @@ class SiteAgentsComeFromTheRegistry(unittest.TestCase):
         paragraphs = plain(section.split("</table>", 1)[1].split("</section>", 1)[0])
         self.assertIn(listed(names("Cloud only")).replace(" Amp", " the current Amp"),
                       paragraphs)
-        self.assertIn("%s is next" % listed(names("Next")), paragraphs)
+        if names("Next"):
+            self.assertIn("%s is next" % listed(names("Next")), paragraphs)
+        else:
+            self.assertNotIn(" is next", paragraphs)
 
     def test_every_count_of_agents_is_the_registrys(self):
         shipped = names(*SHIPPED)
@@ -1073,7 +1076,10 @@ class SiteAgentsComeFromTheRegistry(unittest.TestCase):
         self.assertIn("read all %s by default" % WORDS[len(names(*SHIPPED))], answer)
         self.assertIn(listed(names("Cloud only")).replace(" Amp", " the current Amp"),
                       answer)
-        self.assertIn("%s is next." % listed(names("Next")), answer)
+        if names("Next"):
+            self.assertIn("%s is next." % listed(names("Next")), answer)
+        else:
+            self.assertNotIn(" is next", answer)
         for name in names("Shipped, secrets read-only"):
             self.assertIn("%s keeps its history in a database" % name, answer)
 
@@ -1085,12 +1091,30 @@ class SiteAgentsComeFromTheRegistry(unittest.TestCase):
         self.assertTrue(re.search(r"Read only: %s\b" % re.escape(
             listed(names("Shipped, secrets read-only"))), masks), masks)
 
+    def test_the_commands_page_lists_every_source_id(self):
+        """--source's ID list on /commands is the registry's, in order."""
+        from ranwhat import sources
+        row = re.search(r'IDs: (.*?)</td>', read(SITE / "commands.html")).group(1)
+        self.assertEqual(re.findall(r'<span class="icode">([^<]+)</span>', row),
+                         list(sources.ids()))
+
+    def test_nothing_says_an_agent_is_next_when_none_is(self):
+        if names("Next"):
+            return
+        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md"]
+        for page in files:
+            if page.name in ("updates.html",):
+                continue
+            text = " ".join(read(page).split())
+            self.assertNotRegex(text, r"\b(is|are) next\b", page.name)
+
     def test_llms_txt_names_every_agent(self):
         text = " ".join(read(SITE / "llms.txt").split())
         self.assertIn("Agents read: %s." % listed(names(*SHIPPED)), text)
         self.assertIn(listed(names("Cloud only")).replace(" Amp", " the current Amp"),
                       text)
-        self.assertIn("%s is next." % listed(names("Next")), text)
+        if names("Next"):
+            self.assertIn("%s is next." % listed(names("Next")), text)
 
     def test_the_readme_table_names_every_agent(self):
         readme = read(SITE.parent / "README.md")

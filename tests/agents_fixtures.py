@@ -17,15 +17,18 @@ import os
 import time
 
 import test_source_codex as cx
+import test_source_continue_dev as ct
 import test_source_copilot_cli as cp
 import test_source_droid as dr
 import test_source_gemini as gm
+import test_source_goose as gs
 import test_source_grok as gk
 import test_source_kimi as km
 import test_source_kimi_code as kc
 import test_source_muse_code as mu
 import test_source_pi as pi
 import test_source_qwen as qw
+import test_source_windsurf as ws
 
 GARBAGE = b"\x00\xff\xfe garbage\n\x89PNG\r\n\x1a\nmore {not json\n" * 4
 
@@ -64,6 +67,8 @@ class Agent(object):
     read_tool = True                # False: a read is `cat PATH` in a shell
     byte_arrays = False
     has_read_only = False           # read_only() writes a store
+    timed = True                    # each call has its own time in the file
+    json_lines = True               # a store is JSON Lines, not one document
 
     def root(self, base):
         """The folder `--path <id>=` takes, under base."""
@@ -381,9 +386,98 @@ class MuseCode(Agent):
         return write(self._path(root, name), GARBAGE)
 
 
+class Windsurf(Agent):
+    """The transcripts Windsurf's post_cascade_response_with_transcript
+    hook writes: one step per line, and no time on any of them."""
+    id = "windsurf"
+    unit = "transcript"
+    timed = False
+
+    def root(self, base):
+        return os.path.join(base, ".windsurf", "transcripts")
+
+    def _path(self, root, name):
+        return os.path.join(root, _uuid("windsurf", ord(name[0])) + ".jsonl")
+
+    def write(self, root, calls, name="a", age=3600):
+        steps = [ws.user_input("check the config")]
+        for cid, kind, text, output, when in calls:
+            if kind == "shell":
+                steps.append(ws.run_command(text, output, cwd="/home/dev/app"))
+            else:
+                steps.append(ws.view_file(text, output or ""))
+        return write(self._path(root, name), [ws._go(s) for s in steps], age)
+
+    def garbage(self, root, name="z"):
+        return write(self._path(root, name), GARBAGE)
+
+
+class Continue(Agent):
+    """~/.continue/sessions/<id>.json: one pretty-printed document, with
+    no time on any call."""
+    id = "continue"
+    timed = False
+    json_lines = False
+
+    def root(self, base):
+        return os.path.join(base, ".continue")
+
+    def _path(self, root, name):
+        return os.path.join(root, "sessions",
+                            _uuid("continue", ord(name[0])) + ".json")
+
+    def write(self, root, calls, name="a", age=3600):
+        history = [ct.user_item("check the config")]
+        for cid, kind, text, output, when in calls:
+            tool, args = (("run_terminal_command",
+                           {"command": text, "waitForCompletion": True})
+                          if kind == "shell" else ("read_file", {"filepath": text}))
+            history += ct.ide_call(cid, tool, args, output=None if output is None
+                                   else ct.terminal(output))
+        doc = ct.session(history, sid=_uuid("continue", ord(name[0])),
+                         workspace="file:///home/dev/app")
+        return write(self._path(root, name), ct._pretty(doc), age)
+
+    def garbage(self, root, name="z"):
+        return write(self._path(root, name), GARBAGE)
+
+
+class Goose(Agent):
+    """A session from before Goose 1.10: sessions/<name>.jsonl, a metadata
+    line and then one message a line. Its sessions.db is read only, so it
+    is tested in test_source_goose."""
+    id = "goose"
+    unit = "file"
+
+    def root(self, base):
+        return os.path.join(base, "goose")         # the data folder
+
+    def _path(self, root, name):
+        return os.path.join(root, "sessions", "2026%s_1.jsonl" % name)
+
+    def write(self, root, calls, name="a", age=3600):
+        lines = [gs._dump({"working_dir": "/home/dev/app",
+                           "description": "check the config",
+                           "message_count": len(calls)})]
+        for cid, kind, text, output, when in calls:
+            tool, args = (("developer__shell", {"command": text})
+                          if kind == "shell" else
+                          ("developer__text_editor",
+                           {"command": "view", "path": text}))
+            lines.append(gs._dump({"role": "assistant", "created": int(when),
+                                   "content": [gs.request(cid, tool, args)]}))
+            if output is not None:
+                lines.append(gs._dump({"role": "user", "created": int(when) + 1,
+                                       "content": [gs.legacy_response(cid, output)]}))
+        return write(self._path(root, name), lines, age)
+
+    def garbage(self, root, name="z"):
+        return write(self._path(root, name), GARBAGE)
+
+
 # In registry order.
-AGENTS = (Codex(), Gemini(), CopilotCli(), Qwen(), GrokBuild(), Droid(),
-          KimiCode(), Kimi(), Pi(), MuseCode())
+AGENTS = (Codex(), Gemini(), CopilotCli(), Windsurf(), Continue(), Goose(),
+          Qwen(), GrokBuild(), Droid(), KimiCode(), Kimi(), Pi(), MuseCode())
 
 # The environment variables any adapter reads to find its folder, unset for
 # every test that runs the CLI, so only --path points anywhere.
@@ -392,5 +486,8 @@ AGENT_ENV = ("CLAUDE_CONFIG_DIR", "OPENCLAW_STATE_DIR", "CODEX_HOME",
              "QWEN_HOME", "QWEN_RUNTIME_DIR", "GROK_HOME",
              "FACTORY_HOME_OVERRIDE", "KIMI_CODE_HOME", "KIMI_SHARE_DIR",
              "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR",
+             "CONTINUE_GLOBAL_DIR", "GOOSE_PATH_ROOT", "OPENCODE_DB",
+             "AIDER_CHAT_HISTORY_FILE", "CLINE_DATA_DIR", "CLINE_DIR",
+             "CLINE_SESSION_DATA_DIR",
              "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
              "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA")

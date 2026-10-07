@@ -1,7 +1,7 @@
 # ranwhat
 
 **A flight recorder for AI agents, and a scanner for the authority they hold.**
-AI coding agent security for Claude Code and eleven other coding agents, run
+AI coding agent security for Claude Code and nineteen other coding agents, run
 on your own machine.
 No account, no telemetry, no dependencies.
 
@@ -97,6 +97,14 @@ machine is skipped.
 | Codex (CLI, IDE extension, desktop app) | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` and `archived_sessions/` (`$CODEX_HOME`); `history.jsonl`, `shell_snapshots/` and its SQLite thread index are searched for secrets | JSONL; SQLite read only; `.jsonl.zst` read only, on Python 3.14 or with the `zstd` command |
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.jsonl` and older `session-*.json` (`$GEMINI_CLI_HOME`) | JSONL, JSON |
 | GitHub Copilot CLI | `~/.copilot/session-state/<session>/events.jsonl` (`$COPILOT_HOME`) | JSONL |
+| Cursor (editor and `cursor-agent`) | the editor's `Cursor/User/globalStorage/state.vscdb` (under `~/Library/Application Support`, `%APPDATA%` or `~/.config`), and `~/.cursor/chats/*/*/store.db` | SQLite, read only |
+| Windsurf | `~/.windsurf/transcripts/*.jsonl`, which Windsurf writes when its `post_cascade_response_with_transcript` hook is on; Cascade's own history (`~/.codeium/windsurf/cascade/*.pb`) is encrypted, so it is counted, not read | JSONL |
+| Cline | `<editor>/User/globalStorage/saoudrizwan.claude-dev/tasks/<task>/`, and `~/.cline/data` (`$CLINE_DATA_DIR`) | JSON |
+| Roo Code | `<editor>/User/globalStorage/rooveterinaryinc.roo-cline/tasks/<task>/` | JSON, text |
+| OpenCode | `~/.local/share/opencode/opencode.db` and the older `storage/` JSON files (`$XDG_DATA_HOME/opencode`, `$OPENCODE_DB`) | SQLite read only; JSON |
+| Continue (IDE extensions and `cn`) | `~/.continue/sessions/<session>.json` (`$CONTINUE_GLOBAL_DIR`) | JSON |
+| Aider | `.aider.chat.history.md` and `.aider.input.history` in the repository you run ranwhat in, and in your home folder (`$AIDER_CHAT_HISTORY_FILE`) | Text |
+| Goose (CLI and desktop) | `~/.local/share/goose/sessions/sessions.db` and older `*.jsonl` there (`$GOOSE_PATH_ROOT`; `%APPDATA%\Block\goose\data` on Windows) | SQLite read only; JSONL |
 | Qwen Code | `~/.qwen/projects/<project>/chats/*.jsonl` and older `tmp/<hash>/chats/session-*.json` (`$QWEN_RUNTIME_DIR`, `$QWEN_HOME`) | JSONL, JSON |
 | Grok Build | `~/.grok/sessions/<folder>/<session>/updates.jsonl` (`$GROK_HOME`) | JSONL |
 | Droid | `~/.factory/sessions/*.jsonl`, and `-<cwd>/*.jsonl` and `btw/*.jsonl` below it (`$FACTORY_HOME_OVERRIDE`) | JSONL |
@@ -110,8 +118,7 @@ Meta Muse runs in Meta's cloud and keeps nothing on your machine, so there
 is nothing to read; Muse Code, Meta's coding CLI, is supported.
 Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
 machine; Grok Build, xAI's coding CLI, is supported. The current Amp keeps
-its threads on ampcode.com. Cursor is next, once its format is checked
-against a primary source.
+its threads on ampcode.com.
 
 Nine rules: credential access, secret-shaped strings in tool calls, package
 publishing, cloud resource changes, financial API calls, log tampering,
