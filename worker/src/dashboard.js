@@ -42,9 +42,24 @@
  *   POST /auth/<provider>/unlink    Takes one away, with a fresh code.
  *                       A provider whose client id and secret are not set
  *                       is not offered, and its /auth/ paths answer 404.
+ *   GET  /passkeys/add  The page that adds a passkey, with a fresh code.
+ *   GET  /passkeys/new  Its options for navigator.credentials.create(), as
+ *                       JSON (passkeys.js).
+ *   POST /passkeys      Checks and keeps the passkey the browser made.
+ *   POST /passkeys/remove  Takes one away, with a fresh code.
+ *   GET  /signin/passkey   The page that signs in with a passkey.
+ *   GET  /passkeys/challenge  Its options for navigator.credentials.get(),
+ *                       as JSON, so many an hour from one network.
+ *   POST /signin/passkey   Checks the passkey's answer and signs in; one
+ *                       answer for every way it can be wrong.
+ *   GET  /passkeys.js   The script the two passkey pages load, the only
+ *                       script of ours on this host.
  *
- * Nothing changes on a GET. Every POST passes the origin check here and its
- * form token in its handler (session.js says what both are). Every form
+ * Nothing changes on a GET but a passkey challenge, made for whoever
+ * asks and good once (and, the first time an account asks to add a
+ * passkey, its WebAuthn user handle). Every POST passes the origin check here and its
+ * form token in its handler (session.js says what both are); the passkey
+ * forms are posted by /passkeys.js as the page's own form, token and all. Every form
  * that mails a code (/signin, /signup, /reset, /signin/again) also passes
  * Turnstile, checked on the server for this host and that form before any
  * limit is counted (challenge.js): the day's account mail is shared, and
@@ -60,8 +75,8 @@ import {
 import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, checkCode,
-  clearCookie, current, formOk, formToken, fresh, nextPath, openSession, randomToken, readCookie, requestCode,
-  sameOrigin, setCookie,
+  clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, randomToken, readCookie,
+  requestCode, sameOrigin, setCookie,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
@@ -70,7 +85,11 @@ import {
 import {
   OAUTH_COOKIE, PROVIDERS, arrive, attach, begin, configured, detach, finish, linked, offered,
 } from "./oauth.js";
-import { away, form, notFound, page, redirect, refused, widget, wrongMethod } from "./ui.js";
+import {
+  MAX_LABEL, MAX_PASSKEYS, PAGE_SCRIPT, dateOfDay, forgetPasskey, passkeyLabel, passkeysOf, register,
+  registrationOptions, signIn, signinOptions,
+} from "./passkeys.js";
+import { away, data, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
 const PRICING = "https://ranwhat.com/pricing";
@@ -152,7 +171,8 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
     ${providerButtons(env)}
-    <p>Have a password? <a href="/signin/password">Sign in with it</a>.
+    <p>Have a passkey? <a href="/signin/passkey">Sign in with it</a>.
+       Have a password? <a href="/signin/password">Sign in with it</a>.
        Want one? <a href="/signup">Make an account with a password</a></p>
     <p><small>The address is used to send the code, and kept only once the code
        is typed, as your account. This page sets two cookies, both only to sign
@@ -648,6 +668,9 @@ const EVENTS = {
   signin_github: "Signed in with GitHub",
   linked_github: "GitHub account linked",
   unlinked_github: "GitHub account unlinked",
+  signin_passkey: "Signed in with a passkey",
+  passkey_added: "Passkey added, confirmed with an emailed code",
+  passkey_removed: "Passkey removed",
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -686,8 +709,8 @@ function panel(tier, onPlan) {
    is added, changed or removed with the current password or a code typed
    in the last 15 minutes (fresh() in session.js); without a password, only
    the code will do. Google and GitHub, where they are set up, are linked
-   and unlinked with such a code too; passkeys are on their way. */
-async function methods(env, who, error, providerError) {
+   and unlinked with such a code too, and passkeys added and removed. */
+async function methods(env, who, error, providerError, passkeyError) {
   const stored = await passwordOf(env, who.user);
   const confirmed = fresh(who);
   const stepupToken = await formToken(env, who.id, "stepup");
@@ -760,11 +783,36 @@ async function methods(env, who, error, providerError) {
       ${password}
       ${await provider("google", "Sign in with a Google account that has this address.")}
       ${await provider("github", "Sign in with a GitHub account that has this address, verified.")}
-      ${coming("passkeys", "Passkeys", "Sign in with this device's screen lock or a security key.")}
+      ${await passkeys(env, who, passkeyError, code)}
     </ul></section>`;
 }
 
-async function dashboard(env, who, { error = "", passwordError = "", providerError = null, status = 200 } = {}) {
+/* The account's passkeys, with the day each was added and last used, and
+   the way to add or remove one, which needs a fresh code. */
+async function passkeys(env, who, error, code) {
+  const confirmed = fresh(who);
+  const mine = await passkeysOf(env, who.user);
+  const removeToken = await formToken(env, who.id, "passkey-remove");
+  const items = mine.map((k) => `<li>${escape(k.label)}, added ${escape(when(k.created_at).slice(0, 10))},
+        ${k.last_used_day === null ? "never used" : `last used ${escape(dateOfDay(k.last_used_day))}`}${confirmed
+          ? form("/passkeys/remove", removeToken, `
+        <input type="hidden" name="id" value="${escape(k.id)}">
+        <button type="submit">Remove</button>`) : ""}</li>`).join("");
+  return `<li data-method="passkeys"><strong>Passkeys</strong> <span class="tag">${mine.length ? `${mine.length} added` : "none added"}</span>
+      <br>${mine.length ? `Sign in with ${mine.length === 1 ? "this passkey" : "any of these"} on the
+        <a href="/signin/passkey">passkey sign-in page</a>.`
+        : "Sign in with this device's screen lock or a security key, once you add a passkey here."}
+      ${mine.length ? `<ul>${items}</ul>` : ""}
+      ${problem(error)}
+      ${confirmed
+        ? (mine.length < MAX_PASSKEYS ? `<p><a class="button" href="/passkeys/add">Add a passkey</a></p>` : "")
+        : `<p>Adding or removing a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${code("Email me a code")}`}</li>`;
+}
+
+async function dashboard(env, who, {
+  error = "", passwordError = "", providerError = null, passkeyError = "", status = 200,
+} = {}) {
   const org = who.org;
   const events = await history(env, who.user);
   const onPlan = await plan(env, org.id);
@@ -786,7 +834,7 @@ async function dashboard(env, who, { error = "", passwordError = "", providerErr
     </dl>
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
-    ${await methods(env, who, passwordError, providerError)}
+    ${await methods(env, who, passwordError, providerError, passkeyError)}
     ${rename}
     <h2>Recent activity</h2>
     ${activity}
@@ -1036,6 +1084,161 @@ async function unlinkPost(request, env, ctx, url, provider) {
   return redirect("/");
 }
 
+/* ---------- passkeys ---------- */
+
+const needsPasskeyCode = (env, who) => dashboard(env, who, { status: 403,
+  passkeyError: `Adding or removing a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` });
+
+/* The page that adds one: the form /passkeys.js sends once the device has
+   made the passkey. Without the script it says why nothing happens. */
+async function addPasskeyPage(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  if (!fresh(who)) return needsPasskeyCode(env, who);
+  return addPasskeyForm(env, who);
+}
+
+const NO_SCRIPT = `<noscript><p class="bad">Passkeys need JavaScript, which is off in this browser. Every
+       other way in works without it.</p></noscript>`;
+
+async function addPasskeyForm(env, who, { error = "", status = 200 } = {}) {
+  return page("Add a passkey", `<h1>Add a passkey</h1>
+    <p>Your device asks for its screen lock (a fingerprint, your face or its PIN) or for
+       a security key, and makes a passkey that signs in to this account, on this site
+       only.</p>
+    ${form("/passkeys", await formToken(env, who.id, "passkey-add"), `
+      <input type="hidden" name="clientDataJSON" value="">
+      <input type="hidden" name="attestationObject" value="">
+      <label for="label">Name it, to tell it apart later</label>
+      <input id="label" name="label" type="text" maxlength="${MAX_LABEL}" placeholder="Work laptop" autofocus>
+      <p class="bad passkey-problem" hidden></p>
+      ${problem(error)}
+      <button type="submit">Add passkey</button>`, "", `data-passkey="/passkeys/new" data-ceremony="create"`)}
+    ${NO_SCRIPT}
+    <p><a href="/">Back to your account</a></p>`,
+  { status, passkeys: true });
+}
+
+/* JSON for the script: { error } with the status, or the options. */
+const problemJson = (status, error) => data({ error }, status);
+
+async function passkeyOptions(request, env) {
+  if (!notCrossSite(request)) return problemJson(403, "That request came from another site.");
+  const who = await current(request, env);
+  if (!who) return problemJson(401, "You are signed out. Sign in again, then add the passkey.");
+  if (!fresh(who)) {
+    return problemJson(403, `Adding a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes. Go back to your account for one.`);
+  }
+  const options = await registrationOptions(env, who);
+  if (options.refused === "full") return problemJson(400, `An account holds ${MAX_PASSKEYS} passkeys at most. Remove one first.`);
+  if (options.refused) return problemJson(429, "More passkeys were started for this account in the last hour than we take. Try again in an hour.");
+  return data(options);
+}
+
+async function addPasskey(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "passkey-add")) return refused();
+  if (!fresh(who)) return needsPasskeyCode(env, who);
+  const result = await register(env, who, {
+    clientDataJSON: f.get("clientDataJSON"), attestationObject: f.get("attestationObject"),
+    label: passkeyLabel(f.get("label")),
+  });
+  if (!result.refused) return redirect("/");
+  const [status, error] = {
+    expired: [400, "That passkey request has expired or was already used, so nothing was added. Try again."],
+    taken: [409, "That passkey is already added."],
+    full: [400, `An account holds ${MAX_PASSKEYS} passkeys at most. Remove one first.`],
+  }[result.refused] || [400, "What your browser sent did not check out, so no passkey was added. Try again."];
+  return addPasskeyForm(env, who, { status, error });
+}
+
+/* Only while another way in remains, which the emailed code always is. */
+async function removePasskey(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "passkey-remove")) return refused();
+  if (!fresh(who)) return needsPasskeyCode(env, who);
+  const statements = await forgetPasskey(env, { user: who.user, org: who.org.id, id: f.get("id") ?? "" });
+  if (!statements.length) return redirect("/");
+  const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
+  if (left < 1) return dashboard(env, who, { status: 400, passkeyError: "This passkey is your only way in, so it stays." });
+  await env.LIST.batch(statements);
+  return redirect("/");
+}
+
+/* The page that signs in with one. Its form token and its challenges are
+   bound to the browser's __Host-rw_signin cookie, made here when it has
+   none yet. */
+async function passkeySigninPage(request, env, ctx, url) {
+  const next = nextPath(url.searchParams.get("next"));
+  if (await current(request, env)) return redirect(next);
+  return passkeySigninForm(env, readCookie(request, SIGNIN_COOKIE), { next });
+}
+
+async function passkeySigninForm(env, browser, { next = "/", error = "", status = 200 } = {}) {
+  const { binding, cookies } = bound(browser);
+  return page("Sign in with a passkey", `<h1>Sign in with a passkey</h1>
+    <p>Your device shows the passkeys it has for this site, and asks for its screen lock
+       or your security key.</p>
+    ${form("/signin/passkey", await formToken(env, binding, "passkey"), `
+      <input type="hidden" name="next" value="${escape(next)}">
+      <input type="hidden" name="id" value="">
+      <input type="hidden" name="clientDataJSON" value="">
+      <input type="hidden" name="authenticatorData" value="">
+      <input type="hidden" name="signature" value="">
+      <input type="hidden" name="userHandle" value="">
+      <p class="bad passkey-problem" hidden></p>
+      ${problem(error)}
+      <button type="submit">Sign in with a passkey</button>`, "", `data-passkey="/passkeys/challenge" data-ceremony="get"`)}
+    ${NO_SCRIPT}
+    <p>No passkey here? <a href="/signin">Sign in with an emailed code</a>, or
+       <a href="/signin/password">with your password</a>. Passkeys are added from your
+       account page.</p>
+    <p><small>This page sets a cookie only to sign you in, and nothing on it tracks you.
+       <a href="${PRIVACY}">Privacy</a></small></p>`,
+  { status, cookies, passkeys: true });
+}
+
+async function passkeyChallenge(request, env) {
+  if (!notCrossSite(request)) return problemJson(403, "That request came from another site.");
+  const cookie = readCookie(request, SIGNIN_COOKIE);
+  if (!cookie) return problemJson(403, "Reload the page, then try again.");
+  const options = await signinOptions(request, env, cookie);
+  if (options.refused) {
+    return problemJson(429, "More passkey sign-ins were started from your network in the last hour than we take. Try again in an hour, or sign in with an emailed code.");
+  }
+  return data(options);
+}
+
+/* One answer for every way a passkey can fail to sign in (passkeys.js's
+   signIn()). Signing in then goes as a password does: a new session, not
+   fresh, since no code was typed. */
+async function passkeySignin(request, env) {
+  const f = await fields(request);
+  const binding = readCookie(request, SIGNIN_COOKIE);
+  if (!await formOk(env, f, binding, "passkey")) return refused();
+  const next = nextPath(f.get("next"));
+  const result = await signIn(env, binding, {
+    id: f.get("id"), clientDataJSON: f.get("clientDataJSON"), authenticatorData: f.get("authenticatorData"),
+    signature: f.get("signature"), userHandle: f.get("userHandle"),
+  });
+  if (result.refused) {
+    return passkeySigninForm(env, binding, { next, status: 400,
+      error: "That passkey did not sign you in. Try again, or sign in another way." });
+  }
+  const db = env.LIST;
+  const user = result.user;
+  return enter(request, env, { user, next, coded: false, after: async (org) => [
+    db.prepare("UPDATE users SET signed_in_at = ? WHERE id = ?").bind(now(), user),
+    event(db, { org, user, what: "signin_passkey" }),
+  ] });
+}
+
+const pageScript = () => script(PAGE_SCRIPT);
+
 /* ---------- the host ---------- */
 
 /* Path: { method: handler }. */
@@ -1053,6 +1256,13 @@ const ROUTES = {
   "/signout": { POST: signout },
   "/signout-all": { POST: signoutAll },
   "/org": { POST: rename },
+  "/passkeys/add": { GET: addPasskeyPage },
+  "/passkeys/new": { GET: passkeyOptions },
+  "/passkeys": { POST: addPasskey },
+  "/passkeys/remove": { POST: removePasskey },
+  "/signin/passkey": { GET: passkeySigninPage, POST: passkeySignin },
+  "/passkeys/challenge": { GET: passkeyChallenge },
+  "/passkeys.js": { GET: pageScript },
 };
 for (const provider of Object.keys(PROVIDERS)) {
   const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);

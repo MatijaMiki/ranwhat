@@ -1,13 +1,18 @@
 /* The pages account.ranwhat.com serves, and the headers on every response
  * from it.
  *
- * None of our script runs on this host: the pages are plain HTML forms.
- * The one script allowed anywhere is Cloudflare Turnstile's, and only on
- * the pages whose form mails a code to someone signing in (sign in, make
- * an account, reset, a new code, and the page that offers one when
- * password sign-in is paused): never on the page a code is typed into, and
- * never on the account's own pages, a step-up's included. Every other
- * page's policy allows no script at all. The one inline style is allowed by its hash
+ * The pages are plain HTML forms, and two scripts are allowed, each only
+ * where it is needed. Cloudflare Turnstile's runs only on the pages whose
+ * form mails a code to someone signing in (sign in, make an account,
+ * reset, a new code, and the page that offers one when password sign-in
+ * is paused): never on the page a code is typed into, and never on the
+ * account's own pages, a step-up's included. Ours is one file,
+ * /passkeys.js (passkeys.js), which WebAuthn cannot do without: it runs
+ * only on the two passkey pages, adding one and signing in with one,
+ * whose policy then allows scripts and fetches from this host and
+ * nothing else; no page has an inline script. Every other page's policy
+ * allows no script at all, and every way in but a passkey works on
+ * pages without one. The one inline style is allowed by its hash
  * rather than by 'unsafe-inline', so markup that ever slipped past
  * escape() could not style itself either. Nothing loads from ranwhat.com,
  * so GTM, the analytics and the X pixel that run there never share a page
@@ -50,11 +55,14 @@ let styleHash = null;
 /* default-src 'none' covers script, images, fonts, frames and fetches;
    form-action keeps every form posting here; frame-ancestors keeps the
    page out of anyone's frame. With `challenge`, Turnstile's script and
-   its frame, from challenges.cloudflare.com and nowhere else. `away`:
-   origins a form here may be redirected on to, which browsers hold to
-   form-action too. Only the account page's forms that link Google or
-   GitHub need it (oauth.js's PROVIDERS), and only for those two. */
-async function csp(challenge = false, away = []) {
+   its frame, from challenges.cloudflare.com and nowhere else. With
+   `passkeys`, scripts and fetches from this host: /passkeys.js and the
+   JSON it asks for. Every other response here is HTML or JSON sent with
+   nosniff, which a browser will not run as a script. `away`: origins a
+   form here may be redirected on to, which browsers hold to form-action
+   too. Only the account page's forms that link Google or GitHub need it
+   (oauth.js's PROVIDERS), and only for those two. */
+async function csp(challenge = false, away = [], passkeys = false) {
   if (!styleHash) {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(CSS)));
     let s = "";
@@ -63,7 +71,9 @@ async function csp(challenge = false, away = []) {
   }
   const policy = `default-src 'none'; style-src 'sha256-${styleHash}'; form-action ${["'self'", ...away].join(" ")}; ` +
     "frame-ancestors 'none'; base-uri 'none'";
-  return challenge ? `${policy}; script-src ${CHALLENGE_ORIGIN}; frame-src ${CHALLENGE_ORIGIN}` : policy;
+  if (challenge) return `${policy}; script-src ${CHALLENGE_ORIGIN}; frame-src ${CHALLENGE_ORIGIN}`;
+  if (passkeys) return `${policy}; script-src 'self'; connect-src 'self'`;
+  return policy;
 }
 
 /* On every response from this host, redirects included. HSTS is sent here
@@ -71,9 +81,9 @@ async function csp(challenge = false, away = []) {
    includeSubDomains keeps the decision for ranwhat.com and its other hosts
    separate (site/_headers says why it waits there). Referrer-Policy is
    same-origin, not no-referrer: see sameOrigin() in session.js. */
-async function secured(headers, { challenge = false, away = [] } = {}) {
+async function secured(headers, { challenge = false, away = [], passkeys = false } = {}) {
   headers.set("cache-control", "no-store");
-  headers.set("content-security-policy", await csp(challenge, away));
+  headers.set("content-security-policy", await csp(challenge, away, passkeys));
   headers.set("x-frame-options", "DENY");
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "same-origin");
@@ -85,10 +95,11 @@ async function secured(headers, { challenge = false, away = [] } = {}) {
 }
 
 /* An HTML page. body is markup already escaped by the caller. challenge:
-   the page holds a widget() and may load Turnstile's script. away: see
-   csp(). */
-export async function page(title, body, { status = 200, cookies = [], challenge = false, away = [] } = {}) {
-  const script = challenge ? `\n<script src="${CHALLENGE_SCRIPT}" async defer></script>` : "";
+   the page holds a widget() and may load Turnstile's script. passkeys:
+   the page holds a passkey form and loads /passkeys.js. away: see csp(). */
+export async function page(title, body, { status = 200, cookies = [], challenge = false, away = [], passkeys = false } = {}) {
+  const script = challenge ? `\n<script src="${CHALLENGE_SCRIPT}" async defer></script>`
+    : passkeys ? `\n<script src="/passkeys.js" defer></script>` : "";
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex"><title>${escape(title)} | ranwhat account</title>
@@ -96,7 +107,19 @@ export async function page(title, body, { status = 200, cookies = [], challenge 
 <body><main><a class="wm" href="/">ran<i>what</i></a>${body}</main></body></html>`;
   const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
   for (const c of cookies) headers.append("set-cookie", c);
-  return new Response(html, { status, headers: await secured(headers, { challenge, away }) });
+  return new Response(html, { status, headers: await secured(headers, { challenge, away, passkeys }) });
+}
+
+/* JSON for /passkeys.js, with the same headers as a page. */
+export async function data(value, status = 200) {
+  const headers = new Headers({ "content-type": "application/json; charset=utf-8" });
+  return new Response(JSON.stringify(value), { status, headers: await secured(headers) });
+}
+
+/* /passkeys.js itself. */
+export async function script(text) {
+  const headers = new Headers({ "content-type": "text/javascript; charset=utf-8" });
+  return new Response(text, { headers: await secured(headers) });
 }
 
 /* Turnstile's box, inside a form: once solved, it adds the token to the
@@ -122,9 +145,10 @@ export async function away(url, cookies = []) {
   return new Response(null, { status: 303, headers: await secured(headers) });
 }
 
-/* A form that posts to this host, with its token first. */
-export const form = (action, token, inner, cls = "") =>
-  `<form method="post" action="${escape(action)}"${cls ? ` class="${cls}"` : ""}>` +
+/* A form that posts to this host, with its token first. attributes:
+   markup already escaped by the caller, such as a passkey form's data-. */
+export const form = (action, token, inner, cls = "", attributes = "") =>
+  `<form method="post" action="${escape(action)}"${cls ? ` class="${cls}"` : ""}${attributes ? ` ${attributes}` : ""}>` +
   `<input type="hidden" name="form" value="${escape(token)}">${inner}</form>`;
 
 export const notFound = () => page("Not found", `<h1>Nothing here.</h1>

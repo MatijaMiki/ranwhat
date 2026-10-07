@@ -14,9 +14,11 @@
  * invites, device codes). Later changes then add routes, not ALTERs.
  *
  * Sign-in methods meet in one place, userForVerifiedEmail(). The emailed
- * code is the first; a password, Google, GitHub and passkeys come through
- * the same door. Two methods land on the same account only through an
- * address the method itself verified, never through one someone typed.
+ * code is the first; a password, Google and GitHub come through the same
+ * door. Two methods land on the same account only through an address the
+ * method itself verified, never through one someone typed. A passkey
+ * never makes or joins an account: it is added to the one its owner is
+ * signed in to (passkeys.js), and opens only that one.
  *
  * The tables live in the feed's D1 database (LIST) rather than a new one,
  * because machines join the feed's tokens and org_subscriptions joins its
@@ -104,19 +106,49 @@ const SCHEMA = [
      updated_at INTEGER NOT NULL,
      PRIMARY KEY (user_id, kind))`,
 
-  /* Passkeys: a WebAuthn credential's id and public key, never anything
-     that could sign in by itself. */
+  /* Passkeys (passkeys.js): a WebAuthn credential's id and public key,
+     never anything that could sign in by itself. id and public_key are
+     base64url, the key as the COSE bytes the authenticator sent, which
+     say their own algorithm; alg repeats it for the page. label: what its
+     owner called it on the web. last_used_day: the UTC day (days since
+     1970) it last signed in, and no finer. Nothing had made this table
+     when it took this shape: accounts had never been switched on. */
   `CREATE TABLE IF NOT EXISTS passkeys (
      id TEXT PRIMARY KEY,
      user_id TEXT NOT NULL,
      public_key TEXT NOT NULL,
+     alg INTEGER NOT NULL,
      sign_count INTEGER NOT NULL DEFAULT 0,
-     transports TEXT,
      backed_up INTEGER NOT NULL DEFAULT 0,
-     label TEXT,
+     label TEXT NOT NULL,
      created_at INTEGER NOT NULL,
-     used_at INTEGER)`,
+     last_used_day INTEGER)`,
   `CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys (user_id)`,
+
+  /* The WebAuthn user handle of an account that has added a passkey: 32
+     random bytes, base64url, made the first time and never changed, so
+     every passkey of the account carries the same one. Not the user's id
+     or address: an authenticator keeps nothing that names the account
+     anywhere else. */
+  `CREATE TABLE IF NOT EXISTS passkey_users (
+     user_id TEXT PRIMARY KEY,
+     handle TEXT NOT NULL UNIQUE,
+     created_at INTEGER NOT NULL)`,
+
+  /* A challenge waiting for a passkey's answer. id: the SHA-256 of the
+     challenge, which is kept nowhere. purpose 'register': binding is the
+     session (sessions.id) of user_id, adding a passkey. 'signin': binding
+     is the SHA-256 of the browser's __Host-rw_signin cookie. Used once,
+     within five minutes; the sweep deletes it once it is used or out of
+     date. */
+  `CREATE TABLE IF NOT EXISTS passkey_challenges (
+     id TEXT PRIMARY KEY,
+     purpose TEXT NOT NULL CHECK (purpose IN ('register', 'signin')),
+     binding TEXT NOT NULL,
+     user_id TEXT,
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL,
+     used_at INTEGER)`,
 
   /* What a plan belongs to. customer: the Stripe cus_ id, once a checkout
      made from the account has one. */
@@ -471,6 +503,7 @@ export async function sweep(env) {
   await db.batch([
     db.prepare("DELETE FROM signins WHERE expires_at <= ? OR used_at IS NOT NULL").bind(t),
     db.prepare("DELETE FROM oauth_flows WHERE expires_at <= ? OR used_at IS NOT NULL").bind(t),
+    db.prepare("DELETE FROM passkey_challenges WHERE expires_at <= ? OR used_at IS NOT NULL").bind(t),
     db.prepare("DELETE FROM sessions WHERE expires_at <= ? OR seen_at <= ?").bind(t, t - SESSION_IDLE),
     db.prepare("DELETE FROM throttle WHERE window_start <= ?").bind(t - DAY),
     db.prepare("DELETE FROM mail_counts WHERE day < ?").bind(today(t - KEEP_COUNTS)),

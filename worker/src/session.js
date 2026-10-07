@@ -157,6 +157,20 @@ export function sameOrigin(request) {
   return new URL(request.url).hostname === ACCOUNT_HOST;
 }
 
+/* For the two JSON answers /passkeys.js fetches with GET, which a browser
+   sends without Origin: refused when the browser says the request comes
+   from another site, or names another origin. A browser that sends
+   neither header is let through, as no other site could read the answer
+   (no CORS header) and what it holds is a challenge for the caller's own
+   session or cookie. */
+export function notCrossSite(request) {
+  const site = request.headers.get("sec-fetch-site");
+  const origin = request.headers.get("origin");
+  if (site !== null && site !== "same-origin") return false;
+  if (origin !== null && origin !== ACCOUNT_ORIGIN) return false;
+  return new URL(request.url).hostname === ACCOUNT_HOST;
+}
+
 /* The token a form carries: what it does, bound to the session or the
    sign-in attempt it was shown to. */
 export const formToken = (env, binding, action) => mac(env, `form:${action}:${binding}`);
