@@ -230,6 +230,17 @@ const SCHEMA = [
      linked_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS org_subscriptions_org ON org_subscriptions (org_id)`,
 
+  /* What the billing panel shows of a Stripe subscription, as stripe.js's
+     keep() last fetched it (every webhook event about it, and every
+     claim): monthly or yearly, and when it renews or ends. Drawing the
+     account page reads this and asks Stripe nothing. */
+  `CREATE TABLE IF NOT EXISTS subscription_terms (
+     subscription TEXT PRIMARY KEY,
+     interval TEXT,
+     renews_at INTEGER,
+     ends_at INTEGER,
+     fetched_at INTEGER NOT NULL)`,
+
   /* Plus or Team given by hand (a contract, a comp), written only by an
      operator script. until NULL: no end date. */
   `CREATE TABLE IF NOT EXISTS grants (

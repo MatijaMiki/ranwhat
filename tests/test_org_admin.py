@@ -1,6 +1,7 @@
 """scripts/org_admin.py: the SQL it prints, run against the grants, orgs,
-org_subscriptions and subscriptions tables exactly as worker/src/accounts.js
-and worker/src/auth.js make them. What a grant or a link then does to an
+org_subscriptions, machines, auth_events, subscriptions, tokens and
+token_subscriptions tables exactly as worker/src/accounts.js and
+worker/src/auth.js make them. What a grant or a link then does to an
 organisation's plan is worker/test/plans.test.mjs's.
 """
 import contextlib
@@ -17,6 +18,8 @@ AUTH = (ROOT / "worker" / "src" / "auth.js").read_text(encoding="utf-8")
 ORG = "0b6f6a52-6c1e-4f43-9d0e-5c2a7f3e9b10"
 OTHER_ORG = "7d1c2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
 SUB = "sub_" + "test1abcdef"
+# What machines.js accepts as a machine's id in a form.
+MACHINE_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 def _script():
@@ -35,12 +38,18 @@ class OrgAdmin(unittest.TestCase):
     def setUp(self):
         self.tool = _script()
         self.db = sqlite3.connect(":memory:")
-        self.db.executescript("%s; %s; %s; %s;" % (_table("orgs"), _table("grants"), _table("org_subscriptions"),
-                                                   _table("subscriptions", AUTH)))
+        self.db.executescript("; ".join([
+            _table("orgs"), _table("grants"), _table("org_subscriptions"), _table("machines"), _table("auth_events"),
+            _table("subscriptions", AUTH), _table("tokens", AUTH), _table("token_subscriptions", AUTH)]) + ";")
         for org in (ORG, OTHER_ORG):
             self.db.execute("INSERT INTO orgs (id, name, personal, created_at) VALUES (?, 'Acme', 0, 1)", (org,))
         self.db.execute("INSERT INTO subscriptions (id, customer, status, updated_at) "
                         "VALUES (?, 'cus_test1abcdef', 'active', 1)", (SUB,))
+        # Its emailed token, and an older one revoked (hashes only, as D1 keeps them).
+        for hash_, revoked in (("a" * 64, None), ("b" * 64, 5)):
+            self.db.execute("INSERT INTO tokens (hash, note, created_at, revoked_at) VALUES (?, ?, 1, ?)",
+                            (hash_, "stripe " + SUB, revoked))
+            self.db.execute("INSERT INTO token_subscriptions (hash, subscription) VALUES (?, ?)", (hash_, SUB))
 
     def run_tool(self, *args):
         out = io.StringIO()
@@ -97,10 +106,47 @@ class OrgAdmin(unittest.TestCase):
         self.run_tool("link", SUB, OTHER_ORG)
         self.assertEqual(self.links(), [(SUB, ORG, "script")], "a linked subscription stays where it is")
 
+    def machines(self):
+        return self.db.execute("SELECT id, hash, org_id, user_id, kind, label FROM machines ORDER BY hash").fetchall()
+
+    def logged(self):
+        return self.db.execute("SELECT org_id, user_id, event, subject FROM auth_events ORDER BY id").fetchall()
+
+    def test_link_lists_the_unrevoked_token_as_a_legacy_machine_and_logs_it_once_as_a_claim_does(self):
+        printed = self.run_tool("link", SUB, ORG)
+        self.assertIn("This sends nothing: email the subscriber", printed)
+        (machine,) = self.machines()
+        self.assertRegex(machine[0], MACHINE_ID)
+        self.assertEqual(machine[1:], ("a" * 64, ORG, None, "legacy", ""), "the revoked token is not listed")
+        self.assertEqual(self.logged(), [(ORG, None, "plus_linked_script", SUB)])
+        self.assertIsNone(self.db.execute("SELECT customer FROM orgs WHERE id = ?", (ORG,)).fetchone()[0],
+                          "the organisation's own Stripe customer is not the buyer's")
+        # Run again, once the welcome page has made another token: that one is listed too, and nothing twice.
+        self.db.execute("INSERT INTO tokens (hash, note, created_at) VALUES (?, 'stripe', 2)", ("c" * 64,))
+        self.db.execute("INSERT INTO token_subscriptions (hash, subscription) VALUES (?, ?)", ("c" * 64, SUB))
+        self.run_tool("link", SUB, ORG)
+        self.assertEqual([m[1] for m in self.machines()], ["a" * 64, "c" * 64])
+        self.assertEqual(len({m[0] for m in self.machines()}), 2)
+        self.assertEqual(len(self.logged()), 1)
+
+    def test_a_link_somewhere_else_lists_and_logs_nothing_here(self):
+        self.db.execute("INSERT INTO org_subscriptions (subscription, org_id, how, linked_by, linked_at) "
+                        "VALUES (?, ?, 'session', 'u1', 1)", (SUB, OTHER_ORG))
+        self.run_tool("link", SUB, ORG)
+        self.assertEqual(self.links(), [(SUB, OTHER_ORG, "session")])
+        self.assertEqual(self.machines(), [])
+        self.assertEqual(self.logged(), [])
+        # Nor is a claim from the dashboard logged as the script's, though its tokens are listed.
+        self.run_tool("link", SUB, OTHER_ORG)
+        self.assertEqual([m[2] for m in self.machines()], [OTHER_ORG])
+        self.assertEqual(self.logged(), [])
+
     def test_a_mistyped_subscription_or_organisation_links_nothing(self):
         self.run_tool("link", SUB + "x", ORG)
         self.run_tool("link", SUB, ORG.replace("0b6f", "1b6f"))
         self.assertEqual(self.links(), [])
+        self.assertEqual(self.machines(), [])
+        self.assertEqual(self.logged(), [])
         for sub, org in ((SUB + "'; DROP TABLE org_subscriptions; --", ORG), ("cus_test1abcdef", ORG),
                          ("sub_", ORG), ("", ORG), (SUB, "acme"), (ORG, SUB)):
             out = io.StringIO()

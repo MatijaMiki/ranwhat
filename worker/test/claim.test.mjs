@@ -109,6 +109,14 @@ function services() {
       return reply(200, { object: "list", data: [...s.customers.values()]
         .filter((c) => !c.deleted && c.email === form.email).slice(0, Number(form.limit || 10)) });
     }
+    if (key === "GET /v1/customers/search") {
+      /* Stripe's search: email:"..." matches exactly, but for case. */
+      const q = /^email:"([^"\\]+)"$/.exec(form.query || "");
+      assert.ok(q, form.query);
+      return reply(200, { object: "search_result", data: [...s.customers.values()]
+        .filter((c) => !c.deleted && String(c.email).toLowerCase() === q[1].toLowerCase())
+        .slice(0, Number(form.limit || 10)) });
+    }
     if (key === "GET /v1/subscriptions") {
       /* With no status asked for, every one that is not canceled. */
       return reply(200, { object: "list", data: [...s.subscriptions.values()]
@@ -342,6 +350,47 @@ test("the welcome page and the token email link to the claim, only while account
   assert.equal((await off.get(`/claim?session_id=${bought2.id}`)).status, 404);
   assert.equal((await off.post("/claim", { session_id: bought2.id })).status, 404);
   assert.equal((await off.post("/claim/find", {})).status, 404);
+});
+
+test("a checkout whose payment clears near the end of its link's day is pointed to Find my subscription", async () => {
+  const s = services();
+  const e = env();
+  /* The checkout's own link says when it stops working. */
+  const { id: quick } = await bought(s, e);
+  const until = new Date((s.sessions.get(quick).created + DAY) * 1000).toISOString().slice(0, 16).replace("T", " ");
+  assert.ok(s.emails[0].text.includes(`works until ${until} UTC`), s.emails[0].text);
+  assert.match(s.emails[0].html, new RegExp(`the link works until ${until} UTC`));
+
+  /* Paid by a bank debit that clears 23 hours later: the email comes then, with no link that would
+     stop working within the hour, and Find my subscription instead. */
+  const { id } = await bought(s, e, { mailed: false });
+  const session = s.sessions.get(id);
+  Object.assign(session, { payment_status: "unpaid" });
+  assert.equal((await deliver(e, completedEvent(s, id))).status, 200);
+  assert.equal(s.emails.length, 1, "nothing is mailed before the payment clears");
+  later(DAY - HOUR);
+  session.payment_status = "paid";
+  assert.equal((await deliver(e, { ...completedEvent(s, id), id: `evt_${id}_async`,
+    type: "checkout.session.async_payment_succeeded" })).status, 200);
+  const mail = s.emails.at(-1);
+  assert.equal(s.emails.length, 2);
+  assert.ok(tokenIn(mail.text));
+  assert.doesNotMatch(mail.text + mail.html, /session_id=/);
+  assert.ok(mail.text.includes(`with Find\nmy subscription, which looks it up by this address:\n\n  ${ORIGIN}/claim\n`), mail.text);
+  assert.ok(mail.html.includes(`href="${ORIGIN}/claim"`));
+  assert.match(mail.html, /with Find my subscription, which looks it up by this address/);
+  const welcome = await (await site(e, `/api/welcome?session_id=${id}`)).text();
+  assert.ok(tokenIn(welcome));
+  assert.doesNotMatch(welcome, /session_id=/);
+  assert.ok(welcome.includes(`<a href="${ORIGIN}/claim">account.ranwhat.com/claim</a>`), welcome);
+
+  /* Past its day, the checkout itself proves nothing, as before. */
+  later(HOUR + 1);
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const late = await attachByCheckout(ana, id);
+  assert.equal(late.status, 403, late.text);
+  assert.match(late.text, /Use Find my subscription instead/);
 });
 
 /* ---------- the checkout's proof ---------- */
@@ -644,6 +693,26 @@ test("Find my subscription runs only on a click with a fresh code, lists the liv
   const again = await ana.post("/claim/find", { ...hidden((await ana.get("/claim")).text, "/claim/find") });
   assert.match(again.text, /data-found="1"/);
   assert.match(again.text, new RegExp(`data-subscription="${first.id}"`));
+});
+
+test("Find my subscription finds a subscription whose Stripe email has capitals in it", async () => {
+  const s = services();
+  const e = env();
+  /* Stripe keeps the address as the buyer typed it; the account's is lower-cased. */
+  const { sub } = await bought(s, e, { email: "Ana@Example.COM" });
+  const ana = new Browser(e);
+  await signIn(ana, s, "ana@example.com");
+  const found = await ana.post("/claim/find", { ...hidden((await ana.get("/claim")).text, "/claim/find") });
+  assert.equal(found.status, 200, found.text);
+  assert.match(found.text, /data-found="1"/);
+  assert.match(found.text, new RegExp(`data-subscription="${sub.id}"`));
+  assert.equal(lookups(s).filter((c) => c.key === "GET /v1/customers/search").at(-1).form.query, 'email:"ana@example.com"');
+
+  /* And it attaches by that proof, with the notice to the address as Stripe has it. */
+  const chosen = await ana.post("/claim", { ...hidden(found.text, "/claim"), subscription: sub.id });
+  assert.equal(chosen.status, 200, chosen.text);
+  assert.deepEqual(links(e).map((l) => [l.subscription, l.how]), [[sub.id, "email"]]);
+  assert.deepEqual(s.emails.at(-1).to, ["Ana@Example.COM"]);
 });
 
 test("Find my subscription with nothing to find says to write to us", async () => {

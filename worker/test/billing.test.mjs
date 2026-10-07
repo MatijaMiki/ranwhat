@@ -16,7 +16,8 @@ import { d1 } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const { formToken, FRESH_FOR } = await import("../src/session.js");
-const { UPGRADES_PER_HOUR } = await import("../src/billing.js");
+const { TERMS_READS_PER_HOUR, UPGRADES_PER_HOUR } = await import("../src/billing.js");
+const { schema: feedSchema } = await import("../src/auth.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const SITE = "https://ranwhat.com";
@@ -470,7 +471,7 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   assert.equal(portals(s).length, 0);
 });
 
-test("upgrading needs a fresh code, and an organisation on Plus or Team is not sold Plus again", async () => {
+test("upgrading needs a fresh code once the organisation has a Stripe customer, and an organisation on Plus or Team is not sold Plus again", async () => {
   const s = services();
   const e = env();
   const ana = new Browser(e);
@@ -478,16 +479,28 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   const org = orgOf(e, "ana@example.com");
   const kept = hidden((await ana.get("/upgrade")).text, "/upgrade");
 
+  /* No Stripe customer yet, so no card saved to charge: the first checkout opens on a code over 15 minutes old. */
   later(FRESH_FOR + 1);
+  const first = await ana.get("/upgrade");
+  assert.doesNotMatch(first.text, /Opening checkout needs an emailed code/);
+  assert.doesNotMatch(first.text, /action="\/stepup"/);
+  assert.equal(customerOf(e, org), null);
+  const opened = await ana.post("/upgrade", { ...hidden(first.text, "/upgrade"), plan: "monthly" });
+  assert.equal(opened.status, 303, opened.text);
+  assert.match(opened.location, /^https:\/\/checkout\.stripe\.com\//);
+  assert.ok(customerOf(e, org), "the organisation's customer is made for its first checkout");
+
+  /* Left unpaid, it leaves the customer: from now on, opening checkout needs a fresh code. */
+  const calls = s.calls.length;
   const stale = await ana.get("/upgrade");
-  assert.match(stale.text, /Opening checkout needs an emailed code typed in the last 15 minutes/);
+  assert.match(stale.text, /Opening checkout needs an emailed code typed in the last 15 minutes, as Stripe holds\s+billing details for Personal already/);
   assert.doesNotMatch(stale.text, /action="\/upgrade"/);
   assert.match(stale.text, /<input type="hidden" name="next" value="\/upgrade">/);
   assert.doesNotMatch(stale.headers.get("content-security-policy"), /stripe/);
   const r = await ana.post("/upgrade", { ...kept, plan: "monthly" });
   assert.equal(r.status, 403);
   assert.match(r.text, /so it did not open/);
-  assert.equal(s.calls.length, 0);
+  assert.equal(s.calls.length, calls);
 
   /* The fresh code brings the person back to the upgrade. */
   const asked = await ana.post("/stepup", { form: tokenFor(stale.text, "/stepup"), next: "/upgrade" });
@@ -498,13 +511,13 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   const { sub } = await upgraded(ana, s, e);
 
   /* On Plus: nothing more to buy, before anything is asked of Stripe. */
-  const calls = checkouts(s).length;
+  const bought = checkouts(s).length;
   const page = await ana.get("/upgrade");
   assert.match(page.text, /Personal is on Plus already, so there is nothing to buy\./);
   assert.doesNotMatch(page.text, /action="\/upgrade"/);
   const again = await ana.post("/upgrade", { ...form, plan: "yearly" });
   assert.equal(again.status, 409);
-  assert.equal(checkouts(s).length, calls);
+  assert.equal(checkouts(s).length, bought);
 
   /* On Team, by a grant, likewise, with the subscription gone. */
   sub.status = "canceled";
@@ -512,7 +525,7 @@ test("upgrading needs a fresh code, and an organisation on Plus or Team is not s
   grant(e, org, "team");
   assert.match((await ana.get("/upgrade")).text, /Personal is on Team already/);
   assert.equal((await ana.post("/upgrade", { ...form, plan: "monthly" })).status, 409);
-  assert.equal(checkouts(s).length, calls);
+  assert.equal(checkouts(s).length, bought);
 });
 
 test("an organisation opens only so many checkouts an hour", async () => {
@@ -756,20 +769,32 @@ test("the next upgrade reuses the organisation's customer, and makes it a new on
   assert.equal(form["customer_update[address]"], undefined);
 });
 
-test("the billing panel shows the status it has when Stripe cannot be reached, and when a plan ends", async () => {
+test("the billing panel is drawn from what the webhook kept, asking Stripe nothing however often it loads", async () => {
   const s = services();
   const e = env();
   const ana = new Browser(e);
   await signIn(ana, s);
+  const org = orgOf(e, "ana@example.com");
   const { sub } = await upgraded(ana, s, e);
+  const bo = new Browser(e, { ip: "203.0.113.71" });
+  await signIn(bo, s, "bo@example.com");
+  join(e, "bo@example.com", org, "member");
 
-  s.fail["GET /v1/subscriptions"] = [500, { error: { type: "api_error" } }];
-  let home = await ana.get("/");
-  assert.equal(home.status, 200);
-  assert.match(home.text, /<dd data-status="active">Active<\/dd>\s*<dt>Renews<\/dt><dd>Not known just now<\/dd>/);
-  delete s.fail["GET /v1/subscriptions"];
+  /* Loaded over and over, by the owner and by a plain member: not one call to Stripe. */
+  const renews = new RegExp(`<dd data-status="active">Active</dd>\\s*<dt>Renews</dt><dd data-renews>${isoDay(sub.items.data[0].current_period_end)}</dd>`);
+  const calls = s.calls.length;
+  for (let i = 0; i < 25; i++) {
+    assert.match((await ana.get("/")).text, renews);
+    assert.match((await bo.get("/")).text, renews);
+  }
+  assert.equal(s.calls.length, calls);
+  assert.match((await bo.get("/")).text, /<dt>Plan<\/dt><dd>Plus, yearly<\/dd>/);
 
+  /* Cancelled at the period's end in Stripe's billing page: its event brings the day it ends. */
   sub.cancel_at_period_end = true;
+  let home = await ana.get("/");
+  assert.match(home.text, renews, "nothing changes here before Stripe's event");
+  await deliver(e, subEvent(sub));
   home = await ana.get("/");
   assert.match(home.text, new RegExp(`<dt>Ends</dt><dd data-ends>${isoDay(sub.items.data[0].current_period_end)}</dd>`));
   assert.doesNotMatch(home.text, /data-renews/);
@@ -781,12 +806,68 @@ test("the billing panel shows the status it has when Stripe cannot be reached, a
   assert.match(home.text, /<dd data-status="past_due">Payment overdue: Stripe is trying the card again<\/dd>/);
 
   /* Plus given by a grant: nothing to pay, nothing to manage. */
-  const bo = new Browser(e, { ip: "203.0.113.70" });
-  await signIn(bo, s, "bo@example.com");
-  grant(e, orgOf(e, "bo@example.com"), "plus");
-  const given = (await bo.get("/")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  const eve = new Browser(e, { ip: "203.0.113.70" });
+  await signIn(eve, s, "eve@example.com");
+  grant(e, orgOf(e, "eve@example.com"), "plus");
+  const given = (await eve.get("/")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
   assert.match(given, /Personal has Plus from ranwhat directly, with nothing to pay here\./);
   assert.doesNotMatch(given, /action="\/billing"|Upgrade to Plus/);
+});
+
+test("a subscription linked by hand, with no terms kept yet, is read from Stripe once, for an owner, and only so often an hour", async () => {
+  const s = services();
+  const e = env();
+  const carl = new Browser(e, { ip: "203.0.113.72" });
+  await signIn(carl, s, "carl@example.com");
+  const org = orgOf(e, "carl@example.com");
+  const dee = new Browser(e, { ip: "203.0.113.73" });
+  await signIn(dee, s, "dee@example.com");
+  join(e, "dee@example.com", org, "member");
+  /* As scripts/org_admin.py links one: its rows, and no event since. */
+  await feedSchema(e.LIST);
+  const id = "sub_test1byhand";
+  const ends = unix() + 300 * DAY;
+  s.subscriptions.set(id, { id, object: "subscription", customer: "cus_test1byhand", status: "active",
+    metadata: { ...PLUS }, cancel_at_period_end: false, cancel_at: null, ended_at: null,
+    items: { data: [{ current_period_end: ends, price: { recurring: { interval: "year" } } }] } });
+  run(e, "INSERT INTO subscriptions (id, customer, status, updated_at) VALUES (?, 'cus_test1byhand', 'active', ?)", id, unix());
+  run(e, "INSERT INTO org_subscriptions (subscription, org_id, how, linked_at) VALUES (?, ?, 'script', ?)", id, org, unix());
+  const unknown = /<dd data-status="active">Active<\/dd>\s*<dt>Renews<\/dt><dd>Not known just now<\/dd>/;
+  const known = new RegExp(`<dt>Plan</dt><dd>Plus, yearly</dd>\\s*<dt>Status</dt><dd data-status="active">Active</dd>\\s*<dt>Renews</dt><dd data-renews>${isoDay(ends)}</dd>`);
+
+  /* A plain member's page asks Stripe nothing, and says it is not known yet. */
+  const calls = s.calls.length;
+  for (let i = 0; i < 5; i++) assert.match((await dee.get("/")).text, unknown);
+  assert.equal(s.calls.length, calls);
+
+  /* The owner's page asks, and with Stripe failing, only so many times an hour. */
+  const lines = [];
+  const real = console.log;
+  console.log = (...a) => lines.push(a.join(" "));
+  try {
+    s.fail["GET /v1/subscriptions"] = [500, { error: { type: "api_error" } }];
+    for (let i = 0; i < TERMS_READS_PER_HOUR; i++) {
+      const page = await carl.get("/");
+      assert.equal(page.status, 200);
+      assert.match(page.text, unknown);
+    }
+  } finally {
+    console.log = real;
+  }
+  assert.equal(lines.filter((l) => l.startsWith("stripe billing panel:")).length, TERMS_READS_PER_HOUR);
+  delete s.fail["GET /v1/subscriptions"];
+  assert.match((await carl.get("/")).text, unknown);
+  assert.equal(s.calls.length, calls, "past the hour's reads, not even the owner's page asks");
+
+  /* An hour on: once, and kept, for everyone. */
+  later(HOUR + 1);
+  assert.match((await carl.get("/")).text, known);
+  assert.deepEqual(s.calls.slice(calls).map((c) => c.key), [`GET /v1/subscriptions/${id}`]);
+  for (let i = 0; i < 5; i++) {
+    assert.match((await carl.get("/")).text, known);
+    assert.match((await dee.get("/")).text, known);
+  }
+  assert.equal(s.calls.length, calls + 1);
 });
 
 /* ---------- the anonymous checkout ---------- */

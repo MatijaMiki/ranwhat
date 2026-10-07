@@ -607,7 +607,7 @@ async function invitation(request, env, token) {
     <p>Switch to it on your account page.</p>${back}`, { cookies: [clearCookie(INVITE_COOKIE)] });
   }
   return page("Join an organisation", `${head}
-    <p>Joining shares ${name}'s plan with you. Its owner and admins see your email address, and the
+    <p>Joining shares ${name}'s plan with you. Everyone in ${name} sees your email address, and the
        terminals you link to it.</p>
     ${form("/invite", await formToken(env, who.id, acceptAction(inv)), `
       <input type="hidden" name="token" value="${escape(token)}">

@@ -390,7 +390,8 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.equal(join.length, 1);
     assert.equal(join[0].token, token);
     assert.match(r.text, /<button type="submit">Join Acme<\/button>/);
-    assert.match(r.text, /Its owner and admins see your email address, and the\s+terminals you link to it/);
+    /* What joining shares, said as it is: every member sees every other's address and terminals. */
+    assert.match(r.text, /Everyone in Acme sees your email address, and the\s+terminals you link to it/);
     /* GETs, as many as you like, join nobody. */
     assert.equal((await bo.get(`/invite/${token}`)).status, 200);
     assert.equal(roleIn(e, acme, "bo@example.com"), null);
@@ -409,6 +410,10 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.match(boHome, /<dt>Your role<\/dt><dd>Member<\/dd>/);
     assert.match(boHome, /<dt>Plan<\/dt><dd id="plan">Plus<\/dd>/);
     assert.match(boHome, /Joined an organisation from an invite/);
+    /* As the Join page said: a plain member sees the others' addresses, and the terminals they link. */
+    assert.match(panel(boHome).html, /<strong>ana@example\.com<\/strong> <span class="tag">Owner<\/span>/);
+    await linkTerminal(e, ana, "Ana laptop");
+    assert.match((await bo.get("/")).text, /Ana laptop[\s\S]*?Linked by ana@example\.com on/);
 
     home = (await ana.get("/")).text;
     assert.match(panel(home).html, /<strong>bo@example\.com<\/strong> <span class="tag">Member<\/span>/);

@@ -76,7 +76,8 @@
  *   GET  /upgrade       Plus for a Free organisation, monthly or yearly
  *                       (billing.js); the locked panels link here.
  *   POST /upgrade       Off to a Stripe Checkout bound to the organisation,
- *                       for an owner or admin with a fresh code.
+ *                       for an owner or admin, with a fresh code once the
+ *                       organisation has a Stripe customer.
  *   POST /billing       Manage billing: off to Stripe's billing portal for
  *                       the customer of a subscription linked to the
  *                       organisation, for an owner or admin with a fresh
@@ -744,7 +745,7 @@ const EVENTS = {
   machine_revoked: "Machine revoked, with a fresh code",
   machine_idle_revoked: `Terminal revoked after ${IDLE_DAYS} days unused`,
   ci_token_created: "CI token made, with a fresh code",
-  upgrade_started: "Checkout for Plus opened, with a fresh code",
+  upgrade_started: "Checkout for Plus opened",
   billing_opened: "Billing opened, with a fresh code",
   plus_linked: "Plus subscription linked to the organisation",
   ...CLAIM_EVENTS,

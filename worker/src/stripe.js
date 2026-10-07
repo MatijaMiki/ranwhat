@@ -8,7 +8,9 @@
  *                       the token, the same one the email carries.
  *   POST /api/stripe    Stripe's webhook. After a checkout: the token, by
  *                       email. On any change to a subscription: its status,
- *                       which auth.js checks on every `ranwhat update`.
+ *                       which auth.js checks on every `ranwhat update`
+ *                       (and, while accounts are on, its terms, which the
+ *                       account page's billing panel shows: keep()).
  *   GET  /api/billing   The customer portal's login page, where a subscriber
  *                       changes plan or card, gets invoices, or cancels.
  *
@@ -169,7 +171,9 @@ async function sync(env, id) {
 }
 
 /* sync() for a subscription just fetched from Stripe: its status kept,
-   and returned as kept, with its customer. */
+   and returned as kept, with its customer. While accounts are on, its
+   terms too (termsOf()), for the billing panel to read without asking
+   Stripe; dark, nothing but what was always kept. */
 async function keep(env, sub) {
   if (!sub.metadata || sub.metadata.product !== PRODUCT) return null;
   const db = env.LIST;
@@ -183,6 +187,15 @@ async function keep(env, sub) {
        status = CASE WHEN subscriptions.status IN ('canceled', 'incomplete_expired')
                      THEN subscriptions.status ELSE excluded.status END`)
     .bind(sub.id, customer, sub.status, now()).run();
+  if (accountsOn(env)) {
+    await accountsSchema(db);
+    const terms = termsOf(sub);
+    await db.prepare(
+      `INSERT INTO subscription_terms (subscription, interval, renews_at, ends_at, fetched_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(subscription) DO UPDATE SET interval = excluded.interval, renews_at = excluded.renews_at,
+         ends_at = excluded.ends_at, fetched_at = excluded.fetched_at`)
+      .bind(sub.id, terms.interval, terms.renews_at, terms.ends_at, now()).run();
+  }
   const org = orgIn(sub.metadata);
   if (org) await linkOrg(env, sub.id, org);
   const kept = await db.prepare("SELECT status FROM subscriptions WHERE id = ?").bind(sub.id).first();
@@ -425,36 +438,63 @@ export async function welcome(request, env) {
     <p>After that, <code>uvx ranwhat update</code> fetches the newest catalogue
        with no token to type.</p>
     <p>Keep the token to yourself: anyone holding it gets your feed. It stops
-       working when the subscription ends.</p>${attachHtml(env, id)}
+       working when the subscription ends.</p>${attachHtml(env, session)}
     <p><a href="/api/billing">Manage billing</a>: change plan or card, get
        invoices, or cancel.</p>`);
 }
 
 /* Where a subscription bought here is attached to an account
    (claim.js), with the Checkout that bought it, which shows it is the
-   buyer's for a day. Only while accounts are on: dark, the account host
-   answers nothing, and the welcome page and the email say what they
-   always have. */
-const claimUrl = (id) => `${ACCOUNT_ORIGIN}/claim?session_id=${id}`;
+   buyer's for CLAIM_FOR from when the Checkout was made. Only while
+   accounts are on: dark, the account host answers nothing, and the
+   welcome page and the email say what they always have.
 
-function attachHtml(env, id) {
-  if (!accountsOn(env) || !CHECKOUT_ID.test(String(id))) return "";
+   The checkout's own link is given only while it has CLAIM_LINK_LEFT or
+   more to work: a checkout paid with something that takes days (a bank
+   debit) is mailed when the payment clears, by when its link has run out
+   or nearly, so that email (and the welcome page by then) points to Find
+   my subscription instead, which looks the subscription up by the
+   address it was paid with. */
+const claimUrl = (id) => `${ACCOUNT_ORIGIN}/claim?session_id=${id}`;
+const FIND_URL = `${ACCOUNT_ORIGIN}/claim`;
+const CLAIM_LINK_LEFT = 2 * 3600;
+const stamp = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
+/* { url, until }: the checkout's link and when it stops working, or Find
+   my subscription's page with until null; null while accounts are dark. */
+function attachVia(env, session) {
+  if (!accountsOn(env) || !session || !CHECKOUT_ID.test(String(session.id))) return null;
+  const until = Number.isInteger(session.created) ? session.created + CLAIM_FOR : 0;
+  return until - now() >= CLAIM_LINK_LEFT ? { url: claimUrl(session.id), until } : { url: FIND_URL, until: null };
+}
+
+function attachHtml(env, session) {
+  const via = attachVia(env, session);
+  if (!via) return "";
+  const how = via.until ? `<a href="${escape(via.url)}">Attach to an account</a>, one you have or one you make
+       there` : `Attach it to an account, one you have or one you make there, with Find my subscription on
+       <a href="${escape(via.url)}">${ACCOUNT_HOST}/claim</a>, which looks it up by the address you paid with`;
   return `
     <h2>Attach it to an account</h2>
-    <p><a href="${escape(claimUrl(id))}">Attach to an account</a>, one you have or one you make
-       there: your organisation is then on Plus, and each machine links itself with
+    <p>${how}: your organisation is then on Plus, and each machine links itself with
        <code>uvx ranwhat login</code> instead of sharing this token. The token keeps working, listed on
        your account page, where you can revoke it.</p>`;
 }
 
-function attachText(env, id) {
-  if (!accountsOn(env) || !CHECKOUT_ID.test(String(id))) return [];
+function attachText(env, session) {
+  const via = attachVia(env, session);
+  if (!via) return [];
   return [
-    "Attach to an account, one you have or one you make there (the link",
-    "works for a day; after that, Find my subscription on the same page",
-    "looks it up by this address):",
+    ...(via.until ? [
+      "Attach to an account, one you have or one you make there (the link",
+      `works until ${stamp(via.until)}; after that, Find my subscription on`,
+      "the same page looks it up by this address):",
+    ] : [
+      "Attach to an account, one you have or one you make there, with Find",
+      "my subscription, which looks it up by this address:",
+    ]),
     "",
-    `  ${claimUrl(id)}`,
+    `  ${via.url}`,
     "",
     "Then link each machine with `uvx ranwhat login` instead of sharing the",
     "token. The token keeps working, listed on your account page, where you",
@@ -553,7 +593,7 @@ async function completed(env, session) {
     "UPDATE subscriptions SET mailed_at = ? WHERE id = ? AND mailed_at IS NULL").bind(now(), sub.id).run();
   if (!claimed.meta.changes) return;
   try {
-    await mailToken(env, to, token, session.id);
+    await mailToken(env, to, token, session);
   } catch (err) {
     await db.prepare("UPDATE subscriptions SET mailed_at = NULL WHERE id = ?").bind(sub.id).run();
     throw err;
@@ -651,13 +691,17 @@ async function mailPlusOn(env, to, orgName, { twice = false } = {}) {
 }
 
 /* checkout: the Checkout Session it was bought with, for the link that
-   attaches it to an account (attachText()). */
+   attaches it to an account (attachVia()). */
 async function mailToken(env, to, token, checkout) {
   const t = escape(token);
-  const attach = accountsOn(env) && CHECKOUT_ID.test(String(checkout)) ? `
-      <p style="margin-top:22px"><a href="${escape(claimUrl(checkout))}" style="color:#b8482d">Attach to
-         an account</a>, one you have or one you make there (the link works for a day; after that, Find
-         my subscription on the same page looks it up by this address). Then link each machine with <code style="${CODE}">uvx ranwhat login</code>
+  const via = attachVia(env, checkout);
+  const where = !via ? "" : via.until
+    ? `one you have or one you make there (the link works until ${stamp(via.until)}; after that, Find
+         my subscription on the same page looks it up by this address)`
+    : "one you have or one you make there, with Find my subscription, which looks it up by this address";
+  const attach = via ? `
+      <p style="margin-top:22px"><a href="${escape(via.url)}" style="color:#b8482d">Attach to
+         an account</a>, ${where}. Then link each machine with <code style="${CODE}">uvx ranwhat login</code>
          instead of sharing the token. The token keeps working, listed on your account page, where you
          can revoke it.</p>` : "";
   await resend(env, "POST", "/emails", {
@@ -755,26 +799,27 @@ function intervalOf(sub) {
   return { month: "monthly", year: "yearly" }[recurring.interval] || null;
 }
 
-/* What the account page shows of a subscription, as Stripe has it now:
-   its status, monthly or yearly, and when it renews or ends. Read only:
-   nothing is written, as nothing is on a GET; the webhook keeps the
-   status auth.js reads. null for one that is not something this sells.
-   The period's end is read where either version of Stripe's API puts it,
-   on the subscription or on its item. */
-export async function subscriptionNow(env, id) {
-  if (typeof id !== "string" || !SUBSCRIPTION.test(id)) return null;
-  const sub = await stripe(env, "GET", `/subscriptions/${id}`);
-  if (!sub.metadata || sub.metadata.product !== PRODUCT) return null;
+/* What the account page shows of a subscription, from the subscription
+   as Stripe gave it: monthly or yearly, and when it renews or ends. keep()
+   stores it in subscription_terms. The period's end is read where either
+   version of Stripe's API puts it, on the subscription or on its item. */
+function termsOf(sub) {
   const item = itemOf(sub);
   const periodEnd = at(sub.current_period_end) || at(item && item.current_period_end);
   const ending = Boolean(sub.cancel_at_period_end) || at(sub.cancel_at) !== null;
   return {
-    status: String(sub.status || ""),
     interval: intervalOf(sub),
     renews_at: !ending && LIVE.has(sub.status) ? periodEnd : null,
     ends_at: at(sub.ended_at) || at(sub.cancel_at) || (sub.cancel_at_period_end ? periodEnd : null),
   };
 }
+
+/* For a subscription linked to an organisation whose terms no event has
+   brought yet (one linked by scripts/org_admin.py): fetched from Stripe
+   and kept, status and terms, as an event would. billing.js asks only
+   for an owner or an admin, and only so often an hour. Throws as stripe()
+   does. */
+export const refreshTerms = (env, id) => sync(env, id);
 
 /* ---------- claiming, from an account ---------- */
 
@@ -860,16 +905,27 @@ export async function subscriptionClaim(env, id, email) {
 /* Find my subscription: the live subscriptions this sells, bought on the
    pricing page, whose Stripe customer's email is `email`, the address the
    asker has just typed a code for (claim.js asks only after they click).
-   Stripe's filter matches the email exactly as the customer has it, and
-   each customer is checked again here. At most ten customers, and twenty
-   subscriptions of each. Read only: [{ id, status, interval, since }]. */
+   Stripe keeps a customer's email as the buyer typed it at Checkout, and
+   its list filter (/customers?email=) matches it exactly, capitals and
+   all, while an account's address is lower-cased; so the customers are
+   also looked up with Stripe's customer search, whose exact match
+   (email:"...") ignores case (the M0 test-mode check confirms both).
+   Each customer found either way is checked again here, case aside, and
+   counted once. At most ten customers each way, and twenty subscriptions
+   of each. Read only: [{ id, status, interval, since }]. */
 export async function subscriptionsFor(env, email) {
   const address = lower(email);
   if (!address) return [];
-  const { data: customers = [] } = await stripe(env, "GET", "/customers", { email: address, limit: 10 });
+  const { data: listed = [] } = await stripe(env, "GET", "/customers", { email: address, limit: 10 });
+  /* No quote or backslash can be in an address session.js accepts; one
+     that had either is not searched for, rather than escaped. */
+  const { data: searched = [] } = /["\\]/.test(address) ? {}
+    : await stripe(env, "GET", "/customers/search", { query: `email:"${address}"`, limit: 10 });
+  const seen = new Set();
   const out = [];
-  for (const c of customers) {
-    if (!c || c.deleted || !CUSTOMER.test(idOf(c)) || lower(c.email) !== address) continue;
+  for (const c of [...listed, ...searched]) {
+    if (!c || c.deleted || !CUSTOMER.test(idOf(c)) || lower(c.email) !== address || seen.has(c.id)) continue;
+    seen.add(c.id);
     const { data: subs = [] } = await stripe(env, "GET", "/subscriptions", { customer: c.id, limit: 20 });
     for (const sub of subs) {
       if (!ours(sub) || !SUBSCRIPTION.test(idOf(sub)) || sub.metadata.org !== undefined || !LIVE.has(sub.status)) continue;

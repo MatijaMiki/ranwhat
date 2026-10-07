@@ -17,7 +17,14 @@ table or Stripe) to an organisation, which then has Plus while the
 subscription is live: for a subscriber who paid with another address, or
 who cannot claim it from the dashboard. A subscription is linked once and
 never moved, so linking one that already has an organisation changes
-nothing.
+nothing. As a claim from the dashboard does (worker/src/claim.js), it lists
+the subscription's emailed tokens that are not revoked among the
+organisation's machines (kind legacy), where they can be revoked, and logs
+the link in the organisation's audit log, once. A token the welcome page or
+the email has not made yet is listed by running link again once it has.
+The organisation's own Stripe customer is left as it is, as a claim leaves
+it. Nothing is sent: tell the subscriber yourself, by email to the address
+Stripe has for them, that their subscription is now attached.
 
 This writes nothing and sends nothing: it prints the SQL, to paste into the
 database's console in the Cloudflare dashboard or to run with the printed
@@ -89,14 +96,36 @@ def revoke_sql(kind, org, now=None):
             "AND (until IS NULL OR until > %d)" % (t, org, PLANS[kind], t))
 
 
+# A machine's id, shaped as crypto.randomUUID() makes them, which is what
+# worker/src/machines.js accepts in a form.
+MACHINE_ID = ("lower(substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-' || substr(h, 13, 4) || '-' "
+              "|| substr(h, 17, 4) || '-' || substr(h, 21, 12))")
+
+
 def link_sql(sub, org, now=None):
     """One link, written only if both the subscription and the organisation
-    exist, and never over a link the subscription already has."""
+    exist, and never over a link the subscription already has. Then, only
+    while the subscription is linked to this organisation, its unrevoked
+    tokens as legacy machines (each once: machines.hash is unique), and,
+    for a link this script made, one entry in the audit log."""
     t = int(time.time()) if now is None else now
-    return ("INSERT INTO org_subscriptions (subscription, org_id, how, linked_at) "
-            "SELECT '%s', '%s', 'script', %d WHERE EXISTS (SELECT 1 FROM orgs WHERE id = '%s') "
-            "AND EXISTS (SELECT 1 FROM subscriptions WHERE id = '%s') "
-            "ON CONFLICT(subscription) DO NOTHING" % (sub, org, t, org, sub))
+    here = "EXISTS (SELECT 1 FROM org_subscriptions WHERE subscription = '%s' AND org_id = '%s')" % (sub, org)
+    by_script = ("EXISTS (SELECT 1 FROM org_subscriptions WHERE subscription = '%s' AND org_id = '%s' "
+                 "AND how = 'script')" % (sub, org))
+    return "; ".join([
+        "INSERT INTO org_subscriptions (subscription, org_id, how, linked_at) "
+        "SELECT '%s', '%s', 'script', %d WHERE EXISTS (SELECT 1 FROM orgs WHERE id = '%s') "
+        "AND EXISTS (SELECT 1 FROM subscriptions WHERE id = '%s') "
+        "ON CONFLICT(subscription) DO NOTHING" % (sub, org, t, org, sub),
+        "INSERT OR IGNORE INTO machines (id, hash, org_id, user_id, kind, label, created_at) "
+        "SELECT %s, hash, '%s', NULL, 'legacy', '', %d FROM (SELECT hex(randomblob(16)) AS h, l.hash AS hash "
+        "FROM token_subscriptions l JOIN tokens k ON k.hash = l.hash "
+        "WHERE l.subscription = '%s' AND k.revoked_at IS NULL) WHERE %s" % (MACHINE_ID, org, t, sub, here),
+        "INSERT INTO auth_events (org_id, user_id, event, subject, at) "
+        "SELECT '%s', NULL, 'plus_linked_script', '%s', %d WHERE %s AND NOT EXISTS (SELECT 1 FROM auth_events "
+        "WHERE org_id = '%s' AND event = 'plus_linked_script' AND subject = '%s')"
+        % (org, sub, t, by_script, org, sub),
+    ])
 
 
 def usage():
@@ -129,8 +158,11 @@ def main(argv):
         return 0
     if len(args) == 3 and args[0] == "link" and days is None:
         sub, org = sub_id(args[1]), org_id(args[2])
-        print("Links subscription %s to organisation %s, unless it is linked to one already.\n" % (sub, org))
+        print("Links subscription %s to organisation %s, unless it is linked to one already, and lists its"
+              " emailed tokens among the organisation's machines.\n" % (sub, org))
         switch_on(link_sql(sub, org))
+        print("This sends nothing: email the subscriber, at the address Stripe has for them, that the"
+              " subscription is now attached to the organisation.")
         return 0
     if len(args) == 3 and args[0] == "revoke" and args[1] in PLANS and days is None:
         org = org_id(args[2])

@@ -7,10 +7,13 @@
  *   GET  /upgrade   Monthly or yearly, for the organisation being looked
  *                   at. Without a session: sign in first, and back here.
  *   POST /upgrade   An owner or an admin, of an organisation on neither
- *                   Plus nor Team, with an emailed code typed in the last
- *                   15 minutes: makes the Checkout (stripe.js's
+ *                   Plus nor Team: makes the Checkout (stripe.js's
  *                   orgCheckout()), on the organisation's own Stripe
- *                   customer, and sends the browser to it.
+ *                   customer, and sends the browser to it. Once the
+ *                   organisation has that customer, which may hold a
+ *                   card saved with Stripe, only with an emailed code
+ *                   typed in the last 15 minutes; its first Checkout,
+ *                   with nothing saved to charge, without.
  *   POST /billing   An owner or an admin, with a fresh code, naming a
  *                   subscription linked to this organisation: a portal
  *                   session for that subscription's customer, and off to
@@ -39,7 +42,9 @@
  * goes there adds that origin, and only while the form is on it, to its
  * form-action (ui.js). An organisation opens only so many Checkout and
  * portal sessions an hour, so no session can make Stripe ones without
- * end.
+ * end; and the billing panel is drawn from what the webhook kept, so
+ * loading the account page, however often, asks Stripe nothing
+ * (billingPanel() says when it does, and how rarely).
  */
 import { LIVE, plan } from "./auth.js";
 import { escape } from "./list.js";
@@ -50,8 +55,8 @@ import {
 } from "./session.js";
 import { away, elsewhere, fields, form, page, redirect, refused } from "./ui.js";
 import {
-  CUSTOMER, INTERVALS, SUBSCRIPTION, customerEmail, orgCheckout, orgCustomer, portalSession, sellable,
-  setCustomerEmail, subscriptionNow,
+  CUSTOMER, INTERVALS, SUBSCRIPTION, customerEmail, orgCheckout, orgCustomer, portalSession, refreshTerms, sellable,
+  setCustomerEmail,
 } from "./stripe.js";
 
 export const CHECKOUT_ORIGIN = "https://checkout.stripe.com";
@@ -61,6 +66,7 @@ const PORTAL_URL = /^https:\/\/billing\.stripe\.com\//;
 
 export const UPGRADES_PER_HOUR = 10;    // Checkout sessions one organisation opens an hour
 export const PORTALS_PER_HOUR = 20;     // and portal sessions
+export const TERMS_READS_PER_HOUR = 10; // and reads of terms no event has brought (billingPanel())
 const SHOWN = 5;                         // subscriptions the panel lists at most
 
 /* What each choice costs, as the pricing page says it. Stripe's price,
@@ -89,13 +95,15 @@ const toSignin = (request) =>
 
 /* ---------- what an organisation pays for ---------- */
 
-/* The subscriptions linked to an organisation, with their status as the
-   webhook last kept it: the live ones first, then the most recently
-   linked. */
+/* The subscriptions linked to an organisation, with their status and
+   terms as the webhook last kept them (fetched_at null: no terms kept
+   yet): the live ones first, then the most recently linked. */
 export async function linkedSubscriptions(env, orgId, limit = SHOWN) {
   const live = [...LIVE];
   const { results } = await env.LIST.prepare(
-    `SELECT s.id, s.customer, s.status, l.linked_at FROM org_subscriptions l JOIN subscriptions s ON s.id = l.subscription
+    `SELECT s.id, s.customer, s.status, l.linked_at, t.interval, t.renews_at, t.ends_at, t.fetched_at
+     FROM org_subscriptions l JOIN subscriptions s ON s.id = l.subscription
+     LEFT JOIN subscription_terms t ON t.subscription = s.id
      WHERE l.org_id = ?
      ORDER BY s.status IN (${live.map(() => "?").join(", ")}) DESC, l.linked_at DESC, s.id LIMIT ?`)
     .bind(orgId, ...live, limit).all();
@@ -108,7 +116,9 @@ export async function linkedSubscriptions(env, orgId, limit = SHOWN) {
 export async function linkedSubscription(env, orgId, id) {
   if (typeof id !== "string" || !SUBSCRIPTION.test(id)) return null;
   return env.LIST.prepare(
-    `SELECT s.id, s.customer, s.status FROM org_subscriptions l JOIN subscriptions s ON s.id = l.subscription
+    `SELECT s.id, s.customer, s.status, l.linked_at, t.interval, t.renews_at, t.ends_at, t.fetched_at
+     FROM org_subscriptions l JOIN subscriptions s ON s.id = l.subscription
+     LEFT JOIN subscription_terms t ON t.subscription = s.id
      WHERE l.subscription = ? AND l.org_id = ?`).bind(id, orgId).first();
 }
 
@@ -125,9 +135,18 @@ async function grantOf(env, orgId) {
 
 /* The organisation's billing, for dashboard.js: each live subscription
    (or, with none, the last one) with its plan, status and the day it
-   renews or ends, read from Stripe as the page is drawn; a grant's plan;
-   or, on Free, the way to upgrade. Manage billing is offered to an owner
-   or an admin with a fresh code, and the step-up to one without.
+   renews or ends, as the webhook last kept them (stripe.js's keep()); a
+   grant's plan; or, on Free, the way to upgrade. Manage billing is
+   offered to an owner or an admin with a fresh code, and the step-up to
+   one without.
+
+   Drawing the page asks Stripe nothing, whoever draws it and however
+   often. The one exception is a subscription whose terms no event has
+   brought yet (one linked by scripts/org_admin.py): drawn for an owner or
+   an admin, it is fetched from Stripe and kept, so it is asked for once,
+   and an organisation asks at most TERMS_READS_PER_HOUR times an hour
+   even while Stripe fails. Anyone else sees it as not known yet.
+
    { html, away }: away is the origin its form goes on to, for the page's
    form-action, and only when the form is there. */
 export async function billingPanel(env, who, onPlan, { error = "", upgraded = false } = {}) {
@@ -143,16 +162,18 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
   const billingToken = canOpen ? await orgToken(env, who, "billing") : null;
 
   const items = [];
-  for (const sub of shown) {
-    let known = null;
-    if (env.STRIPE_SECRET_KEY) {
+  for (let sub of shown) {
+    if (sub.fetched_at == null && manager && env.STRIPE_SECRET_KEY &&
+        await bump(env, "terms-org", org.id, HOUR) <= TERMS_READS_PER_HOUR) {
       try {
-        known = await subscriptionNow(env, sub.id);
+        await refreshTerms(env, sub.id);
+        sub = await linkedSubscription(env, org.id, sub.id) || sub;
       } catch (err) {
         console.log(`stripe billing panel: ${err.code || "error"}`);
       }
     }
-    const status = known ? known.status : sub.status;
+    const known = sub.fetched_at == null ? null : sub;
+    const status = sub.status;
     const words = Object.hasOwn(STATUS, status) ? STATUS[status] : status;
     const when = !known ? "<dt>Renews</dt><dd>Not known just now</dd>"
       : known.renews_at ? `<dt>Renews</dt><dd data-renews>${day(known.renews_at)}</dd>`
@@ -223,9 +244,18 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
 
 /* ---------- upgrading ---------- */
 
+/* Whether the organisation has its own Stripe customer already: one that
+   may hold a card saved with Stripe, which a Checkout on it could charge,
+   so opening one then needs a fresh code. */
+async function hasCustomer(env, orgId) {
+  const row = await env.LIST.prepare("SELECT customer FROM orgs WHERE id = ?").bind(orgId).first();
+  return Boolean(row && CUSTOMER.test(String(row.customer)));
+}
+
 /* The upgrade page: what Plus adds and costs, and the two choices, for an
-   owner or an admin with a fresh code; otherwise whichever of those it is
-   not yet, or that the organisation is on Plus already. */
+   owner or an admin (with a fresh code, once the organisation has a
+   Stripe customer); otherwise whichever of those it is not yet, or that
+   the organisation is on Plus already. */
 async function upgradeForm(env, who, { error = "", status = 200 } = {}) {
   const org = who.org;
   const name = escape(org.name);
@@ -255,9 +285,10 @@ async function upgradeForm(env, who, { error = "", status = 200 } = {}) {
     <p>Only an owner or an admin of ${name} can upgrade it. Ask one of them.</p>
     ${problem(error)}${back}`, { status });
   }
-  if (!fresh(who)) {
+  if (!fresh(who) && await hasCustomer(env, org.id)) {
     return page("Upgrade to Plus", `${head}${about}
-    <p>Opening checkout needs an emailed code typed in the last ${FRESH_FOR / 60} minutes. We send one to
+    <p>Opening checkout needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, as Stripe holds
+       billing details for ${name} already. We send one to
        <strong>${escape(who.email)}</strong>; once you type it you come back here.</p>
     ${problem(error)}
     ${form("/stepup", await formToken(env, who.id, "stepup"), `
@@ -304,8 +335,8 @@ async function customerFor(env, org, { replacing = null } = {}) {
 
 /* POST /upgrade: a Checkout bound to the organisation the form was drawn
    for, which must be the one being looked at, never one a form names.
-   Who may, the plan and the fresh code are each checked before anything
-   is asked of Stripe. */
+   Who may, the plan and the fresh code (where one is needed) are each
+   checked before anything is asked of Stripe. */
 export async function upgradePost(request, env) {
   const who = await current(request, env);
   if (!who) return toSignin(request);
@@ -323,7 +354,7 @@ export async function upgradePost(request, env) {
   if (typeof interval !== "string" || !Object.hasOwn(INTERVALS, interval)) {
     return upgradeForm(env, who, { status: 400, error: "Choose monthly or yearly." });
   }
-  if (!fresh(who)) {
+  if (!fresh(who) && await hasCustomer(env, org.id)) {
     return upgradeForm(env, who, { status: 403,
       error: `Opening checkout needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so it did not open.` });
   }
