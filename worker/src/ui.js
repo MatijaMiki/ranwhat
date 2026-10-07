@@ -34,6 +34,8 @@ label{display:block;font-size:14px;margin:14px 0 6px}
 input[type=email],input[type=text],input[type=password]{width:100%;font:16px Menlo,Consolas,monospace;padding:10px 12px;background:var(--ground);color:var(--ink);border:1px solid var(--rule)}
 button{margin-top:12px;font:13px Menlo,Consolas,monospace;padding:11px 16px;background:transparent;color:var(--ink);border:1px solid var(--ink);cursor:pointer}
 button:hover{background:var(--ink);color:var(--surface)}
+a.button{display:inline-block;margin:12px 8px 0 0;font:13px Menlo,Consolas,monospace;padding:11px 16px;color:var(--ink);border:1px solid var(--ink);text-decoration:none}
+a.button:hover{background:var(--ink);color:var(--surface)}
 form.row{display:inline-block;margin-right:8px}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0 0 8px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
 ul{padding-left:18px;color:var(--muted)}li{margin:2px 0}
@@ -43,20 +45,24 @@ small{color:var(--muted)}
 .tag{font:12px Menlo,Consolas,monospace;color:var(--muted)}
 .cf-turnstile{min-height:65px;margin-top:14px}`;
 
-let policy = null;
+let styleHash = null;
 
 /* default-src 'none' covers script, images, fonts, frames and fetches;
    form-action keeps every form posting here; frame-ancestors keeps the
    page out of anyone's frame. With `challenge`, Turnstile's script and
-   its frame, from challenges.cloudflare.com and nowhere else. */
-async function csp(challenge = false) {
-  if (!policy) {
+   its frame, from challenges.cloudflare.com and nowhere else. `away`:
+   origins a form here may be redirected on to, which browsers hold to
+   form-action too. Only the account page's forms that link Google or
+   GitHub need it (oauth.js's PROVIDERS), and only for those two. */
+async function csp(challenge = false, away = []) {
+  if (!styleHash) {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(CSS)));
     let s = "";
     for (const b of digest) s += String.fromCharCode(b);
-    policy = `default-src 'none'; style-src 'sha256-${btoa(s)}'; form-action 'self'; ` +
-      "frame-ancestors 'none'; base-uri 'none'";
+    styleHash = btoa(s);
   }
+  const policy = `default-src 'none'; style-src 'sha256-${styleHash}'; form-action ${["'self'", ...away].join(" ")}; ` +
+    "frame-ancestors 'none'; base-uri 'none'";
   return challenge ? `${policy}; script-src ${CHALLENGE_ORIGIN}; frame-src ${CHALLENGE_ORIGIN}` : policy;
 }
 
@@ -65,9 +71,9 @@ async function csp(challenge = false) {
    includeSubDomains keeps the decision for ranwhat.com and its other hosts
    separate (site/_headers says why it waits there). Referrer-Policy is
    same-origin, not no-referrer: see sameOrigin() in session.js. */
-async function secured(headers, { challenge = false } = {}) {
+async function secured(headers, { challenge = false, away = [] } = {}) {
   headers.set("cache-control", "no-store");
-  headers.set("content-security-policy", await csp(challenge));
+  headers.set("content-security-policy", await csp(challenge, away));
   headers.set("x-frame-options", "DENY");
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "same-origin");
@@ -79,8 +85,9 @@ async function secured(headers, { challenge = false } = {}) {
 }
 
 /* An HTML page. body is markup already escaped by the caller. challenge:
-   the page holds a widget() and may load Turnstile's script. */
-export async function page(title, body, { status = 200, cookies = [], challenge = false } = {}) {
+   the page holds a widget() and may load Turnstile's script. away: see
+   csp(). */
+export async function page(title, body, { status = 200, cookies = [], challenge = false, away = [] } = {}) {
   const script = challenge ? `\n<script src="${CHALLENGE_SCRIPT}" async defer></script>` : "";
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -89,7 +96,7 @@ export async function page(title, body, { status = 200, cookies = [], challenge 
 <body><main><a class="wm" href="/">ran<i>what</i></a>${body}</main></body></html>`;
   const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
   for (const c of cookies) headers.append("set-cookie", c);
-  return new Response(html, { status, headers: await secured(headers, { challenge }) });
+  return new Response(html, { status, headers: await secured(headers, { challenge, away }) });
 }
 
 /* Turnstile's box, inside a form: once solved, it adds the token to the
@@ -102,6 +109,15 @@ export const widget = (action) =>
    host: nothing here redirects anywhere a request named. */
 export async function redirect(path, cookies = []) {
   const headers = new Headers({ location: path });
+  for (const c of cookies) headers.append("set-cookie", c);
+  return new Response(null, { status: 303, headers: await secured(headers) });
+}
+
+/* 303 to a provider's authorization endpoint, for Google or GitHub sign-in:
+   a URL oauth.js builds from its own constants, never one a request
+   named. */
+export async function away(url, cookies = []) {
+  const headers = new Headers({ location: url });
   for (const c of cookies) headers.append("set-cookie", c);
   return new Response(null, { status: 303, headers: await secured(headers) });
 }

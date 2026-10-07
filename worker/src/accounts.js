@@ -277,6 +277,28 @@ const SCHEMA = [
      sent INTEGER NOT NULL,
      PRIMARY KEY (day, kind))`,
 
+  /* Signing in with Google or GitHub, between leaving for the provider and
+     coming back (oauth.js). id: the SHA-256 of the browser's
+     __Host-rw_oauth cookie. state_hash, nonce_hash, verifier_hash: the
+     SHA-256 of the random state, of the random nonce (Google) and of the
+     PKCE verifier, which is an HMAC of the cookie and kept nowhere.
+     purpose 'link': the session (sessions.id) of user_id, adding the
+     provider to their account. Used once, within ten minutes; the sweep
+     deletes it once it is used or out of date. */
+  `CREATE TABLE IF NOT EXISTS oauth_flows (
+     id TEXT PRIMARY KEY,
+     provider TEXT NOT NULL,
+     purpose TEXT NOT NULL CHECK (purpose IN ('signin', 'link')),
+     state_hash TEXT NOT NULL,
+     nonce_hash TEXT,
+     verifier_hash TEXT NOT NULL,
+     user_id TEXT,
+     session_id TEXT,
+     next TEXT NOT NULL DEFAULT '/',
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL,
+     used_at INTEGER)`,
+
   `INSERT OR IGNORE INTO settings (key, value) VALUES ('accounts_schema', '1')`,
 ];
 
@@ -441,11 +463,14 @@ export async function spendAuthMail(env, purpose = "signin") {
    no tables from it. */
 export async function sweep(env) {
   const db = env.LIST;
-  if (accountsOn(env)) await schema(db);
-  else if (!await tablesMade(db)) return;
+  /* A database whose tables an earlier deploy made gets the ones added
+     since, so that every statement below has its table. */
+  if (accountsOn(env) || await tablesMade(db)) await schema(db);
+  else return;
   const t = now();
   await db.batch([
     db.prepare("DELETE FROM signins WHERE expires_at <= ? OR used_at IS NOT NULL").bind(t),
+    db.prepare("DELETE FROM oauth_flows WHERE expires_at <= ? OR used_at IS NOT NULL").bind(t),
     db.prepare("DELETE FROM sessions WHERE expires_at <= ? OR seen_at <= ?").bind(t, t - SESSION_IDLE),
     db.prepare("DELETE FROM throttle WHERE window_start <= ?").bind(t - DAY),
     db.prepare("DELETE FROM mail_counts WHERE day < ?").bind(today(t - KEEP_COUNTS)),

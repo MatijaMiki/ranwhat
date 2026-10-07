@@ -33,6 +33,15 @@
  *   POST /signout       Ends this session.
  *   POST /signout-all   Ends every session of this account.
  *   POST /org           Renames the organisation (owner or admin).
+ *   GET  /auth/google   Signs in with Google, or with GitHub at
+ *   GET  /auth/github   /auth/github: off to the provider (oauth.js).
+ *   POST /auth/<provider>           Links it to the account signed in, with
+ *                       a fresh code.
+ *   GET  /auth/<provider>/callback  Back from the provider: signs in,
+ *                       makes the account, or links, by oauth.js's rule.
+ *   POST /auth/<provider>/unlink    Takes one away, with a fresh code.
+ *                       A provider whose client id and secret are not set
+ *                       is not offered, and its /auth/ paths answer 404.
  *
  * Nothing changes on a GET. Every POST passes the origin check here and its
  * form token in its handler (session.js says what both are). Every form
@@ -58,7 +67,10 @@ import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
   otherWaysIn, passwordOf, passwordProblem, rehashed, unlock,
 } from "./password.js";
-import { form, notFound, page, redirect, refused, widget, wrongMethod } from "./ui.js";
+import {
+  OAUTH_COOKIE, PROVIDERS, arrive, attach, begin, configured, detach, finish, linked, offered,
+} from "./oauth.js";
+import { away, form, notFound, page, redirect, refused, widget, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
 const PRICING = "https://ranwhat.com/pricing";
@@ -139,13 +151,24 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
       ${widget("signin")}
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
+    ${providerButtons(env)}
     <p>Have a password? <a href="/signin/password">Sign in with it</a>.
        Want one? <a href="/signup">Make an account with a password</a></p>
     <p><small>The address is used to send the code, and kept only once the code
        is typed, as your account. This page sets two cookies, both only to sign
        you in, and nothing on it tracks you. Cloudflare Turnstile checks that a
-       person is asking. <a href="${PRIVACY}">Privacy</a></small></p>`,
+       person is asking.${offered(env).length ? ` Continuing with ${offered(env).map((p) => PROVIDERS[p].name).join(" or ")}
+       keeps only that account's id and the address it has verified.` : ""}
+       <a href="${PRIVACY}">Privacy</a></small></p>`,
   { status, cookies, challenge: true });
+}
+
+/* Plain links, so that no script and no form-action stands between the
+   page and the provider. */
+function providerButtons(env) {
+  const via = offered(env);
+  if (!via.length) return "";
+  return `<p>${via.map((p) => `<a class="button" href="/auth/${p}">Continue with ${PROVIDERS[p].name}</a>`).join("\n       ")}</p>`;
 }
 
 async function signinPost(request, env, ctx) {
@@ -270,9 +293,10 @@ async function notTaken(env, token, result) {
 
 /* Someone just signed in as `user`: a new session in place of whatever the
    browser had, written in one batch with `before` (run first) and what
-   `after(org)` returns, and the browser sent on. The organisation is the
-   one the browser was looking at, if it was already this person's. */
-async function enter(request, env, { user, next = "/", coded = true, before = [], after }) {
+   `after(org)` returns, and the browser sent on, with `cookies` set too.
+   The organisation is the one the browser was looking at, if it was
+   already this person's. */
+async function enter(request, env, { user, next = "/", coded = true, before = [], after, cookies = [] }) {
   const was = await current(request, env);
   const org = await orgFor(env, user, was && was.user === user ? was.org.id : null);
   const orgId = org ? org.id : null;
@@ -280,7 +304,8 @@ async function enter(request, env, { user, next = "/", coded = true, before = []
     user, org: orgId, previous: readCookie(request, SESSION_COOKIE), coded,
   });
   await env.LIST.batch([...before, ...statements, ...await after(orgId)]);
-  return redirect(nextPath(next), [setCookie(SESSION_COOKIE, value, SESSION_MAX), clearCookie(SIGNIN_COOKIE)]);
+  return redirect(nextPath(next),
+    [setCookie(SESSION_COOKIE, value, SESSION_MAX), clearCookie(SIGNIN_COOKIE), ...cookies]);
 }
 
 /* A code was typed: the account (made now if this is its first sign-in), a
@@ -615,6 +640,14 @@ const EVENTS = {
   signout: "Signed out",
   signout_all: "Signed out everywhere",
   org_renamed: "Organisation renamed",
+  signup_google: "Account made, with Google",
+  signin_google: "Signed in with Google",
+  linked_google: "Google account linked",
+  unlinked_google: "Google account unlinked",
+  signup_github: "Account made, with GitHub",
+  signin_github: "Signed in with GitHub",
+  linked_github: "GitHub account linked",
+  unlinked_github: "GitHub account unlinked",
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -652,8 +685,9 @@ function panel(tier, onPlan) {
 /* How this account can sign in. The emailed code always works. A password
    is added, changed or removed with the current password or a code typed
    in the last 15 minutes (fresh() in session.js); without a password, only
-   the code will do. The others are on their way. */
-async function methods(env, who, error) {
+   the code will do. Google and GitHub, where they are set up, are linked
+   and unlinked with such a code too; passkeys are on their way. */
+async function methods(env, who, error, providerError) {
   const stored = await passwordOf(env, who.user);
   const confirmed = fresh(who);
   const stepupToken = await formToken(env, who.id, "stepup");
@@ -696,19 +730,41 @@ async function methods(env, who, error) {
   }
   const coming = (key, name, says) => `<li data-method="${key}"><strong>${name}</strong> <span class="tag">coming</span>
       <br>${says}</li>`;
+  const ways = await linked(env, who.user);
+  const provider = async (key, says) => {
+    const { name } = PROVIDERS[key];
+    if (!configured(env, key)) return coming(key, name, says);
+    const mine = ways.filter((w) => w.provider === key);
+    const unlinkToken = await formToken(env, who.id, `unlink-${key}`);
+    const items = mine.map((w) => `<li>${escape(w.verified_email || "no address")}, linked
+        ${escape(when(w.created_at).slice(0, 10))}${confirmed ? form(`/auth/${key}/unlink`, unlinkToken, `
+        <input type="hidden" name="subject" value="${escape(w.provider_subject)}">
+        <button type="submit">Unlink</button>`) : ""}</li>`).join("");
+    const err = providerError && providerError.provider === key ? providerError.text : "";
+    return `<li data-method="${key}"><strong>${name}</strong> <span class="tag">${mine.length ? "linked" : "not linked"}</span>
+      <br>${mine.length ? `Sign in with ${mine.length === 1 ? "this" : "any of these"} ${name} ${mine.length === 1 ? "account" : "accounts"}.`
+        : `Continue with ${name} on the sign-in page signs in here once ${name} has verified ${escape(who.email)}.`}
+      ${mine.length ? `<ul>${items}</ul>` : ""}
+      ${problem(err)}
+      ${confirmed
+        ? form(`/auth/${key}`, await formToken(env, who.id, `link-${key}`),
+          `<button type="submit">Link ${mine.length ? "another" : "a"} ${name} account</button>`)
+        : `<p>Linking or unlinking ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${code("Email me a code")}`}</li>`;
+  };
   return `<section class="panel" id="methods">
     <h2>Sign-in methods</h2>
     <ul>
       <li data-method="code"><strong>Emailed code</strong> <span class="tag">always on</span>
       <br>A code mailed to ${escape(who.email)} signs you in, and confirms what needs confirming.</li>
       ${password}
-      ${coming("google", "Google", "Sign in with a Google account that has this address.")}
-      ${coming("github", "GitHub", "Sign in with a GitHub account that has this address, verified.")}
+      ${await provider("google", "Sign in with a Google account that has this address.")}
+      ${await provider("github", "Sign in with a GitHub account that has this address, verified.")}
       ${coming("passkeys", "Passkeys", "Sign in with this device's screen lock or a security key.")}
     </ul></section>`;
 }
 
-async function dashboard(env, who, { error = "", passwordError = "", status = 200 } = {}) {
+async function dashboard(env, who, { error = "", passwordError = "", providerError = null, status = 200 } = {}) {
   const org = who.org;
   const events = await history(env, who.user);
   const onPlan = await plan(env, org.id);
@@ -730,7 +786,7 @@ async function dashboard(env, who, { error = "", passwordError = "", status = 20
     </dl>
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
-    ${await methods(env, who, passwordError)}
+    ${await methods(env, who, passwordError, providerError)}
     ${rename}
     <h2>Recent activity</h2>
     ${activity}
@@ -739,7 +795,7 @@ async function dashboard(env, who, { error = "", passwordError = "", status = 20
     ${form("/signout", await formToken(env, who.id, "signout"), `<button type="submit">Sign out</button>`, "row")}
     ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<button type="submit">Sign out everywhere</button>`, "row")}
     <p><small><a href="https://ranwhat.com/">ranwhat.com</a> &middot; <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status });
+  { status, away: fresh(who) ? offered(env).map((p) => PROVIDERS[p].origin) : [] });
 }
 
 async function signout(request, env) {
@@ -857,6 +913,129 @@ async function removePassword(request, env) {
   return redirect("/");
 }
 
+/* ---------- Google and GitHub ---------- */
+
+/* oauth.js's limit on sign-ins started from one network. */
+const tooManyStarts = () => page("Too many tries", `<h1>Too many tries.</h1>
+  <p>More sign-ins were started from your network in the last hour than we
+     take. Try again in an hour, or <a href="/signin">sign in with an emailed
+     code</a>.</p>`, { status: 429 });
+
+/* Off to the provider to sign in. Someone signed in already goes home. */
+async function providerStart(request, env, ctx, url, provider) {
+  const next = nextPath(url.searchParams.get("next"));
+  if (await current(request, env)) return redirect(next);
+  const started = await begin(request, env, { provider, next });
+  if (started.refused) return tooManyStarts();
+  return away(started.to, [started.cookie]);
+}
+
+const needsCode = (env, who, provider) => dashboard(env, who, { status: 403, providerError: { provider,
+  text: `Linking or unlinking ${PROVIDERS[provider].name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` } });
+
+/* Off to the provider to link it to the account signed in: a form on the
+   account page, with a code typed in the last 15 minutes. The flow is
+   bound to this session, and only this session can finish it. */
+async function linkStart(request, env, ctx, url, provider) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, `link-${provider}`)) return refused();
+  if (!fresh(who)) return needsCode(env, who, provider);
+  const started = await begin(request, env, { provider, purpose: "link", user: who.user, session: who.id });
+  if (started.refused) return tooManyStarts();
+  return away(started.to, [started.cookie]);
+}
+
+/* Back from the provider. Signing in goes as a password does: a new
+   session in place of the browser's, not fresh, since no code was typed.
+   Linking needs the session that asked for it, still signed in. The
+   flow's cookie goes either way: it worked once already. */
+async function providerBack(request, env, ctx, url, provider) {
+  const name = PROVIDERS[provider].name;
+  const cookies = [clearCookie(OAUTH_COOKIE)];
+  const done = await finish(request, env, provider, url);
+  if (!done.ok) return providerProblem(name, done.why, done.flow, cookies);
+  const { flow, profile } = done;
+  const db = env.LIST;
+  if (flow.purpose === "link") {
+    const who = await current(request, env);
+    if (!who || who.id !== flow.session_id || who.user !== flow.user_id) {
+      return page("Sign in again", `<h1>Sign in again.</h1>
+        <p class="bad">This browser is no longer signed in as it was when linking ${name} began,
+           so nothing was linked.</p>
+        <p><a href="/">Your account</a></p>`, { status: 403, cookies });
+    }
+    const result = await attach(env, { user: who.user, org: who.org.id, provider, profile });
+    if (result.refused) return notLinked(name, result.refused, cookies);
+    return redirect("/", cookies);
+  }
+  const result = await arrive(env, provider, profile);
+  if (result.refused) return unverified(name, cookies);
+  const user = result.user;
+  return enter(request, env, { user, next: flow.next, coded: false, cookies, after: async (org) => [
+    ...(result.what === "linked" ? [event(db, { org, user, what: `linked_${provider}` })] : []),
+    event(db, { org, user, what: `${result.what === "signup" ? "signup" : "signin"}_${provider}` }),
+  ] });
+}
+
+/* A flow that came back without an account to open (oauth.js's finish()). */
+function providerProblem(name, why, flow, cookies) {
+  const linking = Boolean(flow) && flow.purpose === "link";
+  const none = linking ? "nothing was linked" : "nobody was signed in";
+  const [status, title, text] = {
+    expired: [400, "Start again", `That ${name} sign-in has expired or was already used. Start it again from this site.`],
+    cancelled: [200, "Cancelled", `${name} says it was cancelled, so ${none}.`],
+    unavailable: [502, "Try again", `${name} could not be reached just now, so ${none}. Try again in a minute.`],
+  }[why] || [400, "Start again", `${name}'s answer did not check out, so ${none}. Start it again from this site.`];
+  return page(title, `<h1>${title}.</h1>
+    <p class="bad">${text}</p>
+    <p>${linking ? `<a href="/">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
+  { status, cookies });
+}
+
+/* The provider vouched for no address: it can neither make an account nor
+   join one, and the emailed code, which proves the address itself, is the
+   way in. */
+const unverified = (name, cookies) => page("Use an emailed code", `<h1>Use an emailed code.</h1>
+  <p class="bad">${name} did not vouch for an email address on that account${name === "GitHub"
+    ? " (we take only its primary address, and only once GitHub has verified it)" : ""}, so it
+     cannot make or open a ranwhat account.</p>
+  <p><a href="/signin">Sign in with an emailed code</a> instead: typing it proves the address.</p>`,
+{ status: 403, cookies });
+
+function notLinked(name, why, cookies) {
+  const text = {
+    unverified: `${name} did not vouch for an email address on that account, so it cannot be linked.`,
+    taken: `That ${name} account already signs in to another ranwhat account, and stays with it.`,
+    address: `The address that ${name} account has verified has its own ranwhat account. Sign in to that one to link it there.`,
+  }[why];
+  return page("Not linked", `<h1>Not linked.</h1>
+    <p class="bad">${text}</p>
+    <p><a href="/">Back to your account</a></p>`, { status: why === "unverified" ? 403 : 409, cookies });
+}
+
+/* Takes a Google or GitHub account away, with a fresh code, while another
+   way in remains, which the emailed code always is. */
+async function unlinkPost(request, env, ctx, url, provider) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, `unlink-${provider}`)) return refused();
+  if (!fresh(who)) return needsCode(env, who, provider);
+  const statements = await detach(env, {
+    user: who.user, org: who.org.id, provider, subject: String(f.get("subject") ?? ""),
+  });
+  if (!statements.length) return redirect("/");
+  const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
+  if (left < 1) {
+    return dashboard(env, who, { status: 400, providerError: { provider,
+      text: `This ${PROVIDERS[provider].name} account is your only way in, so it stays.` } });
+  }
+  await env.LIST.batch(statements);
+  return redirect("/");
+}
+
 /* ---------- the host ---------- */
 
 /* Path: { method: handler }. */
@@ -875,6 +1054,12 @@ const ROUTES = {
   "/signout-all": { POST: signoutAll },
   "/org": { POST: rename },
 };
+for (const provider of Object.keys(PROVIDERS)) {
+  const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);
+  ROUTES[`/auth/${provider}`] = { GET: as(providerStart), POST: as(linkStart) };
+  ROUTES[`/auth/${provider}/callback`] = { GET: as(providerBack) };
+  ROUTES[`/auth/${provider}/unlink`] = { POST: as(unlinkPost) };
+}
 
 export async function account(request, env, ctx) {
   /* Switched on without its secret, its database or its mail: say so
@@ -885,6 +1070,9 @@ export async function account(request, env, ctx) {
          <a href="https://ranwhat.com/">ranwhat.com</a></p>`, { status: 503 });
   }
   const url = new URL(request.url);
+  /* A provider without its client id and secret is not there at all. */
+  const via = /^\/auth\/([^/]+)/.exec(url.pathname);
+  if (via && !configured(env, via[1])) return notFound();
   const route = Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
   if (!route) return notFound();
   const handle = Object.hasOwn(route, request.method) ? route[request.method] : null;
