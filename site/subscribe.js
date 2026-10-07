@@ -104,8 +104,8 @@
         if (res.ok && data.ok) {
           input.value = "";
           say(data.queued
-            ? "Thanks. Today\u2019s emails are used up, so the link to confirm " +
-              "comes tomorrow. If you were already subscribed, there is nothing more to do."
+            ? "Thanks. Today\u2019s confirmation emails are used up, so the link to confirm " +
+              "comes on a later day. If you were already subscribed, there is nothing more to do."
             : "Check your inbox for a link to confirm. If you were already " +
               "subscribed, there is nothing more to do.", "sent");
           sent = true;

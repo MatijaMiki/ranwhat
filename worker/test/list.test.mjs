@@ -264,6 +264,42 @@ test("past the day's sending limit a confirmation waits, and the cron sends it",
   assert.equal(s.emails.length, 1, "sent once");
 });
 
+test("the list sends only so many confirmations a day, ten with accounts on, so account mail keeps its room; the rest wait", async () => {
+  const s = services();
+  const e = env({ ACCOUNTS_ON: "1" });
+  const answers = [];
+  for (let i = 0; i < 25; i++) answers.push(await signUp(e, `r${i}@example.com`));
+  assert.equal(s.emails.length, list.LIST_MAIL_PER_DAY);
+  assert.equal(list.LIST_MAIL_PER_DAY, 10);
+  assert.deepEqual(answers.slice(list.LIST_MAIL_PER_DAY), Array(25 - list.LIST_MAIL_PER_DAY).fill({ ok: true, queued: true }));
+  assert.equal(pending(e).filter((r) => r.mailed_at === 0).length, 25 - list.LIST_MAIL_PER_DAY);
+
+  /* The cron sends none of them past the day's ten either. */
+  await list.announce(e, feed([OLD]));
+  assert.equal(s.emails.length, list.LIST_MAIL_PER_DAY);
+
+  /* The next day's run sends ten more of those waiting, and no more. */
+  const realNow = Date.now;
+  Date.now = () => realNow() + 24 * 3600 * 1000;
+  try {
+    await list.announce(e, feed([OLD]));
+    assert.equal(s.emails.length, 2 * list.LIST_MAIL_PER_DAY);
+    assert.equal(new Set(s.emails.map((m) => m.to[0])).size, 2 * list.LIST_MAIL_PER_DAY, "each address mailed once");
+    assert.equal(pending(e).filter((r) => r.mailed_at === 0).length, 25 - 2 * list.LIST_MAIL_PER_DAY);
+    await list.announce(e, feed([OLD]));
+    assert.equal(s.emails.length, 2 * list.LIST_MAIL_PER_DAY);
+  } finally {
+    Date.now = realNow;
+  }
+
+  /* With accounts off, there is no account mail to keep room for. */
+  const alone = services();
+  const off = env();
+  for (let i = 0; i < 25; i++) await signUp(off, `r${i}@example.com`);
+  assert.equal(alone.emails.length, 25);
+  assert.ok(list.LIST_MAIL_ALONE >= 25 && list.LIST_MAIL_ALONE <= 90);
+});
+
 test("any other failed confirmation email says so, and the next try goes through at once", async () => {
   const s = services();
   const e = env();
