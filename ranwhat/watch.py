@@ -17,6 +17,7 @@ OTLP receiver slots in behind the same Action Record interface.
 from __future__ import annotations
 
 import bisect
+import contextlib
 import datetime
 import functools
 import shlex
@@ -195,10 +196,29 @@ def _secret_spans(text):
     return clean.secret_spans(text)
 
 
+# A test of a value that leaves it unflagged by secret.literal: one clean's
+# review was told to keep (known.Kept), set for a run by sparing().
+_SPARE = None
+
+
+@contextlib.contextmanager
+def sparing(spare):
+    """For the run inside it, secret.literal leaves every value `spare` is
+    true of (None: none): a value someone chose to keep is no finding."""
+    global _SPARE
+    before, _SPARE = _SPARE, spare
+    try:
+        yield
+    finally:
+        _SPARE = before
+
+
 def _first_secret(text):
     """Span of the earliest credential in text, so the evidence sits on it
-    and not on a fixture beside it."""
+    and not on a fixture beside it. A value kept (_SPARE) is none."""
     spans = _secret_spans(text)
+    if _SPARE is not None:
+        spans = [(lo, hi) for lo, hi in spans if not _SPARE(text[lo:hi])]
     return spans[0] if spans else None
 
 

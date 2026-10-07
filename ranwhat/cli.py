@@ -30,6 +30,7 @@ from . import known as known_mod
 from . import catalog as catalog_mod
 from . import agents as agents_mod
 from . import sources as sources_mod
+from . import sarif as sarif_mod
 from . import hints
 from . import hook as hook_mod
 from . import term
@@ -252,6 +253,12 @@ _HTML_COMMANDS = ("demo", "scan", "live")
 
 # --days when it is not given. A suggested command repeats any other value.
 DEFAULT_DAYS = 30
+
+# The commands that read agent history, and so take --fail-on and --sarif.
+_FINDING_COMMANDS = ("check", "watch", "clean")
+# The exit status for --fail-on: findings at or above its severity. 1 is an
+# error, 2 is nothing read, and either is said over this.
+FAIL_STATUS = 3
 
 
 _UV_BUCKET = re.compile(r"^archive-v\d+$")
@@ -756,6 +763,12 @@ def _remembering(args):
     return remember
 
 
+def _keeping(values):
+    """For clean's review: remembers each value kept (known.Kept.add), so
+    the next run neither reports nor masks it. Whether it could."""
+    return known_mod.Kept.add(values) is not None
+
+
 def _masked_strings(node, mask):
     """node with every string in it, in lists, dicts (their keys too),
     sets and tuples, put through mask: what check and watch print or
@@ -771,6 +784,56 @@ def _masked_strings(node, mask):
     if isinstance(node, (set, frozenset)):
         return type(node)(_masked_strings(v, mask) for v in node)
     return node
+
+
+def _drop_kept(findings, values, kept=None):
+    """findings without those whose value clean's review was told to keep
+    (known.Kept), and how many that was. `values` is {fingerprint: value}
+    as the scan kept them."""
+    kept = known_mod.Kept.open() if kept is None else kept
+    if not kept or not findings:
+        return findings, 0
+    left = {fp: f for fp, f in findings.items() if values.get(fp) not in kept}
+    return left, len(findings) - len(left)
+
+
+def _kept_note(n):
+    """What the report says of the secrets it leaves out as kept."""
+    return ("%s you chose to keep in clean's review %s not listed. Delete "
+            "%s to list %s again." % (
+                agents_mod.plural(n, "secret"), "is" if n == 1 else "are",
+                _shell_path(os.path.join(known_mod.index_dir(),
+                                         known_mod.KEPT_FILE)),
+                "it" if n == 1 else "them"))
+
+
+def _finish(args, status, records=(), findings=(), mask=None):
+    """The exit status of check, watch or clean, once --sarif is written:
+    1 when it could not be, else `status` when it is not 0 (2: nothing
+    read), else FAIL_STATUS when --fail-on finds anything at or above its
+    severity. `findings` are clean's, each of severity sarif.SECRET, and
+    `mask` masks every string of the SARIF log as the report is masked."""
+    if getattr(args, "sarif", None):
+        try:
+            sarif_mod.write(args.sarif, records, findings, mask)
+        except OSError as error:
+            sys.stderr.write("ranwhat: cannot write %s (%s)\n"
+                             % (args.sarif, error.strerror or error))
+            return 1
+    floor = getattr(args, "fail_on", None)
+    if status or not floor:
+        return status
+    failing = sum(1 for r in records
+                  if sarif_mod.at_least(r.get("severity"), floor))
+    if sarif_mod.at_least(sarif_mod.SECRET, floor):
+        failing += len(findings)
+    if not failing:
+        return status
+    sys.stderr.write("\n".join(term.wrap(
+        "%s at or above %s (--fail-on %s): exit status %d."
+        % (agents_mod.plural(failing, "finding"), floor, floor, FAIL_STATUS),
+        stream=sys.stderr)) + "\n")
+    return FAIL_STATUS
 
 
 def _check(args):
@@ -799,14 +862,17 @@ def _check(args):
             sources=args.sources, root=args.root, paths=args.paths,
             since_days=args.days, apply=False, progress=step(_SECRETS),
             known=known, read=index.take)
-        findings = searched.findings
+        keeping = known_mod.Kept.open()
+        findings, kept = _drop_kept(searched.findings, known, keeping)
         everywhere = _known(args, step, index)
         unread = {}
-        records, counts = watch_mod.scan_sources_counted(
-            sources=args.sources, root=args.root,
-            state_dir=args.state_dir, since_days=args.days,
-            progress=step(_ACTIONS), known=everywhere, paths=args.paths,
-            unread=unread)
+        # A kept value typed into a call is no secret.literal either.
+        with watch_mod.sparing(keeping.__contains__ if keeping else None):
+            records, counts = watch_mod.scan_sources_counted(
+                sources=args.sources, root=args.root,
+                state_dir=args.state_dir, since_days=args.days,
+                progress=step(_ACTIONS), known=everywhere, paths=args.paths,
+                unread=unread)
         _mask_known(records, known)
         # Then every value clean finds anywhere, in all that is printed:
         # each action's evidence was masked as it was read, and this masks
@@ -828,13 +894,17 @@ def _check(args):
         args.sources, root=args.root, state_dir=args.state_dir,
         paths=args.paths, asked=args.source)
     nothing = places is not None and not scanned
+    secrets = [_finding_json(f) for f in findings.values()]
+    shown = everywhere.mask if everywhere else None
+
+    def finish(status):
+        return _finish(args, status, records, secrets, shown)
     if args.json:
-        print(_json_text({
-            "days": args.days,
-            "actions": records,
-            "secrets": [_finding_json(f) for f in findings.values()],
-        }))
-        return _said_nothing_read(places if nothing else None, args.days)
+        doc = {"days": args.days, "actions": records, "secrets": secrets}
+        if kept:
+            doc["kept"] = kept
+        print(_json_text(doc))
+        return finish(_said_nothing_read(places if nothing else None, args.days))
 
     from .report import DIM
     # Each section once, then one tail. Printing the two standalone reports
@@ -850,7 +920,7 @@ def _check(args):
         print(clean_mod.render(findings, searched.counts, [], False, footer=False,
                                advice=False, others=searched.others,
                                read_only=searched.read_only,
-                               notes=_clean_notes(args, searched)).rstrip("\n"))
+                               notes=_clean_notes(args, searched, kept)).rstrip("\n"))
     elif sources:
         # watch read something clean did not: "No secrets found" here
         # would be an all-clear on history nobody searched. With nothing
@@ -892,7 +962,7 @@ def _check(args):
             tail += term.wrap(why, indent="      ")
     tail += ["", term.rule("-"), term.FOOTER, ""]
     print("\n".join(tail))
-    return 2 if nothing else 0
+    return finish(2 if nothing else 0)
 
 
 # The header of check's report when it read nothing: watch's section,
@@ -1300,12 +1370,15 @@ def _sentence(text):
     return text if text.endswith((".", "!", "?")) else text + "."
 
 
-def _clean_notes(args, searched):
+def _clean_notes(args, searched, kept=0):
     """_notes, and for each agent that holds a finding what its adapter
     says of it (clean_note), and for each whose files were masked what to
     do next (mask_note): an editor that rewrites the file from memory, a
-    copy kept in the agent's cloud."""
+    copy kept in the agent's cloud. Then how many secrets were left out,
+    `kept`, as kept in clean's review."""
     notes = _notes(args)
+    if kept:
+        notes.append(_kept_note(kept))
     holding = {i for f in searched.findings.values() for i in f.get("sources", ())}
     masked = {searched.stores[path].source for path in searched.changed
               if path in searched.stores}
@@ -1557,6 +1630,17 @@ def _main(argv=None):
     p.add_argument("--apply", action="store_true",
                    help="clean: mask everything found without asking. Without "
                         "it, clean reports and then opens a review session.")
+    p.add_argument("--fail-on", metavar="SEVERITY",
+                   choices=list(sarif_mod.SEVERITIES),
+                   help="check, watch, clean: exit with status %d when "
+                        "anything at or above SEVERITY (medium, high or "
+                        "critical) is found; every secret clean finds is "
+                        "critical. 1 stays an error, 2 nothing read"
+                        % FAIL_STATUS)
+    p.add_argument("--sarif", metavar="PATH",
+                   help="check, watch, clean: also write what was found as "
+                        "SARIF 2.1.0 to PATH, for code scanning. Secrets "
+                        "appear masked, as the report shows them")
     p.add_argument("--no-interactive", action="store_true",
                    help="clean: report and exit instead of opening the review "
                         "session")
@@ -1613,6 +1697,11 @@ def _main(argv=None):
                 + ("; %s has no HTML report" % args.command
                    if args.command else ""))
 
+    for flag, value in (("--fail-on", args.fail_on), ("--sarif", args.sarif)):
+        if value is not None and args.command not in _FINDING_COMMANDS:
+            # Accepted and ignored, a CI step would pass on any history.
+            p.error("%s is only for check, watch and clean" % flag)
+
     if args.command is None:
         _overview(p)
         return 0
@@ -1654,16 +1743,19 @@ def _main(argv=None):
         bar, step = _progress_line(args)
         known = {}            # for the review: never written anywhere
         remember = _remembering(args)
+        # What the review was told to keep is neither listed nor masked.
+        keeping = known_mod.Kept.open()
         try:
             searched = clean_mod.scan_sources(
                 sources=args.sources, root=args.root, paths=args.paths,
                 since_days=args.days, apply=args.apply,
                 progress=step(_SECRETS), known=known,
-                remember=remember if args.apply else None)
+                remember=remember if args.apply else None,
+                spare=keeping.__contains__ if keeping else None)
         finally:
             bar.clear()
-        findings, scanned, changed = (searched.findings, searched.scanned,
-                                      searched.changed)
+        findings, kept = _drop_kept(searched.findings, known, keeping)
+        scanned, changed = searched.scanned, searched.changed
         # Zero found is not "No secrets found": it is a wrong --root, a
         # fresh machine, or history kept somewhere else.
         places = None if searched.found else watch_mod.locations(
@@ -1674,9 +1766,15 @@ def _main(argv=None):
         # another was read from, or in a transcript's name, and the report,
         # --json and the review's show N printed it whole there.
         shown = known_mod.Matcher.of(known.values()).mask if known else None
+
+        def finish(status):
+            return _finish(args, status, (),
+                           [_finding_json(f) for f in findings.values()], shown)
         if args.json:
             doc = {"scanned": scanned, "applied": args.apply, "changed": changed,
                    "findings": [_finding_json(f) for f in findings.values()]}
+            if kept:
+                doc["kept"] = kept
             if args.apply:
                 # The files holding a finding that were left as they are:
                 # {path: "read-only", "in use", ...}.
@@ -1684,15 +1782,15 @@ def _main(argv=None):
                     [(path, "read-only") for path in searched.read_only]
                     + [(path, why) for path, (_i, why) in searched.skipped.items()])
             print(_json_text(_masked_strings(doc, shown) if shown else doc))
-            return _said_nothing_read(places, args.days)
+            return finish(_said_nothing_read(places, args.days))
         if places is not None:
             print(_clean_nothing_read(args))
-            return 2
+            return finish(2)
         print(clean_mod.render(findings, searched.counts, changed, args.apply,
                                shown=shown, others=searched.others,
                                read_only=searched.read_only,
                                skipped=searched.skipped,
-                               notes=_clean_notes(args, searched)))
+                               notes=_clean_notes(args, searched, kept)))
         # The findings are already in memory; making someone re-scan a
         # large history just to act on what they read is wasteful.
         if (findings and not args.apply and not args.no_interactive
@@ -1701,8 +1799,10 @@ def _main(argv=None):
                              paths=(clean_mod.discover(args.root, args.days)
                                     if "claude-code" in args.sources else []),
                              shown=shown, remember=remember,
-                             stores=searched.stores)
-        return 0
+                             stores=searched.stores, keep=_keeping)
+            # What the review kept is no longer a finding.
+            findings, _n = _drop_kept(findings, known)
+        return finish(0)
 
     if args.command == "watch":
         sources = args.sources
@@ -1710,10 +1810,12 @@ def _main(argv=None):
         try:
             everywhere = _known(args, step)
             unread = {}
-            records, counts = watch_mod.scan_sources_counted(
-                sources=sources, root=args.root, state_dir=args.state_dir,
-                since_days=args.days, progress=step(_ACTIONS), known=everywhere,
-                paths=args.paths, unread=unread)
+            keeping = known_mod.Kept.open()
+            with watch_mod.sparing(keeping.__contains__ if keeping else None):
+                records, counts = watch_mod.scan_sources_counted(
+                    sources=sources, root=args.root, state_dir=args.state_dir,
+                    since_days=args.days, progress=step(_ACTIONS),
+                    known=everywhere, paths=args.paths, unread=unread)
             if everywhere:
                 records = _masked_strings(records, everywhere.mask)
         finally:
@@ -1722,14 +1824,16 @@ def _main(argv=None):
         places = None if n else watch_mod.locations(
             sources, root=args.root, state_dir=args.state_dir, paths=args.paths,
             asked=args.source)
+        shown = everywhere.mask if everywhere else None
         if args.json:
             print(_json_text(records))
-            return _said_nothing_read(places, args.days)
+            return _finish(args, _said_nothing_read(places, args.days),
+                           records, (), shown)
         print(watch_mod.render(records, counts, args.days, locations=places,
                                notes=_notes(args),
                                complete=agents_mod.all_read(args.sources),
                                unread=sum(unread.values())))
-        return 2 if places is not None else 0
+        return _finish(args, 2 if places is not None else 0, records, (), shown)
 
     if args.command == "demo":
         _emit(run_scan(_bundled("support-copilot.json")), args)
