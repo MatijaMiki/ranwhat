@@ -1183,6 +1183,26 @@ test("with a code typed in the last 15 minutes the current password is not asked
     303);
 });
 
+test("removing the password ends every other session of the account, as changing it does, and the page says so", async () => {
+  const s = services();
+  const e = env();
+  const ana = await account(e, s, "ana@example.com", ANA_PASSWORD);
+  /* Someone else signs in with the password, somewhere else. */
+  const thief = new Browser(e, { ip: "203.0.113.92" });
+  assert.equal((await withPassword(thief, "ana@example.com", ANA_PASSWORD)).status, 303);
+  assert.equal((await thief.get("/")).status, 200);
+
+  const home = await ana.get("/");
+  const removed = await ana.post("/password/remove", { form: tokenFor(home.text, "/password/remove") });
+  assert.equal(removed.status, 303, removed.text);
+  assert.equal(passwordOf(e, "ana@example.com"), null);
+  assert.equal((await thief.get("/")).location, "/signin", "the password's session is over");
+  assert.equal((await ana.get("/")).status, 200, "this one goes on");
+  assert.equal(rows(e, "SELECT count(*) AS n FROM sessions")[0].n, 1);
+  assert.match((await ana.get("/")).text, /Password removed, and every other session signed out/);
+  assert.match(home.text, /Removing it signs this account out everywhere else\./);
+});
+
 test("the sign-in methods: the code always, a password added with a fresh code and removed, providers not set up coming", async () => {
   const s = services();
   const e = env();

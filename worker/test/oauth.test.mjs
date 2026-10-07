@@ -1097,6 +1097,27 @@ test("a password reset can take every Google, GitHub and passkey way in with it"
   assert.equal((await ana.get("/")).location, "/signin", "every other session ended");
 });
 
+test("unlinking Google or GitHub ends every other session of the account, the one it opened among them", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  await viaProvider(ana, s, "github", { user: { id: 9001 } }, { link: true });
+  /* Someone with that GitHub account signs in with it, somewhere else. */
+  const thief = new Browser(e, { ip: "203.0.113.64" });
+  assert.equal((await viaProvider(thief, s, "github", { user: { id: 9001 } })).res.status, 303);
+  assert.equal((await thief.get("/")).status, 200);
+
+  const home = await ana.get("/");
+  const r = await ana.post("/auth/github/unlink", { form: tokenFor(home.text, "/auth/github/unlink"), subject: "9001" });
+  assert.equal(r.status, 303, r.text);
+  assert.equal((await thief.get("/")).location, "/signin", "the GitHub session is over");
+  assert.equal((await ana.get("/")).status, 200, "this one goes on");
+  assert.equal(count(e, "sessions"), 1);
+  assert.match((await ana.get("/")).text, /GitHub account unlinked, and every other session signed out/);
+  assert.match(home.text, /Unlinking one also signs this account out everywhere else\./);
+});
+
 /* ---------- telling the account ---------- */
 
 test("the account's address is told when a Google or GitHub account is linked to it, within a daily share", async () => {

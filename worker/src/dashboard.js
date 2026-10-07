@@ -723,21 +723,21 @@ const EVENTS = {
   password_added: "Password added, confirmed with an emailed code",
   password_changed: "Password changed, and every other session signed out",
   password_reset: "Password reset with an emailed code, and every other session signed out",
-  password_removed: "Password removed",
+  password_removed: "Password removed, and every other session signed out",
   signout: "Signed out",
   signout_all: "Signed out everywhere",
   org_renamed: "Organisation renamed",
   signup_google: "Account made, with Google",
   signin_google: "Signed in with Google",
   linked_google: "Google account linked",
-  unlinked_google: "Google account unlinked",
+  unlinked_google: "Google account unlinked, and every other session signed out",
   signup_github: "Account made, with GitHub",
   signin_github: "Signed in with GitHub",
   linked_github: "GitHub account linked",
-  unlinked_github: "GitHub account unlinked",
+  unlinked_github: "GitHub account unlinked, and every other session signed out",
   signin_passkey: "Signed in with a passkey",
   passkey_added: "Passkey added, confirmed with an emailed code",
-  passkey_removed: "Passkey removed",
+  passkey_removed: "Passkey removed, and every other session signed out",
   ways_removed: "Every Google, GitHub and passkey way in removed",
   device_approved: "Terminal approved for ranwhat login, with a fresh code",
   device_denied: "Terminal denied for ranwhat login",
@@ -791,7 +791,9 @@ function panel(tier, onPlan) {
    is added, changed or removed with the current password or a code typed
    in the last 15 minutes (fresh() in session.js); without a password, only
    the code will do. Google and GitHub, where they are set up, are linked
-   and unlinked with such a code too, and passkeys added and removed. */
+   and unlinked with such a code too, and passkeys added and removed.
+   Changing the password, or taking any way in away, signs the account out
+   everywhere else, as the page says. */
 async function methods(env, who, error, providerError, passkeyError) {
   const stored = await passwordOf(env, who.user);
   const confirmed = fresh(who);
@@ -820,7 +822,7 @@ async function methods(env, who, error, providerError, passkeyError) {
       ${form("/password", await formToken(env, who.id, "password"), `${currentField("current-password")}${newField}
       <button type="submit">Change password</button>`)}
       <p>Changing it signs this account out everywhere else.</p>
-      ${remove}
+      ${remove}${remove ? "\n      <p>Removing it signs this account out everywhere else.</p>" : ""}
       ${confirmed ? "" : `<p>Forgot it? Confirm with an emailed code, and it is not asked for.</p>
       ${code("Email me a code")}`}</li>`;
   } else {
@@ -865,7 +867,8 @@ async function methods(env, who, error, providerError, passkeyError) {
     return `<li data-method="${key}"><strong>${name}</strong> <span class="tag">${tag}</span>
       <br>${about}
       ${mine.length ? `<ul>${items}</ul>` : ""}
-      ${mine.length && confirmed ? `<p>Unlinking one keeps its id here, so that it does not link itself back; linking it again does.</p>` : ""}
+      ${mine.length && confirmed ? `<p>Unlinking one keeps its id here, so that it does not link itself back; linking it again does.
+        Unlinking one also signs this account out everywhere else.</p>` : ""}
       ${problem(err)}
       ${confirmed ? linkForm
         : `<p>${on ? "Linking or unlinking" : "Unlinking"} ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
@@ -899,6 +902,7 @@ async function passkeys(env, who, error, code) {
         <a href="/signin/passkey">passkey sign-in page</a>.`
         : "Sign in with this device's screen lock or a security key, once you add a passkey here."}
       ${mine.length ? `<ul>${items}</ul>` : ""}
+      ${mine.length && confirmed ? "<p>Removing one signs this account out everywhere else.</p>" : ""}
       ${problem(error)}
       ${confirmed
         ? (mine.length < MAX_PASSKEYS ? `<p><a class="button" href="/passkeys/add">Add a passkey</a></p>` : "")
@@ -1088,7 +1092,10 @@ async function setPassword(request, env) {
   return redirect("/");
 }
 
-/* Only while another way in remains, which the emailed code always is. */
+/* Only while another way in remains, which the emailed code always is.
+   Every other session of the account ends with it, as when the password
+   changes: one that must go may be in someone else's hands, and so may
+   the sessions it opened. */
 async function removePassword(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -1101,8 +1108,13 @@ async function removePassword(request, env) {
   }
   const ok = await allowed(request, env, who, stored, f.get("current"));
   if (ok !== true) return ok;
-  await env.LIST.batch(detachPassword(env, { user: who.user, org: who.org.id }));
+  await env.LIST.batch([...detachPassword(env, { user: who.user, org: who.org.id }), othersOut(env, who)]);
   return redirect("/");
+}
+
+/* The statement that ends every session of this account but this one. */
+function othersOut(env, who) {
+  return env.LIST.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").bind(who.user, who.id);
 }
 
 /* ---------- Google and GitHub ---------- */
@@ -1262,7 +1274,8 @@ function notLinked(name, why, cookies) {
 }
 
 /* Takes a Google or GitHub account away, with a fresh code, while another
-   way in remains, which the emailed code always is. */
+   way in remains, which the emailed code always is, and ends every other
+   session of the account with it, the ones it opened among them. */
 async function unlinkPost(request, env, ctx, url, provider) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -1278,7 +1291,7 @@ async function unlinkPost(request, env, ctx, url, provider) {
     return dashboard(env, who, { status: 400, providerError: { provider,
       text: `This ${PROVIDERS[provider].name} account is your only way in, so it stays.` } });
   }
-  await env.LIST.batch(statements);
+  await env.LIST.batch([...statements, othersOut(env, who)]);
   return redirect("/");
 }
 
@@ -1364,7 +1377,9 @@ async function addPasskey(request, env, ctx) {
   return addPasskeyForm(env, who, { status, error });
 }
 
-/* Only while another way in remains, which the emailed code always is. */
+/* Only while another way in remains, which the emailed code always is,
+   and every other session of the account ends with it, the ones it opened
+   among them. */
 async function removePasskey(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -1375,7 +1390,7 @@ async function removePasskey(request, env) {
   if (!statements.length) return redirect("/");
   const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
   if (left < 1) return dashboard(env, who, { status: 400, passkeyError: "This passkey is your only way in, so it stays." });
-  await env.LIST.batch(statements);
+  await env.LIST.batch([...statements, othersOut(env, who)]);
   return redirect("/");
 }
 

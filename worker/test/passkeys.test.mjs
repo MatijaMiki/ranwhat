@@ -733,6 +733,25 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
   assert.equal((await back.get("/")).status, 200);
 });
 
+test("removing a passkey ends every other session of the account, the one it opened among them, and the page says so", async () => {
+  const s = services();
+  const e = env();
+  const { b, device } = await withPasskey(e, s);
+  const thief = new Browser(e, { ip: "203.0.113.63" });
+  assert.equal((await passkeySignIn(thief, device)).status, 303);
+  assert.equal((await thief.get("/")).status, 200);
+
+  const home = await b.get("/");
+  const r = await b.post("/passkeys/remove", { form: tokenFor(home.text, "/passkeys/remove"), id: device.keys[0].id });
+  assert.equal(r.status, 303, r.text);
+  assert.equal(passkeysOf(e, "ana@example.com").length, 0);
+  assert.equal((await thief.get("/")).location, "/signin", "the passkey's session is over");
+  assert.equal((await b.get("/")).status, 200, "this one goes on");
+  assert.equal(count(e, "sessions"), 1);
+  assert.match((await b.get("/")).text, /Passkey removed, and every other session signed out/);
+  assert.match(home.text, /Removing one signs this account out everywhere else\./);
+});
+
 /* ---------- the script ---------- */
 
 /* Runs /passkeys.js against a stand-in of the page `html`: its form, its
