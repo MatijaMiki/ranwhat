@@ -79,10 +79,12 @@
 import { plan, schema as feedSchema, sha256 } from "./auth.js";
 import { REPLY_TO, escape, mail, resend } from "./list.js";
 import { FEATURES, PLAN_NAMES, allows } from "./features.js";
-import { ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, canManage, event, now, spendAuthMail } from "./accounts.js";
+import {
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SWITCHES_PER_DAY, canManage, event, now, spendAuthMail,
+} from "./accounts.js";
 import {
   ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, current, formOk, formToken, fresh,
-  nextPath, orgFormOk, randomToken, readCookie, setCookie, unbump,
+  nextPath, orgFormOk, peek, randomToken, readCookie, setCookie, unbump,
 } from "./session.js";
 import { fields, form, page, redirect, refused } from "./ui.js";
 import { billingEmailFollows } from "./billing.js";
@@ -873,7 +875,10 @@ export async function transferPost(request, env, ctx) {
 /* ---------- switching ---------- */
 
 /* POST /org/switch: the session looks at another organisation its person
-   is in, and goes on to `next`. */
+   is in, and goes on to `next`. Switching to the one it looks at already
+   writes nothing, and an account switches SWITCHES_PER_DAY times a day at
+   most (accounts.js): read before, so that a refused switch writes
+   nothing, and counted once it is made. */
 export async function switchPost(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -883,10 +888,16 @@ export async function switchPost(request, env) {
   const row = typeof wanted === "string" && wanted.length <= 100 ? await env.LIST.prepare(
     "SELECT org_id FROM memberships WHERE org_id = ? AND user_id = ?").bind(wanted, who.user).first() : null;
   if (!row) return trouble(env, who, 404, "You are not in that organisation, so nothing was changed.");
+  if (row.org_id === who.org.id) return redirect(nextPath(f.get("next")));
+  if (await peek(env, "switch-user", who.user, DAY) >= SWITCHES_PER_DAY) {
+    return trouble(env, who, 429,
+      `You have switched organisation ${SWITCHES_PER_DAY} times today, the most one account can in a day, so nothing was changed. Try again tomorrow.`);
+  }
   const db = env.LIST;
   await db.batch([
     db.prepare("UPDATE sessions SET org_id = ? WHERE id = ?").bind(row.org_id, who.id),
     event(db, { org: row.org_id, user: who.user, what: "org_switched" }),
   ]);
+  await bump(env, "switch-user", who.user, DAY);
   return redirect(nextPath(f.get("next")));
 }

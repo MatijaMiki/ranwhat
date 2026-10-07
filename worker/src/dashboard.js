@@ -120,14 +120,14 @@ import { escape } from "./list.js";
 import { plan } from "./auth.js";
 import { FEATURES, PLAN_NAMES, allows, atLeast, featuresOf } from "./features.js";
 import {
-  ACCOUNT_HOST, DAY, SESSION_MAX, STEPUPS_PER_USER_DAY, canManage, event, forgetWaysIn, history, now, orgFor, orgName,
-  ready, schema, userForVerifiedEmail,
+  ACCOUNT_HOST, DAY, RENAMES_PER_DAY, SESSION_MAX, STEPUPS_PER_USER_DAY, canManage, event, forgetWaysIn, history, now,
+  orgFor, orgName, ready, schema, userForVerifiedEmail,
 } from "./accounts.js";
 import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, bump, checkCode,
   clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, orgFormOk, orgInput, orgToken,
-  holdNotice, randomToken, readCookie, releaseNotice, requestCode, sameOrigin, setCookie, tellWayIn,
+  holdNotice, peek, randomToken, readCookie, releaseNotice, requestCode, sameOrigin, setCookie, tellWayIn,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
@@ -1020,13 +1020,23 @@ async function rename(request, env) {
     return dashboard(env, who, { status: 400,
       error: "A name is 1 to 80 characters, with no control or formatting characters." });
   }
+  if (name === who.org.name) return redirect("/");
+  if (!await renamesLeft(env, who)) return dashboard(env, who, { status: 429, error: TOO_MANY_RENAMES });
   const db = env.LIST;
   await db.batch([
     db.prepare("UPDATE orgs SET name = ? WHERE id = ?").bind(name, who.org.id),
     event(db, { org: who.org.id, user: who.user, what: "org_renamed" }),
   ]);
+  await bump(env, "rename-user", who.user, DAY);
   return redirect("/");
 }
+
+/* Renames, of the organisation and its machines together, are counted
+   per account per day (accounts.js's RENAMES_PER_DAY): read before one is
+   made, so that a refused one writes nothing, and counted once it is. */
+const renamesLeft = async (env, who) => await peek(env, "rename-user", who.user, DAY) < RENAMES_PER_DAY;
+const TOO_MANY_RENAMES = `You have renamed things ${RENAMES_PER_DAY} times today, the most one account can in a
+  day, so nothing was renamed. Try again tomorrow.`.replace(/\s+/g, " ");
 
 /* ---------- the password, signed in ---------- */
 
@@ -1561,7 +1571,10 @@ async function renameMachinePost(request, env) {
     return dashboard(env, who, { status: 400,
       machinesError: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
   }
+  if (label === machine.label) return redirect("/");
+  if (!await renamesLeft(env, who)) return dashboard(env, who, { status: 429, machinesError: TOO_MANY_RENAMES });
   await renameMachine(env, who, machine, label);
+  await bump(env, "rename-user", who.user, DAY);
   return redirect("/");
 }
 

@@ -15,7 +15,8 @@ import { d1 } from "./stand-ins.mjs";
 const worker = (await import("../src/index.js")).default;
 const { NETWORK_MAIL_PER_DAY, formToken, network } = await import("../src/session.js");
 const {
-  AUTH_MAIL_PER_DAY, RESERVE_PER_NETWORK_DAY, RESERVE_PER_USER_DAY, STEPUP_RESERVE, STEPUPS_PER_USER_DAY,
+  AUTH_MAIL_PER_DAY, RENAMES_PER_DAY, RESERVE_PER_NETWORK_DAY, RESERVE_PER_USER_DAY, STEPUP_RESERVE,
+  STEPUPS_PER_USER_DAY, SWITCHES_PER_DAY,
 } = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
@@ -1109,6 +1110,58 @@ test("an owner renames the organisation; a name is escaped, and a member cannot"
   e.LIST.sql.prepare("DELETE FROM memberships WHERE org_id = ? AND user_id = ?").run(acme, boId);
   assert.ok((await bo.get("/")).text.includes("Personal"));
   assert.equal(rows(e, "SELECT event FROM auth_events WHERE event = 'org_renamed'").length, 1);
+});
+
+test("renames and organisation switches write only what changes, and only so many a day for one account", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e, { ip: "203.0.113.5" });
+  await signIn(ana, s, "ana@example.com");
+  const home = await ana.get("/");
+  const org = home.text.match(/<form method="post" action="\/org">[\s\S]*?name="org" value="([^"]+)"/)[1];
+  const rename = (name) => ana.post("/org", { form: tokenFor(home.text, "/org"), org, name });
+  const written = () => rows(e, "SELECT count(*) AS n FROM auth_events")[0].n;
+  const events = (what) => rows(e, "SELECT count(*) AS n FROM auth_events WHERE event = ?", what)[0].n;
+
+  /* A rename to the name it has writes nothing. */
+  let before = written();
+  assert.equal((await rename("Personal")).location, "/");
+  assert.equal(written(), before);
+
+  /* RENAMES_PER_DAY renames, then a 429 that writes nothing. */
+  for (let i = 0; i < RENAMES_PER_DAY; i++) assert.equal((await rename(`Name ${i}`)).location, "/");
+  assert.equal(events("org_renamed"), RENAMES_PER_DAY);
+  before = written();
+  const throttles = rows(e, "SELECT count(*) AS n, coalesce(sum(count), 0) AS c FROM throttle")[0];
+  const over = await rename("One more");
+  assert.equal(over.status, 429);
+  assert.match(over.text, /renamed things \d+ times today/);
+  assert.equal(written(), before);
+  assert.deepEqual(rows(e, "SELECT count(*) AS n, coalesce(sum(count), 0) AS c FROM throttle")[0], throttles,
+                   "a refused rename writes nothing at all");
+  assert.equal(rows(e, "SELECT name FROM orgs WHERE id = ?", org)[0].name, `Name ${RENAMES_PER_DAY - 1}`);
+
+  /* Switching: to the organisation already shown writes nothing; past
+     SWITCHES_PER_DAY, nothing more. */
+  const other = crypto.randomUUID();
+  const [{ id: user }] = rows(e, "SELECT id FROM users WHERE email = 'ana@example.com'");
+  e.LIST.sql.prepare("INSERT INTO orgs (id, name, personal, created_at) VALUES (?, 'Acme', 0, 0)").run(other);
+  e.LIST.sql.prepare("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', 0)").run(other, user);
+  const sw = await formToken(e, sha(ana.jar.get(SESSION)), "org-switch");
+  const to = (id) => ana.post("/org/switch", { form: sw, org: id, next: "/" });
+  before = written();
+  assert.equal((await to(org)).location, "/");
+  assert.equal(written(), before, "already looking at it");
+  for (let i = 0; i < SWITCHES_PER_DAY; i++) assert.equal((await to(i % 2 ? org : other)).location, "/");
+  assert.equal(events("org_switched"), SWITCHES_PER_DAY);
+  const stuck = await to(SWITCHES_PER_DAY % 2 ? org : other);
+  assert.equal(stuck.status, 429);
+  assert.equal(events("org_switched"), SWITCHES_PER_DAY);
+
+  /* The next day, both go on. */
+  later(DAY + 1);
+  assert.equal((await rename("Tomorrow")).location, "/");
+  assert.equal((await to(SWITCHES_PER_DAY % 2 ? org : other)).location, "/");
 });
 
 /* ---------- logs and the cron ---------- */

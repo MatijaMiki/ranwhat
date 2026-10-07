@@ -43,6 +43,16 @@ export const SESSION_MAX = 30 * DAY;    // and none lasts longer than this after
 const KEEP_EVENTS = 396 * DAY;          // the audit log: 13 months
 const KEEP_COUNTS = 7 * DAY;            // the daily email counts
 
+/* What one account may do in a day that adds a row to the audit log and
+   needs no fresh code: renames (of an organisation and of its machines,
+   together) and switches between its organisations. Past them it is
+   refused with nothing written, and a rename or switch that changes
+   nothing writes nothing either. So one account adds at most 90 such rows
+   a day to what the cron keeps for 13 months (about 36,000), and a
+   refused request costs the database a read, never a write. */
+export const RENAMES_PER_DAY = 30;
+export const SWITCHES_PER_DAY = 60;
+
 /* Sign-in codes, fresh-code checks, address checks, password resets and
    the notices that a way in was added share Resend's free plan, 100
    emails a day, with invites (INVITE_MAIL_PER_DAY, below), the email that

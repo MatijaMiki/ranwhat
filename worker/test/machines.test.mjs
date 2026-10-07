@@ -18,6 +18,7 @@ const device = await import("../src/device.js");
 const machines = await import("../src/machines.js");
 const { FEATURES, allows } = await import("../src/features.js");
 const { formToken } = await import("../src/session.js");
+const { RENAMES_PER_DAY } = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const FEED = "https://feed.ranwhat.com";
@@ -427,6 +428,28 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   }
   assert.equal(labelOf(bos.id), "Bo's");
   assert.equal(rows(e, "SELECT 1 FROM auth_events WHERE event = 'machine_renamed'").length, 4);
+});
+
+test("renaming a machine to its own name writes nothing, and renames are counted per account per day", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const mine = await linkTerminal(e, ana, "Laptop");
+  const rename = async (label) => ana.post("/machines/rename",
+    { form: tokenFor((await ana.get("/")).text, "/machines/rename"), id: mine.id, label });
+  const renamed = () => rows(e, "SELECT 1 FROM auth_events WHERE event = 'machine_renamed'").length;
+  assert.equal((await rename("  Laptop ")).location, "/");
+  assert.equal(renamed(), 0, "the same name: nothing written");
+  for (let i = 0; i < RENAMES_PER_DAY; i++) assert.equal((await rename(`Laptop ${i}`)).location, "/");
+  assert.equal(renamed(), RENAMES_PER_DAY);
+  const over = await rename("Laptop again");
+  assert.equal(over.status, 429);
+  assert.match(over.text, /renamed things \d+ times today/);
+  assert.equal(renamed(), RENAMES_PER_DAY);
+  assert.equal(one(e, "SELECT label FROM machines WHERE id = ?", mine.id).label, `Laptop ${RENAMES_PER_DAY - 1}`);
+  later(DAY + 1);
+  assert.equal((await rename("Laptop again")).location, "/");
 });
 
 /* ---------- revoking ---------- */
