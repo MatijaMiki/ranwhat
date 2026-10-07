@@ -862,14 +862,17 @@ def _check(args):
             sources=args.sources, root=args.root, paths=args.paths,
             since_days=args.days, apply=False, progress=step(_SECRETS),
             known=known, read=index.take)
-        findings, kept = _drop_kept(searched.findings, known)
+        keeping = known_mod.Kept.open()
+        findings, kept = _drop_kept(searched.findings, known, keeping)
         everywhere = _known(args, step, index)
         unread = {}
-        records, counts = watch_mod.scan_sources_counted(
-            sources=args.sources, root=args.root,
-            state_dir=args.state_dir, since_days=args.days,
-            progress=step(_ACTIONS), known=everywhere, paths=args.paths,
-            unread=unread)
+        # A kept value typed into a call is no secret.literal either.
+        with watch_mod.sparing(keeping.__contains__ if keeping else None):
+            records, counts = watch_mod.scan_sources_counted(
+                sources=args.sources, root=args.root,
+                state_dir=args.state_dir, since_days=args.days,
+                progress=step(_ACTIONS), known=everywhere, paths=args.paths,
+                unread=unread)
         _mask_known(records, known)
         # Then every value clean finds anywhere, in all that is printed:
         # each action's evidence was masked as it was read, and this masks
@@ -1807,10 +1810,12 @@ def _main(argv=None):
         try:
             everywhere = _known(args, step)
             unread = {}
-            records, counts = watch_mod.scan_sources_counted(
-                sources=sources, root=args.root, state_dir=args.state_dir,
-                since_days=args.days, progress=step(_ACTIONS), known=everywhere,
-                paths=args.paths, unread=unread)
+            keeping = known_mod.Kept.open()
+            with watch_mod.sparing(keeping.__contains__ if keeping else None):
+                records, counts = watch_mod.scan_sources_counted(
+                    sources=sources, root=args.root, state_dir=args.state_dir,
+                    since_days=args.days, progress=step(_ACTIONS),
+                    known=everywhere, paths=args.paths, unread=unread)
             if everywhere:
                 records = _masked_strings(records, everywhere.mask)
         finally:

@@ -39,11 +39,13 @@ compared whole.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import stat
+import time
 
 from . import agents, clean
 from .watch import _transcripts, claude_projects
@@ -362,16 +364,40 @@ def _stored_key(where):
 
 
 def _store_key(where, key):
-    """Keep key as this install's, in a 0700 directory. False where
-    nothing can be written there."""
+    """Keep key as this install's, in a 0700 directory, unless another run
+    has kept one there meanwhile: whether key is the one kept now. False
+    too where nothing can be written there. Only a damaged key is ever
+    replaced: written over another run's, everything hashed under that one
+    (the index, what clean's review was told to keep) was lost."""
+    path = os.path.join(where, "key")
+    tmp = "%s.%d.new" % (path, os.getpid())
     try:
         os.makedirs(where, mode=0o700, exist_ok=True)
         if os.name != "nt":
             os.chmod(where, 0o700)
-        _write_new(os.path.join(where, "key"), key)
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        fd = os.open(tmp, _CREATE, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(key)
+        try:
+            os.link(tmp, path)          # never over one there already
+        except FileExistsError:
+            if _stored_key(where) is None:
+                os.replace(tmp, path)   # damaged: replaced
+        except (OSError, AttributeError, NotImplementedError):
+            # No hard links here (some file systems): the narrower check.
+            if _stored_key(where) is None:
+                os.replace(tmp, path)
     except OSError:
         return False
-    return True
+    finally:
+        try:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
+        except OSError:
+            pass
+    return _stored_key(where) == key
 
 
 def _writable(where):
@@ -620,14 +646,11 @@ class Index(object):
         if not self.kept:
             return
         if not self._stored:
-            # Another part of this run (clean's review keeping a value,
-            # Kept.add) may have kept a key since this index was opened:
-            # writing this one over it would lose what that key hashed. This
-            # index's hashes are under its own key, so it is kept in memory
-            # for this run, and the next run builds it under the stored one.
-            if _stored_key(self.where) is not None:
-                self.kept = False
-                return
+            # Another run, or clean's review keeping a value (Kept.add),
+            # may have kept a key since this index was opened; _store_key
+            # never writes over it. This index's hashes are under its own
+            # key, so it is then kept in memory for this run, and the next
+            # run builds it under the stored one.
             self._stored = _store_key(self.where, self._key)
             if not self._stored:
                 self.kept = False
@@ -643,6 +666,45 @@ class Index(object):
             self._migrated = False
         except OSError:
             self.kept = False
+
+
+_LOCK_WAIT = 5.0                # seconds a keep waits for another's
+_LOCK_STALE = 60.0              # a lock older than this was left by a crash
+
+
+@contextlib.contextmanager
+def _locked(path):
+    """Hold path as a lock file, made exclusively, while the block runs:
+    two runs keeping a value at once each read the file, add theirs and
+    write it, and one would lose the other's. Yields False when it could
+    not be had in _LOCK_WAIT seconds, or not made at all."""
+    deadline = time.time() + _LOCK_WAIT
+    while True:
+        try:
+            fd = os.open(path, _CREATE, 0o600)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.lstat(path).st_mtime > _LOCK_STALE:
+                    os.unlink(path)
+                    continue
+            except OSError:
+                continue
+            if time.time() > deadline:
+                yield False
+                return
+            time.sleep(0.05)
+        except OSError:
+            yield False
+            return
+    try:
+        yield True
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 # What clean's review was told to keep, by the keyed hash of each value,
@@ -712,19 +774,21 @@ class Kept(object):
         where = index_dir()
         key = _stored_key(where)
         if key is None:
-            key = os.urandom(_KEY_SIZE)
-            if not _store_key(where, key):
-                return None
-            key = _stored_key(where)        # another run's, if it won
+            _store_key(where, os.urandom(_KEY_SIZE))
+            key = _stored_key(where)        # this run's, or another's that won
             if key is None:
                 return None
-        hashes = set(cls._load(where, key))
-        hashes.update(cls._of(key, v) for v in values if isinstance(v, str) and v)
-        doc = {"version": KEPT_VERSION, "key": _Hashes(key).key_id,
-               "values": sorted(h.hex() for h in hashes)}
-        try:
-            _write_new(os.path.join(where, KEPT_FILE),
-                       json.dumps(doc, sort_keys=True).encode("utf-8"))
-        except OSError:
-            return None
+        with _locked(os.path.join(where, KEPT_FILE + ".lock")) as held:
+            if not held:
+                return None
+            hashes = set(cls._load(where, key))
+            hashes.update(cls._of(key, v) for v in values
+                          if isinstance(v, str) and v)
+            doc = {"version": KEPT_VERSION, "key": _Hashes(key).key_id,
+                   "values": sorted(h.hex() for h in hashes)}
+            try:
+                _write_new(os.path.join(where, KEPT_FILE),
+                           json.dumps(doc, sort_keys=True).encode("utf-8"))
+            except OSError:
+                return None
         return cls(key, hashes)

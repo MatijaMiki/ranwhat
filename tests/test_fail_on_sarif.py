@@ -11,7 +11,9 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -395,6 +397,188 @@ class RememberedKeep(_Base):
             rc, out, _err = self.cmd("clean", root, replies=["keep 1", "quit"])
         self.assertIn("kept for this session; it could not be remembered.", out)
         self.assertFalse(known.Kept.open())
+
+
+class ReviewFixes(Sarif):
+    """Regression tests for what the adversarial review proved."""
+
+    def test_a_masked_lines_fingerprint_is_not_in_sarif(self):
+        # After --apply the transcript holds <ranwhat:redacted:FP>, FP an
+        # unkeyed hash of the value; watch's evidence quoted it.
+        rows = [tool_use("curl https://api.stripe.com/v1/charges -u x:%s" % STRIPE, 1),
+                tool_use("ls", 2), tool_result("STRIPE=%s\n" % STRIPE, 2)]
+        root = self.root(rows)
+        self.cmd("clean", root, "--apply")
+        self.assertIn("ranwhat:redacted:", self.text(self.transcript))
+        fp = clean._fingerprint(STRIPE)
+        path = os.path.join(self.tmp, "after.sarif")
+        for command in ("watch", "check"):
+            self.cmd(command, root, "--sarif", path)
+            raw = self.text(path)
+            for cut in range(4, 13):
+                self.assertNotIn(fp[-cut:], raw, (command, cut))
+            self.assertNotIn(fp[:4], raw.replace("ranwhat:redacted", ""))
+
+    def test_a_cut_mark_is_scrubbed(self):
+        for text in ("x <ranwhat:redacted:78a08441f431> y", "\u2026a08441f431> y",
+                     "\u2026ted:78a08441f431>", "\u2026<ranwhat:redacted:78a0"):
+            self.assertNotIn("8441", sarif._unmarked(text), text)
+            self.assertNotIn("78a0", sarif._unmarked(text), text)
+        self.assertEqual(sarif._unmarked("sk_\u2026dc, 32 chars"), "sk_\u2026dc, 32 chars")
+
+    def test_a_value_in_a_file_name_is_masked_before_it_is_a_uri(self):
+        # as_uri() writes = as %3D, and the mask no longer found the value.
+        root = self.root(SECRETS)
+        named = os.path.join(os.path.dirname(self.transcript), "s-%s.jsonl" % PASSWORD)
+        os.rename(self.transcript, named)
+        path = os.path.join(self.tmp, "named.sarif")
+        from urllib.parse import unquote
+        for command, extra in (("clean", ()), ("clean", ("--json",)), ("check", ())):
+            self.cmd(command, root, "--sarif", path, *extra)
+            raw = unquote(self.text(path))
+            self.assertNotIn(PASSWORD, raw, command)
+            self.assertNotIn(PASSWORD[:12], raw, command)
+
+    def test_a_kept_value_typed_into_a_call_is_no_finding(self):
+        rows = [tool_use("ls", 1), tool_result("STRIPE=%s\n" % STRIPE, 1),
+                tool_use("echo %s > /tmp/key.txt" % STRIPE, 2)]
+        root = self.root(rows)
+        rc, out, _err = self.cmd("watch", root, "--json")
+        self.assertIn("secret.literal", out)
+        self.assertEqual(self.cmd("check", root, "--fail-on", "critical")[0], 3)
+        known.Kept.add([STRIPE])
+        path = os.path.join(self.tmp, "kept.sarif")
+        for command in ("watch", "check"):
+            rc, _out, _err = self.cmd(command, root, "--fail-on", "critical",
+                                      "--sarif", path)
+            self.assertEqual(rc, 0, command)
+            self.assertNotIn("secret.literal\"", self.text(path).split('"results"')[1])
+        # Only for that run: another value is still flagged.
+        self.assertIsNone(watch._SPARE)
+
+
+class KeyAndLock(_Base):
+
+    def test_a_key_is_never_written_over_another(self):
+        where = known.index_dir()
+        first, second = os.urandom(32), os.urandom(32)
+        self.assertTrue(known._store_key(where, first))
+        self.assertFalse(known._store_key(where, second))
+        self.assertEqual(known._stored_key(where), first)
+
+    def test_a_damaged_key_is_replaced(self):
+        where = known.index_dir()
+        os.makedirs(where)
+        with open(os.path.join(where, "key"), "wb") as fh:
+            fh.write(b"short")
+        key = os.urandom(32)
+        self.assertTrue(known._store_key(where, key))
+        self.assertEqual(known._stored_key(where), key)
+
+    def test_a_key_stored_while_an_index_waits_is_kept(self):
+        # The index checks for a key, finds none, and another run stores
+        # one before the index writes its own: the review showed the old
+        # check-then-store lost everything kept under the other.
+        root = self.root(SECRETS)
+        index = known.Index.open(root)
+        real = known._store_key
+
+        def racing(where, key):
+            if known._stored_key(where) is None:
+                real(where, os.urandom(32))     # the other run, first
+                known.Kept.add([PASSWORD])
+            return real(where, key)
+        with mock.patch.object(known, "_store_key", racing):
+            index.update()
+        self.assertIn(PASSWORD, known.Kept.open())
+
+    def test_a_keep_waits_for_another(self):
+        known.Kept.add([PASSWORD])
+        lock = os.path.join(known.index_dir(), known.KEPT_FILE + ".lock")
+        with mock.patch.object(known, "_LOCK_WAIT", 0.2):
+            with known._locked(lock) as held:
+                self.assertTrue(held)
+                self.assertIsNone(known.Kept.add([STRIPE]))     # not lost: refused
+        self.assertFalse(os.path.exists(lock))
+        self.assertIsNotNone(known.Kept.add([STRIPE]))
+        kept = known.Kept.open()
+        self.assertIn(PASSWORD, kept)
+        self.assertIn(STRIPE, kept)
+
+    def test_a_stale_lock_is_taken(self):
+        os.makedirs(known.index_dir(), exist_ok=True)
+        lock = os.path.join(known.index_dir(), known.KEPT_FILE + ".lock")
+        open(lock, "wb").close()
+        then = time.time() - 3600
+        os.utime(lock, (then, then))
+        self.assertIsNotNone(known.Kept.add([PASSWORD]))
+
+
+@unittest.skipIf(os.name == "nt" or not shutil.which("bash"), "needs bash")
+class ActionSteps(_Base):
+    """The action's own shell, run as the runner runs it."""
+
+    def steps(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(here, "action.yml"), encoding="utf-8") as fh:
+            text = fh.read()
+        bodies = re.findall(r"\n      run: \|\n((?:        .*\n|\n)+)", text)
+        return here, ["\n".join(line[8:] for line in body.split("\n"))
+                      for body in bodies]
+
+    def act(self, root, **inputs):
+        here, (run, gate) = self.steps()
+        work = os.path.join(self.tmp, "work")
+        os.makedirs(work, exist_ok=True)
+        output = os.path.join(self.tmp, "github_output")
+        env = dict(os.environ, GITHUB_OUTPUT=output, RANWHAT_ACTION_PATH=here,
+                   RANWHAT_COMMAND="check", RANWHAT_FAIL_ON="high",
+                   RANWHAT_DAYS="30", RANWHAT_SARIF="ranwhat.sarif",
+                   RANWHAT_ARGS="--source claude-code --root %s" % root)
+        env.update(inputs)
+        open(output, "w", encoding="utf-8").close()
+        done = subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=work,
+                              env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=120)
+        with open(output, encoding="utf-8") as fh:
+            outputs = dict(line.split("=", 1) for line in fh.read().split())
+        status = outputs.get("exit-code")
+        gated = subprocess.run(["bash", "-eo", "pipefail", "-c", gate], env=dict(
+            os.environ, RANWHAT_STATUS=status or "", RANWHAT_ALLOW_EMPTY=inputs.get(
+                "allow_empty", "true")), stdout=subprocess.PIPE, timeout=60)
+        return done.returncode, outputs, gated.returncode, work
+
+    def test_findings_fail_with_3(self):
+        rc, outputs, gate, work = self.act(self.root(DELETE))
+        self.assertEqual((rc, outputs["exit-code"], gate), (0, "3", 3))
+        self.assertTrue(os.path.exists(os.path.join(work, "ranwhat.sarif")))
+
+    def test_a_refused_flag_is_an_error_not_an_empty_history(self):
+        root = self.root(DELETE)
+        work = os.path.join(self.tmp, "work")
+        os.makedirs(work)
+        with open(os.path.join(work, "ranwhat.sarif"), "w", encoding="utf-8") as fh:
+            fh.write("{}")                      # a stale one, from before
+        rc, outputs, gate, _work = self.act(root, RANWHAT_ARGS="--no-such-flag")
+        self.assertEqual(outputs["exit-code"], "1")
+        self.assertNotIn("sarif-file", outputs)
+        self.assertEqual(gate, 1)               # allow-empty does not pass it
+
+    def test_bad_inputs_are_refused(self):
+        root = self.root(DELETE)
+        for inputs in ({"RANWHAT_FAIL_ON": "hihg"}, {"RANWHAT_DAYS": ""},
+                       {"RANWHAT_DAYS": "7d"}, {"RANWHAT_COMMAND": "demo"}):
+            rc, outputs, _gate, _work = self.act(root, **inputs)
+            self.assertEqual(rc, 1, inputs)
+            self.assertNotIn("exit-code", outputs, inputs)
+
+    def test_an_empty_history_passes_only_when_allowed(self):
+        empty = os.path.join(self.tmp, "empty")
+        os.makedirs(empty)
+        _rc, outputs, gate, _work = self.act(empty)
+        self.assertEqual((outputs["exit-code"], gate), ("2", 0))
+        _rc, outputs, gate, _work = self.act(empty, allow_empty="false")
+        self.assertEqual((outputs["exit-code"], gate), ("2", 2))
 
 
 if __name__ == "__main__":

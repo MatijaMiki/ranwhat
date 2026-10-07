@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 
 from . import __version__
 from . import watch as watch_mod
@@ -82,8 +83,34 @@ def _uri(path):
     return quote(path.replace(os.sep, "/"))
 
 
-def _physical(path):
+def _physical(path, mask=None):
+    """A location for path, masked before it is made a URI: percent-encoded,
+    a value in a file name (s-PASSWORD.jsonl, = as %3D) was not found by the
+    mask any more."""
+    if mask is not None:
+        path = mask(path)
     return {"physicalLocation": {"artifactLocation": {"uri": _uri(path)}}}
+
+
+# The mask clean writes in a transcript keeps the value's fingerprint, an
+# unkeyed hash that is a dictionary oracle for a short password: evidence
+# quoting a masked line carries it, whole, or cut at the window's start
+# anywhere in "<ranwhat:redacted:" or its hex.
+_MARK = "<ranwhat:redacted:"
+_WHOLE = re.compile(r"ranwhat:redacted:[0-9a-f]*")
+_CUT = re.compile("\u2026([^\\s\u2026]{0,%d}?)[0-9a-f]{1,12}>" % len(_MARK))
+
+
+def _unmarked(node):
+    if isinstance(node, str):
+        node = _WHOLE.sub("ranwhat:redacted", node)
+        return _CUT.sub(lambda m: ("\u2026" + m.group(1) + ">")
+                        if _MARK.endswith(m.group(1)) else m.group(), node)
+    if isinstance(node, dict):
+        return {_unmarked(k): _unmarked(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_unmarked(v) for v in node]
+    return node
 
 
 def _project_dir(source, project):
@@ -107,7 +134,7 @@ def _id(*parts):
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
-def _action_results(records, index):
+def _action_results(records, index, mask=None):
     out = []
     for record in records:
         source = record.get("source") or "claude-code"
@@ -132,7 +159,7 @@ def _action_results(records, index):
                 hit.get("why"), hit.get("evidence") or "")
             location = {"logicalLocations": logical}
             if where:
-                location.update(_physical(where))
+                location.update(_physical(where, mask))
             out.append({
                 "ruleId": hit.get("rule"),
                 "ruleIndex": index.get(hit.get("rule"), -1),
@@ -148,7 +175,7 @@ def _action_results(records, index):
     return out
 
 
-def _secret_results(findings, index):
+def _secret_results(findings, index, mask=None):
     out = []
     for f in findings:
         label = f.get("label") or "Secret"
@@ -160,7 +187,7 @@ def _secret_results(findings, index):
             text += " Read from %s." % ", ".join(origins)
         files = sorted(f.get("files") or ())
         # Up to ten, as GitHub code scanning shows them.
-        locations = [_physical(path) for path in files[:10]] or [
+        locations = [_physical(path, mask) for path in files[:10]] or [
             {"logicalLocations": [{"name": s, "kind": "agent"} for s in sources]}]
         out.append({
             "ruleId": SECRET_RULE,
@@ -182,7 +209,8 @@ def document(records=(), findings=(), mask=None):
     string in it put through mask."""
     rules = _rules()
     index = {r["id"]: i for i, r in enumerate(rules)}
-    results = _action_results(records, index) + _secret_results(findings, index)
+    results = (_action_results(records, index, mask)
+               + _secret_results(findings, index, mask))
     doc = {"$schema": SCHEMA, "version": VERSION, "runs": [{
         "tool": {"driver": {"name": "ranwhat", "version": __version__,
                             "semanticVersion": __version__,
@@ -194,7 +222,7 @@ def document(records=(), findings=(), mask=None):
     if mask is not None:
         from .cli import _masked_strings
         doc = _masked_strings(doc, mask)
-    return doc
+    return _unmarked(doc)
 
 
 def write(path, records=(), findings=(), mask=None):
