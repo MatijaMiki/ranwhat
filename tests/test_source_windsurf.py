@@ -270,7 +270,12 @@ class Names(unittest.TestCase):
                          "C:/Users/u/a.md")
         self.assertEqual(local_path("/path/to/file.py"), "/path/to/file.py")
         self.assertEqual(local_path("FILE:///x"), "/x")
-        self.assertIsNone(local_path("file://server/share/a.md"))
+        # A Windows network share (or \\wsl.localhost) is its UNC path.
+        self.assertEqual(local_path("file://server/share/a.md"),
+                         "//server/share/a.md")
+        self.assertEqual(local_path("file://wsl.localhost/Ubuntu/home/u/.env"),
+                         "//wsl.localhost/Ubuntu/home/u/.env")
+        self.assertIsNone(local_path("file://server"))
         self.assertIsNone(local_path(""))
         self.assertIsNone(local_path(None))
         self.assertIsNone(local_path(["file:///x"]))
@@ -484,6 +489,15 @@ class Judged(_Home):
         self.assertEqual(rules(write), [])
         self.assertEqual(rules(read), [])
         self.assertEqual(rules(echo), [])
+
+    def test_a_credential_on_a_network_share_is_flagged(self):
+        path = self.transcript([
+            view_file("file://wsl.localhost/Ubuntu/home/u/proj/.env", "A=1"),
+            view_file("file://server/share/u/.ssh/id_rsa", "-----")])
+        env, ssh = self.calls(path)
+        self.assertEqual(env.paths, ("//wsl.localhost/Ubuntu/home/u/proj/.env",))
+        self.assertEqual([r for r, _e in rules(env)], ["cred.read"])
+        self.assertEqual([r for r, _e in rules(ssh)], ["cred.read"])
 
     def test_a_declined_rm_is_still_flagged_and_marked(self):
         path = self.transcript([run_command("rm -rf ~/Documents/x",

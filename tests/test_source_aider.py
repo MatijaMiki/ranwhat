@@ -277,21 +277,22 @@ class Where(unittest.TestCase):
         for home, platform in (("/home/u", "linux"), ("/Users/u", "darwin"),
                                ("C:\\Users\\u", "win32")):
             self.assertEqual(self.src.default_paths({}, home, platform),
-                             [(home, "default")])
+                             [(_paths.join(platform, home, CHAT),
+                               "default")])
 
     def test_the_variable_names_the_file(self):
         env = {ENV: "/srv/logs/chat.md"}
         self.assertEqual(self.src.default_paths(env, "/home/u", "linux"),
                          [("/srv/logs/chat.md", "env " + ENV),
-                          ("/home/u", "default")])
+                          ("/home/u/" + CHAT, "default")])
         env = {ENV: "D:\\logs\\chat.md"}
         self.assertEqual(self.src.default_paths(env, "C:\\Users\\u", "win32"),
                          [("D:\\logs\\chat.md", "env " + ENV),
-                          ("C:\\Users\\u", "default")])
+                          ("C:\\Users\\u\\" + CHAT, "default")])
 
     def test_an_empty_variable_is_not_set(self):
         self.assertEqual(self.src.default_paths({ENV: ""}, "/home/u", "linux"),
-                         [("/home/u", "default")])
+                         [("/home/u/" + CHAT, "default")])
 
     def test_what_every_report_needs(self):
         self.assertEqual((self.src.id, self.src.name, self.src.unit,
@@ -350,7 +351,7 @@ class Discovery(AiderCase):
         path = self.write(SPEC, folder=self.home)
         locations = self.src.locations()
         self.assertEqual([(l.path, l.how, l.found) for l in locations][0],
-                         (self.home, "default", 1))
+                         (os.path.join(self.home, CHAT), "default", 1))
         self.assertEqual([s.path for s in self.src.stores(locations)], [path])
 
     def test_the_current_directory_and_its_git_root(self):
@@ -361,9 +362,10 @@ class Discovery(AiderCase):
         os.chdir(sub)
         locations = self.src.locations()
         real = [(os.path.realpath(l.path), l.how, l.found) for l in locations]
-        self.assertEqual(real[1:], [(os.path.realpath(sub), "current directory", 1),
-                                    (os.path.realpath(self.repo),
-                                     "current directory", 1)])
+        self.assertEqual(real[1:], [
+            (os.path.join(os.path.realpath(sub), CHAT), "current directory", 1),
+            (os.path.join(os.path.realpath(self.repo), CHAT),
+             "current directory", 1)])
         self.assertEqual([os.path.realpath(s.path)
                           for s in self.src.stores(locations)],
                          [os.path.realpath(sub_chat), os.path.realpath(chat)])
@@ -398,6 +400,29 @@ class Discovery(AiderCase):
     def test_a_folder_named_like_the_log_is_not_one(self):
         os.makedirs(os.path.join(self.repo, CHAT))
         self.assertEqual(self.stores(override=self.repo), [])
+
+    def test_an_input_history_with_no_chat_log_beside_it(self):
+        # AIDER_CHAT_HISTORY_FILE moves only the chat log: the input
+        # history stays where Aider runs, and is still found there.
+        moved = self.write(SPEC, folder=os.path.join(self.home, "logs"),
+                           name="chat.md")
+        hist = self.write(["", "# 2026-10-07 14:03:02.418273", "+ls"],
+                          folder=self.home, name=INPUT)
+        os.chdir(self.repo)
+        alone = self.write(["", "# 2026-10-07 14:03:02.418273", "+ls"],
+                           name=INPUT)
+        with mock.patch.dict(os.environ, {ENV: moved}):
+            locations, stores = agents._discover(self.src, None, None)
+        home = [l for l in locations if l.how == "default"][0]
+        self.assertEqual((home.exists, home.found), (True, 1))
+        self.assertEqual(
+            sorted(os.path.realpath(s.path) for s in stores),
+            sorted(os.path.realpath(p) for p in (moved, hist, alone)))
+        # with --path too, and an absent agent is still nothing
+        self.assertEqual([s.path for s in self.stores(
+            override=os.path.join(self.home, CHAT))], [hist])
+        os.remove(hist)
+        self.assertEqual(self.stores(override=os.path.join(self.home, CHAT)), [])
 
     def test_days_prefilter_by_last_write(self):
         self.write(SPEC, age=40 * 86400)
@@ -538,6 +563,19 @@ class Shell(AiderCase):
     def test_yes_always_declines_explicit_commands(self):
         calls = self.session(said("make a", Q_SHELL + "n"))
         self.assertEqual([c.status for c in calls], ["declined"])
+
+    def test_an_answer_not_taken_is_asked_again(self):
+        # confirm_ask logs tool_error between the subject and the question
+        # it asks again; the subject is still the command.
+        retry = "Please answer with one of: yes, no, skip, all, don't"
+        calls = self.session(said("rm -rf ~/", retry, retry, Q_SHELL + "y"))
+        self.assertEqual(self.brief(calls), [
+            ("shell command", "shell", "agent", None, "rm -rf ~/", ())])
+        calls = self.session(reply("see config.py"),
+                             said("config.py", retry, Q_FILE + "n"))
+        self.assertEqual(self.brief(calls), [
+            ("file mention", "read", "agent", "declined", None,
+             ("config.py",))])
 
     def test_a_question_with_no_subject_is_counted(self):
         self.src.reset()
@@ -787,6 +825,40 @@ class Secrets(AiderCase):
                           "export STRIPE_KEY=" + SECRET])
         found = findings(self.src, [store])
         self.assertEqual(found[SECRET]["where"], ["line 3"])
+
+    def test_a_private_key_across_lines(self):
+        # Each line of a key is a line of the log: pasted as one input,
+        # shown by /git, or in an edit block. Each is found whole.
+        body = ["b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW",
+                "QyNTUxOQAAACB" "q7Zx4Kd9Lm2Pw8Rt5Vy1Nc6Hb3Jf0Gs7Ta4Xe9Ui2Ow5Mr8AAAA",
+                "kPh3Wn7Qs2Ly8Dk4Tf9Bx6Mr1Vc5Ga0Jz3Ne7Ku2Hp9Rw4Ys6Lt1Fq8Ab5Cm0Ix3Eo7"]
+        key = (["-----BEGIN OPENSSH PRIVATE KEY-----"] + body
+               + ["-----END OPENSSH PRIVATE KEY-----"])
+        joined = "\n".join(key)
+        lines = (header("2026-10-07 14:02:51") + typed(*(["use this:"] + key))
+                 + typed("/git show HEAD:id_rsa") + ["> " + key[0]] + key[1:-1]
+                 + [key[-1] + H]
+                 + reply("id_rsa", "```", "<<<<<<< SEARCH", "=======")
+                 [:-1] + key + [">>>>>>> REPLACE", "```", ""])
+        path = self.write(lines, age=600)
+        store = self.store(path)
+        found = findings(self.src, [store])
+        self.assertEqual(set(found), {joined})
+        self.assertEqual(found[joined]["origins"], {"id_rsa"})
+        hist_lines = ["", "# 2026-10-07 14:03:02.418273"] + ["+" + l for l in key]
+        hist = self.write(hist_lines, name=INPUT, age=600)
+        hstore = [s for s in self.stores(override=self.repo) if s.path == hist][0]
+        self.assertEqual(set(findings(self.src, [hstore])), {joined})
+        # and masked line by line, every other byte kept
+        for st in (store, hstore):
+            self.assertTrue(self.src.mask(st, [joined]).changed)
+            self.assertEqual(findings(self.src, [st]), {})
+        with open(path, "r", encoding="utf-8") as fh:
+            masked = fh.read()
+        expect = text_of(lines)
+        for line in body:
+            expect = expect.replace(line, clean.REDACTION % clean._fingerprint(line))
+        self.assertEqual(masked, expect)
 
     def test_credential_files_beside_the_log_are_not_read(self):
         self.write(SPEC)

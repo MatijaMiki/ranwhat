@@ -109,8 +109,9 @@ def _string(value):
 def local_path(value):
     """The local path a recorded path names: a file:// URI made a path
     (file:///x/y and file://localhost/x/y; percent-escapes decoded; a
-    Windows drive's leading "/" dropped), anything else as it is. None
-    for an empty value or a URI with another host."""
+    Windows drive's leading "/" dropped; file://host/share/x, a Windows
+    network share or \\\\wsl.localhost, as the UNC path //host/share/x),
+    anything else as it is. None for an empty value."""
     value = _string(value)
     if value is None or not value.lower().startswith("file://"):
         return value
@@ -118,7 +119,9 @@ def local_path(value):
     if rest.lower().startswith("localhost/"):
         rest = rest[len("localhost"):]
     if not rest.startswith("/"):
-        return None             # file://host/share: not a local path
+        host, sep, tail = rest.partition("/")
+        path = unquote(sep + tail)
+        return "//" + unquote(host) + path if host and path else None
     path = unquote(rest)
     if _DRIVE.match(path):
         path = path[1:]

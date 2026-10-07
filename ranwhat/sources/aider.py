@@ -92,7 +92,7 @@ import collections
 import os
 import re
 
-from . import _lines, _stamps, base
+from . import _lines, _paths, _stamps, base
 from .base import Location, SecretText, Source, ToolCall
 
 ENV = "AIDER_CHAT_HISTORY_FILE"
@@ -141,6 +141,10 @@ _URL_Q = re.compile(r"Add URL to the chat\?" + _OPTIONS + r" \[Yes\]: ([a-z])\Z"
 # input too ("#### Run shell command? ... [Yes]: skip"), before its "> " line.
 _ECHO = re.compile(r".*\?" + _OPTIONS + r" \[(?:Yes|No)\]: [a-z']+\Z")
 
+# What confirm_ask logs (tool_error) after an answer it does not take,
+# before it asks again: between the subject and the question.
+_RETRY = re.compile(r"Please answer with one of: yes, no, skip, all(?:, don't)?\Z")
+
 _ADDED = re.compile(r"Added (.+) to the chat\Z")
 _LAUNCHED = re.compile(r"Added (.+) to the chat(?: \(read-only\))?\.\Z")
 _RO_DIR = re.compile(r"Added \d+ files from directory (.+) to read-only files\.\Z")
@@ -152,6 +156,12 @@ _APPLIED = re.compile(r"Applied edit to (.+)\Z")
 _DRY_RUN = re.compile(r"Did not apply edit to (.+) \(--dry-run\)\Z")
 _SCRAPING = re.compile(r"Scraping (.+)\.\.\.\Z")
 _EXECUTING = re.compile(r"Executing: (.+)\Z")
+
+# A private key's first and last lines, as clean finds one; the longest
+# (an RSA 4096 key) is about 50 lines of base64.
+_PEM_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+_PEM_MOST = 200
 
 # SEARCH/REPLACE markers (editblock_coder.py HEAD, UPDATED).
 _HUNK_HEAD = re.compile(r"<{5,9} SEARCH>?\s*\Z")
@@ -233,6 +243,42 @@ def _is_file(path):
         return False
 
 
+class _Pem(object):
+    """A private key both files write a line at a time: the log quotes each
+    line of an input ("#### "), Aider's own output and a reply's lines are
+    lines of their own, and clean finds a key only whole, BEGIN to END in
+    one text. So the lines from a BEGIN line to its END line are handed
+    over once more, joined, as one text."""
+    __slots__ = ("lines", "where", "call", "attached")
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.lines = None
+
+    def step(self, content, where, call=None, attached=None):
+        """Take one line's content; the key's SecretText at its END line."""
+        content = content.rstrip()
+        if self.lines is None:
+            m = _PEM_BEGIN.search(content)
+            if m and not _PEM_END.search(content, m.end()):
+                self.lines = [content[m.start():]]
+                self.where, self.call, self.attached = where, call, attached
+            return None
+        self.lines.append(content)
+        m = _PEM_END.search(content)
+        if m:
+            self.lines[-1] = content[:m.end()]
+            text = SecretText("\n".join(self.lines), call=self.call,
+                              attached=self.attached, where=self.where)
+            self.reset()
+            return text
+        if len(self.lines) > _PEM_MOST:
+            self.reset()
+        return None
+
+
 class _Session(object):
     """The session a call is in: its header's time, and the calls waiting
     for the next header to know how late they can be."""
@@ -259,14 +305,17 @@ class AiderSource(Source):
     # -- where to look ------------------------------------------------------
 
     def default_paths(self, env, home, platform):
-        """AIDER_CHAT_HISTORY_FILE when set, and the home directory, where
-        Aider writes when it is run there outside any repository. Pure: the
-        current directory is added by locations."""
+        """AIDER_CHAT_HISTORY_FILE when set, and the chat log in the home
+        directory, where Aider writes when it is run there outside any
+        repository. Each is the log itself, not its folder: a folder that
+        is there (home always is) would be listed on every run, and a log
+        that is not there costs one stat. Pure: the current directory is
+        added by locations."""
         out = []
         moved = _string(env.get(ENV))
         if moved:
             out.append((moved, "env " + ENV))
-        out.append((home, "default"))
+        out.append((_paths.join(platform, home, CHAT), "default"))
         return out
 
     def project_paths(self, projects):
@@ -276,12 +325,14 @@ class AiderSource(Source):
 
     @staticmethod
     def here():
-        """The current directory and the git root above it, read now."""
+        """The chat log in the current directory and in the git root above
+        it, read now. Finding the root costs a stat of each folder on the
+        way up to it."""
         cwd = os.getcwd()
-        out = [cwd]
+        out = [os.path.join(cwd, CHAT)]
         root = _git_root(cwd)
         if root:
-            out.append(root)
+            out.append(os.path.join(root, CHAT))
         return out
 
     def locations(self, override=None, projects=()):
@@ -290,7 +341,7 @@ class AiderSource(Source):
         time: Aider keeps its history in the repository it ran in."""
         found = Source.locations(self, override, projects)
         if override:
-            return found
+            return self._input_alone(found)
         try:
             seen = set(os.path.normcase(loc.path) for loc in found)
             for path in self.here():
@@ -303,6 +354,25 @@ class AiderSource(Source):
                 if loc.exists:
                     loc.found = len(list(self.stores([loc])))
                 found.append(loc)
+        except Exception as e:      # one adapter must not stop the others
+            self.warn("locations", "could not work out where %s keeps its "
+                      "history (%s)" % (self.name, type(e).__name__))
+        return self._input_alone(found)
+
+    def _input_alone(self, found):
+        """A place whose chat log is not there but whose input history is
+        (AIDER_CHAT_HISTORY_FILE moves only the log; a log deleted on its
+        own) is a place that exists: only those are asked for stores, and
+        the input history holds everything the user typed. One more stat,
+        only where the log is missing."""
+        try:
+            for loc in found:
+                if (loc.exists or os.path.basename(loc.path) != CHAT
+                        or not _is_file(os.path.join(os.path.dirname(loc.path),
+                                                     INPUT))):
+                    continue
+                loc.exists = True
+                loc.found = len(list(self.stores([loc])))
         except Exception as e:      # one adapter must not stop the others
             self.warn("locations", "could not work out where %s keeps its "
                       "history (%s)" % (self.name, type(e).__name__))
@@ -340,6 +410,24 @@ class AiderSource(Source):
             add(chat, "transcript", self.unit, project)
             add(os.path.join(folder, INPUT), "side", "input history", folder)
         return base.newest_first(found, since_days)
+
+    # -- masking ------------------------------------------------------------
+
+    def mask(self, store, values):
+        """As Source.mask, but a value of several lines (a private key read
+        whole, _Pem) is masked a line at a time: in the file each of its
+        lines sits on a line of its own, behind "#### " or "+" in an input,
+        and only its lines of 16 characters or more are masked, so a short
+        one does not mask the same text elsewhere."""
+        out = []
+        for value in values:
+            if isinstance(value, str) and "\n" in value:
+                out.extend(part for part in (l.strip() for l in value.split("\n"))
+                           if len(part) >= 16 and not _PEM_BEGIN.search(part)
+                           and not _PEM_END.search(part))
+            else:
+                out.append(value)
+        return Source.mask(self, store, out)
 
     # -- reading ------------------------------------------------------------
 
@@ -384,6 +472,7 @@ class AiderSource(Source):
         tally = store.path not in self._tallied
         self._tallied.add(store.path)
         started = False
+        pem = _Pem()
         try:
             for line_no, text in self._lines(store):
                 if not text:
@@ -398,6 +487,12 @@ class AiderSource(Source):
                 elif not text.startswith(_INPUT_STAMP) and tally:
                     self.count("unknown")
                 yield SecretText(text, where="line %d" % line_no)
+                if text.startswith(_INPUT_STAMP):
+                    pem.reset()
+                else:
+                    key = pem.step(text, "line %d" % line_no)
+                    if key is not None:
+                        yield key
         except OSError as e:
             self._bad_store(store, e.strerror or type(e).__name__)
 
@@ -426,6 +521,7 @@ class AiderSource(Source):
         typed = []              # (line_no, text) of the input being read
         git = None              # [call, lines] of /git output being read
         hunk = None             # the file a SEARCH/REPLACE block edits
+        pem = _Pem()            # a private key being read, line by line
 
         def end_git():
             if git is not None:
@@ -482,6 +578,7 @@ class AiderSource(Source):
                     yield item
                 session = _Session(stamp or header.group(1))
                 startup, replied, hunk = True, False, None
+                pem.reset()
                 recent.clear()
                 if texts:
                     yield "text", SecretText(text, where=where)
@@ -515,6 +612,17 @@ class AiderSource(Source):
             if texts:
                 yield "text", SecretText(text, call=owner, attached=hunk,
                                          where=where)
+                if is_input is not None:
+                    content = is_input
+                elif message is not None:
+                    content = message
+                elif text.startswith("> "):
+                    content = text[2:]
+                else:
+                    content = text
+                key = pem.step(content, where, owner, hunk)
+                if key is not None:
+                    yield "text", key
             recent.append((line_no, text))
         if typed:
             self._input(store, session, typed)
@@ -594,6 +702,10 @@ class AiderSource(Source):
         lines (tool_output quotes only the first). None when there is none."""
         items = list(recent)
         i = len(items) - 1
+        # An answer confirm_ask did not take is followed by its error, and
+        # the question asked again: the subject is above the errors.
+        while i >= 0 and _RETRY.match(_hard(items[i][1], "> ") or ""):
+            i -= 1
         if i >= 0 and items[i][1].startswith("#### ") and _ECHO.match(
                 _hard(items[i][1], "#### ") or ""):
             i -= 1
