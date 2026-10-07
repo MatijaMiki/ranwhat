@@ -18,7 +18,7 @@ const device = await import("../src/device.js");
 const members = await import("../src/members.js");
 const { FEATURES, allows } = await import("../src/features.js");
 const { FRESH_FOR, formToken, peek } = await import("../src/session.js");
-const { AUTH_MAIL_PER_DAY, STEPUP_RESERVE } = await import("../src/accounts.js");
+const { AUTH_MAIL_PER_DAY, INVITE_MAIL_PER_DAY, STEPUP_RESERVE } = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const FEED = "https://feed.ranwhat.com";
@@ -606,11 +606,12 @@ test("one invite waiting per address, nobody already in, and an address that is 
 
 /* ---------- limits ---------- */
 
-test("an organisation sends 20 invites a day; each comes out of the day's account mail", async () => {
+test("an organisation sends 20 invites a day; each comes out of the day's invite mail", async () => {
   const s = services();
   const e = env();
   const { ana, acme } = await acmeOwner(e, s);
-  const counted = () => (one(e, "SELECT sent FROM mail_counts WHERE kind = 'auth'") || { sent: 0 }).sent;
+  assert.ok(members.INVITES_PER_ORG_DAY < INVITE_MAIL_PER_DAY);
+  const counted = () => (one(e, "SELECT sent FROM mail_counts WHERE kind = 'invite'") || { sent: 0 }).sent;
   const before = counted();
   for (let i = 0; i < members.INVITES_PER_ORG_DAY; i++) {
     const r = await invite(ana, `person${i}@example.com`);
@@ -636,18 +637,47 @@ test("an organisation sends 20 invites a day; each comes out of the day's accoun
   assert.equal((await invite(ana, "one-more@example.com")).status, 303);
 });
 
-test("with the day's account mail used up, nobody is invited and the organisation's count is given back", async () => {
+test("with the day's invite mail used up, nobody is invited and the organisation's count is given back", async () => {
   const s = services();
   const e = env();
   const { ana, acme } = await acmeOwner(e, s);
-  run(e, `INSERT INTO mail_counts (day, kind, sent) VALUES (?, 'auth', ?)
-          ON CONFLICT (day, kind) DO UPDATE SET sent = excluded.sent`, isoDay(unix()), AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+  run(e, `INSERT INTO mail_counts (day, kind, sent) VALUES (?, 'invite', ?)
+          ON CONFLICT (day, kind) DO UPDATE SET sent = excluded.sent`, isoDay(unix()), INVITE_MAIL_PER_DAY);
   const r = await invite(ana, "bo@example.com");
   assert.equal(r.status, 503);
   assert.match(r.text, /today's are used up/);
   assert.equal(invitesOf(e, acme).length, 0);
   assert.equal(lastTo(s, "bo@example.com"), undefined);
   assert.equal(await peek(e, "invite-org", acme, DAY), 0);
+});
+
+test("invites and sign-in codes each have their own day: neither can use up the other's", async () => {
+  const s = services();
+  const e = env();
+  const { ana, acme } = await acmeOwner(e, s);
+  const sent = (kind) => {
+    const row = e.LIST.sql.prepare("SELECT sent FROM mail_counts WHERE day = ? AND kind = ?").get(isoDay(unix()), kind);
+    return row ? row.sent : 0;
+  };
+
+  /* The public forms have used up the day's sign-in mail: an invite still goes. */
+  run(e, `INSERT INTO mail_counts (day, kind, sent) VALUES (?, 'auth', ?)
+          ON CONFLICT (day, kind) DO UPDATE SET sent = excluded.sent`, isoDay(unix()), AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+  const authBefore = sent("auth");
+  assert.equal((await invite(ana, "bo@example.com")).status, 303);
+  assert.ok(lastTo(s, "bo@example.com"));
+  assert.equal(sent("invite"), 1);
+  assert.equal(sent("auth"), authBefore);
+
+  /* The day's invites used up: someone can still be sent a sign-in code. */
+  run(e, `DELETE FROM mail_counts WHERE kind = 'auth'`);
+  run(e, `UPDATE mail_counts SET sent = ? WHERE day = ? AND kind = 'invite'`, INVITE_MAIL_PER_DAY, isoDay(unix()));
+  assert.equal((await invite(ana, "carl@example.com")).status, 503);
+  const stranger = new Browser(e);
+  await signIn(stranger, s, "dee@example.com");
+  assert.ok(lastTo(s, "dee@example.com"));
+  assert.equal(sent("invite"), INVITE_MAIL_PER_DAY);
+  assert.equal(sent("auth-stepup"), 0);
 });
 
 test("inviting, roles, removing and ownership need a fresh code; nothing is done without one", async () => {

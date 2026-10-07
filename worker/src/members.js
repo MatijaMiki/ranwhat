@@ -52,8 +52,9 @@
  * userForVerifiedEmail()). A link in someone else's hands opens nothing.
  * The address is kept while the invite waits, and cleared once it is
  * used or taken back (the cron clears an expired one's). Invite emails
- * come out of the day's account mail ('auth', accounts.js), and an
- * organisation sends at most INVITES_PER_ORG_DAY a day.
+ * have a day of their own ('invite', INVITE_MAIL_PER_DAY in accounts.js),
+ * apart from sign-in codes, and an organisation sends at most
+ * INVITES_PER_ORG_DAY a day.
  *
  * An invite is only as good as its sender's role: it joins nobody once
  * whoever sent it is no longer an owner or an admin of the organisation
@@ -465,7 +466,7 @@ const billingFollows = (env, ctx, orgId, email) => {
 /* POST /members/invite. In this order: who may, the plan, the fresh code,
    the address, that it is neither in the organisation nor waiting on an
    invite already, then the organisation's count for the day and the day's
-   account mail, so a refusal for any other reason spends neither. */
+   invite mail, so a refusal for any other reason spends neither. */
 export async function invitePost(request, env, ctx) {
   const got = await posted(request, env, "member-invite");
   if (got.response) return got.response;

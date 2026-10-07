@@ -71,6 +71,15 @@ export const STEPUPS_PER_USER_DAY = 5;
    never skipped: without it, nothing is attached. */
 export const NOTICES_PER_USER_DAY = 3;
 
+/* Invites to an organisation (members.js) have a day of their own, apart
+   from AUTH_MAIL_PER_DAY: however many organisations invite, nobody's
+   sign-in code or step-up waits on it, and a burst of sign-ins never stops
+   an invite. With the account mail that keeps Resend's 100 a day at about
+   85, leaving the rest for token emails and the list's confirmations.
+   Each organisation also has its own share (INVITES_PER_ORG_DAY), smaller
+   than this, so one organisation's busy day leaves room for another's. */
+export const INVITE_MAIL_PER_DAY = 25;
+
 export const now = () => Math.floor(Date.now() / 1000);
 
 /* "1" or "true" switch accounts on; unset, empty or anything else keeps
@@ -356,7 +365,8 @@ const SCHEMA = [
      count INTEGER NOT NULL)`,
 
   /* Emails sent per UTC day, by kind ('auth': codes from the public forms;
-     'auth-stepup': a signed-in step-up's). */
+     'auth-stepup': a signed-in step-up's; 'invite': invites to an
+     organisation). */
   `CREATE TABLE IF NOT EXISTS mail_counts (
      day TEXT NOT NULL,
      kind TEXT NOT NULL,
@@ -542,16 +552,18 @@ export async function history(env, userId, limit = 10) {
 
 const today = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
 
-/* The day's account mail is two counters. A signed-in step-up, and the
+/* The day's account mail is three counters. A signed-in step-up, and the
    notice that a way in was added (purpose 'notice'), draw only on
-   STEPUP_RESERVE ('auth-stepup'); everything else, from the
-   public sign-in, sign-up and reset forms, on the rest ('auth'). Neither
-   can spend the other's, so a stranger draining the forms cannot stop a
-   step-up, and a signed-in session spraying step-ups cannot stop anyone
-   signing in. */
+   STEPUP_RESERVE ('auth-stepup'); an invite only on INVITE_MAIL_PER_DAY
+   ('invite'); everything else, from the public sign-in, sign-up and reset
+   forms, on the rest of AUTH_MAIL_PER_DAY ('auth'). None can spend
+   another's, so a stranger draining the forms cannot stop a step-up or an
+   invite, and a signed-in session spraying step-ups or invites cannot stop
+   anyone signing in. */
 const signedIn = (purpose) => purpose === "stepup" || purpose === "notice";
-const mailKind = (purpose) => (signedIn(purpose) ? "auth-stepup" : "auth");
-const mailCap = (purpose) => (signedIn(purpose) ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+const mailKind = (purpose) => (purpose === "invite" ? "invite" : signedIn(purpose) ? "auth-stepup" : "auth");
+const mailCap = (purpose) => (purpose === "invite" ? INVITE_MAIL_PER_DAY
+  : signedIn(purpose) ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
 
 /* How many more account emails for `purpose` may go out today. Read before
    the per-address limits, so a day that is used up answers the same for
