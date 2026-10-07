@@ -224,8 +224,9 @@ def main(key):
     print("\nDone. In Cloudflare: Workers & Pages > ranwhat-contact > Settings >")
     print("Variables and Secrets, add two of type Secret:\n")
     print("  STRIPE_SECRET_KEY      the %s secret key (or a restricted key with" % ("live" if live else "test"))
-    print("                         Checkout Sessions: Write, and Prices, Subscriptions")
-    print("                         and Customer portal: Read)")
+    print("                         Checkout Sessions and Customer portal: Write, and")
+    print("                         Prices and Subscriptions: Read; the account page's")
+    print("                         Manage billing makes portal sessions)")
     if secret:
         print("  STRIPE_WEBHOOK_SECRET  %s" % secret)
         print("\n  Stripe shows that signing secret once, here. Add it now.")

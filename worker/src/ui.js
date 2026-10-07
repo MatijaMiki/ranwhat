@@ -65,8 +65,9 @@ let styleHash = null;
    there; every other response is HTML or JSON sent with nosniff besides.
    `away`: origins a form here may be redirected on to, which browsers
    hold to form-action too. Only the account page's forms that link
-   Google or GitHub need it (oauth.js's PROVIDERS), and only for those
-   two. */
+   Google or GitHub need it (oauth.js's PROVIDERS), for those two, and
+   Manage billing and the upgrade's (billing.js), for Stripe's billing
+   portal and Checkout: each only on a page that shows that form. */
 async function csp(challenge = false, away = [], passkeys = false) {
   if (!styleHash) {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(CSS)));
@@ -153,9 +154,11 @@ export async function redirect(path, cookies = []) {
   return new Response(null, { status: 303, headers: await secured(headers) });
 }
 
-/* 303 to a provider's authorization endpoint, for Google or GitHub sign-in:
-   a URL oauth.js builds from its own constants, never one a request
-   named. */
+/* 303 to a provider's authorization endpoint, for Google or GitHub sign-in
+   (a URL oauth.js builds from its own constants), or to a Stripe Checkout
+   or billing-portal session (a URL Stripe gave back, which billing.js
+   checks is on checkout.stripe.com or billing.stripe.com): never one a
+   request named. */
 export async function away(url, cookies = []) {
   const headers = new Headers({ location: url });
   for (const c of cookies) headers.append("set-cookie", c);

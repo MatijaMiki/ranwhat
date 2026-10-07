@@ -503,7 +503,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   const locked = section(html).match(/<div class="panel locked" id="ci-tokens" data-feature="ci_tokens">([\s\S]*?)<\/div>/);
   assert.ok(locked, "a locked CI tokens panel");
   assert.match(locked[1], /CI tokens <span class="tag">locked, needs Plus<\/span>/);
-  assert.match(locked[1], /<a href="https:\/\/ranwhat\.com\/pricing">Upgrade to Plus<\/a>/);
+  assert.match(locked[1], /<a href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
   let r = await forgedCi(e, ana);
   assert.equal(r.status, 403);

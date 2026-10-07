@@ -71,9 +71,10 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;   // 32 random bytes, base64url
    goes into an email's To. */
 const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
 
-/* Where a sign-in may send the browser on to: the account, or the page
-   that approves a terminal (device.js). */
-const NEXT = new Set(["/", "/device"]);
+/* Where a sign-in may send the browser on to: the account, the page that
+   approves a terminal (device.js), or the one that upgrades to Plus
+   (billing.js). */
+const NEXT = new Set(["/", "/device", "/upgrade"]);
 export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 /* ---------- secrets ---------- */

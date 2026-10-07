@@ -4,8 +4,9 @@
  * once ACCOUNTS_ON is set.
  *
  *   GET  /              The account: who you are, your organisation, its
- *                       plan and what each plan has (features.js), how you
- *                       sign in, what happened lately, and signing out.
+ *                       plan and what each plan has (features.js), its
+ *                       billing (billing.js), how you sign in, what
+ *                       happened lately, and signing out.
  *                       Without a session it sends you to /signin.
  *   GET  /signin        The email form.
  *   POST /signin        Mails a code; the same answer for every address.
@@ -72,6 +73,14 @@
  *                       code.
  *   POST /tokens/ci     Makes a CI token, on Plus or Team, as an owner or
  *                       admin, with a fresh code, and shows it this once.
+ *   GET  /upgrade       Plus for a Free organisation, monthly or yearly
+ *                       (billing.js); the locked panels link here.
+ *   POST /upgrade       Off to a Stripe Checkout bound to the organisation,
+ *                       for an owner or admin with a fresh code.
+ *   POST /billing       Manage billing: off to Stripe's billing portal for
+ *                       the customer of a subscription linked to the
+ *                       organisation, for an owner or admin with a fresh
+ *                       code.
  *
  * Nothing changes on a GET but a passkey challenge, made for whoever
  * asks and good once (and, the first time an account asks to add a
@@ -113,6 +122,7 @@ import {
   registrationOptions, signIn, signinOptions,
 } from "./passkeys.js";
 import { approve, deny, deviceLookup, devicePage } from "./device.js";
+import { billingPanel, billingPost, upgradePage, upgradePost } from "./billing.js";
 import {
   EXPIRIES, IDLE_DAYS, MAX_CI, MAX_LABEL as MAX_MACHINE_LABEL, liveCi, machineIn, machineLabel, machinesOf,
   mayChange, mintCi, renameMachine, revokeMachine,
@@ -120,7 +130,7 @@ import {
 import { away, data, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
-const PRICING = "https://ranwhat.com/pricing";
+const UPGRADE = "/upgrade";
 const TALK = "mailto:hello@ranwhat.com?subject=ranwhat%20Team";
 
 /* No session: to the sign-in page, dropping a cookie that no longer opens one. */
@@ -704,22 +714,27 @@ const EVENTS = {
   machine_revoked: "Machine revoked, with a fresh code",
   machine_idle_revoked: `Terminal revoked after ${IDLE_DAYS} days unused`,
   ci_token_created: "CI token made, with a fresh code",
+  upgrade_started: "Checkout for Plus opened, with a fresh code",
+  billing_opened: "Billing opened, with a fresh code",
+  plus_linked: "Plus subscription linked to the organisation",
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
 
 const when = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
-async function home(request, env) {
+/* ?upgraded=1: back from a paid Stripe Checkout (billing.js), which the
+   billing panel thanks for until the webhook has switched Plus on. */
+async function home(request, env, ctx, url) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
-  return dashboard(env, who);
+  return dashboard(env, who, { upgraded: url.searchParams.get("upgraded") === "1" });
 }
 
 /* One panel per paid plan, drawn from features.js, so what the page shows
    locked is what the server refuses. Locked while the organisation's plan
-   is below it. Plus links to the pricing page; Team has no price and no
-   checkout, only a way to talk to us. */
+   is below it. Plus links to the upgrade (billing.js); Team has no price
+   and no checkout, only a way to talk to us. */
 function panel(tier, onPlan) {
   const open = atLeast(onPlan, tier);
   const items = featuresOf(tier).map((f) => {
@@ -731,7 +746,7 @@ function panel(tier, onPlan) {
   }).join("");
   const after = open ? "" : tier === "plus"
     ? `<p>Everything ranwhat does on your machines stays free. Plus adds what needs a server.</p>
-       <p><a href="${PRICING}">Upgrade to Plus</a></p>`
+       <p><a href="${UPGRADE}">Upgrade to Plus</a></p>`
     : `<p>Team is arranged with each organisation. <a href="${TALK}">Talk to us</a></p>`;
   return `<section class="panel${open ? "" : " locked"}" id="${tier}">
     <h2>${PLAN_NAMES[tier]}${open ? "" : ` <span class="tag">locked</span>`}</h2>
@@ -859,11 +874,12 @@ async function passkeys(env, who, error, code) {
 
 async function dashboard(env, who, {
   error = "", passwordError = "", providerError = null, passkeyError = "", signoutError = "", machinesError = "",
-  status = 200,
+  upgraded = false, status = 200,
 } = {}) {
   const org = who.org;
   const events = await history(env, who.user);
   const onPlan = await plan(env, org.id);
+  const billing = await billingPanel(env, who, onPlan, { upgraded });
   const rename = canManage(org) ? `<h2>Organisation name</h2>
     ${form("/org", await formToken(env, who.id, "org"), `
       <label for="name">Name</label>
@@ -882,6 +898,7 @@ async function dashboard(env, who, {
     </dl>
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
+    ${billing.html}
     ${await machinesPanel(env, who, onPlan, machinesError)}
     ${await methods(env, who, passwordError, providerError, passkeyError)}
     ${rename}
@@ -893,7 +910,7 @@ async function dashboard(env, who, {
     ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<button type="submit">Sign out everywhere</button>`, "row")}
     ${await removeAll(env, who, signoutError)}
     <p><small><a href="https://ranwhat.com/">ranwhat.com</a> &middot; <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status, away: fresh(who) ? offered(env).map((p) => PROVIDERS[p].origin) : [] });
+  { status, away: [...(fresh(who) ? offered(env).map((p) => PROVIDERS[p].origin) : []), ...billing.away] });
 }
 
 /* Signing out everywhere and taking every other way in away with it: for
@@ -1410,7 +1427,7 @@ async function machinesPanel(env, who, onPlan, error) {
       <h2>${escape(feature.name)} <span class="tag">locked, needs ${PLAN_NAMES[feature.plan]}</span></h2>
       <p>${escape(feature.says)} Each pipeline gets a token of its own, named, with an expiry if you
          like.</p>
-      <p><a href="${PRICING}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></p></div>`;
+      <p><a href="${UPGRADE}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></p></div>`;
   } else if (!canManage(org)) {
     ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
       <p>An owner or an admin of ${escape(org.name)} can make a CI token here.</p></div>`;
@@ -1573,6 +1590,8 @@ const ROUTES = {
   "/machines/rename": { POST: renameMachinePost },
   "/machines/revoke": { POST: revokeMachinePost },
   "/tokens/ci": { POST: ciTokenPost },
+  "/upgrade": { GET: upgradePage, POST: upgradePost },
+  "/billing": { POST: billingPost },
 };
 for (const provider of Object.keys(PROVIDERS)) {
   const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);
