@@ -941,6 +941,77 @@ test("an account gets ten wrong codes an hour over all its sessions", async () =
   assert.equal((await second.get("/device")).status, 200);
 });
 
+test("a shared network's wrong codes hold back only accounts that typed wrong codes there themselves, and each lock says its real window", async () => {
+  const s = services();
+  const e = env();
+  const shared = "192.0.2.10";   // an office's NAT, a campus, a VPN's exit
+  const cli = await newCode(e);
+  let n = 0;
+  const signedIn = async (email) => {
+    const b = new Browser(e, { ip: `198.51.100.${60 + n++}` });
+    await signIn(b, s, email);
+    b.ip = shared;
+    return b;
+  };
+
+  /* Three accounts, each signed in somewhere else, type thirty wrong codes
+     from the shared address: two sessions of five each. */
+  const sessions = [];
+  let k = 0;
+  for (const name of ["m1", "m2", "m3"]) {
+    for (let twice = 0; twice < 2; twice++) {
+      const m = await signedIn(`${name}@example.org`);
+      sessions.push(m);
+      for (let i = 0; i < device.WRONG_PER_SESSION; i++) await typeDevice(m, stranger(cli.user_code, (k++ % 19) + 1));
+    }
+  }
+  assert.equal(k, device.WRONG_PER_NETWORK);
+
+  /* Ana, signed in and on the same address, has typed nothing wrong: the
+     box is there, and her own code shows her terminal. A slip or two
+     does not lock her out either. */
+  const ana = await signedIn("ana@example.com");
+  const mine = await newCode(e, { ip: shared });
+  assert.equal((await ana.get("/device")).status, 200);
+  const slip = await typeDevice(ana, stranger(mine.user_code, 1));
+  assert.equal(slip.status, 400);
+  assert.match(slip.text, /That code is not right\. 2 tries left\./);
+  const shown = await typeDevice(ana, mine.user_code);
+  assert.equal(shown.status, 200, shown.text);
+  assert.match(shown.text, /Approve this terminal/);
+
+  /* Someone else there who keeps typing wrong codes is held back by the
+     network's count after WRONG_BEFORE_NETWORK of their own, for up to an
+     hour, and is told so. */
+  const m4 = await signedIn("m4@example.org");
+  for (let i = 1; i < device.WRONG_BEFORE_NETWORK; i++) {
+    assert.equal((await typeDevice(m4, stranger(cli.user_code, i))).status, 400);
+  }
+  const held = await typeDevice(m4, stranger(cli.user_code, device.WRONG_BEFORE_NETWORK));
+  assert.equal(held.status, 429);
+  assert.match(held.text, /from your network in the last hour/);
+  assert.match(held.text, /for up to an hour/);
+  assert.equal((await m4.get("/device")).status, 429);
+
+  /* The lock on a session is ten minutes, and says so; the lock on an
+     account that has typed ten is an hour, and says that. */
+  const session = await sessions[0].get("/device");
+  assert.equal(session.status, 429);
+  assert.match(session.text, /in this browser/);
+  assert.match(session.text, /for up to 10 minutes/);
+  const m1 = await signedIn("m1@example.org");
+  const account = await m1.get("/device");
+  assert.equal(account.status, 429);
+  assert.match(account.text, /for this account in the last hour/);
+  assert.match(account.text, /for up to an hour/);
+  assert.doesNotMatch(account.text, /10 minutes/);
+  later(10 * MINUTE + 1);
+  assert.equal((await sessions[0].get("/device")).status, 429, "the session's account is still over its hour");
+  assert.equal((await m1.get("/device")).status, 429);
+  later(HOUR);
+  assert.equal((await (await signedIn("m1@example.org")).get("/device")).status, 200, "its hour is over");
+});
+
 /* ---------- tokens of every kind ---------- */
 
 test("whoami and logout take a Bearer token, never a cookie, and leave shared and CI tokens alone", async () => {

@@ -57,10 +57,16 @@
  * interval, which then grows by five seconds, and for a code nobody holds
  * one read and no write, with no count a network shares, so that nobody
  * else's polls can hold a waiting terminal back; wrong user codes per
- * session (five in ten minutes lock the form), per account and per
- * network, each counted before the code is looked up, so that guesses sent
- * at once are held to the limits too; and five wrong tries at one waiting
- * code lock that code, so that guessing at any one terminal stops there.
+ * session (five in ten minutes lock the form), per account (ten in an
+ * hour) and per network (thirty in an hour), each counted before the code
+ * is looked up, so that guesses sent at once are held to the limits too;
+ * and five wrong tries at one waiting code lock that code, so that
+ * guessing at any one terminal stops there. The network's count holds
+ * back only an account that has typed WRONG_BEFORE_NETWORK wrong codes
+ * itself that hour: nobody behind a shared address (an office, a campus,
+ * a VPN) is locked out for codes someone else there typed, while every
+ * guesser is held to a few an hour once the network is over its count,
+ * and each needs a fresh emailed code for every session.
  */
 import { identify, plan, schema as feedSchema, sha256 } from "./auth.js";
 import { ACCOUNT_ORIGIN, HOUR, event, now, ready, schema as accountsSchema } from "./accounts.js";
@@ -93,7 +99,8 @@ export const PENDING_CEILING = 10 * MAX_PENDING; // and past which nobody does
 export const WRONG_PER_SESSION = 5;       // wrong user codes one session may type in WRONG_WINDOW
 export const WRONG_WINDOW = 10 * 60;
 export const WRONG_PER_USER = 10;         // and one account in an hour, over all its sessions
-export const WRONG_PER_NETWORK = 30;      // and one network in an hour
+export const WRONG_PER_NETWORK = 30;      // and one network in an hour,
+export const WRONG_BEFORE_NETWORK = 3;    // for an account that has typed this many itself that hour
 export const WRONG_PER_CODE = 5;          // wrong tries at one waiting code before it is locked
 export const MACHINE_PREFIX = "rw_m_";
 
@@ -483,43 +490,63 @@ const WRONG_COUNTS = (request, who) => [
   ["device-wrong-net", network(request), HOUR, WRONG_PER_NETWORK],
 ];
 
-/* Whether this session, this account or this network has typed too many
-   wrong codes lately to type another. Read only: for drawing the form.
-   A typed code is counted with countTry() before it is looked up. */
+/* Which count stops this session typing another code: "session",
+   "account" or "network", or null when none does. The network's holds
+   back only an account that has typed WRONG_BEFORE_NETWORK wrong codes
+   itself this hour. Read only: for drawing the form. A typed code is
+   counted with countTry() before it is looked up. */
 async function overLimit(request, env, who) {
-  for (const [kind, key, window, limit] of WRONG_COUNTS(request, who)) {
-    if (await peek(env, kind, key, window) >= limit) return true;
-  }
-  return false;
+  const [session, account, net] = await Promise.all(WRONG_COUNTS(request, who)
+    .map(([kind, key, window]) => peek(env, kind, key, window)));
+  if (session >= WRONG_PER_SESSION) return "session";
+  if (account >= WRONG_PER_USER) return "account";
+  if (net >= WRONG_PER_NETWORK && account >= WRONG_BEFORE_NETWORK) return "network";
+  return null;
 }
 
 /* Counts a typed code as a wrong try before it is looked up, and says
-   whether it may be: { ok, left }. Counting first, in the one statement
-   bump() is, is what holds the limits against a burst of guesses sent at
-   once: each gets its own count, and those past the limit are turned away
-   unlooked. A count past its limit stops the counting there, so a locked
-   session does not spend its account's or its network's tries. A code
-   that turns out right gives its try back (refund()). */
+   whether it may be: { ok, left, over }. Counting first, in the one
+   statement bump() is, is what holds the limits against a burst of
+   guesses sent at once: each gets its own count, and those past the limit
+   are turned away unlooked. A count past its limit stops the counting
+   there, so a locked session does not spend its account's or its
+   network's tries. left: the wrong codes this session may still type
+   should this one be wrong, and over: the count that stops it once none
+   are left. A code that turns out right gives its try back (refund()). */
 async function countTry(request, env, who) {
-  let left = WRONG_PER_SESSION;
-  for (const [kind, key, window, limit] of WRONG_COUNTS(request, who)) {
-    const n = await bump(env, kind, key, window);
-    if (n > limit) return { ok: false, left: 0 };
-    if (kind === "device-wrong") left = limit - n;
-    else if (n === limit) left = 0;
-  }
-  return { ok: true, left };
+  const s = await bump(env, "device-wrong", who.id, WRONG_WINDOW);
+  if (s > WRONG_PER_SESSION) return { ok: false, left: 0, over: "session" };
+  const a = await bump(env, "device-wrong-user", who.user, HOUR);
+  if (a > WRONG_PER_USER) return { ok: false, left: 0, over: "account" };
+  const n = await bump(env, "device-wrong-net", network(request), HOUR);
+  if (n > WRONG_PER_NETWORK && a > WRONG_BEFORE_NETWORK) return { ok: false, left: 0, over: "network" };
+  const lefts = [[WRONG_PER_SESSION - s, "session"], [WRONG_PER_USER - a, "account"],
+    [n >= WRONG_PER_NETWORK ? Math.max(0, WRONG_BEFORE_NETWORK - a) : Infinity, "network"]];
+  const [left, over] = lefts.reduce((low, next) => (next[0] < low[0] ? next : low));
+  return { ok: true, left, over };
 }
 
 async function refund(request, env, who) {
   for (const [kind, key, window] of WRONG_COUNTS(request, who)) await unbump(env, kind, key, window);
 }
 
-const tooMany = () => page("Too many wrong codes", `<h1>Too many wrong codes.</h1>
-  <p class="bad">Too many codes typed here lately were not right, so this form is locked for a
-     while. Try again in ${WRONG_WINDOW / 60} minutes, or run <strong>ranwhat login</strong> again in
-     your terminal for a new code.</p>
+/* The page for a session that may type no more codes for now, saying
+   which count stopped it and for how long at most: the session's runs
+   ten minutes, the account's and the network's an hour. */
+function tooMany(over) {
+  const why = {
+    session: `Too many codes typed in this browser lately were not right,
+       so this form is locked here for up to ${WRONG_WINDOW / 60} minutes.`,
+    account: `Too many codes typed for this account in the last hour were not right,
+       so this form is locked for it for up to an hour.`,
+    network: `Too many codes typed from your network in the last hour were not right, some of them
+       for this account, so this form is locked for it for up to an hour.`,
+  }[over];
+  return page("Too many wrong codes", `<h1>Too many wrong codes.</h1>
+  <p class="bad">${why} Try again then, or run <strong>ranwhat login</strong> again in your terminal for a
+     new code once you can.</p>
   <p><a href="/">Your account</a></p>`, { status: 429 });
+}
 
 /* The step-up, for a session whose last emailed code is older than
    FRESH_FOR: a new code mailed to the account, back here once typed. */
@@ -539,7 +566,8 @@ async function needsCode(env, who, { status = 200, error = "" } = {}) {
    picks another (members.js) and comes back here. */
 async function codeBox(request, env, who, { error = "", status = 200 } = {}) {
   if (!fresh(who)) return needsCode(env, who, { status: status === 200 ? 200 : 403, error });
-  if (await overLimit(request, env, who)) return tooMany();
+  const over = await overLimit(request, env, who);
+  if (over) return tooMany(over);
   return page("Link a terminal", `<h1>Link a terminal</h1>
     <p>Type the code your terminal printed after <strong>ranwhat login</strong>. The terminal is
        linked to <strong>${escape(who.org.name)}</strong>.</p>
@@ -599,18 +627,19 @@ export async function deviceLookup(request, env) {
   const f = await fields(request);
   if (!await formOk(env, f, who.id, "device")) return refused();
   if (!fresh(who)) return needsCode(env, who, { status: 403 });
-  if (await overLimit(request, env, who)) return tooMany();
+  const over = await overLimit(request, env, who);
+  if (over) return tooMany(over);
   const code = typedUserCode(f.get("user_code"));
   if (!code) {
     return codeBox(request, env, who, { status: 400,
       error: "A code is eight letters, in two groups of four, as your terminal printed it." });
   }
   const tried = await countTry(request, env, who);
-  if (!tried.ok) return tooMany();
+  if (!tried.ok) return tooMany(tried.over);
   const { row, others } = await find(env, code);
   if (!row) {
     await wrongTry(env, others);
-    if (tried.left <= 0) return tooMany();
+    if (tried.left <= 0) return tooMany(tried.over);
     return codeBox(request, env, who, { status: 400,
       error: `That code is not right. ${tried.left} ${tried.left === 1 ? "try" : "tries"} left.` });
   }
