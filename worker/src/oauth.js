@@ -449,8 +449,20 @@ async function unlinkedFrom(env, provider, subject, user) {
      "unproven"    it vouched for one it is not the authority for, which
                    neither makes nor joins an account, with or without one
                    at that address: the same answer either way;
-     "unlinked"    the account at that address unlinked this way in. */
-export async function arrive(env, provider, profile) {
+     "unlinked"    the account at that address unlinked this way in;
+     "notice"      it would link an account at that address, and the
+                   email that tells that account so could not be taken
+                   (`why` says why): nothing is linked.
+
+   hold(user) and release(hold): session.js's holdNotice() and
+   releaseNotice(), for the email that tells an account that this way in
+   was linked to it. It is taken before the link, and given back if no
+   link is made. `hold` comes back with 'linked', for tellWayIn(). Should
+   the account at that address be made by another request between the
+   lookup and the link, the email is taken after, if it can be. */
+export async function arrive(env, provider, profile, {
+  hold = async () => ({ mail: false }), release = async () => {},
+} = {}) {
   const db = env.LIST;
   const known = await owner(env, provider, profile.subject);
   if (known) {
@@ -467,9 +479,17 @@ export async function arrive(env, provider, profile) {
   if (profile.authoritative !== true) return { refused: "unproven" };
   const holder = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
   if (holder && await unlinkedFrom(env, provider, profile.subject, holder.id)) return { refused: "unlinked" };
+  let notice = holder ? await hold(holder.id) : null;
+  if (notice && notice.refused) return { refused: "notice", why: notice.refused };
   const found = await userForVerifiedEmail(env, { email, provider, subject: profile.subject });
+  const what = found.refused ? null : found.created ? "signup" : "linked";
+  if (notice && (what !== "linked" || found.id !== holder.id)) {
+    await release(notice);
+    notice = null;
+  }
+  if (what === "linked" && !notice) notice = await hold(found.id);
   if (found.refused) return { refused: found.refused };
-  return { user: found.id, what: found.created ? "signup" : "linked" };
+  return { user: found.id, what, hold: notice };
 }
 
 /* A signed-in person linking a provider to their account, with a fresh

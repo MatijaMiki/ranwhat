@@ -120,14 +120,14 @@ import { escape } from "./list.js";
 import { plan } from "./auth.js";
 import { FEATURES, PLAN_NAMES, allows, atLeast, featuresOf } from "./features.js";
 import {
-  ACCOUNT_HOST, DAY, SESSION_MAX, canManage, event, forgetWaysIn, history, now, orgFor, orgName, ready, schema,
-  userForVerifiedEmail,
+  ACCOUNT_HOST, DAY, SESSION_MAX, STEPUPS_PER_USER_DAY, canManage, event, forgetWaysIn, history, now, orgFor, orgName,
+  ready, schema, userForVerifiedEmail,
 } from "./accounts.js";
 import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, bump, checkCode,
   clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, orgFormOk, orgInput, orgToken,
-  randomToken, readCookie, requestCode, sameOrigin, setCookie, tellWayIn,
+  holdNotice, randomToken, readCookie, releaseNotice, requestCode, sameOrigin, setCookie, tellWayIn,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
@@ -260,7 +260,8 @@ async function signinPost(request, env, ctx) {
   return sendCode(request, env, ctx, { email, purpose: "signin", next, previous: binding });
 }
 
-/* Each refusal is about the network or the day, never the address. */
+/* Each refusal is about the network, the day or (for a step-up) the
+   account asking, never the address. */
 async function sendCode(request, env, ctx, wanted) {
   const result = await requestCode(request, env, ctx, wanted);
   if (result.refused === "network") {
@@ -271,8 +272,15 @@ async function sendCode(request, env, ctx, wanted) {
   if (result.refused === "network-day") {
     return page("Too many codes", `<h1>Too many codes asked for.</h1>
       <p>More sign-in codes were sent for your network today than we send to
-         one network in a day. Try again tomorrow, from another network, or
-         <a href="/signin/password">with your password</a> if you have one.</p>`, { status: 429 });
+         one network in a day. Try again tomorrow, from another network${wanted.purpose === "stepup" ? "."
+           : `, or <a href="/signin/password">with your password</a> if you have one.`}</p>`, { status: 429 });
+  }
+  if (result.refused === "account-day") {
+    return page("No more codes for this account today", `<h1>No more codes for this account today.</h1>
+      <p>This account has asked for ${STEPUPS_PER_USER_DAY} confirmation codes today, the most one account
+         can in a day. To confirm now, sign out and sign in again with an emailed code, which counts as
+         confirming; or try again tomorrow.</p>
+      <p><a href="/">Your account</a></p>`, { status: 429 });
   }
   if (result.refused === "budget") {
     return page("No more codes today", `<h1>No more codes today.</h1>
@@ -1140,22 +1148,50 @@ async function providerBack(request, env, ctx, url, provider) {
            so nothing was linked.</p>
         <p><a href="/">Your account</a></p>`, { status: 403, cookies });
     }
+    /* The email that tells the account's address is taken first: without
+       it, nothing is linked (session.js's holdNotice()). */
+    const hold = await holdNotice(request, env, who.user);
+    if (hold.refused) return noNotice(name, hold.refused, true, cookies);
     const result = await attach(env, { user: who.user, org: who.org.id, provider, profile });
+    if (result.what !== "linked") await releaseNotice(env, hold);
     if (result.refused) return notLinked(name, result.refused, cookies);
-    if (result.what === "linked") tellWayIn(env, ctx, { user: who.user, what: provider });
+    if (result.what === "linked") tellWayIn(env, ctx, { user: who.user, what: provider, hold });
     return redirect("/", cookies);
   }
-  const result = await arrive(env, provider, profile);
+  const result = await arrive(env, provider, profile, {
+    hold: (user) => holdNotice(request, env, user), release: (hold) => releaseNotice(env, hold),
+  });
   if (result.refused === "unproven") return unproven(name, cookies);
   if (result.refused === "unlinked") return wasUnlinked(name, cookies);
+  if (result.refused === "notice") return noNotice(name, result.why, false, cookies);
   if (result.refused) return unverified(name, cookies);
   const user = result.user;
   const entered = await enter(request, env, { user, next: flow.next, coded: false, cookies, after: async (org) => [
     ...(result.what === "linked" ? [event(db, { org, user, what: `linked_${provider}` })] : []),
     event(db, { org, user, what: `${result.what === "signup" ? "signup" : "signin"}_${provider}` }),
   ] });
-  if (result.what === "linked") tellWayIn(env, ctx, { user, what: provider });
+  if (result.what === "linked") tellWayIn(env, ctx, { user, what: provider, hold: result.hold });
   return entered;
+}
+
+/* Why the email that tells of a new way in cannot go now, and when it
+   can: [the end of a sentence, a sentence]. */
+const unsent = (why) => (why === "network-day"
+  ? ["more account emails were sent for your network today than we send to one network in a day",
+    "Try again tomorrow, or from another network."]
+  : ["today's account emails are used up", "Try again after midnight UTC."]);
+
+/* A Google or GitHub account that would have been linked, to the account
+   signed in (`linking`) or to the one its address has, without the email
+   that tells that account so: nothing was linked, and nobody signed in. */
+function noNotice(name, why, linking, cookies) {
+  const [reason, advice] = unsent(why);
+  return page("Not linked", `<h1>Not linked.</h1>
+  <p class="bad">Linking ${name} to a ranwhat account sends that account's address an email to say so,
+     and ${reason}, so nothing was linked${linking ? "" : " and nobody was signed in"}.</p>
+  <p>${advice}</p>
+  <p>${linking ? `<a href="/">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
+  { status: why === "network-day" ? 429 : 503, cookies });
 }
 
 /* A flow that came back without an account to open (oauth.js's finish()). */
@@ -1293,14 +1329,23 @@ async function addPasskey(request, env, ctx) {
   const f = await fields(request);
   if (!await formOk(env, f, who.id, "passkey-add")) return refused();
   if (!fresh(who)) return needsPasskeyCode(env, who);
+  /* The email that tells the account's address is taken first: without
+     it, no passkey is added (session.js's holdNotice()). */
+  const hold = await holdNotice(request, env, who.user);
+  if (hold.refused) {
+    const [reason, advice] = unsent(hold.refused);
+    return addPasskeyForm(env, who, { status: hold.refused === "network-day" ? 429 : 503,
+      error: `No passkey was added: each one added sends your address an email to say so, and ${reason}. ${advice}` });
+  }
   const result = await register(env, who, {
     clientDataJSON: f.get("clientDataJSON"), attestationObject: f.get("attestationObject"),
     label: passkeyLabel(f.get("label")),
   });
   if (!result.refused) {
-    tellWayIn(env, ctx, { user: who.user, what: "passkey" });
+    tellWayIn(env, ctx, { user: who.user, what: "passkey", hold });
     return redirect("/");
   }
+  await releaseNotice(env, hold);
   const [status, error] = {
     expired: [400, "That passkey request has expired or was already used, so nothing was added. Try again."],
     taken: [409, "That passkey is already added."],

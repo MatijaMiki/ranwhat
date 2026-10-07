@@ -43,39 +43,57 @@ export const SESSION_MAX = 30 * DAY;    // and none lasts longer than this after
 const KEEP_EVENTS = 396 * DAY;          // the audit log: 13 months
 const KEEP_COUNTS = 7 * DAY;            // the daily email counts
 
-/* Sign-in codes, fresh-code checks, address checks and password resets
-   share Resend's free plan, 100 emails a day, with the paid token emails
-   and the release list's confirmations. This keeps the account mail to
-   about 60, so a burst of sign-ups can never hold back someone's token. */
+/* Sign-in codes, fresh-code checks, address checks, password resets and
+   the notices that a way in was added share Resend's free plan, 100
+   emails a day, with invites (INVITE_MAIL_PER_DAY, below), the email that
+   says Plus is on and the release list's confirmations (list.js sends at
+   most LIST_MAIL_PER_DAY, 10, of those a day while accounts are on). This
+   keeps the account's own mail to 60, so that with the 25 invites and the
+   10 confirmations a burst of sign-ups can never hold back someone's
+   token. */
 export const AUTH_MAIL_PER_DAY = 60;
 
-/* The last of those are kept for someone already signed in who is asked to
-   confirm it is them (purpose 'stepup'): codes asked for from the sign-in,
-   sign-up and reset forms, by anyone, stop short of them. Strangers who use
-   up the day's sign-in mail still cannot stop a signed-in person from
-   approving a terminal or opening billing. */
-export const STEPUP_RESERVE = 10;
+/* Fifteen of those are kept for accounts already signed in: a step-up's
+   code (purpose 'stepup') and the notice that a way in was added. Codes
+   asked for from the sign-in, sign-up and reset forms, by anyone, stop
+   short of them, so strangers who use up the day's sign-in mail cannot
+   stop a signed-in person from approving a terminal or opening billing.
+   Only an account made at least a day ago draws on the reserve, and at
+   most RESERVE_PER_USER_DAY a day for one account and
+   RESERVE_PER_NETWORK_DAY for one network (an IPv4 /24, an IPv6 /48), so
+   neither accounts made today, nor a handful of older ones, nor many from
+   one network can empty it: emptying it takes eight accounts a day old or
+   more, on five networks. What an account causes past its share comes out
+   of the public forms' mail instead, under that mail's own limits, as a
+   code asked for there would (session.js's signedInMail()). */
+export const STEPUP_RESERVE = 15;
+export const RESERVE_PER_USER_DAY = 2;
+export const RESERVE_PER_NETWORK_DAY = 3;
 
-/* And one account's share of that reserve: a session that asks to confirm
-   itself over and over, from as many networks as it likes, uses up its own
-   day and nobody else's. */
+/* And the step-up codes one account may ask for in a day, from the
+   reserve and the public mail together, from as many networks as it
+   likes. */
 export const STEPUPS_PER_USER_DAY = 5;
 
 /* The email that tells an account a way in was added to it (a Google or
-   GitHub account linked, a passkey added: session.js's tellWayIn()) is
-   mail a signed-in account causes, so it comes out of the same reserve,
-   under a daily share of its own for each account, which step-ups cannot
-   use up. Past either, the notice is skipped: the account's activity
-   still lists what was added. */
+   GitHub account linked, a passkey added: session.js's holdNotice() and
+   tellWayIn()) is taken from the day's mail, as a step-up's code is,
+   before the way in is added, and without it the way in is not added.
+   So nothing another account does can silence it: other accounts can at
+   most use up the day's mail, which stops the adding with it. Each
+   account's first NOTICES_PER_USER_DAY a day are mailed; a way in added
+   past them that day is not, as its address has had that many already
+   that day, and the account's activity lists every one. */
 export const NOTICES_PER_USER_DAY = 3;
 
 /* Invites to an organisation (members.js) have a day of their own, apart
    from AUTH_MAIL_PER_DAY: however many organisations invite, nobody's
    sign-in code or step-up waits on it, and a burst of sign-ins never stops
-   an invite. With the account mail that keeps Resend's 100 a day at about
-   85, leaving the rest for token emails and the list's confirmations.
-   Each organisation also has its own share (INVITES_PER_ORG_DAY), smaller
-   than this, so one organisation's busy day leaves room for another's. */
+   an invite. With the account mail that keeps Resend's 100 a day at 85,
+   leaving 15: the list's 10 confirmations and the emails that say Plus is
+   on. Each organisation also has its own share (INVITES_PER_ORG_DAY),
+   smaller than this, so one organisation's busy day leaves room for
+   another's. */
 export const INVITE_MAIL_PER_DAY = 25;
 
 export const now = () => Math.floor(Date.now() / 1000);
@@ -368,9 +386,10 @@ const SCHEMA = [
      window_start INTEGER NOT NULL,
      count INTEGER NOT NULL)`,
 
-  /* Emails sent per UTC day, by kind ('auth': codes from the public forms;
-     'auth-stepup': a signed-in step-up's; 'invite': invites to an
-     organisation). */
+  /* Emails sent per UTC day, by kind ('auth': codes from the public forms,
+     and what an account signed in causes past its share of the reserve;
+     'auth-stepup': the signed-in reserve, for the step-ups and notices of
+     accounts a day old or more; 'invite': invites to an organisation). */
   `CREATE TABLE IF NOT EXISTS mail_counts (
      day TEXT NOT NULL,
      kind TEXT NOT NULL,
@@ -556,18 +575,18 @@ export async function history(env, userId, limit = 10) {
 
 const today = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
 
-/* The day's account mail is three counters. A signed-in step-up, and the
-   notice that a way in was added (purpose 'notice'), draw only on
-   STEPUP_RESERVE ('auth-stepup'); an invite only on INVITE_MAIL_PER_DAY
-   ('invite'); everything else, from the public sign-in, sign-up and reset
-   forms, on the rest of AUTH_MAIL_PER_DAY ('auth'). None can spend
-   another's, so a stranger draining the forms cannot stop a step-up or an
-   invite, and a signed-in session spraying step-ups or invites cannot stop
-   anyone signing in. */
-const signedIn = (purpose) => purpose === "stepup" || purpose === "notice";
-const mailKind = (purpose) => (purpose === "invite" ? "invite" : signedIn(purpose) ? "auth-stepup" : "auth");
+/* The day's account mail is three counters. The signed-in reserve
+   ('auth-stepup', STEPUP_RESERVE), which session.js draws on for an
+   older account's step-ups and notices within their shares; invites
+   ('invite', INVITE_MAIL_PER_DAY); and the rest of AUTH_MAIL_PER_DAY
+   ('auth'), for the public sign-in, sign-up and reset forms and for what
+   an account signed in causes past its share of the reserve. None can
+   spend another's, so a stranger draining the forms cannot stop an older
+   account's step-up or an invite, and a session spraying invites cannot
+   stop anyone signing in. */
+const mailKind = (purpose) => (purpose === "invite" ? "invite" : purpose === "stepup" ? "auth-stepup" : "auth");
 const mailCap = (purpose) => (purpose === "invite" ? INVITE_MAIL_PER_DAY
-  : signedIn(purpose) ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+  : purpose === "stepup" ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
 
 /* How many more account emails for `purpose` may go out today. Read before
    the per-address limits, so a day that is used up answers the same for
@@ -578,15 +597,23 @@ export async function authMailLeft(env, purpose = "signin") {
   return Math.max(0, mailCap(purpose) - (row ? row.sent : 0));
 }
 
-/* Takes one email for `purpose` from today's budget, or returns false when
-   none is left for it. One statement, so two requests at once cannot both
-   take the last. */
+/* Takes one email for `purpose` from today's budget: the day it was taken
+   from, for giveBackAuthMail(), or false when none is left for it. One
+   statement, so two requests at once cannot both take the last. */
 export async function spendAuthMail(env, purpose = "signin") {
+  const day = today();
   const taken = await env.LIST.prepare(
     `INSERT INTO mail_counts (day, kind, sent) VALUES (?, ?, 1)
      ON CONFLICT(day, kind) DO UPDATE SET sent = sent + 1 WHERE sent < ?`)
-    .bind(today(), mailKind(purpose), mailCap(purpose)).run();
-  return taken.meta.changes === 1;
+    .bind(day, mailKind(purpose), mailCap(purpose)).run();
+  return taken.meta.changes === 1 ? day : false;
+}
+
+/* One email for `purpose` back to the day it was taken from, for one
+   taken for something that then did not happen. Never below nothing. */
+export async function giveBackAuthMail(env, purpose, day) {
+  await env.LIST.prepare("UPDATE mail_counts SET sent = sent - 1 WHERE day = ? AND kind = ? AND sent > 0")
+    .bind(day, mailKind(purpose)).run();
 }
 
 /* ---------- the cron ---------- */

@@ -14,7 +14,9 @@ import { d1 } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const { NETWORK_MAIL_PER_DAY, formToken, network } = await import("../src/session.js");
-const { AUTH_MAIL_PER_DAY, STEPUP_RESERVE, STEPUPS_PER_USER_DAY } = await import("../src/accounts.js");
+const {
+  AUTH_MAIL_PER_DAY, RESERVE_PER_NETWORK_DAY, RESERVE_PER_USER_DAY, STEPUP_RESERVE, STEPUPS_PER_USER_DAY,
+} = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const SECRET = "an-account-test-secret-that-is-long-enough-0123456789";
@@ -160,6 +162,8 @@ async function signIn(b, s, email = "ana@example.com") {
 }
 
 const rows = (e, sql, ...p) => e.LIST.sql.prepare(sql).all(...p).map((r) => ({ ...r }));
+/* Every day's count of one kind of account mail, added up. */
+const sentOf = (e, kind) => rows(e, "SELECT coalesce(sum(sent), 0) AS n FROM mail_counts WHERE kind = ?", kind)[0].n;
 const count = (e, table) => e.LIST.sql.prepare(`SELECT count(*) AS n FROM ${table}`).get().n;
 const tables = (e) => rows(e, "SELECT name FROM sqlite_master WHERE type = 'table'").map((r) => r.name);
 
@@ -794,6 +798,7 @@ test("strangers cannot use up the day's codes for everyone: one network takes te
   const e = env();
   const bob = new Browser(e, { ip: "203.0.113.20" });
   await signIn(bob, s, "bob@example.com");
+  later(DAY + MINUTE);   // the reserve is for accounts a day old or more
 
   /* Sixty throwaway addresses from one /64, walking through it. */
   const before = s.emails.length;
@@ -823,29 +828,126 @@ test("strangers cannot use up the day's codes for everyone: one network takes te
   assert.equal((await bob.post("/stepup", { form: await token() })).status, 503, "until the reserve is gone");
 });
 
-test("step-ups draw only on their own reserve, five a day per account, whatever the network", async () => {
-  /* The twelve tries below take four hours: start them at 01:00 UTC, so
-     they all fall on one day, whatever the time the suite runs at. */
+test("an account asks for five step-ups a day at most, whatever the network: two from the reserve, the rest from the public mail", async () => {
+  /* The twelve tries below take four hours: start them at 01:00 UTC, a
+     day after the account is made, so they all fall on one day, whatever
+     the time the suite runs at. */
   later(DAY - (Math.floor(Date.now() / 1000) % DAY) + HOUR);
   const s = services();
   const e = env();
   const bob = new Browser(e, { ip: "198.51.100.20" });
   await signIn(bob, s, "bob@example.com");
+  later(DAY);
   const token = async () => formToken(e, sha(bob.jar.get(SESSION)), "stepup");
-  const sent = (kind) => (rows(e, `SELECT sent FROM mail_counts WHERE kind = '${kind}'`)[0] || { sent: 0 }).sent;
-  const signinMail = sent("auth");
+  const signinMail = sentOf(e, "auth");
   let mailed = 0;
   for (let i = 0; i < 12; i++) {
     later(20 * MINUTE);
-    bob.ip = `2001:db8:${i + 10}::1`; // a new /64 every time
+    bob.ip = `2001:db8:${i + 10}::1`; // a new /48 every time
     const r = await bob.post("/stepup", { form: await token() });
     if (r.location === "/signin/code") mailed++;
   }
-  assert.equal(mailed, STEPUPS_PER_USER_DAY, "the account's own share, and no more");
-  assert.equal(sent("auth-stepup"), STEPUPS_PER_USER_DAY);
-  assert.equal(sent("auth"), signinMail, "nothing taken from the public forms' mail");
-  // Sign-in for everyone else is untouched.
+  assert.equal(mailed, STEPUPS_PER_USER_DAY, "the account's own day, and no more");
+  assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_USER_DAY, "its share of the reserve, and no more");
+  assert.equal(sentOf(e, "auth") - signinMail, STEPUPS_PER_USER_DAY - RESERVE_PER_USER_DAY);
+  // Sign-in for everyone else goes on.
   await signIn(new Browser(e, { ip: "198.51.100.77" }), s, "carol@example.com");
+});
+
+test("accounts made today cannot use up the reserve: their step-ups come from the public mail", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e, { ip: "203.0.113.60" });
+  await signIn(ana, s, "ana@example.com");
+  later(DAY + HOUR);   // Ana's account is more than a day old now
+
+  /* Three throwaway accounts, each made with one code, ask for every
+     step-up they may, each from a network of its own every time. */
+  const past = [];
+  for (const [n, name] of ["x1", "x2", "x3"].entries()) {
+    const x = new Browser(e, { ip: `198.51.${100 + n}.9` });
+    await signIn(x, s, `${name}@example.org`);
+    for (let i = 0; i <= STEPUPS_PER_USER_DAY; i++) {
+      later(2 * MINUTE);
+      x.ip = `2001:db8:${n + 1}:${i + 1}::1`;
+      const r = await x.post("/stepup", { form: await formToken(e, sha(x.jar.get(SESSION)), "stepup") });
+      if (i < STEPUPS_PER_USER_DAY) assert.equal(r.location, "/signin/code", r.text);
+      else past.push(r);
+    }
+  }
+  assert.equal(sentOf(e, "auth-stepup"), 0, "nothing came out of the reserve");
+  /* Past its own day, an account is told it can sign in again with a
+     code, which counts as confirming. */
+  for (const r of past) {
+    assert.equal(r.status, 429);
+    assert.match(r.text, /sign in again with an emailed code/);
+  }
+
+  /* Ana, whose account is older, confirms it is her from the reserve. */
+  later(20 * MINUTE);
+  const before = s.emails.length;
+  const r = await ana.post("/stepup", { form: await formToken(e, sha(ana.jar.get(SESSION)), "stepup") });
+  assert.equal(r.location, "/signin/code", r.text);
+  assert.equal(s.emails.length, before + 1);
+  assert.equal(sentOf(e, "auth-stepup"), 1);
+  assert.equal((await typeCode(ana, codeIn(s.emails.at(-1)))).location, "/");
+});
+
+test("an older account takes two of the reserve a day and one network three; past either, a step-up comes from the public mail", async () => {
+  /* Start at 01:00 UTC, so that what follows falls on one day. */
+  later(DAY - (Math.floor(Date.now() / 1000) % DAY) + HOUR);
+  const s = services();
+  const e = env();
+  const people = [];
+  for (let i = 0; i < 4; i++) {
+    const b = new Browser(e, { ip: `198.51.100.${i + 1}` });
+    await signIn(b, s, `p${i}@example.com`);
+    people.push(b);
+  }
+  later(DAY);   // every one of them a day old, still at 01:00 UTC
+  assert.equal(RESERVE_PER_USER_DAY, 2);
+  assert.equal(RESERVE_PER_NETWORK_DAY, 3);
+  const stepup = async (b, ip) => {
+    later(2 * MINUTE);
+    b.ip = ip;
+    const r = await b.post("/stepup", { form: await formToken(e, sha(b.jar.get(SESSION)), "stepup") });
+    assert.equal(r.location, "/signin/code", r.text);
+  };
+  const publicMail = sentOf(e, "auth");
+
+  /* One account: its two, then the public mail. */
+  const [p0, p1, p2, p3] = people;
+  for (let i = 0; i < RESERVE_PER_USER_DAY + 1; i++) await stepup(p0, `192.0.2.${10 + i}`);
+  assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_USER_DAY);
+  assert.equal(sentOf(e, "auth") - publicMail, 1);
+
+  /* One network (an IPv4 /24, an IPv6 /48): its three, then the public mail. */
+  await stepup(p1, "192.0.2.20");
+  assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_NETWORK_DAY);
+  await stepup(p2, "192.0.2.21");
+  assert.equal(sentOf(e, "auth-stepup"), RESERVE_PER_NETWORK_DAY, "the network's share is used up");
+  assert.equal(sentOf(e, "auth") - publicMail, 2);
+  await stepup(p2, "2001:db8:aa:1::1");
+  await stepup(p3, "2001:db8:aa:2::1");
+  await stepup(p3, "2001:db8:aa:3::1");
+  assert.equal(sentOf(e, "auth-stepup"), 2 * RESERVE_PER_NETWORK_DAY);
+  await stepup(p2, "2001:db8:aa:4::1");
+  assert.equal(sentOf(e, "auth-stepup"), 2 * RESERVE_PER_NETWORK_DAY, "every /64 of a /48 is one network");
+  assert.equal(sentOf(e, "auth") - publicMail, 3);
+
+  /* With the reserve used up, an older account's step-up comes from the
+     public mail; with that used up too, nothing is sent. */
+  e.LIST.sql.prepare("INSERT OR REPLACE INTO mail_counts (day, kind, sent) VALUES (?, 'auth-stepup', ?)")
+    .run(today(), STEPUP_RESERVE);
+  await stepup(p1, "203.0.113.31");
+  assert.equal(sentOf(e, "auth") - publicMail, 4);
+  e.LIST.sql.prepare("INSERT OR REPLACE INTO mail_counts (day, kind, sent) VALUES (?, 'auth', ?)")
+    .run(today(), AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+  later(2 * MINUTE);
+  p1.ip = "203.0.113.32";
+  const out = await p1.post("/stepup", { form: await formToken(e, sha(p1.jar.get(SESSION)), "stepup") });
+  assert.equal(out.status, 503);
+  assert.match(out.text, /No more codes today/);
 });
 
 test("account email stops at the day's cap, for every address alike, and starts again the next day", async () => {
