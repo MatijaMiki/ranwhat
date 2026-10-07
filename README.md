@@ -86,7 +86,8 @@ Nothing is written there when stderr is not a terminal, or with `--json`.
 ### `ranwhat watch`: audit what Claude Code and your other agents ran
 
 Reads what Claude Code and your other coding agents already wrote to disk.
-No wrapper, no proxy, nothing in your critical path. Every agent below is
+No wrapper, no proxy, nothing in your critical path unless you install the
+[hook](#ranwhat-hook-install-ask-before-a-high-risk-claude-code-call). Every agent below is
 read by default, each from where it keeps its history (the variable in
 brackets moves it, as it moves the agent itself); one that is not on your
 machine is skipped.
@@ -265,6 +266,33 @@ token.
 On a terminal, `scan`, `live` and `update --status` may add one dim line
 about the feed, on stderr and never with `--json`. `RANWHAT_NO_HINTS=1` turns
 it off.
+
+### `ranwhat hook install`: ask before a high-risk Claude Code call
+
+Every other command works after the fact, and the agent never knows.
+The hook is the one opt-in exception. `ranwhat hook install` adds a
+PreToolUse hook to Claude Code's settings, and from the next session each
+tool call watch's rules rate high or critical waits for your yes before it
+runs.
+
+```bash
+uv tool install ranwhat        # or pipx install ranwhat; uvx is refused
+ranwhat hook install           # ~/.claude/settings.json, or $CLAUDE_CONFIG_DIR's
+ranwhat hook status
+ranwhat hook uninstall
+```
+
+- It judges each call on your machine and sends nothing anywhere. A call no
+  rule rates high or critical gets no answer, so Claude Code decides as it would have without
+  the hook.
+- It fails open: if the hook itself breaks, the call goes ahead.
+- `--mode deny` refuses critical calls outright and still asks for high
+  ones, for an agent you check on only now and then.
+- `--scope project` writes `.claude/settings.json` for everyone on the
+  repository; `--scope local` writes `.claude/settings.local.json` for you.
+- `RANWHAT_HOOK=0` in Claude Code's environment lets every call through.
+- Each check takes about a fifth of a second. The reason it gives Claude
+  Code names the rule, never the value that tripped it.
 
 ## Precision is the feature
 
