@@ -26,14 +26,14 @@
  * /api/checkout, /api/welcome, /api/stripe and /api/billing: buying Plus
  * through Stripe, in stripe.js. Paying issues the token the feed accepts;
  * paying from an account (billing.js) links Plus to the organisation
- * instead. Once ACCOUNTS_ON is set and the account host is ready,
- * /api/checkout sends the browser to the account's upgrade, so that every
- * new purchase is an organisation's; the other three go on serving what
- * was bought before.
+ * instead. While ACCOUNTS_ON is set (wrangler.toml sets it) and the
+ * account host is ready, /api/checkout sends the browser to the account's
+ * upgrade, so that every new purchase is an organisation's; the other
+ * three go on serving what was bought before.
  *
  * account.ranwhat.com: accounts, in dashboard.js. Checked by hostname before
  * any route is looked up, so none of the routes below answers there and
- * none of its pages answers anywhere else. Until ACCOUNTS_ON is set it
+ * none of its pages answers anywhere else. With ACCOUNTS_ON unset it
  * answers 404 to everything, exactly as an unknown path does here.
  *
  * Linking a terminal (device.js): POST feed.ranwhat.com/v1/device/code and
@@ -41,7 +41,7 @@
  * the feed host only and take a Bearer token, never a cookie; and GET
  * ranwhat.com/device, a redirect to the page on account.ranwhat.com where
  * the code is typed. Each is looked up by host and path together, and
- * until ACCOUNTS_ON is set none of them is there: they answer 404 as an
+ * with ACCOUNTS_ON unset none of them is there: they answer 404 as an
  * unknown path does.
  */
 import { EmailMessage } from "cloudflare:email";

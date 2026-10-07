@@ -6,7 +6,12 @@
  * the release, which is all that makes it newer than the bundled catalogue.
  * The client's own validator checks it there, so all that is left here is
  * who gets it, which auth.js decides. The client sends the token and
- * nothing else, and nothing here records anything about the request.
+ * nothing else, and nothing here records anything about the request. The
+ * one note any request leaves is auth.js's, for a token from `ranwhat
+ * login` or a CI token: the UTC day it was last used, written at most once
+ * a day, so the account page can show which of an organisation's machines
+ * still fetch. A subscription's shared token and one made by hand leave
+ * none.
  *
  * A machine linked to an organisation on Free is refused with 403
  * {"error": "plus_required", "upgrade": ...}, saying where to change that.

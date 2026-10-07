@@ -401,3 +401,73 @@ test("Plus opens the Plus panel; Team opens both; neither shows the upgrade", as
   run(e, "UPDATE subscriptions SET status = 'canceled' WHERE id = ?", sub);
   assert.match(await home(), /<dd id="plan">Free<\/dd>/, "derived on every request");
 });
+
+/* ---------- locks ---------- */
+
+/* Every element the account page draws locked, with its tag, its own
+   attributes and what is inside it, found by matching its tags, so a
+   locked panel drawn as a section or a div, nested or not, is found. */
+function lockedPanels(html) {
+  const found = [];
+  const open = /<(section|div)\b([^>]*\bclass="[^"]*\blocked\b[^"]*"[^>]*)>/g;
+  for (let m; (m = open.exec(html));) {
+    const tag = m[1];
+    const tags = new RegExp(`<(/?)${tag}\\b[^>]*>`, "g");
+    tags.lastIndex = open.lastIndex;
+    let depth = 1, end = -1;
+    for (let t; depth && (t = tags.exec(html));) {
+      depth += t[1] ? -1 : 1;
+      if (!depth) end = t.index;
+    }
+    assert.ok(end > 0, `an unclosed locked ${tag}`);
+    found.push({ attrs: m[2], inner: html.slice(open.lastIndex, end) });
+  }
+  return found;
+}
+
+const SRC = join(ROOT, "worker", "src");
+const SOURCES = ["auth.js", "feed.js", "dashboard.js", "machines.js", "members.js", "billing.js", "device.js"]
+  .map((f) => readFileSync(join(SRC, f), "utf8")).join("\n");
+
+test("locks: every locked panel names a server-side feature, and a live one is refused on the server", async () => {
+  const e = await stand();
+  const { org: o, home } = await signedIn(e);
+  const locals = ["check", "watch", "clean", "sources", "reach", "scan", "live", "demo", "hook"];
+  const check = (html) => {
+    const panels = lockedPanels(html);
+    for (const { attrs, inner } of panels) {
+      const id = (/\bid="([^"]+)"/.exec(attrs) || [])[1];
+      const keys = [...`${attrs} ${inner}`.matchAll(/data-feature="([^"]+)"/g)].map((x) => x[1]);
+      assert.ok(keys.length > 0, `locked panel ${id} names no feature`);
+      for (const key of keys) {
+        assert.ok(Object.hasOwn(FEATURES, key), `locked panel ${id} names ${key}, which features.js does not have`);
+        const f = FEATURES[key];
+        assert.ok(inner.includes(f.name), `locked panel ${id} does not say ${f.name}`);
+        assert.ok(["plus", "team"].includes(f.plan), key);
+        if (f.status === "live") {
+          /* Drawn locked because the server refuses it: a handler works the
+             plan out at request time and asks the map about this feature. */
+          assert.match(SOURCES, new RegExp(
+            `allows\\(await plan\\([^)]*\\), "${key}"\\)|entitled\\(request, env, "${key}"\\)`),
+            `${key} is drawn locked but nothing on the server refuses it`);
+        }
+      }
+      for (const c of locals) {
+        assert.doesNotMatch(inner, new RegExp(`ranwhat ${c}\\b`), `locked panel ${id} names local command ${c}`);
+      }
+    }
+    return panels.map(({ attrs }) => (/\bid="([^"]+)"/.exec(attrs) || [])[1]);
+  };
+
+  // Free: Plus and Team, and the two Plus features with panels of their own.
+  assert.deepEqual(check(await home()).sort(), ["ci-tokens", "members", "plus", "team"]);
+  // Plus: only Team stays locked.
+  const { sub } = subscription(e, "active", o);
+  assert.deepEqual(check(await home()), ["team"]);
+  // Team: nothing is locked.
+  grant(e, o, "team");
+  assert.deepEqual(check(await home()), []);
+  run(e, "DELETE FROM grants");
+  run(e, "UPDATE subscriptions SET status = 'canceled' WHERE id = ?", sub);
+  assert.deepEqual(check(await home()).sort(), ["ci-tokens", "members", "plus", "team"]);
+});

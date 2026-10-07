@@ -2,11 +2,12 @@
  * organisations in them, the audit log, and the daily budget for the email
  * that signs people in.
  *
- * Dark until ACCOUNTS_ON is set: until then index.js answers 404 to
- * everything on the account host, before any of this runs, and the cron
- * makes none of these tables. Once they exist, its sweep keeps deleting
- * what is out of date with accounts on or off: switching them off stops
- * serving them, not deleting what this file promises to delete.
+ * Served while ACCOUNTS_ON is set, as wrangler.toml sets it. Unset, index.js
+ * answers 404 to everything on the account host, before any of this runs,
+ * and the cron makes none of these tables in a database that never had
+ * them. Once they exist, its sweep keeps deleting what is out of date with
+ * accounts on or off: switching them off stops serving them, not deleting
+ * what this file promises to delete.
  *
  * Every table the accounts design needs is made here, including the ones
  * later work fills (passwords, passkeys, Google and GitHub identities,
@@ -80,7 +81,7 @@ export const INVITE_MAIL_PER_DAY = 25;
 export const now = () => Math.floor(Date.now() / 1000);
 
 /* "1" or "true" switch accounts on; unset, empty or anything else keeps
-   them dark. */
+   them off. */
 export const accountsOn = (env) => ["1", "true"].includes(String(env.ACCOUNTS_ON ?? "").trim().toLowerCase());
 
 /* Switched on and able to work: the database, a way to send the code, a
@@ -594,9 +595,9 @@ export async function spendAuthMail(env, purpose = "signin") {
    out-of-date code, session, limit or count needed is deleted, so an
    address someone typed and never verified is gone within the code's ten
    minutes and the next run, and so is the password hash held with it.
-   That holds while accounts are dark again after being on, too: dark
-   stops serving, not deleting. A database accounts were never on in gets
-   no tables from it. */
+   That holds while accounts are switched off again after being on, too:
+   off stops serving, not deleting. A database accounts were never on in
+   gets no tables from it. */
 export async function sweep(env) {
   const db = env.LIST;
   /* A database whose tables an earlier deploy made gets the ones added

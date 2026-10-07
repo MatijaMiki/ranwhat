@@ -824,6 +824,9 @@ test("strangers cannot use up the day's codes for everyone: one network takes te
 });
 
 test("step-ups draw only on their own reserve, five a day per account, whatever the network", async () => {
+  /* The twelve tries below take four hours: start them at 01:00 UTC, so
+     they all fall on one day, whatever the time the suite runs at. */
+  later(DAY - (Math.floor(Date.now() / 1000) % DAY) + HOUR);
   const s = services();
   const e = env();
   const bob = new Browser(e, { ip: "198.51.100.20" });

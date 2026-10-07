@@ -1,7 +1,7 @@
 /* account.ranwhat.com: signing in with an emailed code or a password,
  * making an account with a password, resetting one, and the account page
  * behind them. index.js sends every request for this host here, and only
- * once ACCOUNTS_ON is set.
+ * while ACCOUNTS_ON is set (wrangler.toml sets it).
  *
  *   GET  /              The account: who you are, your organisation, its
  *                       plan and what each plan has (features.js), its
