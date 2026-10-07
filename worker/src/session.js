@@ -312,8 +312,10 @@ export async function forget(env, kind, who) {
    it counted (for a step-up from the reserve, the account's share and its
    network's: signedInMail()), before anything about the address. A share
    is counted before the code is mailed, so that requests sent at once are
-   held to it too, and given back when no code is mailed; the day's mail is
-   taken only when one is. So they say no more about an address than the
+   held to it too, and given back when the address is over its limits or
+   the day's mail is used up; the day's mail is taken only when a code is
+   to be sent. A code Resend then refuses or fails to send is not given
+   back: the send runs after the reply and only logs. So they say no more about an address than the
    day's budget always has. Then the address, as asked for from this
    network (a minute, an hour) and from everywhere (an hour). A stranger's
    requests for someone's address therefore use up the stranger's own

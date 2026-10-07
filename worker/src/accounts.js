@@ -129,8 +129,10 @@ export const {
    account and RESERVE_PER_NETWORK_DAY for one network (an IPv4 /24, an
    IPv6 /48). Both shares are counted before the email is taken, each in
    one statement, so step-ups sent at once are held to them as step-ups
-   one after another are, and a step-up that sends nothing gives them
-   back (session.js's signedInMail()). So neither accounts made today, nor
+   one after another are, and a step-up refused because the address is
+   over its limits or the day's mail is used up gives them back
+   (session.js's signedInMail()); one that Resend then fails to deliver
+   does not. So neither accounts made today, nor
    a handful of older ones, nor many from one network can empty it:
    emptying it takes the reserve divided by RESERVE_PER_USER_DAY accounts
    a day old or more, on the reserve divided by RESERVE_PER_NETWORK_DAY
