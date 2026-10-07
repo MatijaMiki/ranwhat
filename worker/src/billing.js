@@ -170,7 +170,8 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
   } else if (onPlan === "free") {
     standing = manager
       ? `<p>${name} is on Free. Plus is ${PRICES.monthly} or ${PRICES.yearly}, one price for the organisation.</p>
-      <p><a class="button" href="/upgrade">Upgrade to Plus</a></p>`
+      <p><a class="button" href="/upgrade">Upgrade to Plus</a></p>
+      <p><small>Bought Plus on ranwhat.com without an account? <a href="/claim">Attach it to ${name}</a>.</small></p>`
       : `<p>${name} is on Free. An owner or an admin of it can upgrade it to Plus.</p>`;
   }
 

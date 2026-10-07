@@ -41,6 +41,7 @@
  */
 import { sha256 } from "./auth.js";
 import { REPLY_TO, escape, mail, resend, same } from "./list.js";
+import { CHECKOUT_ID } from "./stripe.js";
 import {
   ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, NOTICES_PER_USER_DAY, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
   authMailLeft, now, orgFor, spendAuthMail,
@@ -72,10 +73,17 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;   // 32 random bytes, base64url
 const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
 
 /* Where a sign-in may send the browser on to: the account, the page that
-   approves a terminal (device.js), or the one that upgrades to Plus
-   (billing.js). */
-const NEXT = new Set(["/", "/device", "/upgrade"]);
-export const nextPath = (value) => (NEXT.has(value) ? value : "/");
+   approves a terminal (device.js), the one that upgrades to Plus
+   (billing.js), or the one that attaches a subscription (claim.js), which
+   may carry the id of the Checkout it came from, of the shape Stripe
+   makes and nothing else, so it stays a path on this host. */
+const NEXT = new Set(["/", "/device", "/upgrade", "/claim"]);
+const CLAIM_NEXT = /^\/claim\?session_id=(cs_[A-Za-z0-9_]+)$/;
+export const nextPath = (value) => {
+  if (NEXT.has(value)) return value;
+  const claim = typeof value === "string" ? CLAIM_NEXT.exec(value) : null;
+  return claim && CHECKOUT_ID.test(claim[1]) ? value : "/";
+};
 
 /* ---------- secrets ---------- */
 
@@ -342,7 +350,7 @@ export async function requestCode(request, env, ctx, {
   return { token };
 }
 
-const FROM = "ranwhat <account@ranwhat.com>";
+export const ACCOUNT_FROM = "ranwhat <account@ranwhat.com>";
 
 /* No link: the code is typed, never clicked. The text names the one place
    it goes, because a code someone reads out to a caller signs the caller
@@ -356,7 +364,7 @@ async function mailCode(env, email, code, purpose) {
     reset: "Typing it, with a new password, on that page replaces this account's password and signs it out everywhere else.",
   }[purpose] || "";
   await resend(env, "POST", "/emails", {
-    from: FROM,
+    from: ACCOUNT_FROM,
     to: [email],
     reply_to: REPLY_TO,
     subject: `Your ranwhat ${what}`,
@@ -421,7 +429,7 @@ async function mailWayIn(env, email, what) {
   const said = `${ADDED[what]} your ranwhat account (${email}), and can now sign in to it.`;
   const ifNot = `If that was not you, sign in at ${ACCOUNT_HOST} with an emailed code, and choose Sign out everywhere and remove every other way in. Then change or reset your password if you have one.`;
   await resend(env, "POST", "/emails", {
-    from: FROM,
+    from: ACCOUNT_FROM,
     to: [email],
     reply_to: REPLY_TO,
     subject: "A new way into your ranwhat account",

@@ -65,7 +65,10 @@ export const STEPUPS_PER_USER_DAY = 5;
    mail a signed-in account causes, so it comes out of the same reserve,
    under a daily share of its own for each account, which step-ups cannot
    use up. Past either, the notice is skipped: the account's activity
-   still lists what was added. */
+   still lists what was added. The notice to a Stripe customer that their
+   subscription was attached to an organisation (claim.js) comes out of
+   the same reserve, at most once for each subscription ever sold, and is
+   never skipped: without it, nothing is attached. */
 export const NOTICES_PER_USER_DAY = 3;
 
 export const now = () => Math.floor(Date.now() / 1000);

@@ -81,6 +81,11 @@
  *                       the customer of a subscription linked to the
  *                       organisation, for an owner or admin with a fresh
  *                       code.
+ *   GET  /claim         Attaches a subscription bought without an account
+ *   POST /claim         to the organisation (claim.js): from the welcome
+ *   POST /claim/find    page's or the email's link, or found by the email
+ *                       just confirmed, for an owner or admin with a fresh
+ *                       code.
  *
  * Nothing changes on a GET but a passkey challenge, made for whoever
  * asks and good once (and, the first time an account asks to add a
@@ -123,6 +128,7 @@ import {
 } from "./passkeys.js";
 import { approve, deny, deviceLookup, devicePage } from "./device.js";
 import { billingPanel, billingPost, upgradePage, upgradePost } from "./billing.js";
+import { CLAIM_EVENTS, claimFind, claimPage, claimPost } from "./claim.js";
 import {
   EXPIRIES, IDLE_DAYS, MAX_CI, MAX_LABEL as MAX_MACHINE_LABEL, liveCi, machineIn, machineLabel, machinesOf,
   mayChange, mintCi, renameMachine, revokeMachine,
@@ -717,6 +723,7 @@ const EVENTS = {
   upgrade_started: "Checkout for Plus opened, with a fresh code",
   billing_opened: "Billing opened, with a fresh code",
   plus_linked: "Plus subscription linked to the organisation",
+  ...CLAIM_EVENTS,
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -1592,6 +1599,8 @@ const ROUTES = {
   "/tokens/ci": { POST: ciTokenPost },
   "/upgrade": { GET: upgradePage, POST: upgradePost },
   "/billing": { POST: billingPost },
+  "/claim": { GET: claimPage, POST: claimPost },
+  "/claim/find": { POST: claimFind },
 };
 for (const provider of Object.keys(PROVIDERS)) {
   const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);

@@ -28,7 +28,9 @@
  * paying from an account (billing.js) links Plus to the organisation
  * instead.
  *
- * account.ranwhat.com: accounts, in dashboard.js. Checked by hostname before
+ * account.ranwhat.com: accounts, in dashboard.js, where a subscription
+ * bought here without an account is attached to one (claim.js), from the
+ * welcome page's and the token email's link. Checked by hostname before
  * any route is looked up, so none of the routes below answers there and
  * none of its pages answers anywhere else. Until ACCOUNTS_ON is set it
  * answers 404 to everything, exactly as an unknown path does here.
