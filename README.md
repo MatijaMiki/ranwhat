@@ -87,7 +87,7 @@ Nothing is written there when stderr is not a terminal, or with `--json`.
 
 Reads what Claude Code and your other coding agents already wrote to disk.
 No wrapper, no proxy, nothing in your critical path unless you install the
-[hook](#ranwhat-hook-install-ask-before-a-flagged-claude-code-call). Every agent below is
+[hook](#ranwhat-hook-install-ask-before-a-high-risk-claude-code-call). Every agent below is
 read by default, each from where it keeps its history (the variable in
 brackets moves it, as it moves the agent itself); one that is not on your
 machine is skipped.
@@ -267,7 +267,7 @@ On a terminal, `scan`, `live` and `update --status` may add one dim line
 about the feed, on stderr and never with `--json`. `RANWHAT_NO_HINTS=1` turns
 it off.
 
-### `ranwhat hook install`: ask before a flagged Claude Code call
+### `ranwhat hook install`: ask before a high-risk Claude Code call
 
 Every other command works after the fact, and the agent never knows.
 The hook is the one opt-in exception. `ranwhat hook install` adds a
