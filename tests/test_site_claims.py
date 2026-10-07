@@ -585,6 +585,36 @@ def _csp():
     return policy
 
 
+class CheckoutCanLeaveThePricingPage(unittest.TestCase):
+    """The pricing page's Plus form posts to the Worker's /api/checkout,
+    which answers 303 to Stripe Checkout or, with accounts on, to the
+    account's upgrade. Browsers hold the redirect after a form to the
+    page's form-action as well as the post, so an origin missing there
+    leaves the button doing nothing, while every Worker test, which sees
+    only the 303, still passes."""
+
+    def test_form_action_allows_every_place_the_checkout_sends_the_browser(self):
+        src = SITE.parent / "worker" / "src"
+        host = re.search(r'^export const ACCOUNT_HOST = "([^"]+)";',
+                         (src / "accounts.js").read_text(encoding="utf-8"), re.M).group(1)
+        stripe_checkout = re.search(r'^export const CHECKOUT_ORIGIN = "([^"]+)";',
+                                    (src / "billing.js").read_text(encoding="utf-8"), re.M).group(1)
+        stripe = (src / "stripe.js").read_text(encoding="utf-8")
+        body = stripe[stripe.index("export async function checkout("):]
+        body = body[:body.index("\n}\n")]
+        # The account's upgrade, and the Checkout Session's own address on
+        # Stripe. A new redirect there has to be added here and to _headers.
+        self.assertIn("const UPGRADE = `${ACCOUNT_ORIGIN}/upgrade`;", stripe)
+        self.assertEqual(re.findall(r"Response\.redirect\(([^,]+), 303\)", body),
+                         ["UPGRADE", "session.url"])
+        form_action = _csp()["form-action"]
+        for origin in ("https://" + host, stripe_checkout):
+            with self.subTest(origin=origin):
+                self.assertIn(origin, form_action)
+        # The form is on the pricing page, under the site-wide policy.
+        self.assertIn('action="/api/checkout"', read(SITE / "pricing.html"))
+
+
 class HeaderRulesAreNotRepeated(unittest.TestCase):
     """Pages joins a header applied twice to one path with a comma. A merge
     once left /contact.js with two Cache-Control rules, a year immutable and

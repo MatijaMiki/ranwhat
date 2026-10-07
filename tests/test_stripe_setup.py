@@ -166,6 +166,40 @@ class SetupScript(unittest.TestCase):
         self.assertIn(cfg["login_page"]["url"], out)
         self.assertIn("4242 4242 4242 4242", out)
 
+    def test_a_restricted_key_is_told_every_permission_the_worker_uses(self):
+        # The Worker opens, lists and expires Checkouts, makes customers and changes
+        # and reads their email (an organisation's own), opens portal sessions, and
+        # reads prices and subscriptions: a key without one of these gets a 403 from
+        # Stripe, and one with more than these can do more than the Worker needs.
+        said = " ".join(self.run_tool().split())
+        self.assertIn("Checkout Sessions, Customers and Customer portal: Write, "
+                      "and Prices and Subscriptions: Read", said)
+        self.assertIn("Write includes Read", said)
+
+    def test_the_permissions_named_are_exactly_those_of_the_calls_the_worker_makes(self):
+        # Each Stripe resource the Worker calls, from every stripe(env, ...) call in
+        # worker/src: Write where any call to it is not a GET, Read where all are.
+        resources = {"checkout": "Checkout Sessions", "customers": "Customers",
+                     "billing_portal": "Customer portal", "prices": "Prices", "subscriptions": "Subscriptions"}
+        levels = {}
+        for source in sorted((ROOT / "worker" / "src").glob("*.js")):
+            text = source.read_text(encoding="utf-8")
+            for args in re.findall(r"(?<![\w.])(?<!function )stripe\(env,\s*([^)]*)", text):
+                call = re.match(r'"(GET|POST|DELETE)",\s*[`"]/([a-z_]+)', args)
+                self.assertIsNotNone(call, "%s: a call to Stripe this test cannot read: %s" % (source.name, args))
+                method, resource = call.groups()
+                self.assertIn(resource, resources, "%s calls /%s, which no permission names" % (source.name, resource))
+                name = resources[resource]
+                levels[name] = "Write" if method != "GET" or levels.get(name) == "Write" else "Read"
+        said = " ".join(self.run_tool().split())
+        named = re.search(r"restricted key with (.+?): Write, and (.+?): Read\.", said)
+        self.assertIsNotNone(named, said)
+        printed = {}
+        for level, names in zip(("Write", "Read"), named.groups()):
+            for name in re.split(r", | and ", names):
+                printed[name] = level
+        self.assertEqual(printed, levels)
+
     def test_a_second_run_makes_nothing_new_and_shows_no_secret(self):
         self.run_tool()
         out = self.run_tool()

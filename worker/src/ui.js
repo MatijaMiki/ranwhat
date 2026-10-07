@@ -65,8 +65,9 @@ let styleHash = null;
    there; every other response is HTML or JSON sent with nosniff besides.
    `away`: origins a form here may be redirected on to, which browsers
    hold to form-action too. Only the account page's forms that link
-   Google or GitHub need it (oauth.js's PROVIDERS), and only for those
-   two. */
+   Google or GitHub need it (oauth.js's PROVIDERS), for those two, and
+   Manage billing and the upgrade's (billing.js), for Stripe's billing
+   portal and Checkout: each only on a page that shows that form. */
 async function csp(challenge = false, away = [], passkeys = false) {
   if (!styleHash) {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(CSS)));
@@ -153,9 +154,11 @@ export async function redirect(path, cookies = []) {
   return new Response(null, { status: 303, headers: await secured(headers) });
 }
 
-/* 303 to a provider's authorization endpoint, for Google or GitHub sign-in:
-   a URL oauth.js builds from its own constants, never one a request
-   named. */
+/* 303 to a provider's authorization endpoint, for Google or GitHub sign-in
+   (a URL oauth.js builds from its own constants), or to a Stripe Checkout
+   or billing-portal session (a URL Stripe gave back, which billing.js
+   checks is on checkout.stripe.com or billing.stripe.com): never one a
+   request named. */
 export async function away(url, cookies = []) {
   const headers = new Headers({ location: url });
   for (const c of cookies) headers.append("set-cookie", c);
@@ -181,3 +184,10 @@ export async function wrongMethod(methods) {
 export const refused = () => page("Not accepted", `<h1>That form was not accepted.</h1>
   <p>It may have been open too long, or come from another site. Go back,
      reload the page and try again.</p><p><a href="/">Your account</a></p>`, { status: 403 });
+
+/* A form drawn for another of the person's organisations than the one the
+   session looks at now (session.js's orgFormOk()): nothing was done. */
+export const elsewhere = () => page("Another organisation", `<h1>Nothing was done.</h1>
+  <p class="bad">That form was for another of your organisations than the one this page is looking at now,
+     so nothing was done. Reload your account page and try again.</p>
+  <p><a href="/">Your account</a></p>`, { status: 409 });

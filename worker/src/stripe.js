@@ -3,12 +3,16 @@
  *
  *   POST /api/checkout  The pricing page's form (plan=monthly or annual).
  *                       Makes a Checkout Session for the price with that
- *                       plan's lookup key and sends the browser to Stripe.
+ *                       plan's lookup key and sends the browser to Stripe;
+ *                       while accounts are on and ready, to the account's
+ *                       upgrade instead (checkout()).
  *   GET  /api/welcome   Where Stripe sends the browser after paying. Shows
  *                       the token, the same one the email carries.
  *   POST /api/stripe    Stripe's webhook. After a checkout: the token, by
  *                       email. On any change to a subscription: its status,
- *                       which auth.js checks on every `ranwhat update`.
+ *                       which auth.js checks on every `ranwhat update`
+ *                       (and, while accounts are on, its terms, which the
+ *                       account page's billing panel shows: keep()).
  *   GET  /api/billing   The customer portal's login page, where a subscriber
  *                       changes plan or card, gets invoices, or cancels.
  *
@@ -21,12 +25,38 @@
  * Everything this sells carries metadata product=ranwhat-plus, and anything
  * without it (another site's sale on the same Stripe account) is ignored.
  *
+ * Plus bought from an account (account.ranwhat.com/upgrade, billing.js) is
+ * a Checkout bound to the organisation: client_reference_id and metadata
+ * org on the session, and metadata org on the subscription it makes. The
+ * webhook links that subscription to the organisation in org_subscriptions
+ * (sync()), once and for good, and the buyer is told to run ranwhat login
+ * instead of being sent a token: an organisation's machines each get
+ * their own (device.js), so no shared one is made for it, here or on the
+ * welcome page.
+ *
+ * Such a Checkout is always on the organisation's own Stripe customer,
+ * made here before its first one (orgCustomer()) with the owner's address,
+ * never one Stripe makes from whatever address the payer types: Stripe's
+ * billing-page login (/api/billing) mails a way in to the customer's
+ * address, so that address has to be one the organisation answers for,
+ * and billing.js moves it to the owner's when whoever has it stops being
+ * an owner or an admin.
+ *
+ * While accounts are on, an account's upgrade is the only way to buy Plus:
+ * the pricing page's checkout makes no Checkout of its own and sends the
+ * browser there (checkout()). The welcome page, the webhook and the billing
+ * login go on serving what the pricing page sold before, a Checkout
+ * opened just before accounts were switched on and paid just after among
+ * it, exactly as they did; a subscription bought that way is attached to
+ * an organisation only by hand, with scripts/org_admin.py link.
+ *
  * scripts/stripe_setup.py makes the product, its two prices, the webhook
  * endpoint and the portal. Secrets: STRIPE_SECRET_KEY and
  * STRIPE_WEBHOOK_SECRET, with the list's RESEND_API_KEY and LIST_SECRET.
  */
 import { LIVE, schema, sha256 } from "./auth.js";
 import { CODE, REPLY_TO, SENDER, escape, mail, page, resend, same, sign, switchedOn } from "./list.js";
+import { ACCOUNT_HOST, ACCOUNT_ORIGIN, accountsOn, ready, schema as accountsSchema } from "./accounts.js";
 
 const ORIGIN = "https://ranwhat.com";
 const API = "https://api.stripe.com/v1";
@@ -36,8 +66,15 @@ export const PLANS = { monthly: "ranwhat_plus_monthly", annual: "ranwhat_plus_an
 const TOLERANCE = 300;            // seconds a webhook signature stays good
 const SHOW_FOR = 24 * 3600;       // the welcome page shows the token this long after checkout
 const PAID = new Set(["paid", "no_payment_required"]);
-const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,250}$/;
-const SUBSCRIPTION = /^sub_[A-Za-z0-9]{6,250}$/;
+/* A Checkout Session's id, as Stripe makes them. */
+const CHECKOUT_ID = /^cs_(test|live)_[A-Za-z0-9]{10,250}$/;
+export const SUBSCRIPTION = /^sub_[A-Za-z0-9]{6,250}$/;
+export const CUSTOMER = /^cus_[A-Za-z0-9]{6,250}$/;
+const ORG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/* The account page's choice (billing.js) and the price's lookup key it
+   buys: the pricing page's own form says annual for the second. */
+export const INTERVALS = Object.freeze({ monthly: PLANS.monthly, yearly: PLANS.annual });
 
 /* Shown under the pay button. Checkout's own terms checkbox would need the
    terms URL set in the Stripe dashboard first; this needs nothing. */
@@ -68,8 +105,9 @@ export function encode(params, prefix = "", out = new URLSearchParams()) {
 }
 
 /* One API call. Throws an Error whose code is Stripe's error code or type,
-   or the HTTP status, and whose status is the HTTP status (0: unreachable). */
-async function stripe(env, method, path, params) {
+   or the HTTP status, whose status is the HTTP status (0: unreachable),
+   and whose param is the parameter Stripe named, if it named one. */
+export async function stripe(env, method, path, params) {
   const form = params ? encode(params).toString() : "";
   let res;
   try {
@@ -88,7 +126,8 @@ async function stripe(env, method, path, params) {
   if (!res.ok) {
     const e = data.error || {};
     throw Object.assign(new Error(`Stripe ${res.status}`),
-      { code: String(e.code || e.type || res.status), status: res.status });
+      { code: String(e.code || e.type || res.status), status: res.status,
+        param: typeof e.param === "string" ? e.param : null });
   }
   return data;
 }
@@ -124,10 +163,20 @@ function seller(env) {
 /* The subscription as Stripe has it now, with its status kept for auth.js
    and returned as kept. Fetched rather than read from the event: Stripe
    does not promise to deliver events in order, and a late one must not
-   bring back an old status. null when it is not something this sells. */
+   bring back an old status. null when it is not something this sells.
+
+   org: the organisation its metadata names, for one bought from an
+   account, which it is linked to here (linkOrg()); null otherwise. */
 async function sync(env, id) {
   if (typeof id !== "string" || !SUBSCRIPTION.test(id)) return null;
-  const sub = await stripe(env, "GET", `/subscriptions/${id}`);
+  return keep(env, await stripe(env, "GET", `/subscriptions/${id}`));
+}
+
+/* sync() for a subscription just fetched from Stripe: its status kept,
+   and returned as kept, with its customer. While accounts are on, its
+   terms too (termsOf()), for the billing panel to read without asking
+   Stripe; dark, nothing but what was always kept. */
+async function keep(env, sub) {
   if (!sub.metadata || sub.metadata.product !== PRODUCT) return null;
   const db = env.LIST;
   await schema(db);
@@ -140,12 +189,55 @@ async function sync(env, id) {
        status = CASE WHEN subscriptions.status IN ('canceled', 'incomplete_expired')
                      THEN subscriptions.status ELSE excluded.status END`)
     .bind(sub.id, customer, sub.status, now()).run();
+  if (accountsOn(env)) {
+    await accountsSchema(db);
+    const terms = termsOf(sub);
+    await db.prepare(
+      `INSERT INTO subscription_terms (subscription, interval, renews_at, ends_at, fetched_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(subscription) DO UPDATE SET interval = excluded.interval, renews_at = excluded.renews_at,
+         ends_at = excluded.ends_at, fetched_at = excluded.fetched_at`)
+      .bind(sub.id, terms.interval, terms.renews_at, terms.ends_at, now()).run();
+  }
+  const org = orgIn(sub.metadata);
+  if (org) await linkOrg(env, sub.id, org);
   const kept = await db.prepare("SELECT status FROM subscriptions WHERE id = ?").bind(sub.id).first();
-  return { id: sub.id, status: kept.status };
+  return { id: sub.id, status: kept.status, org, customer };
+}
+
+/* The organisation a session's or a subscription's metadata names, when
+   it names one the way orgCheckout() writes it. */
+const orgIn = (metadata) =>
+  metadata && typeof metadata.org === "string" && ORG.test(metadata.org) ? metadata.org : null;
+
+/* Links a subscription bought from an account to the organisation its
+   own metadata names, as Stripe holds it: nobody but this Worker, with
+   its key, can set that. INSERT OR IGNORE, and the subscription is the
+   key, so whichever event comes first links it (subscription.created can
+   arrive before checkout.session.completed), every later one and every
+   retry leave it as it is, and a subscription linked once is never moved
+   to another organisation. An organisation that is no longer there gets
+   nothing. The link is logged once. The organisation's Stripe customer is
+   never taken from a subscription: it is the one orgCustomer() made. */
+async function linkOrg(env, sub, org) {
+  const db = env.LIST;
+  await accountsSchema(db);
+  const t = now();
+  const ours = "EXISTS (SELECT 1 FROM org_subscriptions WHERE subscription = ? AND org_id = ?)";
+  await db.batch([
+    db.prepare(`INSERT OR IGNORE INTO org_subscriptions (subscription, org_id, how, linked_by, linked_at)
+                SELECT ?, id, 'checkout', NULL, ? FROM orgs WHERE id = ?`).bind(sub, t, org),
+    db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
+                SELECT ?, NULL, 'plus_linked', ?, ? WHERE ${ours} AND NOT EXISTS (
+                  SELECT 1 FROM auth_events WHERE org_id = ? AND event = 'plus_linked' AND subject = ?)`)
+      .bind(org, sub, t, sub, org, org, sub),
+  ]);
 }
 
 /* The subscription's token: the same one on every call, switched on (its
-   hash stored and tied to the subscription) by the first. */
+   hash stored and tied to the subscription) by the first. A token revoked
+   since (on the account page, once scripts/org_admin.py has linked its
+   subscription to an organisation) stays revoked: both rows are INSERT OR
+   IGNORE. */
 async function issue(env, sub) {
   const db = env.LIST;
   const row = await db.prepare("SELECT gen FROM subscriptions WHERE id = ?").bind(sub.id).first();
@@ -162,7 +254,22 @@ async function issue(env, sub) {
 
 /* ---------- checkout ---------- */
 
+/* The account's upgrade, where Plus is bought while accounts are on. */
+const UPGRADE = `${ACCOUNT_ORIGIN}/upgrade`;
+
 export async function checkout(request, env) {
+  /* With accounts on, Plus belongs to an organisation and is bought from
+     its account (billing.js), so this sends every browser there, before
+     reading the form, asking Stripe or writing anything, and to the same
+     address whatever the request says. Switched on but not ready
+     (accounts.js's ready()), the account host answers every page with its
+     503, so until it is, Plus is sold here as it is dark. Nobody had
+     bought Plus here when that was decided; anything bought here before
+     the switch, or while it was not ready, is attached to an organisation
+     by hand, with scripts/org_admin.py link. The pricing page's
+     form-action (site/_headers) allows the account origin, as browsers
+     hold this redirect to it too. */
+  if (accountsOn(env) && ready(env)) return Response.redirect(UPGRADE, 303);
   if (!sellable(env)) return closed();
   let plan = null;
   try {
@@ -195,18 +302,120 @@ export async function checkout(request, env) {
   return Response.redirect(session.url, 303);
 }
 
+/* A Checkout Session bound to an organisation, for its owner or an admin
+   on the account page (billing.js, which checks who asks, the plan and
+   the fresh code first). The same product, prices and tax handling as the
+   pricing page's, and more: the organisation, as client_reference_id and
+   in the metadata of both the session and the subscription it makes; the
+   organisation's own Stripe customer (orgCustomer()), always, so that the
+   payer cannot make the organisation's billing theirs by typing their own
+   address; and an expiry of ORG_CHECKOUT_FOR rather than Stripe's day.
+   The organisation's Checkouts still open are expired first (closeOpen()),
+   so that two cannot both be paid for. Stripe sends the browser back to
+   the account either way. Returns the session; throws as stripe() does,
+   and with param "customer" when Stripe turns the customer down (one
+   deleted since), for billing.js to make the organisation a new one. */
+export const ORG_CHECKOUT_FOR = 31 * 60;  // Stripe's least is 30 minutes; one more for the clocks
+
+export async function orgCheckout(env, { org, interval, customer }) {
+  if (!ORG.test(String(org)) || !Object.hasOwn(INTERVALS, interval) || !CUSTOMER.test(String(customer))) {
+    throw Object.assign(new Error("bad checkout"), { code: "bad_request", status: 400 });
+  }
+  const key = INTERVALS[interval];
+  const { data = [] } = await stripe(env, "GET", "/prices", { lookup_keys: [key], active: true });
+  if (!data[0]) throw Object.assign(new Error("no price"), { code: `no active price ${key}`, status: 0 });
+  await closeOpen(env, { org, customer });
+  const metadata = { product: PRODUCT, org };
+  const params = {
+    mode: "subscription",
+    line_items: [{ price: data[0].id, quantity: 1 }],
+    success_url: `${ACCOUNT_ORIGIN}/?upgraded=1`,
+    cancel_url: `${ACCOUNT_ORIGIN}/upgrade`,
+    client_reference_id: org,
+    metadata,
+    subscription_data: { metadata },
+    ...seller(env),
+    /* With our own tax settings, Checkout asks for the address and a tax
+       ID, and with a customer it may only keep them on that customer. */
+    customer,
+    ...(env.STRIPE_TAX === "managed" ? {} : { customer_update: { address: "auto", name: "auto" } }),
+    expires_at: now() + ORG_CHECKOUT_FOR,
+  };
+  try {
+    return await stripe(env, "POST", "/checkout/sessions", params);
+  } catch (err) {
+    /* Managed Payments turns down parameters its guide does not list; an
+       expiry is not worth not selling for. */
+    if (err.status !== 400 || err.param !== "expires_at") throw err;
+    console.log(`stripe org checkout: ${err.code}, without expires_at`);
+    return stripe(env, "POST", "/checkout/sessions", { ...params, expires_at: undefined });
+  }
+}
+
+/* Expires the Checkouts still open on the organisation's customer that
+   were made for it, so that only the newest can be paid. Best effort:
+   one that cannot be listed or expired just now runs out by itself in
+   ORG_CHECKOUT_FOR, and the webhook flags an organisation that pays
+   twice (orgCompleted()). */
+async function closeOpen(env, { org, customer }) {
+  let open = [];
+  try {
+    ({ data: open = [] } = await stripe(env, "GET", "/checkout/sessions", { customer, status: "open", limit: 20 }));
+  } catch (err) {
+    console.log(`stripe org checkout list: ${err.code || "error"}`);
+    return;
+  }
+  for (const session of open) {
+    if (!session || !CHECKOUT_ID.test(String(session.id)) || !session.metadata ||
+        session.metadata.product !== PRODUCT || session.metadata.org !== org) continue;
+    try {
+      await stripe(env, "POST", `/checkout/sessions/${session.id}/expire`);
+    } catch (err) {
+      console.log(`stripe org checkout expire: ${err.code || "error"}`);
+    }
+  }
+}
+
+/* A Stripe customer of the organisation's own, for its Checkouts and its
+   billing page: `email` is its owner's address, verified here, and Stripe
+   keeps it on the customer and shows it, unchangeable, at Checkout.
+   Returns its id; throws as stripe() does. */
+export async function orgCustomer(env, { org, email }) {
+  if (!ORG.test(String(org)) || typeof email !== "string" || !email) {
+    throw Object.assign(new Error("bad customer"), { code: "bad_request", status: 400 });
+  }
+  const made = await stripe(env, "POST", "/customers", { email, metadata: { product: PRODUCT, org } });
+  if (!made || !CUSTOMER.test(String(made.id))) {
+    throw Object.assign(new Error("no customer"), { code: "no_customer", status: 0 });
+  }
+  return made.id;
+}
+
+/* Stripe's email for the customer, changed to `email` (billing.js, when
+   whoever had it is no longer an owner or an admin). Throws as stripe()
+   does. */
+export async function setCustomerEmail(env, customer, email) {
+  if (!CUSTOMER.test(String(customer)) || typeof email !== "string" || !email) {
+    throw Object.assign(new Error("bad customer"), { code: "bad_request", status: 400 });
+  }
+  await stripe(env, "POST", `/customers/${customer}`, { email });
+}
+
 /* ---------- after paying ---------- */
 
 export async function welcome(request, env) {
   if (!sellable(env)) return closed();
   const id = new URL(request.url).searchParams.get("session_id") || "";
-  if (!SESSION.test(id)) return unknown();
+  if (!CHECKOUT_ID.test(id)) return unknown();
   let session, sub, token;
   try {
     session = await stripe(env, "GET", `/checkout/sessions/${id}`);
     if (!session.metadata || session.metadata.product !== PRODUCT || session.mode !== "subscription") {
       return unknown();
     }
+    /* Bought from an account: Stripe sends the browser back there, and no
+       shared token is made for an organisation. */
+    if (session.metadata.org !== undefined) return forOrg();
     if (session.status !== "complete" || !PAID.has(session.payment_status)) {
       return page("Payment pending", `<h1>Your payment is still going through.</h1>
         <p>Some payment methods take a few days to clear. Your feed token comes
@@ -254,6 +463,11 @@ export async function welcome(request, env) {
 const closed = () => page("Not open yet", `<h1>Checkout is not open yet.</h1>
   <p>If you want Plus now, <a href="/contact?about=plus">write to us</a>.</p>`, 503);
 
+const forOrg = () => page("Plus for your organisation", `<h1>Plus is for your organisation.</h1>
+  <p>This checkout was made from an account, so there is no shared token to show: each
+     machine links itself with <code>uvx ranwhat login</code>. Your
+     <a href="${ACCOUNT_ORIGIN}/">account page</a> shows Plus once Stripe confirms the payment.</p>`);
+
 const unknown = () => page("Not found", `<h1>That checkout was not found.</h1>
   <p>If you paid, your token comes by email. If it does not arrive,
      <a href="/contact?about=plus">write to us</a>.</p>`, 404);
@@ -299,7 +513,7 @@ export async function webhook(request, env) {
          held a leaked signing secret could sign an event, but could not
          make Stripe send a token to an address of their own. Another
          site's sessions cost no call. */
-      if (object.metadata && object.metadata.product === PRODUCT && SESSION.test(String(object.id))) {
+      if (object.metadata && object.metadata.product === PRODUCT && CHECKOUT_ID.test(String(object.id))) {
         await completed(env, await stripe(env, "GET", `/checkout/sessions/${object.id}`));
       }
     } else if (type.startsWith("customer.subscription.")) {
@@ -323,6 +537,7 @@ async function completed(env, session) {
   /* Paid by something that takes days (a bank debit): the
      async_payment_succeeded event comes back here when it clears. */
   if (!PAID.has(session.payment_status)) return;
+  if (session.metadata.org !== undefined) return orgCompleted(env, session);
   const sub = await sync(env, session.subscription);
   if (!sub || !LIVE.has(sub.status)) return;
   const token = await issue(env, sub);
@@ -340,6 +555,96 @@ async function completed(env, session) {
     await db.prepare("UPDATE subscriptions SET mailed_at = NULL WHERE id = ?").bind(sub.id).run();
     throw err;
   }
+}
+
+/* A finished checkout made from an account. sync() links the subscription
+   to the organisation its own metadata names; this then tells the buyer
+   Plus is on for it, once, as completed() sends a token once. Only when
+   the session and the subscription agree on the organisation, and the
+   subscription is linked to it: a mismatch (metadata edited by hand in
+   Stripe) is logged and mails nothing, and no token is made. An
+   organisation that has another live subscription linked already (two
+   Checkouts paid, or one paid besides an attached purchase) is logged,
+   and the email says so and how to cancel one; the billing panel says it
+   too (billing.js). */
+async function orgCompleted(env, session) {
+  const org = orgIn(session.metadata);
+  const sub = await sync(env, session.subscription);
+  if (!sub) return;
+  if (!org || session.client_reference_id !== org || sub.org !== org) {
+    console.log("stripe checkout: org mismatch");
+    return;
+  }
+  if (!LIVE.has(sub.status)) return;
+  const db = env.LIST;
+  const linked = await db.prepare(
+    `SELECT o.name FROM org_subscriptions l JOIN orgs o ON o.id = l.org_id
+     WHERE l.subscription = ? AND l.org_id = ?`).bind(sub.id, org).first();
+  if (!linked) {
+    console.log("stripe checkout: org not linked");
+    return;
+  }
+  const live = [...LIVE];
+  const others = await db.prepare(
+    `SELECT count(*) AS n FROM org_subscriptions l JOIN subscriptions s ON s.id = l.subscription
+     WHERE l.org_id = ? AND l.subscription != ? AND s.status IN (${live.map(() => "?").join(", ")})`)
+    .bind(org, sub.id, ...live).first();
+  const twice = Boolean(others && others.n > 0);
+  if (twice) console.log("stripe checkout: org has another live subscription");
+  const to = session.customer_details && session.customer_details.email;
+  if (!to) return;
+  const claimed = await db.prepare(
+    "UPDATE subscriptions SET mailed_at = ? WHERE id = ? AND mailed_at IS NULL").bind(now(), sub.id).run();
+  if (!claimed.meta.changes) return;
+  try {
+    await mailPlusOn(env, to, linked.name, { twice });
+  } catch (err) {
+    await db.prepare("UPDATE subscriptions SET mailed_at = NULL WHERE id = ?").bind(sub.id).run();
+    throw err;
+  }
+}
+
+/* Instead of a token: Plus is on for the organisation, and how its
+   machines link themselves. The address is Stripe's, used for this email
+   and kept nowhere here. twice: the organisation was paying for Plus
+   already, so it now pays twice until one is cancelled. */
+async function mailPlusOn(env, to, orgName, { twice = false } = {}) {
+  const name = String(orgName).replace(/[\r\n]+/g, " ");
+  const n = escape(name);
+  const two = twice ? `${name} now has two Plus subscriptions, and needs one. Cancel the one you do not ` +
+    `want with Manage billing on ${ACCOUNT_HOST}, and write to us (reply to this email) for a refund of it.` : "";
+  await resend(env, "POST", "/emails", {
+    from: SENDER,
+    to: [to],
+    reply_to: REPLY_TO,
+    subject: `ranwhat Plus is on for ${name}`,
+    text: [
+      `Thanks for subscribing. ranwhat Plus is on for ${name}.`,
+      "",
+      ...(two ? [two, ""] : []),
+      "Link each machine once, in a terminal:",
+      "",
+      "  uvx ranwhat login",
+      "",
+      `It prints a code to type at ${ORIGIN}/device, signed in to your account.`,
+      `CI tokens are made on your account page: ${ACCOUNT_ORIGIN}/`,
+      "",
+      `Change plan or card, get invoices, or cancel: Manage billing on ${ACCOUNT_HOST}.`,
+      "Questions: reply to this email.",
+      "",
+      "ranwhat.com",
+    ].join("\n"),
+    html: mail(`
+      <p>Thanks for subscribing. ranwhat Plus is on for <strong>${n}</strong>.</p>${two ? `
+      <p><strong>${escape(two)}</strong></p>` : ""}
+      <p>Link each machine once, in a terminal:</p>
+      <p><code style="${CODE}">uvx ranwhat login</code></p>
+      <p>It prints a code to type at <a href="${ORIGIN}/device" style="color:#b8482d">ranwhat.com/device</a>,
+         signed in to your account. CI tokens are made on your
+         <a href="${ACCOUNT_ORIGIN}/" style="color:#b8482d">account page</a>.</p>
+      <p style="margin-top:22px">Change plan or card, get invoices, or cancel: Manage billing on
+         ${ACCOUNT_HOST}. Questions: reply to this email.</p>`),
+  });
 }
 
 async function mailToken(env, to, token) {
@@ -405,4 +710,75 @@ export async function billing(request, env) {
     }
   }
   return Response.redirect(`${ORIGIN}/contact?about=plus`, 302);
+}
+
+/* ---------- billing, from an account ---------- */
+
+/* A billing-portal session for `customer`, the Stripe customer of a
+   subscription linked to the organisation (billing.js checks that, the
+   role and the fresh code first), on the portal scripts/stripe_setup.py
+   made where it is found, and back to the account page after. Returns the
+   session; throws as stripe() does. */
+export async function portalSession(env, customer) {
+  if (typeof customer !== "string" || !CUSTOMER.test(customer)) {
+    throw Object.assign(new Error("bad customer"), { code: "bad_customer", status: 400 });
+  }
+  const { data = [] } = await stripe(env, "GET", "/billing_portal/configurations", { active: true, limit: 100 });
+  const portal = data.find((c) => c.metadata && c.metadata.product === PRODUCT);
+  return stripe(env, "POST", "/billing_portal/sessions", {
+    customer,
+    return_url: `${ACCOUNT_ORIGIN}/`,
+    configuration: portal ? portal.id : undefined,
+  });
+}
+
+const at = (v) => (Number.isInteger(v) && v > 0 ? v : null);
+const itemOf = (sub) => (sub.items && Array.isArray(sub.items.data) ? sub.items.data[0] : null);
+
+/* Monthly or yearly, from the subscription's price; null when Stripe's
+   answer does not say. */
+function intervalOf(sub) {
+  const item = itemOf(sub);
+  const recurring = (item && item.price && item.price.recurring) || sub.plan || {};
+  return { month: "monthly", year: "yearly" }[recurring.interval] || null;
+}
+
+/* What the account page shows of a subscription, from the subscription
+   as Stripe gave it: monthly or yearly, and when it renews or ends. keep()
+   stores it in subscription_terms. The period's end is read where either
+   version of Stripe's API puts it, on the subscription or on its item. */
+function termsOf(sub) {
+  const item = itemOf(sub);
+  const periodEnd = at(sub.current_period_end) || at(item && item.current_period_end);
+  const ending = Boolean(sub.cancel_at_period_end) || at(sub.cancel_at) !== null;
+  return {
+    interval: intervalOf(sub),
+    renews_at: !ending && LIVE.has(sub.status) ? periodEnd : null,
+    ends_at: at(sub.ended_at) || at(sub.cancel_at) || (sub.cancel_at_period_end ? periodEnd : null),
+  };
+}
+
+/* For a subscription linked to an organisation whose terms no event has
+   brought yet (one linked by scripts/org_admin.py): fetched from Stripe
+   and kept, status and terms, as an event would. billing.js asks only
+   for an owner or an admin, and only so often an hour. Throws as stripe()
+   does. */
+export const refreshTerms = (env, id) => sync(env, id);
+
+const idOf = (v) => (typeof v === "string" ? v : v && typeof v.id === "string" ? v.id : "");
+
+/* The email Stripe holds for a customer, or null for one deleted, without
+   one, or not found (billing.js's billingEmailFollows()). Throws as
+   stripe() does, but for a 404. */
+export async function customerEmail(env, customer) {
+  const id = idOf(customer);
+  if (!CUSTOMER.test(id)) return null;
+  let c;
+  try {
+    c = await stripe(env, "GET", `/customers/${id}`);
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+  return c && !c.deleted && typeof c.email === "string" && c.email ? c.email : null;
 }

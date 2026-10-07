@@ -24,7 +24,12 @@
  * from its own hostname.
  *
  * /api/checkout, /api/welcome, /api/stripe and /api/billing: buying Plus
- * through Stripe, in stripe.js. Paying issues the token the feed accepts.
+ * through Stripe, in stripe.js. Paying issues the token the feed accepts;
+ * paying from an account (billing.js) links Plus to the organisation
+ * instead. Once ACCOUNTS_ON is set and the account host is ready,
+ * /api/checkout sends the browser to the account's upgrade, so that every
+ * new purchase is an organisation's; the other three go on serving what
+ * was bought before.
  *
  * account.ranwhat.com: accounts, in dashboard.js. Checked by hostname before
  * any route is looked up, so none of the routes below answers there and

@@ -29,6 +29,10 @@ export const FEATURES = Object.freeze({
     plan: "plus", status: "live", name: "CI tokens",
     says: "A token for a pipeline, made and revoked here.",
   }),
+  members: Object.freeze({
+    plan: "plus", status: "live", name: "Members",
+    says: "Invite your team by email: one price however many people.",
+  }),
   push: Object.freeze({
     plan: "plus", status: "coming", name: "Push",
     says: "Send a machine's findings to your account, as derived metadata only.",

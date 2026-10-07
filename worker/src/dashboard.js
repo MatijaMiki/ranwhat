@@ -4,8 +4,9 @@
  * once ACCOUNTS_ON is set.
  *
  *   GET  /              The account: who you are, your organisation, its
- *                       plan and what each plan has (features.js), how you
- *                       sign in, what happened lately, and signing out.
+ *                       plan and what each plan has (features.js), its
+ *                       billing (billing.js), how you sign in, what
+ *                       happened lately, and signing out.
  *                       Without a session it sends you to /signin.
  *   GET  /signin        The email form.
  *   POST /signin        Mails a code; the same answer for every address.
@@ -72,6 +73,31 @@
  *                       code.
  *   POST /tokens/ci     Makes a CI token, on Plus or Team, as an owner or
  *                       admin, with a fresh code, and shows it this once.
+ *   GET  /upgrade       Plus for a Free organisation, monthly or yearly
+ *                       (billing.js); the locked panels link here.
+ *   POST /upgrade       Off to a Stripe Checkout bound to the organisation,
+ *                       for an owner or admin, with a fresh code once the
+ *                       organisation has a Stripe customer.
+ *   POST /billing       Manage billing: off to Stripe's billing portal for
+ *                       the customer of a subscription linked to the
+ *                       organisation, for an owner or admin with a fresh
+ *                       code.
+ *   POST /members/invite   Invites someone by email to a Plus or Team
+ *                       organisation, as an owner or admin with a fresh
+ *                       code (members.js).
+ *   GET  /invite/<token>   The invite from the email: what it is for, and
+ *   GET  /invite        Join for whoever is signed in as the address it
+ *                       was sent to. Never joins on a GET.
+ *   POST /invite        Joins, as a member.
+ *   POST /invites/revoke   Takes a waiting invite back (owner or admin).
+ *   POST /members/role  Makes a member an admin or an admin a member (the
+ *                       owner, with a fresh code).
+ *   POST /members/remove   Removes someone, revoking the terminals they
+ *                       linked (owner or admin, with a fresh code).
+ *   POST /members/leave    Leaves the organisation (anyone but its owner).
+ *   POST /members/transfer Makes an admin the owner (the owner, with a
+ *                       fresh code), after a page that says what it does.
+ *   POST /org/switch    Looks at another of one's organisations.
  *
  * Nothing changes on a GET but a passkey challenge, made for whoever
  * asks and good once (and, the first time an account asks to add a
@@ -79,7 +105,9 @@
  * whose start (an oauth_flows row, its cookie and the count for the
  * network) and callback (which uses the flow up, and may make the
  * account, link it and sign in) are GETs because the provider sends the
- * browser back with one. Every POST passes the origin check here and its
+ * browser back with one. An invite's link only shows the invite, and may
+ * leave the cookie that brings the browser back to it after signing in:
+ * joining is a POST. Every POST passes the origin check here and its
  * form token in its handler (session.js says what both are); the passkey
  * forms are posted by /passkeys.js as the page's own form, token and all. Every form
  * that mails a code (/signin, /signup, /reset, /signin/again) also passes
@@ -98,8 +126,8 @@ import {
 import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, bump, checkCode,
-  clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, randomToken, readCookie,
-  requestCode, sameOrigin, setCookie, tellWayIn,
+  clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, orgFormOk, orgInput, orgToken,
+  randomToken, readCookie, requestCode, sameOrigin, setCookie, tellWayIn,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
@@ -113,14 +141,21 @@ import {
   registrationOptions, signIn, signinOptions,
 } from "./passkeys.js";
 import { approve, deny, deviceLookup, devicePage } from "./device.js";
+import { billingPanel, billingPost, upgradePage, upgradePost } from "./billing.js";
+import {
+  MEMBER_EVENTS, acceptPost, inviteAgain, invitePage, invitePost, leavePost, membersPanel, removePost,
+  revokeInvitePost, rolePost, switchPost, switcher, transferPost,
+} from "./members.js";
 import {
   EXPIRIES, IDLE_DAYS, MAX_CI, MAX_LABEL as MAX_MACHINE_LABEL, liveCi, machineIn, machineLabel, machinesOf,
   mayChange, mintCi, renameMachine, revokeMachine,
 } from "./machines.js";
-import { away, data, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
+import {
+  away, data, elsewhere, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod,
+} from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
-const PRICING = "https://ranwhat.com/pricing";
+const UPGRADE = "/upgrade";
 const TALK = "mailto:hello@ranwhat.com?subject=ranwhat%20Team";
 
 /* No session: to the sign-in page, dropping a cookie that no longer opens one. */
@@ -704,22 +739,28 @@ const EVENTS = {
   machine_revoked: "Machine revoked, with a fresh code",
   machine_idle_revoked: `Terminal revoked after ${IDLE_DAYS} days unused`,
   ci_token_created: "CI token made, with a fresh code",
+  upgrade_started: "Checkout for Plus opened",
+  billing_opened: "Billing opened, with a fresh code",
+  plus_linked: "Plus subscription linked to the organisation",
+  ...MEMBER_EVENTS,
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
 
 const when = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
-async function home(request, env) {
+/* ?upgraded=1: back from a paid Stripe Checkout (billing.js), which the
+   billing panel thanks for until the webhook has switched Plus on. */
+async function home(request, env, ctx, url) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
-  return dashboard(env, who);
+  return dashboard(env, who, { upgraded: url.searchParams.get("upgraded") === "1" });
 }
 
 /* One panel per paid plan, drawn from features.js, so what the page shows
    locked is what the server refuses. Locked while the organisation's plan
-   is below it. Plus links to the pricing page; Team has no price and no
-   checkout, only a way to talk to us. */
+   is below it. Plus links to the upgrade (billing.js); Team has no price
+   and no checkout, only a way to talk to us. */
 function panel(tier, onPlan) {
   const open = atLeast(onPlan, tier);
   const items = featuresOf(tier).map((f) => {
@@ -731,7 +772,7 @@ function panel(tier, onPlan) {
   }).join("");
   const after = open ? "" : tier === "plus"
     ? `<p>Everything ranwhat does on your machines stays free. Plus adds what needs a server.</p>
-       <p><a href="${PRICING}">Upgrade to Plus</a></p>`
+       <p><a href="${UPGRADE}">Upgrade to Plus</a></p>`
     : `<p>Team is arranged with each organisation. <a href="${TALK}">Talk to us</a></p>`;
   return `<section class="panel${open ? "" : " locked"}" id="${tier}">
     <h2>${PLAN_NAMES[tier]}${open ? "" : ` <span class="tag">locked</span>`}</h2>
@@ -859,13 +900,14 @@ async function passkeys(env, who, error, code) {
 
 async function dashboard(env, who, {
   error = "", passwordError = "", providerError = null, passkeyError = "", signoutError = "", machinesError = "",
-  status = 200,
+  upgraded = false, status = 200,
 } = {}) {
   const org = who.org;
   const events = await history(env, who.user);
   const onPlan = await plan(env, org.id);
+  const billing = await billingPanel(env, who, onPlan, { upgraded });
   const rename = canManage(org) ? `<h2>Organisation name</h2>
-    ${form("/org", await formToken(env, who.id, "org"), `
+    ${form("/org", await orgToken(env, who, "org"), `${orgInput(who)}
       <label for="name">Name</label>
       <input id="name" name="name" type="text" maxlength="80" required value="${escape(org.name)}">
       ${problem(error)}
@@ -880,9 +922,12 @@ async function dashboard(env, who, {
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd id="plan">${PLAN_NAMES[onPlan]}</dd>
     </dl>
+    ${await switcher(env, who)}
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
+    ${billing.html}
     ${await machinesPanel(env, who, onPlan, machinesError)}
+    ${await membersPanel(env, who, onPlan)}
     ${await methods(env, who, passwordError, providerError, passkeyError)}
     ${rename}
     <h2>Recent activity</h2>
@@ -893,7 +938,7 @@ async function dashboard(env, who, {
     ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<button type="submit">Sign out everywhere</button>`, "row")}
     ${await removeAll(env, who, signoutError)}
     <p><small><a href="https://ranwhat.com/">ranwhat.com</a> &middot; <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status, away: fresh(who) ? offered(env).map((p) => PROVIDERS[p].origin) : [] });
+  { status, away: [...(fresh(who) ? offered(env).map((p) => PROVIDERS[p].origin) : []), ...billing.away] });
 }
 
 /* Signing out everywhere and taking every other way in away with it: for
@@ -953,7 +998,11 @@ async function rename(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
   const f = await fields(request);
-  if (!await formOk(env, f, who.id, "org")) return refused();
+  /* Bound to the organisation it was drawn for, so a page left open in
+     another tab renames nothing else. */
+  const bound = await orgFormOk(env, f, who, "org");
+  if (bound === "refused") return refused();
+  if (bound === "elsewhere") return elsewhere();
   if (!canManage(who.org)) {
     return page("Not allowed", `<h1>Only an owner or an admin can rename it.</h1>
       <p><a href="/">Your account</a></p>`, { status: 403 });
@@ -1410,7 +1459,7 @@ async function machinesPanel(env, who, onPlan, error) {
       <h2>${escape(feature.name)} <span class="tag">locked, needs ${PLAN_NAMES[feature.plan]}</span></h2>
       <p>${escape(feature.says)} Each pipeline gets a token of its own, named, with an expiry if you
          like.</p>
-      <p><a href="${PRICING}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></p></div>`;
+      <p><a href="${UPGRADE}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></p></div>`;
   } else if (!canManage(org)) {
     ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
       <p>An owner or an admin of ${escape(org.name)} can make a CI token here.</p></div>`;
@@ -1427,7 +1476,7 @@ async function machinesPanel(env, who, onPlan, error) {
     const options = EXPIRY_CHOICES.map(([value, text]) => `<option value="${value}">${text}</option>`).join("");
     ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
       <p>${escape(feature.says)} The token is shown once, on the next page, and never again.</p>
-      ${form("/tokens/ci", await formToken(env, who.id, ciAction(nonce)), `
+      ${form("/tokens/ci", await orgToken(env, who, ciAction(nonce)), `${orgInput(who)}
         <input type="hidden" name="nonce" value="${nonce}">
         <label for="ci-label">Name</label>
         <input id="ci-label" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required placeholder="GitHub Actions">
@@ -1500,7 +1549,12 @@ async function ciTokenPost(request, env) {
   if (!who) return signedOut(request);
   const f = await fields(request);
   const nonce = f.get("nonce");
-  if (typeof nonce !== "string" || !NONCE.test(nonce) || !await formOk(env, f, who.id, ciAction(nonce))) return refused();
+  /* Bound to the nonce and to the organisation it was drawn for: a token
+     made from a page left open in another tab would be for an
+     organisation the page did not name. */
+  const bound = typeof nonce === "string" && NONCE.test(nonce) ? await orgFormOk(env, f, who, ciAction(nonce)) : "refused";
+  if (bound === "refused") return refused();
+  if (bound === "elsewhere") return elsewhere();
   if (!canManage(who.org)) {
     return dashboard(env, who, { status: 403, machinesError: "Only an owner or an admin can make a CI token." });
   }
@@ -1560,6 +1614,7 @@ const ROUTES = {
   "/signout": { POST: signout },
   "/signout-all": { POST: signoutAll },
   "/org": { POST: rename },
+  "/org/switch": { POST: switchPost },
   "/passkeys/add": { GET: addPasskeyPage },
   "/passkeys/new": { GET: passkeyOptions },
   "/passkeys": { POST: addPasskey },
@@ -1573,6 +1628,15 @@ const ROUTES = {
   "/machines/rename": { POST: renameMachinePost },
   "/machines/revoke": { POST: revokeMachinePost },
   "/tokens/ci": { POST: ciTokenPost },
+  "/upgrade": { GET: upgradePage, POST: upgradePost },
+  "/billing": { POST: billingPost },
+  "/members/invite": { POST: invitePost },
+  "/invite": { GET: inviteAgain, POST: acceptPost },
+  "/invites/revoke": { POST: revokeInvitePost },
+  "/members/role": { POST: rolePost },
+  "/members/remove": { POST: removePost },
+  "/members/leave": { POST: leavePost },
+  "/members/transfer": { POST: transferPost },
 };
 for (const provider of Object.keys(PROVIDERS)) {
   const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);
@@ -1595,7 +1659,10 @@ export async function account(request, env, ctx) {
   const via = /^\/auth\/([^/]+)/.exec(url.pathname);
   if (via && !configured(env, via[1]) &&
       !(Object.hasOwn(PROVIDERS, via[1]) && url.pathname === `/auth/${via[1]}/unlink`)) return notFound();
-  const route = Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
+  /* The link in an invite email carries its token in the path. */
+  const link = /^\/invite\/([^/]+)$/.exec(url.pathname);
+  const route = link ? { GET: (rq, e) => invitePage(rq, e, link[1]) }
+    : Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
   if (!route) return notFound();
   const handle = Object.hasOwn(route, request.method) ? route[request.method] : null;
   if (!handle) return wrongMethod(Object.keys(route));

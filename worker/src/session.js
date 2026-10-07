@@ -71,9 +71,13 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;   // 32 random bytes, base64url
    goes into an email's To. */
 const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
 
-/* Where a sign-in may send the browser on to: the account, or the page
-   that approves a terminal (device.js). */
-const NEXT = new Set(["/", "/device"]);
+/* Where a sign-in may send the browser on to: the account, the page that
+   approves a terminal (device.js), the one that upgrades to Plus
+   (billing.js), or the invite waiting in the browser's cookie (members.js,
+   which keeps the invite's token out of `next` and so out of the
+   database). Anything else, a query string included, goes to the
+   account. */
+const NEXT = new Set(["/", "/device", "/upgrade", "/invite"]);
 export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 /* ---------- secrets ---------- */
@@ -180,6 +184,23 @@ export async function formOk(env, form, binding, action) {
   const sent = form.get("form");
   if (!binding || typeof sent !== "string") return false;
   return same(sent, await formToken(env, binding, action));
+}
+
+/* A form that acts on the organisation it was drawn for: its token is for
+   `${action}:${org}`, and the organisation is in a hidden field, so a form
+   left open in one tab cannot act on another organisation switched to (or
+   joined) in a second. orgToken() and orgInput() draw one for the
+   organisation `who` is looking at; orgFormOk() answers "ok" when the form
+   is right and for that organisation, "elsewhere" when it is right but was
+   drawn for another, and "refused" otherwise. */
+export const orgToken = (env, who, action) => formToken(env, who.id, `${action}:${who.org.id}`);
+export const orgInput = (who) => `<input type="hidden" name="org" value="${escape(who.org.id)}">`;
+
+export async function orgFormOk(env, form, who, action) {
+  const orgId = form.get("org");
+  if (typeof orgId !== "string" || !orgId || orgId.length > 100 ||
+      !await formOk(env, form, who.id, `${action}:${orgId}`)) return "refused";
+  return orgId === who.org.id ? "ok" : "elsewhere";
 }
 
 /* ---------- limits ---------- */
@@ -341,7 +362,7 @@ export async function requestCode(request, env, ctx, {
   return { token };
 }
 
-const FROM = "ranwhat <account@ranwhat.com>";
+export const ACCOUNT_FROM = "ranwhat <account@ranwhat.com>";
 
 /* No link: the code is typed, never clicked. The text names the one place
    it goes, because a code someone reads out to a caller signs the caller
@@ -355,7 +376,7 @@ async function mailCode(env, email, code, purpose) {
     reset: "Typing it, with a new password, on that page replaces this account's password and signs it out everywhere else.",
   }[purpose] || "";
   await resend(env, "POST", "/emails", {
-    from: FROM,
+    from: ACCOUNT_FROM,
     to: [email],
     reply_to: REPLY_TO,
     subject: `Your ranwhat ${what}`,
@@ -420,7 +441,7 @@ async function mailWayIn(env, email, what) {
   const said = `${ADDED[what]} your ranwhat account (${email}), and can now sign in to it.`;
   const ifNot = `If that was not you, sign in at ${ACCOUNT_HOST} with an emailed code, and choose Sign out everywhere and remove every other way in. Then change or reset your password if you have one.`;
   await resend(env, "POST", "/emails", {
-    from: FROM,
+    from: ACCOUNT_FROM,
     to: [email],
     reply_to: REPLY_TO,
     subject: "A new way into your ranwhat account",
@@ -542,5 +563,5 @@ export async function current(request, env) {
 }
 
 /* For what needs a code typed in the last 15 minutes: approving a
-   terminal, a CI token, billing, claiming, members, deleting. */
+   terminal, a CI token, billing, members, deleting. */
 export const fresh = (who) => Boolean(who) && who.authed_at > now() - FRESH_FOR;

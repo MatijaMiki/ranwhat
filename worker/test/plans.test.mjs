@@ -322,7 +322,7 @@ test("a subscription linked to an organisation shows it, on that organisation's 
   grant(e, o, "team");
   const who = await identify(asking(tok), e);
   assert.deepEqual([who.kind, who.account, who.org, who.plan], ["subscription", sub, o, "team"]);
-  /* An emailed token listed as a legacy machine on claiming stays on the
+  /* An emailed token listed as a legacy machine on linking stays on the
      subscription's path: it works while the subscription does. */
   run(e, "INSERT INTO machines (id, hash, org_id, kind, label, created_at) VALUES (?, ?, ?, 'legacy', 'emailed', ?)",
       randomUUID(), hash(tok), o, now());
@@ -371,7 +371,7 @@ test("a Free organisation's dashboard shows Plus and Team locked, from the map, 
   }
   assert.deepEqual(plus.features.slice(0, 2), ["feed", "ci_tokens"], "the feed and CI tokens lead the Plus panel");
   assert.match(plus.html, /<li data-feature="ci_tokens"><strong>CI tokens<\/strong> <span class="tag">Needs Plus<\/span>/);
-  assert.match(plus.html, /<a href="https:\/\/ranwhat\.com\/pricing">Upgrade to Plus<\/a>/);
+  assert.match(plus.html, /<a href="\/upgrade">Upgrade to Plus<\/a>/);
   // Team: no price and nothing to buy, only a way to talk to us.
   assert.doesNotMatch(team.html, /<form|€|\$|£|\/\s*(month|year)|per (month|year|seat)|pricing|checkout/i);
   assert.match(team.html, /href="mailto:hello@ranwhat\.com/);
