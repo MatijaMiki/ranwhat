@@ -810,6 +810,30 @@ class FeedTextCannotDriveTheTerminal(_FeedText, FeedHome):
         self.assertIsNone(feed.load(), "nothing was cached")
 
 
+class UpdateCountsOnlyProvidersWithScopes(_FeedText, FeedHome):
+    """The feed, like the bundled catalogue, carries an empty 'generic'
+    entry. update and update --status counted it, and said thirteen
+    providers where the site and the scan say twelve."""
+
+    def test_an_empty_provider_is_not_counted(self):
+        cat = {"acme": {"acme:delete": _entry(), "acme:read": _entry()}, "generic": {}}
+        rc, out, err = self._run(["update"], body=json.dumps(_doc(cat)).encode())
+        self.assertEqual(rc, 0, err)
+        self.assertIn("1 providers, 2 scopes", out)
+        rc, out, err = self._run(["update", "--status"])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("1 providers, 2 scopes", out)
+
+    def test_the_served_feed_counts_what_the_site_says(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "worker", "feed", "catalogue.json")
+        with open(path, encoding="utf-8") as fh:
+            cat = json.load(fh)["catalogue"]
+        self.assertIn("generic", cat)
+        self.assertEqual(feed.providers(cat),
+                         sum(1 for scopes in catalog.CATALOG.values() if scopes))
+
+
 class FeedTextTheTerminalCannotEncodeIsNoFeed(_FeedText, FeedHome):
     """JSON can spell half of a UTF-16 surrogate pair on its own, "\\ud800",
     and json.loads turns it into a str no UTF-8 stream will write. It passed

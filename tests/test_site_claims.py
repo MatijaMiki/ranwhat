@@ -1317,6 +1317,52 @@ class AccountClaimsMatchTheWorker(unittest.TestCase):
         self.assertNotRegex(identities, r"token")
         self.assertIn("It stores no Google or GitHub token", self.privacy)
 
+    def test_the_limits_the_terms_state_are_the_ones_set(self):
+        ci = int(re.search(r"^export const MAX_CI = (\d+);", self.src["machines.js"], re.M).group(1))
+        invites = int(re.search(r"^export const INVITES_PER_ORG_DAY = (\d+);",
+                                self.src["members.js"], re.M).group(1))
+        self.assertIn("can hold up to %d CI tokens at a time" % ci, self.terms)
+        self.assertIn("can send up to %d invites a day" % invites, self.terms)
+
+    def test_turnstile_is_said_to_be_only_where_the_account_asks_for_it(self):
+        # Step-up codes are mailed without it, so "the pages that email a
+        # code" said more than the code does.
+        dashboard = self.src["dashboard.js"]
+        actions = set(re.findall(r'unchallenged\(request, env, f, "(\w+)"\)', dashboard))
+        self.assertEqual(actions, {"signin", "again", "signup", "reset"})
+        self.assertNotRegex(dashboard[dashboard.index("async function stepup"):][:600],
+                            r"unchallenged")
+        self.assertNotIn("pages that email a code", self.privacy)
+        # Once among the third parties, once among the account's pages.
+        self.assertEqual(self.privacy.count(
+            "pages for signing in, making an account and resetting a password"), 2)
+        self.assertIn("Cloudflare Turnstile, on the pages for signing in, making an account "
+                      "and resetting a password", self.privacy)
+
+    def test_stripe_and_resend_are_said_to_follow_role_changes_and_invites(self):
+        self.assertIn("billingEmailDue", self.src["members.js"])
+        self.assertIn("when an owner or an admin of one with a Stripe customer record "
+                      "leaves, is removed, is made a member or hands on ownership", self.privacy)
+        self.assertIn("invites you to an organisation", self.privacy)
+
+    def test_both_forms_of_a_normalised_password_are_said_to_be_checked(self):
+        self.assertIn("raw !== p && await pwned(raw", self.src["password.js"])
+        self.assertIn("so both are checked, each by the first five characters of its own hash",
+                      self.privacy)
+
+    def test_a_provider_flow_is_said_to_go_when_the_sweep_deletes_it(self):
+        self.assertIn("DELETE FROM oauth_flows WHERE expires_at <= ? OR used_at IS NOT NULL",
+                      self.src["accounts.js"])
+        toml = read(SITE.parent / "worker" / "wrangler.toml")
+        self.assertIn('crons = ["7,22,37,52 * * * *"]', toml)
+        self.assertIn("That record works for 10 minutes, and is deleted within a quarter of "
+                      "an hour of being used or running out", self.privacy)
+
+    def test_the_plan_cache_is_said_to_hold_as_many_tokens_as_it_does(self):
+        from ranwhat import account
+        self.assertIn("for each of the last %s tokens it asked about"
+                      % WORDS[account.CACHE_ENTRIES], self.privacy)
+
     def test_the_terms_change_is_dated_and_the_notice_clause_stays(self):
         self.assertIn("Last changed 7 October 2026.", self.terms)
         self.assertIn("We will email subscribers at least 30 days before a change to "

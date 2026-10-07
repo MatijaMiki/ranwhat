@@ -503,6 +503,26 @@ class AFileThatCannotBeOpenedIsNamed(unittest.TestCase):
                          "ranwhat: cannot read profile?.json (Invalid argument)")
 
 
+class LiveNamesTheVersionThatIsRunning(unittest.TestCase):
+    """live and --pull-usage told every provider they asked that this was
+    ranwhat/0.1, whatever version it was."""
+
+    def test_the_user_agent_is_this_version(self):
+        import urllib.error
+        import ranwhat
+        from ranwhat import introspect
+        sent = []
+
+        def offline(req, *a, **kw):
+            sent.append(req.get_header("User-agent"))
+            raise urllib.error.URLError("offline")
+
+        with mock.patch("urllib.request.urlopen", offline):
+            with self.assertRaises(introspect.IntrospectionError):
+                introspect.github("ghp_" "FAKEFAKEFAKE1234")
+        self.assertEqual(sent, ["ranwhat/%s (read-only introspection)" % ranwhat.__version__])
+
+
 class NoEmDashes(unittest.TestCase):
     """The site's rule (tests/test_site_claims.py) holds for the terminal
     too. The rotation advice in `clean`'s review had sixteen. Every string

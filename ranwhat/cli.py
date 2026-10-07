@@ -565,7 +565,8 @@ def _update(args):
     cat = doc.get("catalogue", {})
     sys.stdout.write(
         "  Updated to feed %s\n  %d providers, %d scopes\n"
-        % (doc.get("version") or "?", len(cat), sum(len(v) for v in cat.values())))
+        % (doc.get("version") or "?", feed_mod.providers(cat),
+           sum(len(v) for v in cat.values())))
     return 0
 
 

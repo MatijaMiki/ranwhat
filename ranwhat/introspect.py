@@ -19,7 +19,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import __version__
+
 TIMEOUT = 15
+# The version that is running. A fixed string told every provider live and
+# --pull-usage ask that this was ranwhat/0.1, whatever version it was.
+USER_AGENT = "ranwhat/%s (read-only introspection)" % __version__
 
 
 class IntrospectionError(Exception):
@@ -46,7 +51,7 @@ def _request(url, method="GET", headers=None, data=None):
     if data is not None:
         body = urllib.parse.urlencode(data).encode()
     req = urllib.request.Request(url, data=body, method=method)
-    req.add_header("User-Agent", "ranwhat/0.1 (read-only introspection)")
+    req.add_header("User-Agent", USER_AGENT)
     for k, v in (headers or {}).items():
         # Stripping a token takes a \r off its ends, not a line break inside
         # it: a CRLF file with a second line, read with $(cat file). Refused

@@ -55,7 +55,7 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 
 ## Project
 
-- [Pricing](https://ranwhat.com/pricing): free on your own machine; Plus is €12 a month or €120 a year per organisation, bought from an account at account.ranwhat.com. Its catalogue feed, a token per machine, CI tokens, members and billing are live, with the rest of Plus being built; Team is annual, by contact, and being built.
+- [Pricing](https://ranwhat.com/pricing): free on your own machine; Plus is €12 a month or €120 a year per organisation, bought from an account at account.ranwhat.com. Its catalogue feed, CI tokens and members are live, with the rest of Plus being built; the account itself, and a token per machine from `ranwhat login`, are free. Team is annual, by contact, and being built.
 - [Terms](https://ranwhat.com/terms): the terms for Plus and the account: organisations, billing, cancelling, the 14-day refund, tokens.
 - [About](https://ranwhat.com/about): who builds it and why
 - [Updates](https://ranwhat.com/updates): every release, newest first, with an [RSS feed](https://ranwhat.com/rss.xml) and email signup

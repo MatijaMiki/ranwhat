@@ -453,6 +453,13 @@ def status():
         "active": True,
         "version": doc.get("version"),
         "fetched_at": doc.get("fetched_at"),
-        "providers": len(cat),
+        "providers": providers(cat),
         "scopes": sum(len(v) for v in cat.values()),
     }
+
+
+def providers(cat):
+    """How many providers a catalogue rates a scope for. The feed, like the
+    bundle, carries an empty 'generic' entry, which is no provider: counted,
+    it made update say thirteen where the site and the scan say twelve."""
+    return sum(1 for v in cat.values() if v)

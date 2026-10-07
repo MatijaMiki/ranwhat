@@ -90,11 +90,11 @@
       <div class="grid2">
         <div class="cell">
           <h3>Stays local</h3>
-          <p>Credentials, prompts, tool arguments, file contents, customer records. The CLI holds a provider token in memory for one call and never writes it down. The only token it stores is your own ranwhat token, at <span class="icode">~/.ranwhat/token</span> (mode 0600): the one <span class="icode">ranwhat login</span> saves for this machine, or a subscription token you save with <span class="icode">update --save-token</span>. Beside it, <span class="icode">~/.ranwhat/account.json</span> (mode 0600) notes the plan, organisation and email address the server last gave for that token, filed under the token&rsquo;s SHA-256 and never the token, so the CLI knows whether to mention Plus. <span class="icode">logout</span> deletes both.</p>
+          <p>Credentials, prompts, tool arguments, file contents, customer records. The CLI holds a provider token in memory for one call and never writes it down. The only token it saves for its own use is your own ranwhat token, at <span class="icode">~/.ranwhat/token</span> (mode 0600): the one <span class="icode">ranwhat login</span> saves for this machine, or one you save with <span class="icode">update --save-token</span>. Beside it, <span class="icode">~/.ranwhat/account.json</span> (mode 0600) notes the plan, organisation and email address the server last gave for each of the last four tokens it asked about, the saved one or one given with <span class="icode">RANWHAT_TOKEN</span> or <span class="icode">--token</span>, each filed under the token&rsquo;s SHA-256 and never the token, so the CLI knows whether to mention Plus. <span class="icode">logout</span> deletes both. <span class="icode">clean</span>, when you ask it to mask secrets, first copies each transcript it changes, secrets and all, to <span class="icode">~/.ranwhat/backups</span> (mode 0600), where the copies stay until you delete them.</p>
         </div>
         <div class="cell">
           <h3>Goes online, when you ask</h3>
-          <p><span class="icode">live</span> and <span class="icode">--pull-usage</span> call the provider that issued each token, and nothing else. <span class="icode">update</span> sends your token to <span class="icode">feed.ranwhat.com</span> and nothing else. A token made by <span class="icode">ranwhat login</span> belongs to one machine, and a CI token to one pipeline, so we know the day each last used its token, and nothing finer. <span class="icode">login</span>, <span class="icode">whoami</span> and <span class="icode">logout</span> talk to the same host: <span class="icode">login</span> to get a code and then this machine&rsquo;s token, the other two with that token. None of them sends a hostname, operating system, user name or machine identifier. A hosted record of what your agents did, when one exists, would receive derived metadata only: what tool, what authority, whether it was reversible, with payloads hashed in place. None exists yet, and the account described below holds no agent data at all.</p>
+          <p><span class="icode">live</span> and <span class="icode">--pull-usage</span> call the provider that issued each token, and nothing else. <span class="icode">update</span> sends your token to <span class="icode">feed.ranwhat.com</span> and nothing else. A token made by <span class="icode">ranwhat login</span> belongs to one machine, and a CI token to one pipeline, so we know the day each last used its token, and nothing finer. <span class="icode">login</span>, <span class="icode">whoami</span> and <span class="icode">logout</span> talk to the same host: <span class="icode">login</span> to get a code and then this machine&rsquo;s token, <span class="icode">whoami</span> with the token it is given with <span class="icode">--token</span>, or else the one in <span class="icode">RANWHAT_TOKEN</span>, or else the saved one, and <span class="icode">logout</span> with the saved one. None of them sends a hostname, operating system, user name or machine identifier. A hosted record of what your agents did, when one exists, would receive derived metadata only: what tool, what authority, whether it was reversible, with payloads hashed in place. None exists yet, and the account described below holds no agent data at all.</p>
         </div>
       </div>
       <div class="rows" style="margin-top:30px">
@@ -137,7 +137,7 @@
             ad pixel set their own, each only if you allow that one (next two
             rows). Your answer is kept in your browser&rsquo;s local storage so
             the question is asked once. The optional account at
-            account.ranwhat.com is a separate site, and sets cookies of its own
+            account.ranwhat.com is a separate host, and sets cookies of its own
             there, only when you use it and only the ones it needs to work
             (<a href="#account">Account</a>, below).</span></div>
         <div class="row" id="stats"><span class="k">Visit statistics</span>
@@ -232,8 +232,9 @@
             the account can show it: not your name, address or card. It reads
             the email address the checkout gives to send its confirmation
             through Resend, and does not keep it. A subscription bought on the
-            pricing page before accounts existed keeps its emailed feed token,
-            of which the database holds a hash.
+            pricing page before accounts existed, or while the account could
+            not be used, keeps its emailed feed token, of which the database
+            holds a hash, and we attach it to its organisation by hand.
             We keep those IDs for as long as the subscription exists, and
             afterwards as the record of a sale. The legal basis is the contract
             you enter by subscribing (GDPR art.&nbsp;6(1)(b)), and keeping
@@ -262,16 +263,23 @@
         <div class="row"><span class="k">Third parties</span>
           <span class="v">Cloudflare Turnstile, on the contact page, on the
             home and updates pages once you start typing an address into the
-            signup form, and on the account&rsquo;s pages that email a code:
-            the challenge that keeps the forms from being used by bots. It
-            loads from challenges.cloudflare.com and reads signals from your
-            browser to tell a person from a script, and our Worker checks its
-            answer with Cloudflare, sending your IP address with it. Resend,
-            only if you sign up for release emails, subscribe to Plus, or use
-            the account (Account, below). Stripe, only when an organisation
-            subscribes to Plus or opens its billing (Payments, above). Google
-            and GitHub, only if you choose to sign in with one of them, and
-            Have I Been Pwned, only when you choose a password for the account
+            signup form, and on the account&rsquo;s pages for signing in,
+            making an account and resetting a password: the challenge that
+            keeps the forms from being used by bots. It loads from
+            challenges.cloudflare.com and reads signals from your browser to
+            tell a person from a script, and our Worker checks its answer with
+            Cloudflare, sending your IP address with it. Resend, only if you
+            sign up for release emails, subscribe to Plus or use the account,
+            or if someone else types your address into one of the
+            account&rsquo;s forms that email a code, invites you to an
+            organisation or buys Plus for one whose billing email is yours
+            (Account, below). Stripe, only when an organisation subscribes to
+            Plus or opens its billing, and when an owner or an admin of one
+            with a Stripe customer record leaves, is removed, is made a member
+            or hands on ownership, so that its billing email stays the
+            owner&rsquo;s (Payments, above). Google and GitHub, only if you
+            choose to sign in with one of them, and Have I Been Pwned, only
+            when you choose a password for the account
             (Account, below). Google Analytics and X, each only if you allow
             it (above). The directories that list ranwhat, on the home page
             only (Directory badges, below).
@@ -340,13 +348,17 @@
 
       <div class="rows" style="margin-top:8px">
         <div class="row"><span class="k">Its pages</span>
-          <span class="v">account.ranwhat.com is a separate site from ranwhat.com.
+          <span class="v">account.ranwhat.com is a separate host from ranwhat.com.
             Its pages load none of ranwhat.com&rsquo;s scripts: not Google
             Analytics, not X&rsquo;s pixel and not Cloudflare Web Analytics.
             The only scripts that run there are
-            Cloudflare Turnstile, on the pages that email a code, and our own
+            Cloudflare Turnstile, on the pages for signing in, making an
+            account and resetting a password, and our own
             passkey script, on the two pages that add a passkey or sign in with
-            one. The account stores no IP address and no user agent. Cloudflare
+            one. Your browser sends it any cookie set for the whole of
+            ranwhat.com, such as Google Analytics&rsquo; cookies if you allowed
+            them there, and the account reads none of them, only its own (next
+            row). The account stores no IP address and no user agent. Cloudflare
             logs requests to it as it does for this site (Server logs,
             above).</span></div>
         <div class="row" id="account-cookies"><span class="k">Cookies</span>
@@ -374,7 +386,10 @@
             A password you choose is first checked against passwords known
             from data breaches, with Have I Been Pwned: our Worker sends it
             only the first five characters of the password&rsquo;s SHA-1
-            hash, never the password. All of this is kept until the account
+            hash, never the password. When normalising a password changes its
+            characters, as it does with full-width letters, both forms sign
+            in, so both are checked, each by the first five characters of its
+            own hash. All of this is kept until the account
             is deleted.</span></div>
         <div class="row"><span class="k">Google and GitHub</span>
           <span class="v">Optional ways to sign in. If you use one, your browser
@@ -385,10 +400,13 @@
             verified address), and keeps only those two, with when the link was
             made and last used. It stores no Google or
             GitHub token: GitHub&rsquo;s is used for those two reads and then
-            dropped. While you are away at the provider, we keep only hashes of
-            the random values that tie your return to your browser, for 10
-            minutes. If you unlink one, we keep its ID, without an address, so
-            that it cannot link itself to your account again, for as long as
+            dropped. While you are away at the provider, we keep hashes of the
+            random values that tie your return to your browser, which provider
+            you chose, the page to return you to and, when you are adding one
+            to your account, which account and session asked. That record works
+            for 10 minutes, and is deleted within a quarter of an hour of being
+            used or running out. If you unlink one, we keep its ID, without an
+            address, so that it cannot link itself to your account again, for as long as
             the account exists.</span></div>
         <div class="row"><span class="k">Passkeys</span>
           <span class="v">If you add one: its credential ID, its public key, its
