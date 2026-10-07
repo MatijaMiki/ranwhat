@@ -14,6 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
 import { d1 } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
@@ -21,6 +22,8 @@ const { formToken, FRESH_FOR } = await import("../src/session.js");
 const { TERMS_READS_PER_HOUR, UPGRADES_PER_HOUR } = await import("../src/billing.js");
 const { schema: feedSchema } = await import("../src/auth.js");
 
+/* The repository, for the tests that read its source. */
+const ROOT = new URL("../../", import.meta.url);
 const ORIGIN = "https://account.ranwhat.com";
 const SITE = "https://ranwhat.com";
 const FEED = "https://feed.ranwhat.com";
@@ -943,6 +946,40 @@ test("with accounts on, the pricing page's checkout goes to the upgrade, asking 
   assert.equal(checkouts(s).length, 1);
 });
 
+test("switched on but not ready, the account host cannot sell, so the pricing page's checkout goes on selling as it does dark", async () => {
+  /* Each of these is a switch-on that accounts.js's ready() turns down:
+     the upgrade would answer with the account host's 503. */
+  for (const [missing, opens] of [
+    [{ TURNSTILE_SECRET: undefined }, true],
+    [{ TURNSTILE_SECRET: "" }, true],
+    [{ ACCOUNT_SECRET: undefined }, true],
+    [{ ACCOUNT_SECRET: "too-short" }, true],
+    /* Without its mail, nothing is on sale here dark either. */
+    [{ RESEND_API_KEY: undefined }, false],
+  ]) {
+    const why = Object.entries(missing).map(([k, v]) => `${k}=${v}`).join();
+    const s = services();
+    const half = env(missing);
+    assert.equal((await worker.fetch(new Request(UPGRADE_URL), half, ctx)).status, 503, why);
+    const post = (e) => site(e, "/api/checkout", { method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" }, body: "plan=annual" });
+    const got = await post(half);
+    const want = await post({ ...half, ACCOUNTS_ON: "" });
+    assert.equal(got.status, opens ? 303 : 503, why);
+    assert.equal(got.status, want.status, why);
+    if (opens) {
+      assert.match(got.headers.get("location"), /^https:\/\/checkout\.stripe\.com\/c\/pay\/cs_test_/, why);
+      const [on, dark] = checkouts(s).map((c) => c.form);
+      assert.equal(checkouts(s).length, 2, why);
+      assert.deepEqual(on, dark, `${why}: the same Checkout the dark site opens`);
+      assert.equal(on["metadata[org]"], undefined, why);
+    } else {
+      assert.equal(await got.text(), await want.text(), why);
+      assert.equal(s.calls.length, 0, why);
+    }
+  }
+});
+
 /* A Checkout opened on the pricing page while accounts were dark, in the
    same database: the id Stripe sends the browser back with. */
 async function openedBefore(e) {
@@ -1083,6 +1120,25 @@ test("a sign-in asked to go on to /claim goes to the account instead", async () 
     const done = await signIn(b, s, `n${s.emails.length}@example.com`, asked);
     assert.equal(done.location, landed, asked);
   }
+});
+
+test("nothing writes the removed claim's ways of linking a subscription, and nothing is named after it", () => {
+  const SRC = new URL("worker/src/", ROOT);
+  const src = Object.fromEntries(readdirSync(SRC).filter((f) => f.endsWith(".js"))
+    .map((f) => [f, readFileSync(new URL(f, SRC), "utf8")]));
+  /* The webhook is the Worker's one writer, with 'checkout' and no linked_by, */
+  assert.deepEqual(Object.keys(src).filter((f) => /INTO org_subscriptions\b/.test(src[f])), ["stripe.js"]);
+  assert.match(src["stripe.js"], /INSERT OR IGNORE INTO org_subscriptions \(subscription, org_id, how, linked_by, linked_at\)\s+SELECT \?, id, 'checkout', NULL, \?/);
+  /* and scripts/org_admin.py's link the only other, with 'script'. */
+  assert.match(readFileSync(new URL("scripts/org_admin.py", ROOT), "utf8"),
+    /"INSERT INTO org_subscriptions \(subscription, org_id, how, linked_at\) "\s+"SELECT '%s', '%s', 'script', %d /);
+  /* The table keeps the claim's values as deployed, and says that nothing writes them. */
+  const accounts = src["accounts.js"];
+  const at = accounts.indexOf("CREATE TABLE IF NOT EXISTS org_subscriptions");
+  assert.match(accounts.slice(at), /^[^`]*how TEXT NOT NULL CHECK \(how IN \('checkout', 'session', 'email', 'script'\)\),\s+linked_by TEXT,/);
+  const comment = accounts.slice(accounts.lastIndexOf("/*", at), at);
+  for (const unused of ["'session'", "'email'", "linked_by"]) assert.ok(comment.includes(unused), `${unused} is not explained`);
+  assert.deepEqual(Object.keys(src).filter((f) => /claimed_by/.test(src[f])), [], "still named after the claim");
 });
 
 /* ---------- bound to the organisation ---------- */

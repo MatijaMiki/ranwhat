@@ -4,8 +4,8 @@
  *   POST /api/checkout  The pricing page's form (plan=monthly or annual).
  *                       Makes a Checkout Session for the price with that
  *                       plan's lookup key and sends the browser to Stripe;
- *                       while accounts are on, to the account's upgrade
- *                       instead (checkout()).
+ *                       while accounts are on and ready, to the account's
+ *                       upgrade instead (checkout()).
  *   GET  /api/welcome   Where Stripe sends the browser after paying. Shows
  *                       the token, the same one the email carries.
  *   POST /api/stripe    Stripe's webhook. After a checkout: the token, by
@@ -56,7 +56,7 @@
  */
 import { LIVE, schema, sha256 } from "./auth.js";
 import { CODE, REPLY_TO, SENDER, escape, mail, page, resend, same, sign, switchedOn } from "./list.js";
-import { ACCOUNT_HOST, ACCOUNT_ORIGIN, accountsOn, schema as accountsSchema } from "./accounts.js";
+import { ACCOUNT_HOST, ACCOUNT_ORIGIN, accountsOn, ready, schema as accountsSchema } from "./accounts.js";
 
 const ORIGIN = "https://ranwhat.com";
 const API = "https://api.stripe.com/v1";
@@ -261,10 +261,15 @@ export async function checkout(request, env) {
   /* With accounts on, Plus belongs to an organisation and is bought from
      its account (billing.js), so this sends every browser there, before
      reading the form, asking Stripe or writing anything, and to the same
-     address whatever the request says. Nobody had bought Plus here when
-     that was decided; anything bought here before the switch is attached
-     to an organisation by hand, with scripts/org_admin.py link. */
-  if (accountsOn(env)) return Response.redirect(UPGRADE, 303);
+     address whatever the request says. Switched on but not ready
+     (accounts.js's ready()), the account host answers every page with its
+     503, so until it is, Plus is sold here as it is dark. Nobody had
+     bought Plus here when that was decided; anything bought here before
+     the switch, or while it was not ready, is attached to an organisation
+     by hand, with scripts/org_admin.py link. The pricing page's
+     form-action (site/_headers) allows the account origin, as browsers
+     hold this redirect to it too. */
+  if (accountsOn(env) && ready(env)) return Response.redirect(UPGRADE, 303);
   if (!sellable(env)) return closed();
   let plan = null;
   try {

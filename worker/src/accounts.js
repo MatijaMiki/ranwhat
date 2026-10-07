@@ -227,7 +227,12 @@ const SCHEMA = [
 
   /* Which organisation a Stripe subscription (auth.js's subscriptions)
      pays for. One organisation can hold several; a subscription is linked
-     once and never moved. */
+     once and never moved. how is 'checkout' for one bought from the
+     account (stripe.js's webhook) or 'script' for one linked by
+     scripts/org_admin.py. 'session' and 'email' were the removed
+     self-service claim's, and linked_by held who claimed: nothing writes
+     those values, or anything but NULL to that column, and they stay only
+     because the table is as deployed. */
   `CREATE TABLE IF NOT EXISTS org_subscriptions (
      subscription TEXT PRIMARY KEY,
      org_id TEXT NOT NULL,

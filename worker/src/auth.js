@@ -83,7 +83,7 @@ const LEGACY = `SELECT t.expires_at, t.revoked_at, l.subscription, s.status FROM
 const LINKED = `SELECT t.expires_at, t.revoked_at, l.subscription, s.status,
        m.id AS machine, m.kind, m.org_id AS machine_org, m.user_id, m.label, m.created_at AS linked_at,
        m.last_used_day,
-       o.org_id AS claimed_by
+       o.org_id AS linked_org
      FROM tokens t
        LEFT JOIN token_subscriptions l ON l.hash = t.hash
        LEFT JOIN subscriptions s ON s.id = l.subscription
@@ -183,7 +183,7 @@ export async function identify(request, env) {
   }
   if (row.subscription) {
     if (!LIVE.has(row.status)) return refused;
-    const org = row.claimed_by || null;
+    const org = row.linked_org || null;
     return { ok: true, kind: "subscription", account: row.subscription, org,
              plan: org ? await plan(env, org) : "plus" };
   }
