@@ -7,9 +7,11 @@ is the same structure kept current, fetched from a server and cached on disk.
 Three properties this module has to hold to, because the whole tool is sold on
 them:
 
-  It never phones home. `update` sends a token and nothing else. No machine
-  identifier, no scope list, no usage counts. What is on this machine is not
-  the feed server's business.
+  It never phones home. `update` sends a token and nothing else. No
+  hostname, no scope list, no usage counts. A token from `ranwhat login`
+  belongs to one machine, so the server knows which of your linked machines
+  fetched, to the day and no finer. What is on this machine is not the feed
+  server's business.
 
   It is never required. Every command works with no feed, no token and no
   network. A missing or stale feed degrades to the bundled snapshot, silently.
@@ -278,7 +280,8 @@ def fetch(token, url=None, timeout=TIMEOUT):
             raise why from None
         if exc.code in (401, 403):
             raise FeedError(
-                "That token was not accepted. Check it at ranwhat.com/contact.")
+                "That token was not accepted. Run ranwhat login, or check it "
+                "at account.ranwhat.com.")
         if exc.code == 404:
             raise FeedError("The feed endpoint returned 404: %s" % url)
         raise FeedError("The feed server returned HTTP %s." % exc.code)

@@ -506,6 +506,26 @@ class SiteStructure(unittest.TestCase):
                              header, page.name)
             self.assertEqual(part(text, "footer"), footer, page.name)
 
+    def test_every_page_offers_sign_in_in_its_header_and_footer(self):
+        # A plain link to the account, which lives on a host of its own
+        # (worker/src/accounts.js's ACCOUNT_HOST): ranwhat.com sets no
+        # cookie for it and loads nothing from it.
+        host = re.search(r'^export const ACCOUNT_HOST = "([^"]+)";',
+                         read(SITE.parent / "worker" / "src" / "accounts.js"), re.M).group(1)
+        link = '<a href="https://%s/">Sign in</a>' % host
+        for page in all_pages():
+            if page.name == "example-report.html":
+                continue
+            text = read(page)
+            header = re.findall(r"<header>.*?</header>", text, re.S)
+            footer = re.findall(r"<footer>.*?</footer>", text, re.S)
+            self.assertEqual((len(header), len(footer)), (1, 1), page.name)
+            self.assertEqual(header[0].count(link), 1, page.name)
+            self.assertEqual(footer[0].count(link), 1, page.name)
+            # In the menu with the other pages, so a phone folds it in too.
+            nav = re.search(r'<nav id="site-nav">(.*?)</nav>', header[0], re.S)
+            self.assertIn(link, nav.group(1), page.name)
+
     def test_no_page_repeats_a_claim_the_tool_does_not_keep(self):
         # live, --pull-usage and update all go online; the suite outgrew 102.
         stale = ("transmits nothing", "never sends a byte", "102 tests")
@@ -1225,6 +1245,83 @@ class ReleaseNotesAndFeed(unittest.TestCase):
             text = read(page)
             if 'class="fbase"' in text:
                 self.assertIn(tag, text.split("</head>", 1)[0], page.name)
+
+
+class AccountClaimsMatchTheWorker(unittest.TestCase):
+    """What privacy.html and terms.html say about the account, against the
+    constants in worker/src that make it true: the cookies and how long
+    each lasts, how long sessions and the security history are kept, and
+    when an idle terminal's token is revoked."""
+
+    def setUp(self):
+        self.src = {f.name: read(f) for f in (SITE.parent / "worker" / "src").glob("*.js")}
+        self.privacy = plain(read(SITE / "privacy.html"))
+        self.terms = plain(read(SITE / "terms.html"))
+
+    def constant(self, name):
+        """A lifetime constant, in seconds."""
+        units = {"DAY": 86400, "HOUR": 3600}
+        for text in self.src.values():
+            m = re.search(r"^(?:export )?const %s = (.+?);" % name, text, re.M)
+            if m:
+                expr = m.group(1)
+                for unit, seconds in units.items():
+                    expr = re.sub(r"\b%s\b" % unit, str(seconds), expr)
+                self.assertRegex(expr, r"^[\d\s*]+$", name)
+                value = 1
+                for factor in expr.split("*"):
+                    value *= int(factor)
+                return value
+        self.fail("no constant %s in worker/src" % name)
+
+    def test_privacy_names_every_cookie_the_account_sets_and_no_other(self):
+        set_in_code = set()
+        for text in self.src.values():
+            set_in_code |= set(re.findall(r'_COOKIE = "(__Host-rw_[a-z]+)"', text))
+        self.assertEqual(set_in_code, {"__Host-rw_session", "__Host-rw_signin",
+                                       "__Host-rw_oauth", "__Host-rw_invite"})
+        named = set(re.findall(r"__Host-rw_[a-z]+", self.privacy))
+        self.assertEqual(named, set_in_code)
+        self.assertIn("Four, set only on account.ranwhat.com", self.privacy)
+
+    def test_the_lifetimes_said_are_the_ones_set(self):
+        said = {
+            "SESSION_MAX": "kept at most 30 days",
+            "SESSION_IDLE": "after 14 days unused",
+            "SIGNIN_FOR": "first shown and kept an hour",
+            "FLOW_FOR": "Google or GitHub, for 10 minutes",
+            "INVITE_COOKIE_FOR": "invite link, for an hour",
+            "CODE_FOR": "for the code\u2019s 10 minutes",
+            "KEEP_EVENTS": "kept for 13 months",
+        }
+        seconds = {"SESSION_MAX": 30 * 86400, "SESSION_IDLE": 14 * 86400, "SIGNIN_FOR": 3600,
+                   "FLOW_FOR": 600, "INVITE_COOKIE_FOR": 3600, "CODE_FOR": 600,
+                   "KEEP_EVENTS": 396 * 86400}
+        for name, phrase in said.items():
+            with self.subTest(constant=name):
+                self.assertEqual(self.constant(name), seconds[name])
+                self.assertIn(phrase, self.privacy)
+
+    def test_an_idle_terminal_is_revoked_when_both_pages_say(self):
+        days = int(re.search(r"^export const IDLE_DAYS = (\d+);",
+                             self.src["machines.js"], re.M).group(1))
+        self.assertIn("unused for %d days is revoked" % days, self.privacy)
+        self.assertIn("unused for %d days is revoked by itself" % days, self.terms)
+
+    def test_no_provider_token_is_kept_and_none_is_said_to_be(self):
+        # oauth.js stores the provider's id and the address it vouched for,
+        # and never a token: the identities table has no column for one.
+        schema = self.src["accounts.js"]
+        identities = schema[schema.index("CREATE TABLE IF NOT EXISTS identities"):]
+        identities = identities[:identities.index("`")]
+        self.assertNotRegex(identities, r"token")
+        self.assertIn("It stores no Google or GitHub token", self.privacy)
+
+    def test_the_terms_change_is_dated_and_the_notice_clause_stays(self):
+        self.assertIn("Last changed 7 October 2026.", self.terms)
+        self.assertIn("We will email subscribers at least 30 days before a change to "
+                      "these terms reaches them.", self.terms)
+        self.assertIn("There is no button that deletes the account itself yet", self.privacy)
 
 
 class EmailSignup(unittest.TestCase):

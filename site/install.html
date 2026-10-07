@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install ranwhat: run it with uvx, pipx or pip on Python 3.9+</title>
-<meta name="description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account. Start with ranwhat check, then read what it found.">
+<meta name="description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account needed. Start with ranwhat check and read what it found.">
 <link rel="canonical" href="https://ranwhat.com/install">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/install">
 <meta property="og:title" content="Install ranwhat: run it with uvx, pipx or pip on Python 3.9+">
-<meta property="og:description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account. Start with ranwhat check, then read what it found.">
+<meta property="og:description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account needed. Start with ranwhat check and read what it found.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="Install ranwhat: run it with uvx, pipx or pip on Python 3.9+">
-<meta name="twitter:description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account. Start with ranwhat check, then read what it found.">
+<meta name="twitter:description" content="Run ranwhat once with uvx, or install it with pipx or pip. Python 3.9 or newer, no dependencies, no account needed. Start with ranwhat check and read what it found.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -47,6 +47,7 @@
       <a href="/pricing">Pricing</a>
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
     </nav>
     <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
       <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
@@ -79,6 +80,7 @@
     <li><a class="cmdname" href="/commands#live">live</a></li>
     <li><a class="cmdname" href="/commands#demo">demo</a></li>
     <li><a class="cmdname" href="/commands#update">update</a></li>
+    <li><a class="cmdname" href="/commands#login">login</a></li>
     <li><a class="cmdname" href="/commands#hook">hook</a></li>
   </ul>
   <p class="docnav-h">Reference</p>
@@ -93,8 +95,8 @@
     <p class="eyebrow">Install</p>
     <h1>Install ranwhat</h1>
     <p class="lede">
-      Python 3.9 or newer. No dependencies, no account, and nothing built on
-      your machine. Current version 0.5.0.
+      Python 3.9 or newer. No dependencies, no account needed, and nothing
+      built on your machine. Current version 0.5.0.
     </p>
   </div>
 </section>
@@ -161,7 +163,7 @@ pip install ranwhat</pre></div>
         <div class="row"><span class="k">Claude Code</span>
           <span class="v">Reads <span class="icode">~/.claude/projects/*/*.jsonl</span> and the subagent transcripts beside them, the last 30 days by default (<span class="icode">--days N</span>). If <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead, and <span class="icode">--root PATH</span> points it at any other directory. <a href="/guides/claude-code-history">Where Claude Code keeps its history</a> covers what else is in that directory. The <a href="/watch">watch page</a> lists every agent ranwhat reads.</span></div>
         <div class="row"><span class="k">Writes</span>
-          <span class="v">None of your files, unless you ask. <span class="icode">clean</span> masks secrets only on <span class="icode">--apply</span> or <span class="icode">mask</span>, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">--html</span> writes the report you name, mode 600. <span class="icode">check</span> and <span class="icode">watch</span> keep an index of the secrets <span class="icode">clean</span> finds in <span class="icode">~/.ranwhat/known</span> (<span class="icode">$RANWHAT_HOME/known</span> when that is set), so they can hide every one in what they print: salted fingerprints, never a secret, readable by you alone. <span class="icode">update</span> caches the catalogue under <span class="icode">~/.ranwhat/feed</span>, and stores its token at <span class="icode">~/.ranwhat/token</span> (0600) only with <span class="icode">--save-token</span>. <span class="icode">hook install</span> and <span class="icode">hook uninstall</span> add or remove one PreToolUse entry in the Claude Code settings file you choose, and leave the rest of it as it was.</span></div>
+          <span class="v">None of your files, unless you ask. <span class="icode">clean</span> masks secrets only on <span class="icode">--apply</span> or <span class="icode">mask</span>, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">--html</span> writes the report you name, mode 600. <span class="icode">check</span> and <span class="icode">watch</span> keep an index of the secrets <span class="icode">clean</span> finds in <span class="icode">~/.ranwhat/known</span> (<span class="icode">$RANWHAT_HOME/known</span> when that is set), so they can hide every one in what they print: salted fingerprints, never a secret, readable by you alone. <span class="icode">update</span> caches the catalogue under <span class="icode">~/.ranwhat/feed</span>, and stores its token at <span class="icode">~/.ranwhat/token</span> (0600) only with <span class="icode">--save-token</span>. <span class="icode">login</span> saves this machine&rsquo;s token there, and <span class="icode">login</span>, <span class="icode">whoami</span> and <span class="icode">update</span> note the plan last heard for a token in <span class="icode">~/.ranwhat/account.json</span> (0600); <span class="icode">logout</span> deletes both. <span class="icode">hook install</span> and <span class="icode">hook uninstall</span> add or remove one PreToolUse entry in the Claude Code settings file you choose, and leave the rest of it as it was.</span></div>
       </div>
     </div>
   </div>
@@ -174,8 +176,8 @@ pip install ranwhat</pre></div>
       <h2>What goes online.</h2>
       <p class="lede">
         No account needed. live and --pull-usage ask only the provider that
-        issued each token, and update only fetches the catalogue. Everything
-        else reads locally and sends nothing.
+        issued each token, and update, login, whoami and logout talk only to
+        ranwhat.com. Everything else reads locally and sends nothing.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
         It runs on Linux, macOS and Windows, and CI runs every test on all three.
@@ -235,6 +237,7 @@ pip install ranwhat</pre></div>
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/updates">Updates</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
