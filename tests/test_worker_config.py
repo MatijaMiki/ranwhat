@@ -44,7 +44,22 @@ class BranchBuildsCanRun(unittest.TestCase):
         self.assertEqual(config["name"], "ranwhat-contact")
         self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL"])
         self.assertEqual([r["pattern"] for r in config["routes"]],
-                         ["ranwhat.com/api/*", "feed.ranwhat.com/v1/*"])
+                         ["ranwhat.com/api/*", "feed.ranwhat.com/v1/*", "account.ranwhat.com/*"])
+        # Routes, not custom domains, so a deploy needs no DNS permission.
+        for route in config["routes"]:
+            self.assertEqual(route["zone_name"], "ranwhat.com")
+            self.assertNotIn("custom_domain", route)
+
+    @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
+    def test_accounts_are_dark_and_passwords_fit_the_runtime(self):
+        with WRANGLER.open("rb") as fh:
+            config = tomllib.load(fh)
+        # ACCOUNTS_ON is added in the change that switches accounts on.
+        self.assertNotIn("ACCOUNTS_ON", config["vars"])
+        # Workers' WebCrypto refuses one PBKDF2 call above 100,000
+        # iterations, so password.js runs its 600,000 as a chain of calls
+        # within that. An override here could only lower the count.
+        self.assertNotIn("PBKDF2_ITERATIONS", config["vars"])
 
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
     def test_the_contact_binding_reaches_one_inbox(self):
