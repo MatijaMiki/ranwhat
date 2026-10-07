@@ -40,9 +40,9 @@
  * cookies' SameSite=Lax is a second layer, not the check.
  */
 import { sha256 } from "./auth.js";
-import { REPLY_TO, mail, resend, same } from "./list.js";
+import { REPLY_TO, escape, mail, resend, same } from "./list.js";
 import {
-  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, NOTICES_PER_USER_DAY, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
   authMailLeft, now, orgFor, spendAuthMail,
 } from "./accounts.js";
 
@@ -152,6 +152,20 @@ export function sameOrigin(request) {
   const site = request.headers.get("sec-fetch-site");
   const origin = request.headers.get("origin");
   if (site === null && origin === null) return false;
+  if (site !== null && site !== "same-origin") return false;
+  if (origin !== null && origin !== ACCOUNT_ORIGIN) return false;
+  return new URL(request.url).hostname === ACCOUNT_HOST;
+}
+
+/* For the two JSON answers /passkeys.js fetches with GET, which a browser
+   sends without Origin: refused when the browser says the request comes
+   from another site, or names another origin. A browser that sends
+   neither header is let through, as no other site could read the answer
+   (no CORS header) and what it holds is a challenge for the caller's own
+   session or cookie. */
+export function notCrossSite(request) {
+  const site = request.headers.get("sec-fetch-site");
+  const origin = request.headers.get("origin");
   if (site !== null && site !== "same-origin") return false;
   if (origin !== null && origin !== ACCOUNT_ORIGIN) return false;
   return new URL(request.url).hostname === ACCOUNT_HOST;
@@ -354,6 +368,50 @@ async function mailCode(env, email, code, purpose) {
          chat or phone.</p>
       <p style="color:#5a6672">If you did not ask for a code, ignore this email: nothing happens
          without it.</p>`),
+  });
+}
+
+/* ---------- telling an account what was added to it ---------- */
+
+const ADDED = {
+  google: "A Google account was linked to",
+  github: "A GitHub account was linked to",
+  passkey: "A passkey was added to",
+};
+
+/* Mails `user`'s address that a way in was just added to the account
+   (`what`: google, github or passkey), after the reply has gone, so that
+   one its owner did not add is noticed. Out of the signed-in reserve,
+   at most NOTICES_PER_USER_DAY a day for one account (accounts.js), and
+   skipped past either: the account's activity lists it all the same. It
+   names the kind of way in and nothing else, no provider id, label or
+   address but the account's own. All of it runs after the reply, so a
+   notice that fails never undoes what it tells of. */
+export function tellWayIn(env, ctx, { user, what }) {
+  ctx.waitUntil((async () => {
+    const row = await env.LIST.prepare("SELECT email FROM users WHERE id = ?").bind(user).first();
+    if (!row || !Object.hasOwn(ADDED, what)) return;
+    if (await bump(env, "notice-user", user, DAY) > NOTICES_PER_USER_DAY) return;
+    if (!await spendAuthMail(env, "notice")) return;
+    await mailWayIn(env, row.email, what);
+  })().catch((err) => {
+    console.log(`account notice mail: ${err.code || err.name || "error"}`);
+  }));
+}
+
+async function mailWayIn(env, email, what) {
+  const said = `${ADDED[what]} your ranwhat account (${email}), and can now sign in to it.`;
+  const ifNot = `If that was not you, sign in at ${ACCOUNT_HOST} with an emailed code, and choose Sign out everywhere and remove every other way in. Then change or reset your password if you have one.`;
+  await resend(env, "POST", "/emails", {
+    from: FROM,
+    to: [email],
+    reply_to: REPLY_TO,
+    subject: "A new way into your ranwhat account",
+    text: [said, "", "If that was you, there is nothing to do.", "", ifNot, "", "ranwhat.com"].join("\n"),
+    html: mail(`
+      <p>${escape(said)}</p>
+      <p>If that was you, there is nothing to do.</p>
+      <p>${escape(ifNot)}</p>`),
   });
 }
 

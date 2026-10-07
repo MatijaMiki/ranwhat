@@ -31,11 +31,44 @@
  *                       fresh code, then every other session ends.
  *   POST /password/remove  Takes it away, on the same terms.
  *   POST /signout       Ends this session.
- *   POST /signout-all   Ends every session of this account.
+ *   POST /signout-all   Ends every session of this account, and with a
+ *                       fresh code can take away every Google and GitHub
+ *                       link and passkey with them (forgetWaysIn()).
  *   POST /org           Renames the organisation (owner or admin).
+ *   GET  /auth/google   Signs in with Google, or with GitHub at
+ *   GET  /auth/github   /auth/github: off to the provider (oauth.js).
+ *   POST /auth/<provider>           Links it to the account signed in, with
+ *                       a fresh code.
+ *   GET  /auth/<provider>/callback  Back from the provider: signs in,
+ *                       makes the account, or links, by oauth.js's rule.
+ *   POST /auth/<provider>/unlink    Takes one away, with a fresh code, for
+ *                       good: it does not link itself back.
+ *                       A provider whose client id and secret are not set
+ *                       is not offered, and its /auth/ paths answer 404,
+ *                       but for unlink: an account linked to it before
+ *                       still lists it, and can still take it away.
+ *   GET  /passkeys/add  The page that adds a passkey, with a fresh code.
+ *   GET  /passkeys/new  Its options for navigator.credentials.create(), as
+ *                       JSON (passkeys.js).
+ *   POST /passkeys      Checks and keeps the passkey the browser made.
+ *   POST /passkeys/remove  Takes one away, with a fresh code.
+ *   GET  /signin/passkey   The page that signs in with a passkey.
+ *   GET  /passkeys/challenge  Its options for navigator.credentials.get(),
+ *                       as JSON, so many an hour from one network.
+ *   POST /signin/passkey   Checks the passkey's answer and signs in; one
+ *                       answer for every way it can be wrong.
+ *   GET  /passkeys.js   The script the two passkey pages load, the only
+ *                       script of ours on this host.
  *
- * Nothing changes on a GET. Every POST passes the origin check here and its
- * form token in its handler (session.js says what both are). Every form
+ * Nothing changes on a GET but a passkey challenge, made for whoever
+ * asks and good once (and, the first time an account asks to add a
+ * passkey, its WebAuthn user handle), and Google and GitHub sign-in,
+ * whose start (an oauth_flows row, its cookie and the count for the
+ * network) and callback (which uses the flow up, and may make the
+ * account, link it and sign in) are GETs because the provider sends the
+ * browser back with one. Every POST passes the origin check here and its
+ * form token in its handler (session.js says what both are); the passkey
+ * forms are posted by /passkeys.js as the page's own form, token and all. Every form
  * that mails a code (/signin, /signup, /reset, /signin/again) also passes
  * Turnstile, checked on the server for this host and that form before any
  * limit is counted (challenge.js): the day's account mail is shared, and
@@ -46,19 +79,27 @@ import { escape } from "./list.js";
 import { plan } from "./auth.js";
 import { PLAN_NAMES, atLeast, featuresOf } from "./features.js";
 import {
-  ACCOUNT_HOST, SESSION_MAX, canManage, event, history, now, orgFor, orgName, ready, schema, userForVerifiedEmail,
+  ACCOUNT_HOST, SESSION_MAX, canManage, event, forgetWaysIn, history, now, orgFor, orgName, ready, schema,
+  userForVerifiedEmail,
 } from "./accounts.js";
 import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, checkCode,
-  clearCookie, current, formOk, formToken, fresh, nextPath, openSession, randomToken, readCookie, requestCode,
-  sameOrigin, setCookie,
+  clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, randomToken, readCookie,
+  requestCode, sameOrigin, setCookie, tellWayIn,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
   otherWaysIn, passwordOf, passwordProblem, rehashed, unlock,
 } from "./password.js";
-import { form, notFound, page, redirect, refused, widget, wrongMethod } from "./ui.js";
+import {
+  OAUTH_COOKIE, PROVIDERS, arrive, attach, begin, configured, detach, finish, linked, offered,
+} from "./oauth.js";
+import {
+  MAX_LABEL, MAX_PASSKEYS, PAGE_SCRIPT, forgetPasskey, passkeyLabel, passkeysOf, register,
+  registrationOptions, signIn, signinOptions,
+} from "./passkeys.js";
+import { away, data, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
 const PRICING = "https://ranwhat.com/pricing";
@@ -139,13 +180,25 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
       ${widget("signin")}
       ${problem(error)}
       <button type="submit">Email me a code</button>`)}
-    <p>Have a password? <a href="/signin/password">Sign in with it</a>.
+    ${providerButtons(env)}
+    <p>Have a passkey? <a href="/signin/passkey">Sign in with it</a>.
+       Have a password? <a href="/signin/password">Sign in with it</a>.
        Want one? <a href="/signup">Make an account with a password</a></p>
     <p><small>The address is used to send the code, and kept only once the code
        is typed, as your account. This page sets two cookies, both only to sign
        you in, and nothing on it tracks you. Cloudflare Turnstile checks that a
-       person is asking. <a href="${PRIVACY}">Privacy</a></small></p>`,
+       person is asking.${offered(env).length ? ` Continuing with ${offered(env).map((p) => PROVIDERS[p].name).join(" or ")}
+       keeps only that account's id and the address it has verified.` : ""}
+       <a href="${PRIVACY}">Privacy</a></small></p>`,
   { status, cookies, challenge: true });
+}
+
+/* Plain links, so that no script and no form-action stands between the
+   page and the provider. */
+function providerButtons(env) {
+  const via = offered(env);
+  if (!via.length) return "";
+  return `<p>${via.map((p) => `<a class="button" href="/auth/${p}">Continue with ${PROVIDERS[p].name}</a>`).join("\n       ")}</p>`;
 }
 
 async function signinPost(request, env, ctx) {
@@ -225,7 +278,9 @@ async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
              spellcheck="false" maxlength="12" required autofocus>
       ${reset ? `<label for="password">New password</label>
       <input id="password" name="password" type="password" autocomplete="new-password" minlength="${MIN_LENGTH}" required>
-      ${NEW_PASSWORD}` : ""}
+      ${NEW_PASSWORD}
+      <label><input type="checkbox" name="ways" value="remove"> Also unlink every Google and GitHub account
+        and remove every passkey, in case one is in someone else's hands</label>` : ""}
       ${problem(error)}
       <button type="submit">${stepup ? "Confirm" : verify ? "Confirm and sign in" : reset ? "Set password and sign in" : "Sign in"}</button>`)}
     <p>Nothing after a minute? Look in spam, then ${anew(row, "ask for a new code")}.</p>
@@ -270,9 +325,10 @@ async function notTaken(env, token, result) {
 
 /* Someone just signed in as `user`: a new session in place of whatever the
    browser had, written in one batch with `before` (run first) and what
-   `after(org)` returns, and the browser sent on. The organisation is the
-   one the browser was looking at, if it was already this person's. */
-async function enter(request, env, { user, next = "/", coded = true, before = [], after }) {
+   `after(org)` returns, and the browser sent on, with `cookies` set too.
+   The organisation is the one the browser was looking at, if it was
+   already this person's. */
+async function enter(request, env, { user, next = "/", coded = true, before = [], after, cookies = [] }) {
   const was = await current(request, env);
   const org = await orgFor(env, user, was && was.user === user ? was.org.id : null);
   const orgId = org ? org.id : null;
@@ -280,7 +336,8 @@ async function enter(request, env, { user, next = "/", coded = true, before = []
     user, org: orgId, previous: readCookie(request, SESSION_COOKIE), coded,
   });
   await env.LIST.batch([...before, ...statements, ...await after(orgId)]);
-  return redirect(nextPath(next), [setCookie(SESSION_COOKIE, value, SESSION_MAX), clearCookie(SIGNIN_COOKIE)]);
+  return redirect(nextPath(next),
+    [setCookie(SESSION_COOKIE, value, SESSION_MAX), clearCookie(SIGNIN_COOKIE), ...cookies]);
 }
 
 /* A code was typed: the account (made now if this is its first sign-in), a
@@ -334,7 +391,9 @@ async function signedIn(request, env, row) {
    is checked as any code is. Once it is right the address is proven, as a
    sign-in code proves it (an address with no account gets one, as /signin
    would give it), and in one batch: every session of the account ends,
-   the password is replaced, and this browser gets the one new session. */
+   the password is replaced, every Google, GitHub and passkey way in goes
+   too when the box for it was ticked, and this browser gets the one new
+   session. */
 async function resetCode(request, env, token, row, f) {
   if (row.used_at || row.expires_at <= now()) return spent(env, token, row, "expired");
   if (row.tries >= CODE_TRIES) return spent(env, token, row, "burned");
@@ -360,6 +419,7 @@ async function resetCode(request, env, token, row, f) {
     after: async (org) => [
       ...(found.created ? [event(db, { org, user, what: "signup" })] : []),
       ...await attachPassword(env, { user, org, hash, reset: true }),
+      ...(f.get("ways") === "remove" ? forgetWaysIn(env, { user, org }) : []),
       await unlock(env, row.email),
     ],
   });
@@ -615,6 +675,18 @@ const EVENTS = {
   signout: "Signed out",
   signout_all: "Signed out everywhere",
   org_renamed: "Organisation renamed",
+  signup_google: "Account made, with Google",
+  signin_google: "Signed in with Google",
+  linked_google: "Google account linked",
+  unlinked_google: "Google account unlinked",
+  signup_github: "Account made, with GitHub",
+  signin_github: "Signed in with GitHub",
+  linked_github: "GitHub account linked",
+  unlinked_github: "GitHub account unlinked",
+  signin_passkey: "Signed in with a passkey",
+  passkey_added: "Passkey added, confirmed with an emailed code",
+  passkey_removed: "Passkey removed",
+  ways_removed: "Every Google, GitHub and passkey way in removed",
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -652,8 +724,9 @@ function panel(tier, onPlan) {
 /* How this account can sign in. The emailed code always works. A password
    is added, changed or removed with the current password or a code typed
    in the last 15 minutes (fresh() in session.js); without a password, only
-   the code will do. The others are on their way. */
-async function methods(env, who, error) {
+   the code will do. Google and GitHub, where they are set up, are linked
+   and unlinked with such a code too, and passkeys added and removed. */
+async function methods(env, who, error, providerError, passkeyError) {
   const stored = await passwordOf(env, who.user);
   const confirmed = fresh(who);
   const stepupToken = await formToken(env, who.id, "stepup");
@@ -696,19 +769,80 @@ async function methods(env, who, error) {
   }
   const coming = (key, name, says) => `<li data-method="${key}"><strong>${name}</strong> <span class="tag">coming</span>
       <br>${says}</li>`;
+  const ways = await linked(env, who.user);
+  /* A provider switched off after accounts were linked to it still lists
+     them, and still unlinks them, so nothing linked is left that cannot
+     be taken away; it links nothing new. */
+  const provider = async (key, says) => {
+    const { name } = PROVIDERS[key];
+    const on = configured(env, key);
+    const mine = ways.filter((w) => w.provider === key);
+    if (!on && !mine.length) return coming(key, name, says);
+    const unlinkToken = await formToken(env, who.id, `unlink-${key}`);
+    const items = mine.map((w) => `<li>${escape(w.verified_email || "no address")}, linked
+        ${escape(when(w.created_at).slice(0, 10))}${confirmed ? form(`/auth/${key}/unlink`, unlinkToken, `
+        <input type="hidden" name="subject" value="${escape(w.provider_subject)}">
+        <button type="submit">Unlink</button>`) : ""}</li>`).join("");
+    const err = providerError && providerError.provider === key ? providerError.text : "";
+    const accounts = mine.length === 1 ? "account" : "accounts";
+    const tag = !on ? "not offered now" : mine.length ? "linked" : "not linked";
+    const about = !on
+      ? `${name} sign-in is not offered just now, so ${mine.length === 1 ? "this" : "these"} ${name} ${accounts}
+        cannot sign in here until it is again.`
+      : mine.length ? `Sign in with ${mine.length === 1 ? "this" : "any of these"} ${name} ${accounts}.`
+        : `Link a ${name} account here to sign in with it.${key === "google"
+          ? ` A Gmail or Google Workspace account that is ${escape(who.email)} itself needs no link.` : ""}`;
+    const linkForm = on
+      ? form(`/auth/${key}`, await formToken(env, who.id, `link-${key}`),
+        `<button type="submit">Link ${mine.length ? "another" : "a"} ${name} account</button>`)
+      : "";
+    return `<li data-method="${key}"><strong>${name}</strong> <span class="tag">${tag}</span>
+      <br>${about}
+      ${mine.length ? `<ul>${items}</ul>` : ""}
+      ${mine.length && confirmed ? `<p>Unlinking one keeps its id here, so that it does not link itself back; linking it again does.</p>` : ""}
+      ${problem(err)}
+      ${confirmed ? linkForm
+        : `<p>${on ? "Linking or unlinking" : "Unlinking"} ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${code("Email me a code")}`}</li>`;
+  };
   return `<section class="panel" id="methods">
     <h2>Sign-in methods</h2>
     <ul>
       <li data-method="code"><strong>Emailed code</strong> <span class="tag">always on</span>
       <br>A code mailed to ${escape(who.email)} signs you in, and confirms what needs confirming.</li>
       ${password}
-      ${coming("google", "Google", "Sign in with a Google account that has this address.")}
-      ${coming("github", "GitHub", "Sign in with a GitHub account that has this address, verified.")}
-      ${coming("passkeys", "Passkeys", "Sign in with this device's screen lock or a security key.")}
+      ${await provider("google", "Sign in with a Google account linked here.")}
+      ${await provider("github", "Sign in with a GitHub account linked here.")}
+      ${await passkeys(env, who, passkeyError, code)}
     </ul></section>`;
 }
 
-async function dashboard(env, who, { error = "", passwordError = "", status = 200 } = {}) {
+/* The account's passkeys, with the day each was added and last used, and
+   the way to add or remove one, which needs a fresh code. */
+async function passkeys(env, who, error, code) {
+  const confirmed = fresh(who);
+  const mine = await passkeysOf(env, who.user);
+  const removeToken = await formToken(env, who.id, "passkey-remove");
+  const items = mine.map((k) => `<li>${escape(k.label)}, added ${escape(when(k.created_at).slice(0, 10))},
+        ${k.used_at === null ? "never used" : `last used ${escape(when(k.used_at).slice(0, 10))}`}${confirmed
+          ? form("/passkeys/remove", removeToken, `
+        <input type="hidden" name="id" value="${escape(k.id)}">
+        <button type="submit">Remove</button>`) : ""}</li>`).join("");
+  return `<li data-method="passkeys"><strong>Passkeys</strong> <span class="tag">${mine.length ? `${mine.length} added` : "none added"}</span>
+      <br>${mine.length ? `Sign in with ${mine.length === 1 ? "this passkey" : "any of these"} on the
+        <a href="/signin/passkey">passkey sign-in page</a>.`
+        : "Sign in with this device's screen lock or a security key, once you add a passkey here."}
+      ${mine.length ? `<ul>${items}</ul>` : ""}
+      ${problem(error)}
+      ${confirmed
+        ? (mine.length < MAX_PASSKEYS ? `<p><a class="button" href="/passkeys/add">Add a passkey</a></p>` : "")
+        : `<p>Adding or removing a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${code("Email me a code")}`}</li>`;
+}
+
+async function dashboard(env, who, {
+  error = "", passwordError = "", providerError = null, passkeyError = "", signoutError = "", status = 200,
+} = {}) {
   const org = who.org;
   const events = await history(env, who.user);
   const onPlan = await plan(env, org.id);
@@ -730,7 +864,7 @@ async function dashboard(env, who, { error = "", passwordError = "", status = 20
     </dl>
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
-    ${await methods(env, who, passwordError)}
+    ${await methods(env, who, passwordError, providerError, passkeyError)}
     ${rename}
     <h2>Recent activity</h2>
     ${activity}
@@ -738,8 +872,27 @@ async function dashboard(env, who, { error = "", passwordError = "", status = 20
     <p>Sign out everywhere ends this account's sessions in every browser.</p>
     ${form("/signout", await formToken(env, who.id, "signout"), `<button type="submit">Sign out</button>`, "row")}
     ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<button type="submit">Sign out everywhere</button>`, "row")}
+    ${await removeAll(env, who, signoutError)}
     <p><small><a href="https://ranwhat.com/">ranwhat.com</a> &middot; <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status });
+  { status, away: fresh(who) ? offered(env).map((p) => PROVIDERS[p].origin) : [] });
+}
+
+/* Signing out everywhere and taking every other way in away with it: for
+   someone who thinks a linked Google or GitHub account, or a passkey, is
+   in someone else's hands. Only with a fresh code, as taking any one of
+   them away is, and only offered while there is one. */
+async function removeAll(env, who, error) {
+  if (await otherWaysIn(env, who.user) < 2) return problem(error);
+  if (!fresh(who)) {
+    return `<p>To take away every Google and GitHub link and every passkey as well, confirm with an
+       emailed code first (under Sign-in methods).</p>${problem(error)}`;
+  }
+  return `<p>Or sign out everywhere and take away every Google and GitHub account linked here and
+       every passkey with it, leaving the emailed code${await passwordOf(env, who.user) ? " and your password" : ""}.
+       None of them links itself back.</p>
+    ${problem(error)}
+    ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<input type="hidden" name="ways" value="remove">
+      <button type="submit">Sign out everywhere and remove every other way in</button>`)}`;
 }
 
 async function signout(request, env) {
@@ -755,13 +908,22 @@ async function signout(request, env) {
 }
 
 /* Every session of this account, this one included: for a lost laptop, or
-   a cookie that may have been copied. */
+   a cookie that may have been copied. With ways=remove and a fresh code,
+   every Google and GitHub link and every passkey go in the same batch
+   (removeAll()). */
 async function signoutAll(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
-  if (!await formOk(env, await fields(request), who.id, "signout-all")) return refused();
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "signout-all")) return refused();
+  const ways = f.get("ways") === "remove";
+  if (ways && !fresh(who)) {
+    return dashboard(env, who, { status: 403,
+      signoutError: `Taking every other way in away needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so nothing was done.` });
+  }
   const db = env.LIST;
   await db.batch([
+    ...(ways ? forgetWaysIn(env, { user: who.user, org: who.org.id }) : []),
     db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(who.user),
     event(db, { org: who.org.id, user: who.user, what: "signout_all" }),
   ]);
@@ -857,6 +1019,313 @@ async function removePassword(request, env) {
   return redirect("/");
 }
 
+/* ---------- Google and GitHub ---------- */
+
+/* oauth.js's limit on sign-ins started from one network. */
+const tooManyStarts = () => page("Too many tries", `<h1>Too many tries.</h1>
+  <p>More sign-ins were started from your network in the last hour than we
+     take. Try again in an hour, or <a href="/signin">sign in with an emailed
+     code</a>.</p>`, { status: 429 });
+
+/* Off to the provider to sign in. Someone signed in already goes home. */
+async function providerStart(request, env, ctx, url, provider) {
+  const next = nextPath(url.searchParams.get("next"));
+  if (await current(request, env)) return redirect(next);
+  const started = await begin(request, env, { provider, next });
+  if (started.refused) return tooManyStarts();
+  return away(started.to, [started.cookie]);
+}
+
+const needsCode = (env, who, provider) => dashboard(env, who, { status: 403, providerError: { provider,
+  text: `Linking or unlinking ${PROVIDERS[provider].name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` } });
+
+/* Off to the provider to link it to the account signed in: a form on the
+   account page, with a code typed in the last 15 minutes. The flow is
+   bound to this session, and only this session can finish it. */
+async function linkStart(request, env, ctx, url, provider) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, `link-${provider}`)) return refused();
+  if (!fresh(who)) return needsCode(env, who, provider);
+  const started = await begin(request, env, { provider, purpose: "link", user: who.user, session: who.id });
+  if (started.refused) return tooManyStarts();
+  return away(started.to, [started.cookie]);
+}
+
+/* Back from the provider. Signing in goes as a password does: a new
+   session in place of the browser's, not fresh, since no code was typed.
+   Linking needs the session that asked for it, still signed in. The
+   flow's cookie goes either way: it worked once already. */
+async function providerBack(request, env, ctx, url, provider) {
+  const name = PROVIDERS[provider].name;
+  const cookies = [clearCookie(OAUTH_COOKIE)];
+  const done = await finish(request, env, provider, url);
+  if (!done.ok) return providerProblem(name, done.why, done.flow, cookies);
+  const { flow, profile } = done;
+  const db = env.LIST;
+  if (flow.purpose === "link") {
+    const who = await current(request, env);
+    if (!who || who.id !== flow.session_id || who.user !== flow.user_id) {
+      return page("Sign in again", `<h1>Sign in again.</h1>
+        <p class="bad">This browser is no longer signed in as it was when linking ${name} began,
+           so nothing was linked.</p>
+        <p><a href="/">Your account</a></p>`, { status: 403, cookies });
+    }
+    const result = await attach(env, { user: who.user, org: who.org.id, provider, profile });
+    if (result.refused) return notLinked(name, result.refused, cookies);
+    if (result.what === "linked") tellWayIn(env, ctx, { user: who.user, what: provider });
+    return redirect("/", cookies);
+  }
+  const result = await arrive(env, provider, profile);
+  if (result.refused === "unproven") return unproven(name, cookies);
+  if (result.refused === "unlinked") return wasUnlinked(name, cookies);
+  if (result.refused) return unverified(name, cookies);
+  const user = result.user;
+  const entered = await enter(request, env, { user, next: flow.next, coded: false, cookies, after: async (org) => [
+    ...(result.what === "linked" ? [event(db, { org, user, what: `linked_${provider}` })] : []),
+    event(db, { org, user, what: `${result.what === "signup" ? "signup" : "signin"}_${provider}` }),
+  ] });
+  if (result.what === "linked") tellWayIn(env, ctx, { user, what: provider });
+  return entered;
+}
+
+/* A flow that came back without an account to open (oauth.js's finish()). */
+function providerProblem(name, why, flow, cookies) {
+  const linking = Boolean(flow) && flow.purpose === "link";
+  const none = linking ? "nothing was linked" : "nobody was signed in";
+  const [status, title, text] = {
+    expired: [400, "Start again", `That ${name} sign-in has expired or was already used. Start it again from this site.`],
+    cancelled: [200, "Cancelled", `${name} says it was cancelled, so ${none}.`],
+    unavailable: [502, "Try again", `${name} could not be reached just now, so ${none}. Try again in a minute.`],
+  }[why] || [400, "Start again", `${name}'s answer did not check out, so ${none}. Start it again from this site.`];
+  return page(title, `<h1>${title}.</h1>
+    <p class="bad">${text}</p>
+    <p>${linking ? `<a href="/">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
+  { status, cookies });
+}
+
+/* The provider vouched for no address: it can neither make an account nor
+   join one, and the emailed code, which proves the address itself, is the
+   way in. */
+const unverified = (name, cookies) => page("Use an emailed code", `<h1>Use an emailed code.</h1>
+  <p class="bad">${name} did not vouch for an email address on that account${name === "GitHub"
+    ? " (we take only its primary address, and only once GitHub has verified it)" : ""}, so it
+     cannot make or open a ranwhat account.</p>
+  <p><a href="/signin">Sign in with an emailed code</a> instead: typing it proves the address.</p>`,
+{ status: 403, cookies });
+
+/* The provider vouched for an address it is not the authority for
+   (oauth.js): GitHub always, Google for an address that is not Gmail or
+   its Workspace domain. The same page whether or not an account has the
+   address, so it says nothing about who has one. */
+const unproven = (name, cookies) => page("Use an emailed code", `<h1>Use an emailed code first.</h1>
+  <p class="bad">${name} says the address on that account was verified once, which does not show it
+     is still yours${name === "GitHub" ? "" : " (Google vouches for that only for Gmail and Google Workspace addresses)"},
+     so ${name} cannot make or open a ranwhat account by itself.</p>
+  <p><a href="/signin">Sign in with an emailed code</a>, which makes the account if there is none yet.
+     Then link ${name} from your account page, and it signs you in from then on.</p>`,
+{ status: 403, cookies });
+
+/* A way in the account at this address unlinked: only linking it again
+   from the account page brings it back. */
+const wasUnlinked = (name, cookies) => page("Use an emailed code", `<h1>Use an emailed code.</h1>
+  <p class="bad">That ${name} account was unlinked from the ranwhat account for its address, so it
+     does not sign in there any more.</p>
+  <p><a href="/signin">Sign in with an emailed code</a>. To use ${name} again, link it from your
+     account page.</p>`,
+{ status: 403, cookies });
+
+function notLinked(name, why, cookies) {
+  const text = {
+    unverified: `${name} did not vouch for an email address on that account, so it cannot be linked.`,
+    taken: `That ${name} account already signs in to another ranwhat account, and stays with it.`,
+    address: `The address that ${name} account has verified has its own ranwhat account. Sign in to that one to link it there.`,
+  }[why];
+  return page("Not linked", `<h1>Not linked.</h1>
+    <p class="bad">${text}</p>
+    <p><a href="/">Back to your account</a></p>`, { status: why === "unverified" ? 403 : 409, cookies });
+}
+
+/* Takes a Google or GitHub account away, with a fresh code, while another
+   way in remains, which the emailed code always is. */
+async function unlinkPost(request, env, ctx, url, provider) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, `unlink-${provider}`)) return refused();
+  if (!fresh(who)) return needsCode(env, who, provider);
+  const statements = await detach(env, {
+    user: who.user, org: who.org.id, provider, subject: String(f.get("subject") ?? ""),
+  });
+  if (!statements.length) return redirect("/");
+  const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
+  if (left < 1) {
+    return dashboard(env, who, { status: 400, providerError: { provider,
+      text: `This ${PROVIDERS[provider].name} account is your only way in, so it stays.` } });
+  }
+  await env.LIST.batch(statements);
+  return redirect("/");
+}
+
+/* ---------- passkeys ---------- */
+
+const needsPasskeyCode = (env, who) => dashboard(env, who, { status: 403,
+  passkeyError: `Adding or removing a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` });
+
+/* The page that adds one: the form /passkeys.js sends once the device has
+   made the passkey. Without the script it says why nothing happens. */
+async function addPasskeyPage(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  if (!fresh(who)) return needsPasskeyCode(env, who);
+  return addPasskeyForm(env, who);
+}
+
+const NO_SCRIPT = `<noscript><p class="bad">Passkeys need JavaScript, which is off in this browser. Every
+       other way in works without it.</p></noscript>`;
+
+async function addPasskeyForm(env, who, { error = "", status = 200 } = {}) {
+  return page("Add a passkey", `<h1>Add a passkey</h1>
+    <p>Your device asks for its screen lock (a fingerprint, your face or its PIN) or for
+       a security key, and makes a passkey that signs in to this account, on this site
+       only.</p>
+    ${form("/passkeys", await formToken(env, who.id, "passkey-add"), `
+      <input type="hidden" name="clientDataJSON" value="">
+      <input type="hidden" name="attestationObject" value="">
+      <label for="label">Name it, to tell it apart later</label>
+      <input id="label" name="label" type="text" maxlength="${MAX_LABEL}" placeholder="Work laptop" autofocus>
+      <p class="bad passkey-problem" hidden></p>
+      ${problem(error)}
+      <button type="submit">Add passkey</button>`, "", `data-passkey="/passkeys/new" data-ceremony="create"`)}
+    ${NO_SCRIPT}
+    <p><a href="/">Back to your account</a></p>`,
+  { status, passkeys: true });
+}
+
+/* JSON for the script: { error } with the status, or the options. */
+const problemJson = (status, error) => data({ error }, status);
+
+async function passkeyOptions(request, env) {
+  if (!notCrossSite(request)) return problemJson(403, "That request came from another site.");
+  const who = await current(request, env);
+  if (!who) return problemJson(401, "You are signed out. Sign in again, then add the passkey.");
+  if (!fresh(who)) {
+    return problemJson(403, `Adding a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes. Go back to your account for one.`);
+  }
+  const options = await registrationOptions(env, who);
+  if (options.refused === "full") return problemJson(400, `An account holds ${MAX_PASSKEYS} passkeys at most. Remove one first.`);
+  if (options.refused) return problemJson(429, "More passkeys were started for this account in the last hour than we take. Try again in an hour.");
+  return data(options);
+}
+
+async function addPasskey(request, env, ctx) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "passkey-add")) return refused();
+  if (!fresh(who)) return needsPasskeyCode(env, who);
+  const result = await register(env, who, {
+    clientDataJSON: f.get("clientDataJSON"), attestationObject: f.get("attestationObject"),
+    label: passkeyLabel(f.get("label")),
+  });
+  if (!result.refused) {
+    tellWayIn(env, ctx, { user: who.user, what: "passkey" });
+    return redirect("/");
+  }
+  const [status, error] = {
+    expired: [400, "That passkey request has expired or was already used, so nothing was added. Try again."],
+    taken: [409, "That passkey is already added."],
+    full: [400, `An account holds ${MAX_PASSKEYS} passkeys at most. Remove one first.`],
+  }[result.refused] || [400, "What your browser sent did not check out, so no passkey was added. Try again."];
+  return addPasskeyForm(env, who, { status, error });
+}
+
+/* Only while another way in remains, which the emailed code always is. */
+async function removePasskey(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "passkey-remove")) return refused();
+  if (!fresh(who)) return needsPasskeyCode(env, who);
+  const statements = await forgetPasskey(env, { user: who.user, org: who.org.id, id: f.get("id") ?? "" });
+  if (!statements.length) return redirect("/");
+  const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
+  if (left < 1) return dashboard(env, who, { status: 400, passkeyError: "This passkey is your only way in, so it stays." });
+  await env.LIST.batch(statements);
+  return redirect("/");
+}
+
+/* The page that signs in with one. Its form token and its challenges are
+   bound to the browser's __Host-rw_signin cookie, made here when it has
+   none yet. */
+async function passkeySigninPage(request, env, ctx, url) {
+  const next = nextPath(url.searchParams.get("next"));
+  if (await current(request, env)) return redirect(next);
+  return passkeySigninForm(env, readCookie(request, SIGNIN_COOKIE), { next });
+}
+
+async function passkeySigninForm(env, browser, { next = "/", error = "", status = 200 } = {}) {
+  const { binding, cookies } = bound(browser);
+  return page("Sign in with a passkey", `<h1>Sign in with a passkey</h1>
+    <p>Your device shows the passkeys it has for this site, and asks for its screen lock
+       or your security key.</p>
+    ${form("/signin/passkey", await formToken(env, binding, "passkey"), `
+      <input type="hidden" name="next" value="${escape(next)}">
+      <input type="hidden" name="id" value="">
+      <input type="hidden" name="clientDataJSON" value="">
+      <input type="hidden" name="authenticatorData" value="">
+      <input type="hidden" name="signature" value="">
+      <input type="hidden" name="userHandle" value="">
+      <p class="bad passkey-problem" hidden></p>
+      ${problem(error)}
+      <button type="submit">Sign in with a passkey</button>`, "", `data-passkey="/passkeys/challenge" data-ceremony="get"`)}
+    ${NO_SCRIPT}
+    <p>No passkey here? <a href="/signin">Sign in with an emailed code</a>, or
+       <a href="/signin/password">with your password</a>. Passkeys are added from your
+       account page.</p>
+    <p><small>This page sets a cookie only to sign you in, and nothing on it tracks you.
+       <a href="${PRIVACY}">Privacy</a></small></p>`,
+  { status, cookies, passkeys: true });
+}
+
+async function passkeyChallenge(request, env) {
+  if (!notCrossSite(request)) return problemJson(403, "That request came from another site.");
+  const cookie = readCookie(request, SIGNIN_COOKIE);
+  if (!cookie) return problemJson(403, "Reload the page, then try again.");
+  const options = await signinOptions(request, env, cookie);
+  if (options.refused) {
+    return problemJson(429, "More passkey sign-ins were started from your network in the last hour than we take. Try again in an hour, or sign in with an emailed code.");
+  }
+  return data(options);
+}
+
+/* One answer for every way a passkey can fail to sign in (passkeys.js's
+   signIn()). Signing in then goes as a password does: a new session, not
+   fresh, since no code was typed. */
+async function passkeySignin(request, env) {
+  const f = await fields(request);
+  const binding = readCookie(request, SIGNIN_COOKIE);
+  if (!await formOk(env, f, binding, "passkey")) return refused();
+  const next = nextPath(f.get("next"));
+  const result = await signIn(env, binding, {
+    id: f.get("id"), clientDataJSON: f.get("clientDataJSON"), authenticatorData: f.get("authenticatorData"),
+    signature: f.get("signature"), userHandle: f.get("userHandle"),
+  });
+  if (result.refused) {
+    return passkeySigninForm(env, binding, { next, status: 400,
+      error: "That passkey did not sign you in. Try again, or sign in another way." });
+  }
+  const db = env.LIST;
+  const user = result.user;
+  return enter(request, env, { user, next, coded: false, after: async (org) => [
+    db.prepare("UPDATE users SET signed_in_at = ? WHERE id = ?").bind(now(), user),
+    event(db, { org, user, what: "signin_passkey" }),
+  ] });
+}
+
+const pageScript = () => script(PAGE_SCRIPT);
+
 /* ---------- the host ---------- */
 
 /* Path: { method: handler }. */
@@ -874,7 +1343,20 @@ const ROUTES = {
   "/signout": { POST: signout },
   "/signout-all": { POST: signoutAll },
   "/org": { POST: rename },
+  "/passkeys/add": { GET: addPasskeyPage },
+  "/passkeys/new": { GET: passkeyOptions },
+  "/passkeys": { POST: addPasskey },
+  "/passkeys/remove": { POST: removePasskey },
+  "/signin/passkey": { GET: passkeySigninPage, POST: passkeySignin },
+  "/passkeys/challenge": { GET: passkeyChallenge },
+  "/passkeys.js": { GET: pageScript },
 };
+for (const provider of Object.keys(PROVIDERS)) {
+  const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);
+  ROUTES[`/auth/${provider}`] = { GET: as(providerStart), POST: as(linkStart) };
+  ROUTES[`/auth/${provider}/callback`] = { GET: as(providerBack) };
+  ROUTES[`/auth/${provider}/unlink`] = { POST: as(unlinkPost) };
+}
 
 export async function account(request, env, ctx) {
   /* Switched on without its secret, its database or its mail: say so
@@ -885,6 +1367,11 @@ export async function account(request, env, ctx) {
          <a href="https://ranwhat.com/">ranwhat.com</a></p>`, { status: 503 });
   }
   const url = new URL(request.url);
+  /* A provider without its client id and secret is not there, but for
+     unlinking an account linked while it was. */
+  const via = /^\/auth\/([^/]+)/.exec(url.pathname);
+  if (via && !configured(env, via[1]) &&
+      !(Object.hasOwn(PROVIDERS, via[1]) && url.pathname === `/auth/${via[1]}/unlink`)) return notFound();
   const route = Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
   if (!route) return notFound();
   const handle = Object.hasOwn(route, request.method) ? route[request.method] : null;

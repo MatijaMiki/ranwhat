@@ -1183,7 +1183,7 @@ test("with a code typed in the last 15 minutes the current password is not asked
     303);
 });
 
-test("the sign-in methods: the code always, a password added with a fresh code and removed, the rest coming", async () => {
+test("the sign-in methods: the code always, a password added with a fresh code and removed, providers not set up coming", async () => {
   const s = services();
   const e = env();
   const b = new Browser(e);
@@ -1193,9 +1193,10 @@ test("the sign-in methods: the code always, a password added with a fresh code a
   assert.doesNotMatch(home.text, /<script|\son[a-z]+=/i);
   assert.match(home.text, /data-method="code"><strong>Emailed code<\/strong> <span class="tag">always on/);
   assert.match(home.text, /data-method="password"><strong>Password<\/strong> <span class="tag">not set/);
-  for (const [key, name] of [["google", "Google"], ["github", "GitHub"], ["passkeys", "Passkeys"]]) {
+  for (const [key, name] of [["google", "Google"], ["github", "GitHub"]]) {
     assert.match(home.text, new RegExp(`data-method="${key}"><strong>${name}</strong> <span class="tag">coming`));
   }
+  assert.match(home.text, /data-method="passkeys"><strong>Passkeys<\/strong> <span class="tag">none added/);
   assert.doesNotMatch(home.text, /action="\/password\/remove"/);
 
   const added = await b.post("/password", { form: tokenFor(home.text, "/password"), password: ANA_PASSWORD });
