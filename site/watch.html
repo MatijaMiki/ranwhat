@@ -155,6 +155,8 @@
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         watch looks back over history after the fact, so it is not live
         monitoring of Claude Code or any other agent, and it blocks nothing.
+        To have the same rules asked before a Claude Code call runs, install
+        the opt-in <a href="/commands#hook">hook</a>.
         For a record kept while the agent works, add a hook or OpenTelemetry,
         as the <a href="/guides/claude-code-audit-log">Claude Code audit log
         guide</a> shows.
@@ -203,7 +205,8 @@
     <div>
       <h2>Reads the agents already on your machine.</h2>
       <p class="lede">
-        No wrapper, no proxy, nothing in your critical path. It reads what
+        No wrapper, no proxy, nothing in your critical path unless you
+        install the <a href="/commands#hook">hook</a>. It reads what
         each agent already wrote to disk, all of them by default.
       </p>
       <div class="scroll">

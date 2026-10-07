@@ -104,9 +104,10 @@
       <p>
         It is one part of <a href="/guides/ai-coding-agent-security">AI agent
         security</a>: the record of what already ran,
-        what leaked, and what the credentials still allow. It does not block
-        anything while the agent works. Claude Code's permission rules, hooks
-        and sandbox do that.
+        what leaked, and what the credentials still allow. It blocks nothing
+        while the agent works unless you install its hook, which asks before
+        a call it would flag. Claude Code's permission rules, hooks and
+        sandbox do the rest.
       </p>
     </div>
   </div>
@@ -123,7 +124,7 @@
           <p>Reads what Claude Code and eleven other coding agents already
              wrote to disk and surfaces the handful of irreversible actions
              worth knowing about. No wrapper, no proxy, nothing in the
-             critical path.</p>
+             critical path, unless you install the hook.</p>
         </div>
         <div class="cell">
           <h3>The scanner</h3>
