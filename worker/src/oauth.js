@@ -326,12 +326,15 @@ function objectOf(segment) {
   }
 }
 
-/* Google's signing keys by kid, until the time their max-age gives. */
-let keys = { byKid: new Map(), until: 0, fetched: 0 };
+/* Google's signing keys by kid: fetched again at `until`, the time their
+   max-age gives, and used while Google cannot be reached until `usable`,
+   a day after that. `down`: the last fetch failed. */
+const noKeys = () => ({ byKid: new Map(), until: 0, fetched: 0, usable: 0, down: false });
+let keys = noKeys();
 
 /* For tests: start from no keys. */
 export function forgetKeys() {
-  keys = { byKid: new Map(), until: 0, fetched: 0 };
+  keys = noKeys();
 }
 
 async function loadKeys() {
@@ -354,16 +357,30 @@ async function loadKeys() {
   const age = Number(res.headers.get("age")) || 0;
   const t = now();
   const fresh = /no-store|no-cache/i.test(control) || !maxAge ? 0 : Math.max(0, Number(maxAge[1]) - age);
-  keys = { byKid, until: t + Math.min(fresh, DAY), fetched: t };
+  const until = t + Math.min(fresh, DAY);
+  keys = { byKid, until, fetched: t, usable: until + DAY, down: false };
 }
 
 /* The key for `kid`: from memory while its max-age lasts, and fetched
    again when it has run out, or when Google has rotated to a key we do not
-   have yet (at most once a minute). */
+   have yet (at most once a minute). When Google's keys cannot be fetched,
+   a key already held still verifies, for up to a day past its max-age,
+   and the next try waits a minute rather than every sign-in asking again.
+   Only a key we do not hold, or hold no longer, is then an outage. */
 async function keyFor(kid) {
   const t = now();
-  if (t >= keys.until || (!keys.byKid.has(kid) && t - keys.fetched >= 60)) await loadKeys();
-  return keys.byKid.get(kid) || null;
+  if (t >= keys.until || (!keys.byKid.has(kid) && t - keys.fetched >= 60)) {
+    try {
+      await loadKeys();
+    } catch (err) {
+      if (!keys.down) console.log(`account google keys: ${err.name || "error"}`);
+      keys = { ...keys, until: t + 60, fetched: t, down: true };
+    }
+  }
+  const key = t < keys.usable ? keys.byKid.get(kid) : undefined;
+  if (key) return key;
+  if (keys.down) throw new Error("Google's keys could not be fetched");
+  return null;
 }
 
 /* The claims of a Google id_token that passes every check, or a
@@ -390,8 +407,11 @@ export async function verifyIdToken(env, token, { nonceHash, clientId = (env.GOO
     throw invalid;
   }
   const t = now();
+  /* For us and nobody else: a list of audiences only when every one is
+     this client, with azp naming it (OIDC Core 3.1.3.7). */
   const audience = claims.aud === clientId ||
-    (Array.isArray(claims.aud) && claims.aud.includes(clientId) && claims.azp === clientId);
+    (Array.isArray(claims.aud) && claims.aud.length > 0 && claims.aud.every((a) => a === clientId) &&
+     claims.azp === clientId);
   if (!clientId || !audience || (claims.azp !== undefined && claims.azp !== clientId)) throw invalid;
   if (!GOOGLE_ISSUERS.has(claims.iss)) throw invalid;
   if (!Number.isFinite(claims.exp) || !Number.isFinite(claims.iat)) throw invalid;

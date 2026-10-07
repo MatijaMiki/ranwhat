@@ -44,7 +44,9 @@
  *   POST /auth/<provider>/unlink    Takes one away, with a fresh code, for
  *                       good: it does not link itself back.
  *                       A provider whose client id and secret are not set
- *                       is not offered, and its /auth/ paths answer 404.
+ *                       is not offered, and its /auth/ paths answer 404,
+ *                       but for unlink: an account linked to it before
+ *                       still lists it, and can still take it away.
  *   GET  /passkeys/add  The page that adds a passkey, with a fresh code.
  *   GET  /passkeys/new  Its options for navigator.credentials.create(), as
  *                       JSON (passkeys.js).
@@ -60,7 +62,11 @@
  *
  * Nothing changes on a GET but a passkey challenge, made for whoever
  * asks and good once (and, the first time an account asks to add a
- * passkey, its WebAuthn user handle). Every POST passes the origin check here and its
+ * passkey, its WebAuthn user handle), and Google and GitHub sign-in,
+ * whose start (an oauth_flows row, its cookie and the count for the
+ * network) and callback (which uses the flow up, and may make the
+ * account, link it and sign in) are GETs because the provider sends the
+ * browser back with one. Every POST passes the origin check here and its
  * form token in its handler (session.js says what both are); the passkey
  * forms are posted by /passkeys.js as the page's own form, token and all. Every form
  * that mails a code (/signin, /signup, /reset, /signin/again) also passes
@@ -764,27 +770,39 @@ async function methods(env, who, error, providerError, passkeyError) {
   const coming = (key, name, says) => `<li data-method="${key}"><strong>${name}</strong> <span class="tag">coming</span>
       <br>${says}</li>`;
   const ways = await linked(env, who.user);
+  /* A provider switched off after accounts were linked to it still lists
+     them, and still unlinks them, so nothing linked is left that cannot
+     be taken away; it links nothing new. */
   const provider = async (key, says) => {
     const { name } = PROVIDERS[key];
-    if (!configured(env, key)) return coming(key, name, says);
+    const on = configured(env, key);
     const mine = ways.filter((w) => w.provider === key);
+    if (!on && !mine.length) return coming(key, name, says);
     const unlinkToken = await formToken(env, who.id, `unlink-${key}`);
     const items = mine.map((w) => `<li>${escape(w.verified_email || "no address")}, linked
         ${escape(when(w.created_at).slice(0, 10))}${confirmed ? form(`/auth/${key}/unlink`, unlinkToken, `
         <input type="hidden" name="subject" value="${escape(w.provider_subject)}">
         <button type="submit">Unlink</button>`) : ""}</li>`).join("");
     const err = providerError && providerError.provider === key ? providerError.text : "";
-    return `<li data-method="${key}"><strong>${name}</strong> <span class="tag">${mine.length ? "linked" : "not linked"}</span>
-      <br>${mine.length ? `Sign in with ${mine.length === 1 ? "this" : "any of these"} ${name} ${mine.length === 1 ? "account" : "accounts"}.`
+    const accounts = mine.length === 1 ? "account" : "accounts";
+    const tag = !on ? "not offered now" : mine.length ? "linked" : "not linked";
+    const about = !on
+      ? `${name} sign-in is not offered just now, so ${mine.length === 1 ? "this" : "these"} ${name} ${accounts}
+        cannot sign in here until it is again.`
+      : mine.length ? `Sign in with ${mine.length === 1 ? "this" : "any of these"} ${name} ${accounts}.`
         : `Link a ${name} account here to sign in with it.${key === "google"
-          ? ` A Gmail or Google Workspace account that is ${escape(who.email)} itself needs no link.` : ""}`}
+          ? ` A Gmail or Google Workspace account that is ${escape(who.email)} itself needs no link.` : ""}`;
+    const linkForm = on
+      ? form(`/auth/${key}`, await formToken(env, who.id, `link-${key}`),
+        `<button type="submit">Link ${mine.length ? "another" : "a"} ${name} account</button>`)
+      : "";
+    return `<li data-method="${key}"><strong>${name}</strong> <span class="tag">${tag}</span>
+      <br>${about}
       ${mine.length ? `<ul>${items}</ul>` : ""}
       ${mine.length && confirmed ? `<p>Unlinking one keeps its id here, so that it does not link itself back; linking it again does.</p>` : ""}
       ${problem(err)}
-      ${confirmed
-        ? form(`/auth/${key}`, await formToken(env, who.id, `link-${key}`),
-          `<button type="submit">Link ${mine.length ? "another" : "a"} ${name} account</button>`)
-        : `<p>Linking or unlinking ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${confirmed ? linkForm
+        : `<p>${on ? "Linking or unlinking" : "Unlinking"} ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
       ${code("Email me a code")}`}</li>`;
   };
   return `<section class="panel" id="methods">
@@ -1349,9 +1367,11 @@ export async function account(request, env, ctx) {
          <a href="https://ranwhat.com/">ranwhat.com</a></p>`, { status: 503 });
   }
   const url = new URL(request.url);
-  /* A provider without its client id and secret is not there at all. */
+  /* A provider without its client id and secret is not there, but for
+     unlinking an account linked while it was. */
   const via = /^\/auth\/([^/]+)/.exec(url.pathname);
-  if (via && !configured(env, via[1])) return notFound();
+  if (via && !configured(env, via[1]) &&
+      !(Object.hasOwn(PROVIDERS, via[1]) && url.pathname === `/auth/${via[1]}/unlink`)) return notFound();
   const route = Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
   if (!route) return notFound();
   const handle = Object.hasOwn(route, request.method) ? route[request.method] : null;

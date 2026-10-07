@@ -9,8 +9,8 @@
  * account's own pages, a step-up's included. Ours is one file,
  * /passkeys.js (passkeys.js), which WebAuthn cannot do without: it runs
  * only on the two passkey pages, adding one and signing in with one,
- * whose policy then allows scripts and fetches from this host and
- * nothing else; no page has an inline script. Every other page's policy
+ * whose policy then allows that one script and fetches to the two paths
+ * it asks for options, and nothing else; no page has an inline script. Every other page's policy
  * allows no script at all, and every way in but a passkey works on
  * pages without one. The one inline style is allowed by its hash
  * rather than by 'unsafe-inline', so markup that ever slipped past
@@ -20,6 +20,7 @@
  */
 import { escape } from "./list.js";
 import { CHALLENGE_ORIGIN, CHALLENGE_SCRIPT, SITEKEY } from "./challenge.js";
+import { ACCOUNT_ORIGIN } from "./accounts.js";
 
 /* The site's colours, without its font: /fonts/ is on ranwhat.com, which
    this host's policy does not reach. */
@@ -56,12 +57,14 @@ let styleHash = null;
    form-action keeps every form posting here; frame-ancestors keeps the
    page out of anyone's frame. With `challenge`, Turnstile's script and
    its frame, from challenges.cloudflare.com and nowhere else. With
-   `passkeys`, scripts and fetches from this host: /passkeys.js and the
-   JSON it asks for. Every other response here is HTML or JSON sent with
-   nosniff, which a browser will not run as a script. `away`: origins a
-   form here may be redirected on to, which browsers hold to form-action
-   too. Only the account page's forms that link Google or GitHub need it
-   (oauth.js's PROVIDERS), and only for those two. */
+   `passkeys`, /passkeys.js and the two paths whose JSON it asks for,
+   each named exactly (a source without a trailing slash is that one
+   path), so nothing else this host ever answers can run or be fetched
+   there; every other response is HTML or JSON sent with nosniff besides.
+   `away`: origins a form here may be redirected on to, which browsers
+   hold to form-action too. Only the account page's forms that link
+   Google or GitHub need it (oauth.js's PROVIDERS), and only for those
+   two. */
 async function csp(challenge = false, away = [], passkeys = false) {
   if (!styleHash) {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(CSS)));
@@ -72,7 +75,10 @@ async function csp(challenge = false, away = [], passkeys = false) {
   const policy = `default-src 'none'; style-src 'sha256-${styleHash}'; form-action ${["'self'", ...away].join(" ")}; ` +
     "frame-ancestors 'none'; base-uri 'none'";
   if (challenge) return `${policy}; script-src ${CHALLENGE_ORIGIN}; frame-src ${CHALLENGE_ORIGIN}`;
-  if (passkeys) return `${policy}; script-src 'self'; connect-src 'self'`;
+  if (passkeys) {
+    return `${policy}; script-src ${ACCOUNT_ORIGIN}/passkeys.js; ` +
+      `connect-src ${ACCOUNT_ORIGIN}/passkeys/new ${ACCOUNT_ORIGIN}/passkeys/challenge`;
+  }
   return policy;
 }
 

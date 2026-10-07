@@ -225,7 +225,8 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
   const page = await b.get("/passkeys/add");
   assert.equal(page.status, 200);
   assert.match(page.text, /<form method="post" action="\/passkeys" data-passkey="\/passkeys\/new" data-ceremony="create">/);
-  assert.match(page.headers.get("content-security-policy"), /; script-src 'self'; connect-src 'self'$/);
+  assert.match(page.headers.get("content-security-policy"),
+    /; script-src https:\/\/account\.ranwhat\.com\/passkeys\.js; connect-src https:\/\/account\.ranwhat\.com\/passkeys\/new https:\/\/account\.ranwhat\.com\/passkeys\/challenge$/);
   assert.deepEqual(page.text.match(/<script[^>]*>/g), ['<script src="/passkeys.js" defer>']);
   assert.doesNotMatch(page.text, /<script[^>]*>[^<]/, "no inline script");
   assert.doesNotMatch(page.text, /\son[a-z]+=/i);
@@ -555,7 +556,8 @@ test("someone whose only way in besides the code is a passkey signs in with it",
   assert.equal(home.location, "/signin");
   const page = await b.get("/signin/passkey");
   assert.match(page.text, /<form method="post" action="\/signin\/passkey" data-passkey="\/passkeys\/challenge" data-ceremony="get">/);
-  assert.match(page.headers.get("content-security-policy"), /; script-src 'self'; connect-src 'self'$/);
+  assert.match(page.headers.get("content-security-policy"),
+    /; script-src https:\/\/account\.ranwhat\.com\/passkeys\.js; connect-src https:\/\/account\.ranwhat\.com\/passkeys\/new https:\/\/account\.ranwhat\.com\/passkeys\/challenge$/);
   assert.deepEqual(page.text.match(/<script[^>]*>/g), ['<script src="/passkeys.js" defer>']);
   const res = await passkeySignIn(b, device);
   assert.equal(res.status, 303, res.text);

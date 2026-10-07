@@ -83,6 +83,7 @@ function services() {
     if (u.hostname === "api.pwnedpasswords.com") return new Response("", { status: 200 });
     if (`${u.hostname}${u.pathname}` === "www.googleapis.com/oauth2/v3/certs") {
       s.keyFetches += 1;
+      if (s.keys === "down") return json({ error: "internal" }, 503);
       return json({ keys: [JWK] }, 200, { "cache-control": "public, max-age=3600, must-revalidate" });
     }
     if (`${method} ${u.hostname}${u.pathname}` === "POST oauth2.googleapis.com/token") {
@@ -257,7 +258,7 @@ test("a provider without its client id and secret is not offered, and every /aut
   assert.equal(page.status, 200);
   assert.doesNotMatch(page.text, /Continue with/);
   for (const path of ["/auth/google", "/auth/google/callback?code=x&state=y", "/auth/github", "/auth/github/callback",
-                      "/auth/nobody", "/auth/github/unlink"]) {
+                      "/auth/nobody", "/auth/nobody/unlink"]) {
     assert.equal((await b.get(path)).status, 404, path);
     assert.equal((await b.post(path, {})).status, 404, `POST ${path}`);
   }
@@ -269,6 +270,40 @@ test("a provider without its client id and secret is not offered, and every /aut
   assert.doesNotMatch(shown.text, /Continue with Google/);
   assert.equal((await new Browser(github).get("/auth/google")).status, 404);
   assert.equal((await new Browser(github).get("/auth/github")).status, 303);
+});
+
+test("a provider switched off after an account linked it still lists that link, and can still unlink it", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  const user = userOf(e, "ana@example.com");
+  await viaProvider(ana, s, "github", { user: { id: 9001 } }, { link: true });
+  delete e.GITHUB_CLIENT_SECRET;
+
+  let home = await ana.get("/");
+  assert.match(home.text, /data-method="github"><strong>GitHub<\/strong> <span class="tag">not offered now<\/span>/);
+  assert.match(home.text, /name="subject" value="9001"/);
+  assert.doesNotMatch(home.text, /action="\/auth\/github"/, "nothing new links");
+  for (const path of ["/auth/github", "/auth/github/callback"]) assert.equal((await ana.get(path)).status, 404, path);
+  /* Not fresh: the page says unlinking needs a code, and the POST is refused. */
+  const unlink = tokenFor(home.text, "/auth/github/unlink");
+  later(FRESH_FOR + 1);
+  home = await ana.get("/");
+  assert.doesNotMatch(home.text, /action="\/auth\/github\/unlink"/);
+  assert.match(home.text, /Unlinking GitHub needs an emailed code/);
+  assert.equal((await ana.post("/auth/github/unlink", { form: unlink, subject: "9001" })).status, 403);
+  assert.equal(identities(e).filter((i) => i.provider === "github").length, 1);
+  /* Fresh again: it goes, and GitHub is shown as coming. */
+  await ana.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" });
+  const page = await ana.get("/signin/code");
+  await ana.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: codeIn(s.emails.at(-1)) });
+  home = await ana.get("/");
+  const done = await ana.post("/auth/github/unlink", { form: tokenFor(home.text, "/auth/github/unlink"), subject: "9001" });
+  assert.equal(done.status, 303);
+  assert.deepEqual(identities(e).filter((i) => i.user_id === user).map((i) => i.provider), ["email"]);
+  assert.equal(eventsOf(e, user).at(-1), "unlinked_github");
+  assert.match((await ana.get("/")).text, /data-method="github"><strong>GitHub<\/strong> <span class="tag">coming<\/span>/);
 });
 
 test("the sign-in page offers both as plain links, with no script of ours and no change to its policy", async () => {
@@ -444,6 +479,8 @@ test("Google: an id_token that is forged, not for us, not Google's, out of date 
     "wrong aud": { claims: { aud: "someone-else.apps.googleusercontent.com", azp: "someone-else.apps.googleusercontent.com" } },
     "wrong azp": { claims: { azp: "someone-else.apps.googleusercontent.com" } },
     "aud list without azp": { claims: { aud: [GOOGLE_ID, "other"], azp: undefined } },
+    "aud list naming another audience too": { claims: { aud: [GOOGLE_ID, "other"], azp: GOOGLE_ID } },
+    "empty aud list": { claims: { aud: [], azp: GOOGLE_ID } },
     "wrong iss": { claims: { iss: "https://accounts.example.com" } },
     "expired": { claims: { iat: t() - 5 * MINUTE, exp: t() - SKEW - 1 } },
     "issued in the future": { claims: { iat: t() + SKEW + 30, exp: t() + 7200 } },
@@ -475,6 +512,9 @@ test("Google: an id_token that is forged, not for us, not Google's, out of date 
   /* Both issuer spellings Google uses pass, with a minute's skew either way. */
   const b = new Browser(e);
   assert.equal((await viaProvider(b, s, "google", { claims: { iss: "accounts.google.com", iat: t() + SKEW - 5 } })).res.status, 303);
+  /* An audience list that names only us, with azp, passes too. */
+  const c = new Browser(e, { ip: "203.0.113.90" });
+  assert.equal((await viaProvider(c, s, "google", { claims: { aud: [GOOGLE_ID], azp: GOOGLE_ID } })).res.status, 303);
 });
 
 test("Google's keys are fetched once and kept for their max-age, then fetched again", async () => {
@@ -493,6 +533,38 @@ test("Google's keys are fetched once and kept for their max-age, then fetched ag
   assert.equal((await viaProvider(new Browser(e), s, "google", unknown)).res.status, 400);
   assert.equal((await viaProvider(new Browser(e), s, "google", unknown)).res.status, 400);
   assert.equal(s.keyFetches, 3);
+});
+
+test("Google's keys out of date while Google cannot send them: a key held verifies for a day more, asked for once a minute", async () => {
+  const s = services();
+  const e = env();
+  forgetKeys();
+  await viaProvider(new Browser(e), s, "google");
+  assert.equal(s.keyFetches, 1);
+  s.keys = "down";
+  later(3700);
+  assert.equal((await viaProvider(new Browser(e), s, "google")).res.status, 303);
+  assert.equal(s.keyFetches, 2);
+  assert.equal((await viaProvider(new Browser(e), s, "google")).res.status, 303);
+  assert.equal(s.keyFetches, 2, "not asked again within the minute");
+  /* A key we never had is an outage then, not a forgery. */
+  const unknown = { header: { alg: "RS256", kid: "rotated-in" } };
+  assert.equal((await viaProvider(new Browser(e), s, "google", unknown)).res.status, 502);
+  later(61);
+  assert.equal((await viaProvider(new Browser(e), s, "google")).res.status, 303);
+  assert.equal(s.keyFetches, 3);
+  /* A day past its max-age, a held key is too old to use. */
+  later(24 * 3600);
+  const late = new Browser(e);
+  const old = await viaProvider(late, s, "google");
+  assert.equal(old.res.status, 502);
+  assert.match(old.res.text, /could not be reached/);
+  await signedOut(late);
+  /* Back up: fetched again, and signs in. */
+  s.keys = "up";
+  later(61);
+  assert.equal((await viaProvider(new Browser(e), s, "google")).res.status, 303);
+  assert.equal(s.keyFetches, 5);
 });
 
 test("Google: an address Google does not call verified never makes an account, nor joins one", async () => {
