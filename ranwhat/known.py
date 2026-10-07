@@ -620,6 +620,14 @@ class Index(object):
         if not self.kept:
             return
         if not self._stored:
+            # Another part of this run (clean's review keeping a value,
+            # Kept.add) may have kept a key since this index was opened:
+            # writing this one over it would lose what that key hashed. This
+            # index's hashes are under its own key, so it is kept in memory
+            # for this run, and the next run builds it under the stored one.
+            if _stored_key(self.where) is not None:
+                self.kept = False
+                return
             self._stored = _store_key(self.where, self._key)
             if not self._stored:
                 self.kept = False
@@ -635,3 +643,88 @@ class Index(object):
             self._migrated = False
         except OSError:
             self.kept = False
+
+
+# What clean's review was told to keep, by the keyed hash of each value,
+# beside the index and under its key: a value someone chose to leave as it
+# is (a test fixture's password, a key already rotated) is not reported
+# again on the next run, nor masked by clean --apply.
+KEPT_VERSION = 1
+KEPT_FILE = "kept.json"
+
+
+class Kept(object):
+    """The values clean's review was told to keep, as keyed BLAKE2b hashes
+    of each whole value under this install's key: never a value, nor any
+    part or unkeyed hash of one. A file damaged, of another version, or
+    written under another key (the key lost and made again) is read as
+    none kept. `value in kept` asks whether one is."""
+
+    def __init__(self, key=None, hashes=()):
+        self._key = key
+        self._hashes = frozenset(hashes)
+
+    @classmethod
+    def open(cls):
+        """What is kept on this machine, or none."""
+        where = index_dir()
+        key = _stored_key(where)
+        if key is None:
+            return cls()
+        return cls(key, cls._load(where, key))
+
+    @staticmethod
+    def _load(where, key):
+        try:
+            doc = json.loads(_read(os.path.join(where, KEPT_FILE)).decode("utf-8"))
+            if (doc["version"] != KEPT_VERSION
+                    or doc["key"] != _Hashes(key).key_id):
+                return frozenset()
+            return frozenset(_hex(h, _VALUE_SIZE) for h in doc["values"])
+        except (OSError, ValueError, TypeError, KeyError, AttributeError,
+                RecursionError):
+            return frozenset()
+
+    @staticmethod
+    def _of(key, value):
+        h = _hasher(key, b"ranwhat:kept", _VALUE_SIZE)
+        h.update(_bytes(value))
+        return h.digest()
+
+    def __contains__(self, value):
+        return (self._key is not None and isinstance(value, str)
+                and self._of(self._key, value) in self._hashes)
+
+    def __len__(self):
+        return len(self._hashes)
+
+    def __bool__(self):
+        return bool(self._hashes)
+
+    __nonzero__ = __bool__
+
+    @classmethod
+    def add(cls, values):
+        """Keep values, read again from disk first so that nothing another
+        run kept meanwhile is lost: the Kept now on disk, or None where
+        nothing could be written (the values are then reported again next
+        run)."""
+        where = index_dir()
+        key = _stored_key(where)
+        if key is None:
+            key = os.urandom(_KEY_SIZE)
+            if not _store_key(where, key):
+                return None
+            key = _stored_key(where)        # another run's, if it won
+            if key is None:
+                return None
+        hashes = set(cls._load(where, key))
+        hashes.update(cls._of(key, v) for v in values if isinstance(v, str) and v)
+        doc = {"version": KEPT_VERSION, "key": _Hashes(key).key_id,
+               "values": sorted(h.hex() for h in hashes)}
+        try:
+            _write_new(os.path.join(where, KEPT_FILE),
+                       json.dumps(doc, sort_keys=True).encode("utf-8"))
+        except OSError:
+            return None
+        return cls(key, hashes)

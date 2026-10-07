@@ -154,9 +154,14 @@
         It never changes a file: <span class="icode">check --apply</span> is refused, and
         masking is left to <span class="icode">clean</span>. <span class="icode">--json</span> prints the actions and the
         secrets as one document. It exits with status 2 when it found no history to
-        read, so a script can tell a machine with nothing on it from a clean one.
+        read, so a script can tell a machine with nothing on it from a clean one,
+        and 1 on an error. With <span class="icode">--fail-on high</span> it exits 3 when it finds
+        anything that high or higher, and <span class="icode">--sarif PATH</span> writes the findings for
+        code scanning, every secret masked. In CI, the
+        <a href="https://github.com/MatijaMiki/ranwhat#in-ci-the-github-action">GitHub Action</a>
+        runs it with both.
       </p>
-      <p class="flaglist">Flags: <a href="#flag-days"><span class="icode">--days N</span></a>, <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-root"><span class="icode">--root PATH</span></a>, <a href="#flag-state-dir"><span class="icode">--state-dir PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+      <p class="flaglist">Flags: <a href="#flag-days"><span class="icode">--days N</span></a>, <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-root"><span class="icode">--root PATH</span></a>, <a href="#flag-state-dir"><span class="icode">--state-dir PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>, <a href="#flag-fail-on"><span class="icode">--fail-on SEVERITY</span></a>, <a href="#flag-sarif"><span class="icode">--sarif PATH</span></a>.</p>
     </div>
   </div>
 </section>
@@ -330,6 +335,12 @@
           <tr><td><code id="flag-no-interactive">--no-interactive</code></td>
               <td data-label="Commands">clean</td>
               <td data-label="What it does">Report and exit, instead of opening the review session.</td></tr>
+          <tr><td><code id="flag-fail-on">--fail-on SEVERITY</code></td>
+              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="What it does">Exit with status 3 when anything at or above <span class="icode">medium</span>, <span class="icode">high</span> or <span class="icode">critical</span> is found. Every secret clean finds is critical, masked or not. 1 stays an error and 2 nothing read, and either wins over 3.</td></tr>
+          <tr><td><code id="flag-sarif">--sarif PATH</code></td>
+              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="What it does">Also write what was found to PATH as SARIF 2.1.0, for code scanning. Each secret is in it as the report shows it, masked.</td></tr>
           <tr><td><code id="flag-html">--html PATH</code></td>
               <td data-label="Commands">demo, scan, live</td>
               <td data-label="What it does">Write the report as a page to PATH as well.</td></tr>

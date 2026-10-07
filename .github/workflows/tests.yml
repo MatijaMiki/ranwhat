@@ -55,3 +55,47 @@ jobs:
       # 22.13 and later). The feed test runs the real `ranwhat update`
       # against the Worker, so it needs the Python the runner comes with.
       - run: node --test worker/test/list.test.mjs worker/test/feed.test.mjs worker/test/auth.test.mjs worker/test/stripe.test.mjs worker/test/accounts.test.mjs worker/test/plans.test.mjs worker/test/password.test.mjs worker/test/oauth.test.mjs worker/test/webauthn.test.mjs worker/test/passkeys.test.mjs worker/test/device.test.mjs worker/test/machines.test.mjs
+
+  action:
+    name: The GitHub Action fails on findings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # One Claude Code transcript with one high action in it: rm -rf on
+      # a directory under the home directory.
+      - run: |
+          python3 - "$RUNNER_TEMP/projects/-tmp-proj" <<'PY'
+          import json, os, sys, time
+          os.makedirs(sys.argv[1])
+          when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+          row = {"timestamp": when, "message": {"role": "assistant", "content": [
+              {"type": "tool_use", "id": "t1", "name": "Bash",
+               "input": {"command": "rm -rf ~/Documents/archive"}}]}}
+          with open(os.path.join(sys.argv[1], "s1.jsonl"), "w") as fh:
+              fh.write(json.dumps(row) + "\n")
+          PY
+      - id: high
+        uses: ./
+        continue-on-error: true
+        with:
+          fail-on: high
+          upload-sarif: "false"
+          args: --source claude-code --root ${{ runner.temp }}/projects
+      - id: critical
+        uses: ./
+        with:
+          fail-on: critical
+          upload-sarif: "false"
+          sarif-file: critical.sarif
+          args: --source claude-code --root ${{ runner.temp }}/projects
+      - env:
+          HIGH_OUTCOME: ${{ steps.high.outcome }}
+          HIGH_CODE: ${{ steps.high.outputs.exit-code }}
+          CRITICAL_CODE: ${{ steps.critical.outputs.exit-code }}
+        run: |
+          test "$HIGH_OUTCOME" = failure
+          test "$HIGH_CODE" = 3
+          test "$CRITICAL_CODE" = 0
+          python3 -c "import json; r = json.load(open('ranwhat.sarif'))['runs'][0]['results']; assert [x['ruleId'] for x in r] == ['fs.destructive'], r"
