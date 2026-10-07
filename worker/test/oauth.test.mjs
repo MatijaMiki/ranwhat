@@ -6,8 +6,10 @@
  *
  * The cases this file is for: a callback that is not the one this browser
  * started (state, PKCE, nonce, replay, age), an id_token that is not
- * Google's or not for us, and a provider's address that is not verified,
- * which must never make or join an account.
+ * Google's or not for us, a provider's address that is not verified, or
+ * that it verified once but is not the authority for (GitHub's always),
+ * which must never make or join an account, and an unlinked provider
+ * account, which must never link itself back.
  *
  *     node --test --test-timeout=60000 worker/test/oauth.test.mjs
  */
@@ -18,7 +20,8 @@ import { d1 } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const { FRESH_FOR, formToken } = await import("../src/session.js");
-const { FLOW_FOR, SKEW, STARTS_PER_NETWORK, forgetKeys } = await import("../src/oauth.js");
+const { FLOW_FOR, SKEW, STARTS_PER_NETWORK, forgetKeys, googleGivesOut } = await import("../src/oauth.js");
+const { NOTICES_PER_USER_DAY, userForVerifiedEmail } = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const SECRET = "an-account-test-secret-" + "that-is-long-enough-0123456789";
@@ -77,6 +80,7 @@ function services() {
       s.emails.push(JSON.parse(init.body));
       return json({ id: `e${s.emails.length}` });
     }
+    if (u.hostname === "api.pwnedpasswords.com") return new Response("", { status: 200 });
     if (`${u.hostname}${u.pathname}` === "www.googleapis.com/oauth2/v3/certs") {
       s.keyFetches += 1;
       return json({ keys: [JWK] }, 200, { "cache-control": "public, max-age=3600, must-revalidate" });
@@ -96,8 +100,10 @@ function services() {
       }
       grant.used = true;
       const t = nowS();
+      /* A Google Workspace account on example.com unless a test says
+         otherwise: Google is the authority for its address. */
       const claims = { iss: "https://accounts.google.com", azp: GOOGLE_ID, aud: GOOGLE_ID, sub: "1001",
-                       email: "ana@example.com", email_verified: true, iat: t, exp: t + 3600,
+                       email: "ana@example.com", email_verified: true, hd: "example.com", iat: t, exp: t + 3600,
                        nonce: grant.nonce, ...grant.claims };
       for (const k of Object.keys(claims)) if (claims[k] === undefined) delete claims[k];
       return json({ access_token: "ya29." + "test-access", expires_in: 3599, token_type: "Bearer",
@@ -558,7 +564,9 @@ test("GitHub: PKCE and state, the numeric id as the subject, the primary verifie
   const s = services();
   const e = env();
   const b = new Browser(e);
-  const flow = await leave(b, "github");
+  await signInByCode(b, s, "ana@example.com");
+  const user = userOf(e, "ana@example.com");
+  const flow = await leave(b, "github", { link: true });
   assert.equal(`${flow.to.origin}${flow.to.pathname}`, "https://github.com/login/oauth/authorize");
   const q = flow.to.searchParams;
   assert.equal(q.get("client_id"), GITHUB_ID);
@@ -575,54 +583,58 @@ test("GitHub: PKCE and state, the numeric id as the subject, the primary verifie
   }));
   assert.equal(res.status, 303, res.text);
   assert.equal(s256(s.bodies.at(-1).get("code_verifier")), flow.challenge);
-  const user = userOf(e, "ana@example.com");
-  assert.deepEqual(identities(e), [{ provider: "github", provider_subject: "583231", user_id: user, verified_email: "ana@example.com" }]);
-  assert.deepEqual(eventsOf(e, user), ["signup_github"]);
+  assert.deepEqual(identities(e).filter((i) => i.provider === "github"),
+                   [{ provider: "github", provider_subject: "583231", user_id: user, verified_email: "ana@example.com" }]);
+  assert.deepEqual(eventsOf(e, user), ["signup", "linked_github"]);
   assert.ok(s.calls.includes("GET api.github.com/user") && s.calls.includes("GET api.github.com/user/emails"));
-  const [token] = [...s.tokens.keys()];
-  assert.ok(!everything(e).includes(token), "the access token is kept nowhere");
+
+  /* From then on the numeric id signs in to ana's account, whatever
+     address GitHub has for it now, verified or not. */
+  const elsewhere = new Browser(e, { ip: "203.0.113.25" });
+  const back = await viaProvider(elsewhere, s, "github", { user: { id: 583231, login: "ana-codes" }, emails: [] });
+  assert.equal(back.res.status, 303, back.res.text);
+  assert.match((await elsewhere.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
+  assert.deepEqual(eventsOf(e, user), ["signup", "linked_github", "signin_github"]);
+  for (const token of s.tokens.keys()) assert.ok(!everything(e).includes(token), "the access token is kept nowhere");
   assert.ok(!everything(e).includes("ana-codes"), "nor the login");
 });
 
-test("GitHub: only a primary and verified address counts; another verified one never links to its account", async () => {
+test("GitHub: only a primary and verified address counts for a link, and none makes an account", async () => {
   const s = services();
   const e = env();
   const ana = new Browser(e);
   await signInByCode(ana, s, "ana@example.com");
-  const anaId = userOf(e, "ana@example.com");
 
-  /* Ana's address on the account, but not verified there: refused, and
-     ana's account gains nothing. */
+  /* Linked from ana's own page: a primary that is not verified, a
+     verified address that is not the primary, or none at all (user:email
+     not granted) are all refused, and ana's account gains nothing. */
+  for (const what of [
+    { user: { id: 777 }, emails: [{ email: "ana@example.com", primary: true, verified: false }] },
+    { user: { id: 777 }, emails: [{ email: "someone@example.org", primary: true, verified: false },
+                                  { email: "ana@example.com", primary: false, verified: true }] },
+    { user: { id: 779 }, emailsStatus: 404 },
+  ]) {
+    const { res } = await viaProvider(ana, s, "github", what, { link: true });
+    assert.equal(res.status, 403, res.text);
+    assert.match(res.text, /did not vouch for an email address on that account, so it cannot be linked/);
+  }
+  assert.equal(identities(e).filter((i) => i.provider === "github").length, 0);
+
+  /* Signing in with it says which address counts. */
   const unverified = await viaProvider(new Browser(e, { ip: "203.0.113.30" }), s, "github", {
     user: { id: 777 }, emails: [{ email: "ana@example.com", primary: true, verified: false }] });
   assert.equal(unverified.res.status, 403);
   assert.match(unverified.res.text, /only its primary address, and only once GitHub has verified it/);
-  /* Verified, but not the primary. */
-  const secondary = await viaProvider(new Browser(e, { ip: "203.0.113.31" }), s, "github", {
-    user: { id: 777 }, emails: [{ email: "someone@example.org", primary: true, verified: false },
-                                { email: "ana@example.com", primary: false, verified: true }] });
-  assert.equal(secondary.res.status, 403);
-  /* A verified primary of the GitHub user's own, and ana's address
-     verified beside it: the account is the primary's, never ana's. */
+  /* A verified primary of the GitHub user's own, with ana's address
+     verified beside it: no account for either. */
   const mallory = new Browser(e, { ip: "203.0.113.32" });
   const own = await viaProvider(mallory, s, "github", {
     user: { id: 778 }, emails: [{ email: "mallory@example.com", primary: true, verified: true },
                                 { email: "ana@example.com", primary: false, verified: true }] });
-  assert.equal(own.res.status, 303);
-  assert.match((await mallory.get("/")).text, /Signed in as<\/dt><dd>mallory@example\.com/);
-  assert.equal(identities(e).filter((i) => i.user_id === anaId && i.provider === "github").length, 0);
-  /* No address at all: user:email not granted. */
-  const none = await viaProvider(new Browser(e, { ip: "203.0.113.33" }), s, "github", { user: { id: 779 }, emailsStatus: 404 });
-  assert.equal(none.res.status, 403);
-  assert.equal(count(e, "users"), 2);
-
-  /* GitHub vouches for ana's address as the primary: it is ana's way in. */
-  const linked = new Browser(e, { ip: "203.0.113.34" });
-  const vouched = await viaProvider(linked, s, "github", {
-    user: { id: 777 }, emails: [{ email: "ana@example.com", primary: true, verified: true }] });
-  assert.equal(vouched.res.status, 303);
-  assert.match((await linked.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
-  assert.deepEqual(eventsOf(e, anaId).slice(-2), ["linked_github", "signin_github"]);
+  assert.equal(own.res.status, 403);
+  await signedOut(mallory);
+  assert.equal(count(e, "users"), 1);
+  assert.equal(identities(e).filter((i) => i.provider === "github").length, 0);
 });
 
 test("GitHub: a refused code, a bad answer or GitHub down sign nobody in", async () => {
@@ -701,8 +713,8 @@ test("linking refuses another account's way in, another account's address, an un
   const e = env();
   const bo = new Browser(e, { ip: "203.0.113.50" });
   await signInByCode(bo, s, "bo@example.com");
-  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.51" }), s, "github", {
-    user: { id: 31337 }, emails: [{ email: "bo@example.com", primary: true, verified: true }] })).res.status, 303);
+  assert.equal((await viaProvider(bo, s, "github", {
+    user: { id: 31337 }, emails: [{ email: "bo@example.com", primary: true, verified: true }] }, { link: true })).res.status, 303);
   const boId = userOf(e, "bo@example.com");
 
   const ana = new Browser(e);
@@ -756,21 +768,24 @@ test("unlinking needs a fresh code, takes only this account's own, and leaves th
   await viaProvider(ana, s, "github", { user: { id: 9001 } }, { link: true });
   await viaProvider(ana, s, "google", { claims: { sub: "2002" } }, { link: true });
   const bo = new Browser(e, { ip: "203.0.113.60" });
-  await viaProvider(bo, s, "github", { user: { id: 9002 }, emails: [{ email: "bo@example.com", primary: true, verified: true }] });
-  assert.equal(count(e, "identities"), 4);
+  await signInByCode(bo, s, "bo@example.com");
+  await viaProvider(bo, s, "github", { user: { id: 9002 }, emails: [{ email: "bo@example.com", primary: true, verified: true }] },
+                    { link: true });
+  assert.equal(count(e, "identities"), 5);
 
   let home = await ana.get("/");
   const unlink = tokenFor(home.text, "/auth/github/unlink");
   assert.match(home.text, /name="subject" value="9001"/);
   /* bo's GitHub, named in ana's form: nothing happens, and nothing is recorded. */
   assert.equal((await ana.post("/auth/github/unlink", { form: unlink, subject: "9002" })).status, 303);
-  assert.equal(count(e, "identities"), 4);
+  assert.equal(count(e, "identities"), 5);
+  assert.equal(count(e, "unlinked_identities"), 0);
   assert.ok(!eventsOf(e, user).includes("unlinked_github"));
   /* Not fresh: refused. */
   later(FRESH_FOR + 1);
   const stale = await ana.post("/auth/github/unlink", { form: unlink, subject: "9001" });
   assert.equal(stale.status, 403);
-  assert.equal(count(e, "identities"), 4);
+  assert.equal(count(e, "identities"), 5);
   /* Fresh again with a step-up code. */
   home = await ana.get("/");
   assert.doesNotMatch(home.text, /action="\/auth\/github\/unlink"/);
@@ -782,11 +797,270 @@ test("unlinking needs a fresh code, takes only this account's own, and leaves th
   assert.deepEqual(identities(e).filter((i) => i.user_id === user).map((i) => i.provider), ["email", "google"]);
   assert.equal(eventsOf(e, user).at(-1), "unlinked_github");
   assert.match((await ana.get("/")).text, /GitHub account unlinked/);
-  /* That GitHub account no longer opens ana's account; with its verified
-     address it would link again, which is the rule for any sign-in. */
+  /* That GitHub account no longer opens ana's account, even with ana's
+     address as its verified primary. */
   const b = new Browser(e, { ip: "203.0.113.61" });
-  const back = await viaProvider(b, s, "github", { user: { id: 9001 }, emails: [{ email: "x@example.net", primary: true, verified: false }] });
+  const back = await viaProvider(b, s, "github", { user: { id: 9001 } });
   assert.equal(back.res.status, 403);
+  await signedOut(b);
+  assert.deepEqual(identities(e).filter((i) => i.user_id === user).map((i) => i.provider), ["email", "google"]);
+});
+
+/* ---------- verified once is not held now ---------- */
+
+test("Google is the authority only for Gmail and for its Workspace domain", () => {
+  for (const [email, hd] of [["a@gmail.com"], ["A@GMail.com"], ["a@googlemail.com"], ["a@corp.example", "corp.example"],
+                             ["a@CORP.example", "Corp.Example"]]) {
+    assert.equal(googleGivesOut(email, hd), true, `${email} ${hd}`);
+  }
+  for (const [email, hd] of [["a@corp.example"], ["a@corp.example", ""], ["a@corp.example", "other.example"],
+                             ["a@mail.corp.example", "corp.example"], ["a@gmail.com.evil.example"], ["a@corp.example", 1],
+                             [null, "corp.example"], ["corp.example", "corp.example"]]) {
+    assert.equal(googleGivesOut(email, hd), false, `${email} ${hd}`);
+  }
+});
+
+test("Google: an address it verified but does not give out neither makes an account nor joins one, and says the same either way", async () => {
+  const s = services();
+  const e = env();
+  const corp = { sub: "666", email: "alice@corp.example", email_verified: true, hd: undefined };
+  const first = (await viaProvider(new Browser(e, { ip: "203.0.113.66" }), s, "google", { claims: corp })).res;
+  assert.equal(first.status, 403);
+  assert.match(first.text, /Use an emailed code first/);
+  assert.match(first.text, /<a href="\/signin">Sign in with an emailed code<\/a>, which makes the account if there is none yet/);
+  assert.equal(count(e, "users"), 0, "no account made ahead of the address's owner");
+
+  const alice = new Browser(e);
+  await signInByCode(alice, s, "alice@corp.example");
+  const victim = userOf(e, "alice@corp.example");
+  const mails = s.emails.length;
+  for (const claims of [corp, { ...corp, hd: "other.example" }, { ...corp, hd: "" }, { ...corp, email_verified: "true" }]) {
+    const b = new Browser(e, { ip: "203.0.113.67" });
+    const res = (await viaProvider(b, s, "google", { claims })).res;
+    assert.equal(res.status, 403, JSON.stringify(claims));
+    assert.equal(res.text, first.text, "the same page whether or not an account has the address");
+    await signedOut(b);
+  }
+  assert.deepEqual(identities(e), [{ provider: "email", provider_subject: "alice@corp.example", user_id: victim,
+                                     verified_email: "alice@corp.example" }]);
+  assert.equal(rows(e, "SELECT count(*) AS n FROM sessions WHERE user_id = ?", victim)[0].n, 1);
+  assert.deepEqual(eventsOf(e, victim), ["signup"]);
+  assert.equal(s.emails.length, mails, "and nobody is mailed");
+
+  /* Google gives out Gmail addresses itself: those make an account. */
+  const carla = new Browser(e, { ip: "203.0.113.68" });
+  const made = (await viaProvider(carla, s, "google", { claims: { sub: "1234", email: "Carla@Gmail.com", hd: undefined } })).res;
+  assert.equal(made.status, 303, made.text);
+  assert.match((await carla.get("/")).text, /Signed in as<\/dt><dd>carla@gmail\.com/);
+});
+
+test("GitHub never makes an account or joins one by its address, verified or not, and says the same either way", async () => {
+  const s = services();
+  const e = env();
+  const gh = { user: { id: 777, login: "mallory" }, emails: [{ email: "alice@corp.example", primary: true, verified: true }] };
+  const first = (await viaProvider(new Browser(e, { ip: "203.0.113.77" }), s, "github", gh)).res;
+  assert.equal(first.status, 403);
+  assert.match(first.text, /GitHub says the address on that account was verified once, which does not show it\s+is still yours/);
+  assert.match(first.text, /Then link GitHub from your account page/);
+  assert.equal(count(e, "users"), 0);
+
+  const alice = new Browser(e);
+  await signInByCode(alice, s, "alice@corp.example");
+  const victim = userOf(e, "alice@corp.example");
+  const h = new Browser(e, { ip: "203.0.113.78" });
+  const again = (await viaProvider(h, s, "github", gh)).res;
+  assert.equal(again.status, 403);
+  assert.equal(again.text, first.text);
+  await signedOut(h);
+  assert.deepEqual(identities(e).map((i) => i.provider), ["email"]);
+  assert.deepEqual(eventsOf(e, victim), ["signup"]);
+  assert.equal(rows(e, "SELECT count(*) AS n FROM sessions WHERE user_id = ?", victim)[0].n, 1);
+});
+
+test("nobody can make an account ahead of an address's owner, who then has only the ways in they chose", async () => {
+  const s = services();
+  const e = env();
+  const google = { claims: { sub: "666", email: "bob@corp.example", hd: undefined } };
+  const github = { user: { id: 777 }, emails: [{ email: "bob@corp.example", primary: true, verified: true }] };
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.66" }), s, "google", google)).res.status, 403);
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.66" }), s, "github", github)).res.status, 403);
+  assert.equal(count(e, "users"), 0);
+
+  const bob = new Browser(e);
+  await signInByCode(bob, s, "bob@corp.example");
+  const user = userOf(e, "bob@corp.example");
+  assert.deepEqual(eventsOf(e, user), ["signup"]);
+  assert.deepEqual(identities(e).map((i) => i.provider), ["email"]);
+
+  for (const [provider, what] of [["google", google], ["github", github]]) {
+    const back = new Browser(e, { ip: "203.0.113.67" });
+    assert.equal((await viaProvider(back, s, provider, what)).res.status, 403, provider);
+    await signedOut(back);
+  }
+  assert.equal(rows(e, "SELECT count(*) AS n FROM sessions WHERE user_id = ?", user)[0].n, 1);
+  assert.equal(count(e, "users"), 1);
+});
+
+/* ---------- unlinking is for good ---------- */
+
+test("an unlinked Google or GitHub account never links itself back, and only a link from the account page undoes it", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  const user = userOf(e, "ana@example.com");
+  /* Google, the authority for ana's Workspace address, links itself on
+     sign-in; GitHub is linked from the account page. */
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.90" }), s, "google", { claims: { sub: "2002" } })).res.status, 303);
+  assert.equal((await viaProvider(ana, s, "github", { user: { id: 777 } }, { link: true })).res.status, 303);
+  assert.equal(identities(e).filter((i) => i.user_id === user).length, 3);
+
+  for (const [provider, subject] of [["google", "2002"], ["github", "777"]]) {
+    const home = await ana.get("/");
+    assert.match(home.text, /Unlinking one keeps its id here, so that it does not link itself back/);
+    const done = await ana.post(`/auth/${provider}/unlink`, { form: tokenFor(home.text, `/auth/${provider}/unlink`), subject });
+    assert.equal(done.status, 303);
+  }
+  assert.deepEqual(rows(e, "SELECT provider, provider_subject, user_id FROM unlinked_identities ORDER BY provider"),
+                   [{ provider: "github", provider_subject: "777", user_id: user },
+                    { provider: "google", provider_subject: "2002", user_id: user }]);
+
+  /* Each signs in again with ana's address, verified, Google as its
+     authority: neither is let in, and neither is linked. */
+  const events = eventsOf(e, user).length;
+  const google = (await viaProvider(new Browser(e, { ip: "203.0.113.91" }), s, "google", { claims: { sub: "2002" } })).res;
+  assert.equal(google.status, 403);
+  assert.match(google.text, /That Google account was unlinked from the ranwhat account for its address/);
+  const github = (await viaProvider(new Browser(e, { ip: "203.0.113.92" }), s, "github", { user: { id: 777 } })).res;
+  assert.equal(github.status, 403);
+  assert.deepEqual(identities(e).filter((i) => i.user_id === user).map((i) => i.provider), ["email"]);
+  assert.equal(eventsOf(e, user).length, events, "nothing linked, nobody signed in");
+
+  /* Inside the batch too: an unlink that lands after the check holds. */
+  assert.deepEqual(await userForVerifiedEmail(e, { email: "ana@example.com", provider: "google", subject: "2002" }),
+                   { refused: "unlinked" });
+  assert.equal(identities(e).filter((i) => i.provider === "google").length, 0);
+  /* Another Google account with ana's address is not held back. */
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.93" }), s, "google", { claims: { sub: "3003" } })).res.status, 303);
+
+  /* Linking it again from the account page, with a fresh code, takes the
+     note away, and it signs in by itself again. */
+  assert.equal((await viaProvider(ana, s, "google", { claims: { sub: "2002" } }, { link: true })).res.status, 303);
+  assert.deepEqual(rows(e, "SELECT provider FROM unlinked_identities"), [{ provider: "github" }]);
+  const g = new Browser(e, { ip: "203.0.113.94" });
+  assert.equal((await viaProvider(g, s, "google", { claims: { sub: "2002" } })).res.status, 303);
+  assert.match((await g.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
+});
+
+test("signing out everywhere can take every Google, GitHub and passkey way in with it, with a fresh code, for good", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  const user = userOf(e, "ana@example.com");
+  let home = await ana.get("/");
+  assert.doesNotMatch(home.text, /remove every other way in/, "not offered with nothing to remove");
+  await viaProvider(ana, s, "github", { user: { id: 777 } }, { link: true });
+  await viaProvider(ana, s, "google", { claims: { sub: "2002" } }, { link: true });
+  e.LIST.sql.prepare(`INSERT INTO passkeys (id, user_id, public_key, sign_count, backed_up, label, created_at)
+                      VALUES ('pk1', ?, 'AQ', 0, 0, 'Phone', ?)`).run(user, nowS());
+  const elsewhere = new Browser(e, { ip: "203.0.113.95" });
+  assert.equal((await viaProvider(elsewhere, s, "github", { user: { id: 777 } })).res.status, 303);
+
+  home = await ana.get("/");
+  assert.match(home.text, /<button type="submit">Sign out everywhere and remove every other way in<\/button>/);
+  assert.match(home.text, /leaving the emailed code\./);
+  const token = tokenFor(home.text, "/signout-all");
+  /* Not fresh: refused, and nothing changes, not even the sessions. */
+  later(FRESH_FOR + 1);
+  home = await ana.get("/");
+  assert.doesNotMatch(home.text, /<button type="submit">Sign out everywhere and remove/);
+  assert.match(home.text, /confirm with an\s+emailed code first/);
+  const stale = await ana.post("/signout-all", { form: token, ways: "remove" });
+  assert.equal(stale.status, 403);
+  assert.match(stale.text, /so nothing was done/);
+  assert.equal(identities(e).filter((i) => i.provider !== "email").length, 2);
+  assert.equal(count(e, "passkeys"), 1);
+  assert.equal(count(e, "sessions"), 2);
+  later(-(FRESH_FOR + 1));
+
+  const done = await ana.post("/signout-all", { form: token, ways: "remove" });
+  assert.equal(done.status, 303);
+  assert.equal(done.location, "/signin");
+  assert.deepEqual(identities(e).map((i) => i.provider), ["email"]);
+  assert.equal(count(e, "passkeys"), 0);
+  assert.equal(count(e, "sessions"), 0);
+  assert.equal(count(e, "unlinked_identities"), 2);
+  assert.deepEqual(eventsOf(e, user).slice(-2), ["ways_removed", "signout_all"]);
+  assert.equal((await elsewhere.get("/")).location, "/signin", "the session GitHub opened is over");
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.96" }), s, "github", { user: { id: 777 } })).res.status, 403);
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.96" }), s, "google", { claims: { sub: "2002" } })).res.status, 403);
+  assert.equal(count(e, "sessions"), 0);
+});
+
+test("a password reset can take every Google, GitHub and passkey way in with it", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  const user = userOf(e, "ana@example.com");
+  await viaProvider(ana, s, "github", { user: { id: 777 } }, { link: true });
+  e.LIST.sql.prepare(`INSERT INTO passkeys (id, user_id, public_key, sign_count, backed_up, label, created_at)
+                      VALUES ('pk1', ?, 'AQ', 0, 0, 'Phone', ?)`).run(user, nowS());
+
+  const b = new Browser(e, { ip: "203.0.113.97" });
+  const form = await b.get("/reset");
+  await b.post("/reset", { form: tokenFor(form.text, "/reset"), email: "ana@example.com", "cf-turnstile-response": "solved:reset" });
+  const page = await b.get("/signin/code");
+  assert.match(page.text, /<label><input type="checkbox" name="ways" value="remove"> Also unlink every Google and GitHub account/);
+  const done = await b.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: codeIn(s.emails.at(-1)),
+                                              password: "a long and unbreached passphrase", ways: "remove" });
+  assert.equal(done.status, 303, done.text);
+  assert.deepEqual(identities(e).map((i) => i.provider), ["email"]);
+  assert.equal(count(e, "passkeys"), 0);
+  assert.deepEqual(rows(e, "SELECT provider, provider_subject FROM unlinked_identities"), [{ provider: "github", provider_subject: "777" }]);
+  assert.deepEqual(eventsOf(e, user).slice(-2), ["password_added", "ways_removed"]);
+  assert.equal((await ana.get("/")).location, "/signin", "every other session ended");
+});
+
+/* ---------- telling the account ---------- */
+
+test("the account's address is told when a Google or GitHub account is linked to it, within a daily share", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  const user = userOf(e, "ana@example.com");
+  const mails = s.emails.length;
+  /* Google links itself, Google being the authority for the address;
+     GitHub is linked from the account page. */
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.98" }), s, "google", { claims: { sub: "2002" } })).res.status, 303);
+  assert.equal((await viaProvider(ana, s, "github", { user: { id: 777 } }, { link: true })).res.status, 303);
+  const notices = s.emails.slice(mails);
+  assert.deepEqual(notices.map((m) => m.text.split("\n")[0]), [
+    "A Google account was linked to your ranwhat account (ana@example.com), and can now sign in to it.",
+    "A GitHub account was linked to your ranwhat account (ana@example.com), and can now sign in to it.",
+  ]);
+  for (const m of notices) {
+    assert.deepEqual(m.to, ["ana@example.com"]);
+    assert.equal(m.subject, "A new way into your ranwhat account");
+    assert.match(m.text, /Sign out everywhere and remove every other way in/);
+    assert.ok(!JSON.stringify(m).includes("2002") && !JSON.stringify(m).includes("777"), "no provider id");
+  }
+  /* Signing in with one already linked, or making an account with
+     Google, tells nobody: nothing was added to an account. */
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.98" }), s, "google", { claims: { sub: "2002" } })).res.status, 303);
+  assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.98" }), s, "google",
+    { claims: { sub: "4004", email: "dee@gmail.com", hd: undefined } })).res.status, 303);
+  assert.equal(s.emails.length, mails + 2);
+  /* At most NOTICES_PER_USER_DAY a day for one account, from the
+     signed-in reserve; the activity lists every link all the same. */
+  for (let id = 800; id < 800 + NOTICES_PER_USER_DAY; id++) {
+    assert.equal((await viaProvider(ana, s, "github", { user: { id } }, { link: true })).res.status, 303);
+  }
+  assert.equal(s.emails.length, mails + NOTICES_PER_USER_DAY);
+  assert.deepEqual(rows(e, "SELECT sent FROM mail_counts WHERE kind = 'auth-stepup'"), [{ sent: NOTICES_PER_USER_DAY }]);
+  assert.equal(eventsOf(e, user).filter((x) => x === "linked_github").length, 1 + NOTICES_PER_USER_DAY);
 });
 
 /* ---------- limits, the session, and the sweep ---------- */

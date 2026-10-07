@@ -8,17 +8,24 @@
  * what is out of date with accounts on or off: switching them off stops
  * serving them, not deleting what this file promises to delete.
  *
- * Every table the accounts design needs is made here, in one go, including
- * the ones later work fills (passwords, passkeys, Google and GitHub
- * identities, machines, subscriptions linked to an organisation, grants,
- * invites, device codes). Later changes then add routes, not ALTERs.
+ * Every table the accounts design needs is made here, including the ones
+ * later work fills (passwords, passkeys, Google and GitHub identities,
+ * machines, subscriptions linked to an organisation, grants, invites,
+ * device codes). Later changes add routes and new tables, and never
+ * change the columns of a table an earlier deploy may have made:
+ * CREATE TABLE IF NOT EXISTS does nothing to a table that is there, and
+ * the first deploy's tables are in every D1 where ACCOUNTS_ON was ever
+ * set. A change to one would need an ALTER, run on purpose.
  *
  * Sign-in methods meet in one place, userForVerifiedEmail(). The emailed
- * code is the first; a password, Google and GitHub come through the same
- * door. Two methods land on the same account only through an address the
- * method itself verified, never through one someone typed. A passkey
- * never makes or joins an account: it is added to the one its owner is
- * signed in to (passkeys.js), and opens only that one.
+ * code is the first; a password, and Google where it is the authority for
+ * the address (oauth.js), come through the same door. Two methods land on
+ * the same account only through an address the method itself proved is
+ * held now, never through one someone typed. GitHub, and Google for an
+ * address it does not give out, only open an account that linked them
+ * from its own page. A passkey never makes or joins an account either: it
+ * is added to the one its owner is signed in to (passkeys.js), and opens
+ * only that one.
  *
  * The tables live in the feed's D1 database (LIST) rather than a new one,
  * because machines join the feed's tokens and org_subscriptions joins its
@@ -52,6 +59,14 @@ export const STEPUP_RESERVE = 10;
    itself over and over, from as many networks as it likes, uses up its own
    day and nobody else's. */
 export const STEPUPS_PER_USER_DAY = 5;
+
+/* The email that tells an account a way in was added to it (a Google or
+   GitHub account linked, a passkey added: session.js's tellWayIn()) is
+   mail a signed-in account causes, so it comes out of the same reserve,
+   under a daily share of its own for each account, which step-ups cannot
+   use up. Past either, the notice is skipped: the account's activity
+   still lists what was added. */
+export const NOTICES_PER_USER_DAY = 3;
 
 export const now = () => Math.floor(Date.now() / 1000);
 
@@ -96,6 +111,19 @@ const SCHEMA = [
      PRIMARY KEY (provider, provider_subject))`,
   `CREATE INDEX IF NOT EXISTS identities_user ON identities (user_id)`,
 
+  /* A Google or GitHub account (provider and provider_subject as in
+     identities) that was unlinked from user_id's account. It never links
+     itself to that account again through the account's address
+     (oauth.js); only linking it from the account page, with a fresh code,
+     takes this row away. Kept while the account is: it holds the
+     provider's id and no address. */
+  `CREATE TABLE IF NOT EXISTS unlinked_identities (
+     provider TEXT NOT NULL,
+     provider_subject TEXT NOT NULL,
+     user_id TEXT NOT NULL,
+     unlinked_at INTEGER NOT NULL,
+     PRIMARY KEY (provider, provider_subject, user_id))`,
+
   /* A password, as its PBKDF2 hash with the salt and iteration count in
      the same string, never the password. One per person. */
   `CREATE TABLE IF NOT EXISTS credentials (
@@ -109,20 +137,21 @@ const SCHEMA = [
   /* Passkeys (passkeys.js): a WebAuthn credential's id and public key,
      never anything that could sign in by itself. id and public_key are
      base64url, the key as the COSE bytes the authenticator sent, which
-     say their own algorithm; alg repeats it for the page. label: what its
-     owner called it on the web. last_used_day: the UTC day (days since
-     1970) it last signed in, and no finer. Nothing had made this table
-     when it took this shape: accounts had never been switched on. */
+     say their own algorithm. transports: left NULL, as nothing here needs
+     it. label: what its owner called it on the web, never empty
+     (passkeyLabel()). used_at: the start (00:00 UTC) of the day it last
+     signed in, and no finer. The first deploy made this table with these
+     columns, so they stay as they are (see the top of this file). */
   `CREATE TABLE IF NOT EXISTS passkeys (
      id TEXT PRIMARY KEY,
      user_id TEXT NOT NULL,
      public_key TEXT NOT NULL,
-     alg INTEGER NOT NULL,
      sign_count INTEGER NOT NULL DEFAULT 0,
+     transports TEXT,
      backed_up INTEGER NOT NULL DEFAULT 0,
-     label TEXT NOT NULL,
+     label TEXT,
      created_at INTEGER NOT NULL,
-     last_used_day INTEGER)`,
+     used_at INTEGER)`,
   `CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys (user_id)`,
 
   /* The WebAuthn user handle of an account that has added a passkey: 32
@@ -355,14 +384,21 @@ async function tablesMade(db) {
 /* The account an address belongs to, made on first use: a user, their
    personal organisation with them as its owner, and the identity they came
    in with, all in one batch. Every sign-in method calls this, and only once
-   it has verified the address itself: the emailed code by its being typed,
-   Google and GitHub by their verified flag. That is what lets a code, a
-   password and a Google sign-in for one address be one account, and
-   nothing else may join two.
+   it has shown the address is held now: the emailed code by its being
+   typed, Google only where it is the authority for the address (a Gmail
+   address, or one on the Google Workspace domain the token names), never
+   GitHub (oauth.js says why). That is what lets a code, a password and a
+   Google sign-in for one address be one account, and nothing else may
+   join two.
 
    A way in that is already known keeps the account it opened, whatever
    address the provider reports now: a Google or GitHub id stays with its
    person, while an address can be given up and handed to someone else.
+
+   A provider's account that was unlinked from the account with this
+   address (unlinked_identities) is not linked again here: { refused:
+   "unlinked" }. oauth.js checks that first; this holds it inside the
+   batch, against an unlink that lands in between.
 
    Two first sign-ins for one address can race: the unique address lets
    one user in, and the organisation and membership are only written for
@@ -396,13 +432,16 @@ export async function userForVerifiedEmail(env, { email, provider = "email", sub
     db.prepare(`INSERT INTO memberships (org_id, user_id, role, created_at) SELECT ?, ?, 'owner', ? WHERE ${ours}`)
       .bind(org, id, t, id),
     db.prepare(`INSERT OR IGNORE INTO identities (provider, provider_subject, user_id, verified_email, created_at)
-                SELECT ?, ?, id, ?, ? FROM users WHERE email = ?`)
-      .bind(provider, sub, address, t, address),
+                SELECT ?, ?, id, ?, ? FROM users WHERE email = ? AND NOT EXISTS (
+                  SELECT 1 FROM unlinked_identities x
+                  WHERE x.provider = ? AND x.provider_subject = ? AND x.user_id = users.id)`)
+      .bind(provider, sub, address, t, address, provider, sub),
   ]);
   /* The identity says whose it is, so a race over the same way in ends on
      one account too. */
   const user = await db.prepare(
     "SELECT user_id FROM identities WHERE provider = ? AND provider_subject = ?").bind(provider, sub).first();
+  if (!user) return { refused: "unlinked" };
   await db.batch(touch(user.user_id));
   return { id: user.user_id, created: user.user_id === id };
 }
@@ -434,6 +473,28 @@ export function orgName(input) {
 
 export const canManage = (org) => Boolean(org) && (org.role === "owner" || org.role === "admin");
 
+/* ---------- ways in ---------- */
+
+/* The statements that take away every Google and GitHub account linked to
+   `user`'s account and every passkey of it, with the event, for the
+   caller's batch: for someone who signs out everywhere, or resets their
+   password, because one of them may be in someone else's hands. Each
+   provider's account is kept in unlinked_identities, so that none links
+   itself back. The emailed code stays, and the password is the caller's
+   to keep or replace. */
+export function forgetWaysIn(env, { user, org = null }) {
+  const db = env.LIST;
+  return [
+    db.prepare(`INSERT INTO unlinked_identities (provider, provider_subject, user_id, unlinked_at)
+                SELECT provider, provider_subject, user_id, ? FROM identities WHERE user_id = ? AND provider != 'email'
+                ON CONFLICT (provider, provider_subject, user_id) DO UPDATE SET unlinked_at = excluded.unlinked_at`)
+      .bind(now(), user),
+    db.prepare("DELETE FROM identities WHERE user_id = ? AND provider != 'email'").bind(user),
+    db.prepare("DELETE FROM passkeys WHERE user_id = ?").bind(user),
+    event(db, { org, user, what: "ways_removed" }),
+  ];
+}
+
 /* ---------- the audit log ---------- */
 
 /* A statement, so that an event is written in the same batch as what it
@@ -455,14 +516,16 @@ export async function history(env, userId, limit = 10) {
 
 const today = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
 
-/* The day's account mail is two counters. A signed-in step-up draws only
-   on its own STEPUP_RESERVE ('auth-stepup'); everything else, from the
+/* The day's account mail is two counters. A signed-in step-up, and the
+   notice that a way in was added (purpose 'notice'), draw only on
+   STEPUP_RESERVE ('auth-stepup'); everything else, from the
    public sign-in, sign-up and reset forms, on the rest ('auth'). Neither
    can spend the other's, so a stranger draining the forms cannot stop a
    step-up, and a signed-in session spraying step-ups cannot stop anyone
    signing in. */
-const mailKind = (purpose) => (purpose === "stepup" ? "auth-stepup" : "auth");
-const mailCap = (purpose) => (purpose === "stepup" ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+const signedIn = (purpose) => purpose === "stepup" || purpose === "notice";
+const mailKind = (purpose) => (signedIn(purpose) ? "auth-stepup" : "auth");
+const mailCap = (purpose) => (signedIn(purpose) ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
 
 /* How many more account emails for `purpose` may go out today. Read before
    the per-address limits, so a day that is used up answers the same for

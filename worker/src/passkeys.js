@@ -28,10 +28,10 @@
  * verified, so a challenge works once, for the one that asked, whether or
  * not what came with it checks out.
  *
- * Stored. passkeys holds the credential id, the COSE public key, its
- * algorithm, the counter, whether it is backed up, the label and when it
- * was added, and the day (only the day) it last signed in. Nothing about
- * the device, the network or the browser.
+ * Stored. passkeys holds the credential id, the COSE public key (which
+ * says its own algorithm), the counter, whether it is backed up, the label
+ * and when it was added, and the day (only the day) it last signed in.
+ * Nothing about the device, the network or the browser.
  */
 import { sha256 } from "./auth.js";
 import { DAY, HOUR, event, now } from "./accounts.js";
@@ -102,7 +102,7 @@ async function handleOf(env, user) {
 /* An account's passkeys, oldest first. */
 export async function passkeysOf(env, user) {
   const { results } = await env.LIST.prepare(
-    `SELECT id, label, alg, backed_up, created_at, last_used_day FROM passkeys
+    `SELECT id, label, backed_up, created_at, used_at FROM passkeys
      WHERE user_id = ? ORDER BY created_at, id`).bind(user).all();
   return results;
 }
@@ -117,9 +117,9 @@ export function passkeyLabel(input) {
   return [...label].slice(0, MAX_LABEL).join("").trim() || "Passkey";
 }
 
-/* The UTC day of a time, as days since 1970, and back to a date. */
-export const dayOf = (t) => Math.floor(t / DAY);
-export const dateOfDay = (day) => new Date(day * DAY * 1000).toISOString().slice(0, 10);
+/* The start (00:00 UTC) of the day a time falls in: when a passkey was
+   last used, to the day and no finer. */
+export const dayOf = (t) => Math.floor(t / DAY) * DAY;
 
 /* ---------- adding one ---------- */
 
@@ -163,10 +163,10 @@ export async function register(env, who, { clientDataJSON, attestationObject, la
   }
   const t = now();
   const added = await db.prepare(
-    `INSERT INTO passkeys (id, user_id, public_key, alg, sign_count, backed_up, label, created_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM passkeys WHERE user_id = ?) < ?
+    `INSERT INTO passkeys (id, user_id, public_key, sign_count, backed_up, label, created_at)
+     SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM passkeys WHERE user_id = ?) < ?
      ON CONFLICT(id) DO NOTHING`)
-    .bind(made.credentialId, who.user, made.publicKey, made.alg, made.signCount, made.backedUp ? 1 : 0, label, t,
+    .bind(made.credentialId, who.user, made.publicKey, made.signCount, made.backedUp ? 1 : 0, passkeyLabel(label), t,
       who.user, MAX_PASSKEYS).run();
   if (added.meta.changes !== 1) {
     const taken = await db.prepare("SELECT 1 AS yes FROM passkeys WHERE id = ?").bind(made.credentialId).first();
@@ -220,7 +220,7 @@ export async function signIn(env, cookie, { id, clientDataJSON, authenticatorDat
     return { refused: err.why };
   }
   const written = await db.prepare(
-    "UPDATE passkeys SET sign_count = ?, backed_up = ?, last_used_day = ? WHERE id = ? AND sign_count = ?")
+    "UPDATE passkeys SET sign_count = ?, backed_up = ?, used_at = ? WHERE id = ? AND sign_count = ?")
     .bind(used.signCount, used.backedUp ? 1 : 0, dayOf(now()), row.id, row.sign_count).run();
   if (written.meta.changes !== 1) return { refused: "counter" };
   return { user: row.user_id };

@@ -6,7 +6,8 @@
  *
  * The cases this file is for: a challenge that is out of date, used, or
  * someone else's; a form from another site; a counter that does not go
- * up; and that every way a passkey can fail to sign in looks the same.
+ * up; that every way a passkey can fail to sign in looks the same; and a
+ * database whose passkeys table the first deploy made.
  *
  *     node --test --test-timeout=60000 worker/test/passkeys.test.mjs
  */
@@ -23,6 +24,8 @@ const { FRESH_FOR, formToken } = await import("../src/session.js");
 const {
   CHALLENGE_FOR, CHALLENGES_PER_NETWORK, MAX_LABEL, OPTIONS_PER_USER, PAGE_SCRIPT, passkeyLabel,
 } = await import("../src/passkeys.js");
+const { coseKey } = await import("../src/webauthn.js");
+const { schema, sweep } = await import("../src/accounts.js");
 
 const SECRET = "an-account-test-secret-" + "that-is-long-enough-0123456789";
 const SESSION = "__Host-rw_session";
@@ -260,10 +263,20 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
   const [row] = passkeysOf(e, "ana@example.com");
   assert.deepEqual({ ...row, created_at: 0 }, {
     id: device.keys[0].id, user_id: userOf(e, "ana@example.com"), public_key: b64(cbor(device.keys[0].pair.cose)),
-    alg: -7, sign_count: 1, backed_up: 0, label: "Work laptop", created_at: 0, last_used_day: null,
+    sign_count: 1, transports: null, backed_up: 0, label: "Work laptop", created_at: 0, used_at: null,
   });
+  assert.equal(coseKey(unb64(row.public_key)).alg, -7, "the stored key says its own algorithm");
   assert.ok(Math.abs(row.created_at - nowS()) < 5);
   assert.equal(eventsOf(e, "ana@example.com").at(-1), "passkey_added");
+  /* The account's address is told, and told nothing about the passkey
+     but that there is one. */
+  const notice = s.emails.at(-1);
+  assert.deepEqual(notice.to, ["ana@example.com"]);
+  assert.equal(notice.subject, "A new way into your ranwhat account");
+  assert.match(notice.text, /^A passkey was added to your ranwhat account \(ana@example\.com\)/);
+  assert.ok(!JSON.stringify(notice).includes(device.keys[0].id) && !JSON.stringify(notice).includes("Work laptop"));
+  assert.deepEqual(rows(e, "SELECT kind, sent FROM mail_counts ORDER BY kind"),
+                   [{ kind: "auth", sent: 1 }, { kind: "auth-stepup", sent: 1 }], "out of the signed-in reserve");
   assert.equal(rows(e, "SELECT used_at FROM passkey_challenges")[0].used_at > 0, true);
 
   /* The handle is made once; the passkey just added is left out next time. */
@@ -289,7 +302,8 @@ test("adding a passkey takes RS256 and Ed25519 keys too, and labels are cleaned,
     const { res } = await addPasskey(b, new Device({ make }), { label: "" });
     assert.equal(res.status, 303, res.text);
   }
-  assert.deepEqual(passkeysOf(e, "ana@example.com").map((p) => [p.alg, p.label]).sort(), [[-257, "Passkey"], [-8, "Passkey"]]);
+  assert.deepEqual(passkeysOf(e, "ana@example.com").map((p) => [coseKey(unb64(p.public_key)).alg, p.label]).sort(),
+                   [[-257, "Passkey"], [-8, "Passkey"]]);
   assert.equal(passkeyLabel("x".repeat(500)), "x".repeat(MAX_LABEL));
   assert.equal(passkeyLabel("\u0000​"), "Passkey");
   assert.equal(passkeyLabel(" Phone  \t one "), "Phone one");
@@ -559,7 +573,7 @@ test("someone whose only way in besides the code is a passkey signs in with it",
   assert.match(signedIn.text, /Adding or removing a passkey needs an emailed code/);
   const [row] = passkeysOf(e, "ana@example.com");
   assert.equal(row.sign_count, 2);
-  assert.equal(row.last_used_day, today());
+  assert.equal(row.used_at, today() * DAY, "the day, and no finer");
   const date = new Date(today() * DAY * 1000).toISOString().slice(0, 10);
   assert.match(signedIn.text, new RegExp(`last used ${date}`));
 
@@ -596,7 +610,7 @@ test("the counter is written on every sign-in, and one that does not go up is re
     assert.equal((await passkeySignIn(new Browser(e, { ip: "203.0.113.44" }), synced)).status, 303);
   }
   assert.equal(passkeysOf(e, "bo@example.com")[0].sign_count, 0);
-  assert.equal(passkeysOf(e, "bo@example.com")[0].last_used_day, today());
+  assert.equal(passkeysOf(e, "bo@example.com")[0].used_at, today() * DAY);
 });
 
 test("every way a passkey can fail to sign in gets the same answer", async () => {
@@ -822,4 +836,117 @@ test("the sweep deletes challenges once used or out of date", async () => {
   await Promise.all(waits.map((p) => p.catch(() => {})));
   assert.equal(count(e, "passkey_challenges"), 0);
   assert.equal(count(e, "passkeys"), 1);
+});
+
+/* ---------- a database the first deploy made ---------- */
+
+/* The tables the first accounts deploy made (wave 1, merged before passkeys
+   were written), as it made them: they are in every D1 where ACCOUNTS_ON
+   was ever set, and CREATE TABLE IF NOT EXISTS leaves each as it is. */
+const WAVE_1 = [
+  `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, created_at
+   INTEGER NOT NULL, signed_in_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS identities (provider TEXT NOT NULL, provider_subject TEXT NOT NULL, user_id TEXT
+   NOT NULL, verified_email TEXT COLLATE NOCASE, created_at INTEGER NOT NULL, used_at INTEGER, PRIMARY KEY
+   (provider, provider_subject))`,
+  `CREATE INDEX IF NOT EXISTS identities_user ON identities (user_id)`,
+  `CREATE TABLE IF NOT EXISTS credentials (user_id TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN
+   ('password')), hash TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY
+   (user_id, kind))`,
+  `CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, public_key TEXT NOT NULL,
+   sign_count INTEGER NOT NULL DEFAULT 0, transports TEXT, backed_up INTEGER NOT NULL DEFAULT 0, label TEXT,
+   created_at INTEGER NOT NULL, used_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys (user_id)`,
+  `CREATE TABLE IF NOT EXISTS orgs (id TEXT PRIMARY KEY, name TEXT NOT NULL, personal INTEGER NOT NULL DEFAULT
+   1, customer TEXT, created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS memberships (org_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL
+   CHECK (role IN ('owner', 'admin', 'member')), created_at INTEGER NOT NULL, PRIMARY KEY (org_id, user_id))`,
+  `CREATE INDEX IF NOT EXISTS memberships_user ON memberships (user_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS one_owner ON memberships (org_id) WHERE role = 'owner'`,
+  `CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, email TEXT COLLATE NOCASE,
+   role TEXT NOT NULL CHECK (role IN ('admin', 'member')), token_hash TEXT NOT NULL UNIQUE, invited_by TEXT,
+   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, accepted_at INTEGER, revoked_at INTEGER)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS open_invite ON invites (org_id, email) WHERE accepted_at IS NULL AND
+   revoked_at IS NULL`,
+  `CREATE TABLE IF NOT EXISTS org_subscriptions (subscription TEXT PRIMARY KEY, org_id TEXT NOT NULL, how TEXT
+   NOT NULL CHECK (how IN ('checkout', 'session', 'email', 'script')), linked_by TEXT, linked_at INTEGER NOT
+   NULL)`,
+  `CREATE INDEX IF NOT EXISTS org_subscriptions_org ON org_subscriptions (org_id)`,
+  `CREATE TABLE IF NOT EXISTS grants (id INTEGER PRIMARY KEY, org_id TEXT NOT NULL, plan TEXT NOT NULL CHECK
+   (plan IN ('plus', 'team')), starts_at INTEGER NOT NULL, until INTEGER, note TEXT, created_at INTEGER NOT
+   NULL)`,
+  `CREATE INDEX IF NOT EXISTS grants_org ON grants (org_id)`,
+  `CREATE TABLE IF NOT EXISTS machines (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, org_id TEXT NOT NULL,
+   user_id TEXT, kind TEXT NOT NULL CHECK (kind IN ('device', 'ci', 'legacy')), label TEXT NOT NULL, created_at
+   INTEGER NOT NULL, last_used_day INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS machines_org ON machines (org_id)`,
+  `CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, org_id TEXT, created_at
+   INTEGER NOT NULL, seen_at INTEGER NOT NULL, authed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)`,
+  `CREATE TABLE IF NOT EXISTS signins (id TEXT PRIMARY KEY, email TEXT NOT NULL, email_mac TEXT NOT NULL,
+   purpose TEXT NOT NULL CHECK (purpose IN ('signin', 'stepup', 'verify', 'reset')), user_id TEXT, code_mac
+   TEXT NOT NULL, password_hash TEXT, next TEXT NOT NULL DEFAULT '/', created_at INTEGER NOT NULL, expires_at
+   INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, mailed INTEGER NOT NULL DEFAULT 0, used_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS signins_email ON signins (email_mac, created_at)`,
+  `CREATE TABLE IF NOT EXISTS device_codes (device_hash TEXT PRIMARY KEY, user_code_mac TEXT NOT NULL UNIQUE,
+   country TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, polled_at INTEGER, interval INTEGER
+   NOT NULL DEFAULT 5, state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'approved', 'denied',
+   'issued')), user_id TEXT, org_id TEXT, label TEXT, decided_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS auth_events (id INTEGER PRIMARY KEY AUTOINCREMENT, org_id TEXT, user_id TEXT,
+   event TEXT NOT NULL, subject TEXT, at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS auth_events_org ON auth_events (org_id, at)`,
+  `CREATE INDEX IF NOT EXISTS auth_events_user ON auth_events (user_id, at)`,
+  `CREATE TABLE IF NOT EXISTS throttle (key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT
+   NULL)`,
+  `CREATE TABLE IF NOT EXISTS mail_counts (day TEXT NOT NULL, kind TEXT NOT NULL, sent INTEGER NOT NULL,
+   PRIMARY KEY (day, kind))`,
+  `INSERT OR IGNORE INTO settings (key, value) VALUES ('accounts_schema', '1')`,
+];
+
+const columns = (e, table) => rows(e, `SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info('${table}')`);
+
+test("a database the first deploy made: every table it has keeps the columns today's code uses", async () => {
+  const old = env();
+  for (const sql of WAVE_1) old.LIST.sql.exec(sql);
+  await schema(old.LIST);
+  const made = env();
+  await schema(made.LIST);
+  const tables = (e) => rows(e, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").map((r) => r.name);
+  assert.deepEqual(tables(old), tables(made), "the tables made since are added");
+  for (const table of tables(made)) assert.deepEqual(columns(old, table), columns(made, table), table);
+  assert.deepEqual(columns(old, "passkeys").map((c) => c.name),
+                   ["id", "user_id", "public_key", "sign_count", "transports", "backed_up", "label", "created_at", "used_at"]);
+});
+
+test("a database the first deploy made: the account page, adding a passkey, signing in with it, removing it and the sweep work", async () => {
+  const s = services();
+  const e = env();
+  for (const sql of WAVE_1) e.LIST.sql.exec(sql);
+  const b = new Browser(e);
+  await signInByCode(b, s, "ana@example.com");
+  let home = await b.get("/");
+  assert.equal(home.status, 200, home.text);
+  assert.match(home.text, /<span class="tag">none added<\/span>/);
+  const device = new Device();
+  const { res } = await addPasskey(b, device);
+  assert.equal(res.status, 303, res.text);
+  const signedIn = await passkeySignIn(new Browser(e, { ip: "203.0.113.90" }), device);
+  assert.equal(signedIn.status, 303, signedIn.text);
+  assert.equal(passkeysOf(e, "ana@example.com")[0].used_at, today() * DAY);
+  home = await b.get("/");
+  assert.match(home.text, new RegExp(`Work laptop, added [0-9-]+,\\s+last used ${new Date(today() * DAY * 1000).toISOString().slice(0, 10)}`));
+
+  for (const on of ["1", ""]) {
+    const waits = [];
+    await worker.scheduled({}, { ...e, ACCOUNTS_ON: on }, { waitUntil: (p) => waits.push(p) });
+    await Promise.all(waits);
+  }
+  await sweep(e);
+  assert.equal(count(e, "passkey_challenges"), 0, "used challenges are swept");
+
+  const removed = await b.post("/passkeys/remove", { form: tokenFor(home.text, "/passkeys/remove"), id: device.keys[0].id });
+  assert.equal(removed.status, 303, removed.text);
+  assert.equal(count(e, "passkeys"), 0);
+  assert.equal(rows(e, "SELECT value FROM settings WHERE key = 'accounts_schema'")[0].value, "1");
 });

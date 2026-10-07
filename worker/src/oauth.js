@@ -20,21 +20,36 @@
  *   Google  the id_token is verified here: RS256 under a key from Google's
  *           JWKS (kept in memory for its max-age), the issuer, the audience
  *           (our client id), its times within a minute's skew, and the
- *           nonce. sub is the subject; email and email_verified come from
- *           the token.
+ *           nonce. sub is the subject; email, email_verified and hd come
+ *           from the token.
  *   GitHub  the numeric user id is the subject, and the only address taken
  *           is the one GitHub marks primary and verified. The access token
  *           is used for those two calls and kept nowhere.
  *
+ * Verified is not the same as held. A provider's "verified" says the
+ * address was proven once, perhaps years ago: a Google account made on a
+ * work address keeps it verified after its owner leaves and the address
+ * is someone else's, and on GitHub an address stays verified after it
+ * changes hands too (and an Enterprise Managed User can carry whatever
+ * address its enterprise's identity provider set). Google is the
+ * authority, and its word holds today, only for an address it gives out
+ * itself: a Gmail address, or one on the Google Workspace domain the
+ * token's hd claim names (Google's own guidance for sign-in on a
+ * server). GitHub is never the authority for an address.
+ *
  * Which account. A provider's own id, once linked, signs in its account
- * whatever address the provider reports now. Otherwise the provider must
- * say the address is verified, and then the address is the account
- * (userForVerifiedEmail() in accounts.js): an account with it gets this
- * way in linked to it, and an address without one gets an account, as the
- * emailed code would make. An address the provider does not vouch for
- * never makes or joins an account: the emailed code is the way in then.
- * A signed-in person can also link a provider from the account page, with
- * a fresh code, under the same rule.
+ * whatever address the provider reports now. Otherwise only an
+ * authoritative Google answer goes by the address (userForVerifiedEmail()
+ * in accounts.js): an account with it gets this way in linked to it, and
+ * an address without one gets an account, as the emailed code would make,
+ * and the account is mailed when a way in is linked to it. Any other
+ * answer, GitHub's always, neither makes nor joins an account, whether or
+ * not one has the address, and says the same either way: the emailed code
+ * is the way in, and the provider is linked from the account page, with a
+ * fresh code (attach()). A provider's account that was unlinked from an
+ * account never links itself to it again by its address
+ * (unlinked_identities in accounts.js); linking it from the account page
+ * is the only way back.
  *
  * A provider without its client id and secret in the environment is not
  * offered and its routes answer 404.
@@ -163,7 +178,7 @@ export async function begin(request, env, { provider, purpose = "signin", user =
 /* ---------- coming back ---------- */
 
 /* The provider's answer, checked. { ok: true, flow, profile: { subject,
-   email, verified } } or { ok: false, why, flow }:
+   email, verified, authoritative } } or { ok: false, why, flow }:
      "expired"      no flow for this browser, or one already used or out
                     of date (flow is then null);
      "cancelled"    the provider says the person said no;
@@ -238,11 +253,24 @@ async function google(env, { code, verifier, nonceHash }) {
   const answer = await body(res);
   if (!ok || !answer) throw new Refused("invalid");
   const claims = await verifyIdToken(env, answer.id_token, { nonceHash });
-  return {
-    subject: claims.sub,
-    email: typeof claims.email === "string" ? claims.email : null,
-    verified: claims.email_verified === true || claims.email_verified === "true",
-  };
+  const email = typeof claims.email === "string" ? claims.email : null;
+  const verified = claims.email_verified === true || claims.email_verified === "true";
+  return { subject: claims.sub, email, verified, authoritative: verified && googleGivesOut(email, claims.hd) };
+}
+
+const GMAIL = new Set(["gmail.com", "googlemail.com"]);
+
+/* Whether Google gives out `email` itself, so that its verified flag says
+   who holds the address now: a Gmail address, or one on the Workspace
+   domain `hd` names. A Workspace address on another of its domains is
+   treated as any other address: the emailed code once, then a link. */
+export function googleGivesOut(email, hd) {
+  if (typeof email !== "string") return false;
+  const at = email.lastIndexOf("@");
+  if (at < 1) return false;
+  const domain = email.slice(at + 1).trim().toLowerCase();
+  if (GMAIL.has(domain)) return true;
+  return typeof hd === "string" && hd.length > 0 && domain === hd.trim().toLowerCase();
 }
 
 async function github(env, { code, verifier }) {
@@ -277,7 +305,9 @@ async function github(env, { code, verifier }) {
   const primary = Array.isArray(list)
     ? list.find((e) => e && e.primary === true && e.verified === true && typeof e.email === "string")
     : null;
-  return { subject: String(me.id), email: primary ? primary.email : null, verified: Boolean(primary) };
+  /* Never the authority: a verified address stays verified on GitHub
+     after it has changed hands. */
+  return { subject: String(me.id), email: primary ? primary.email : null, verified: Boolean(primary), authoritative: false };
 }
 
 /* ---------- Google's id_token ---------- */
@@ -384,11 +414,22 @@ async function owner(env, provider, subject) {
 /* The address a provider vouched for, as an account may hold it, or null. */
 const vouched = (profile) => (profile.verified ? address(profile.email) : null);
 
+/* Whether `user`'s account had this provider's account unlinked from it. */
+async function unlinkedFrom(env, provider, subject, user) {
+  return Boolean(await env.LIST.prepare(
+    "SELECT 1 AS yes FROM unlinked_identities WHERE provider = ? AND provider_subject = ? AND user_id = ?")
+    .bind(provider, subject, user).first());
+}
+
 /* Signing in with a provider. { user, what } where what is 'signin' (this
-   way in was already linked), 'linked' (the provider's verified address
-   is an account's, which this way in now opens too) or 'signup' (a new
-   account, its organisation and this way in), or { refused: "unverified" }
-   when the provider vouched for no address we can use. */
+   way in was already linked), 'linked' (Google is the authority for an
+   account's address, and this way in now opens it too) or 'signup' (a
+   new account, its organisation and this way in), or { refused }:
+     "unverified"  the provider vouched for no address we can use;
+     "unproven"    it vouched for one it is not the authority for, which
+                   neither makes nor joins an account, with or without one
+                   at that address: the same answer either way;
+     "unlinked"    the account at that address unlinked this way in. */
 export async function arrive(env, provider, profile) {
   const db = env.LIST;
   const known = await owner(env, provider, profile.subject);
@@ -403,12 +444,20 @@ export async function arrive(env, provider, profile) {
   }
   const email = vouched(profile);
   if (!email) return { refused: "unverified" };
+  if (profile.authoritative !== true) return { refused: "unproven" };
+  const holder = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+  if (holder && await unlinkedFrom(env, provider, profile.subject, holder.id)) return { refused: "unlinked" };
   const found = await userForVerifiedEmail(env, { email, provider, subject: profile.subject });
+  if (found.refused) return { refused: found.refused };
   return { user: found.id, what: found.created ? "signup" : "linked" };
 }
 
-/* A signed-in person linking a provider to their account. { what:
-   'linked' | 'already' } or { refused }:
+/* A signed-in person linking a provider to their account, with a fresh
+   code: the code proved the account's address, and the provider's sign-in
+   just now proved this provider's account is theirs, so any address it
+   vouches for will do here, authority or not. Linking it again is how an
+   account takes back a way in it unlinked. { what: 'linked' | 'already' }
+   or { refused }:
      "unverified"  the provider vouched for no address;
      "taken"       this way in already opens another account, and stays
                    with it;
@@ -431,7 +480,11 @@ export async function attach(env, { user, org, provider, profile }) {
   if (added.meta.changes !== 1) {
     return await owner(env, provider, profile.subject) === user ? { what: "already" } : { refused: "taken" };
   }
-  await event(db, { org, user, what: `linked_${provider}` }).run();
+  await db.batch([
+    db.prepare("DELETE FROM unlinked_identities WHERE provider = ? AND provider_subject = ? AND user_id = ?")
+      .bind(provider, profile.subject, user),
+    event(db, { org, user, what: `linked_${provider}` }),
+  ]);
   return { what: "linked" };
 }
 
@@ -444,7 +497,9 @@ export async function linked(env, user) {
 }
 
 /* The statements that take one away, with the event, for the caller's
-   batch; nothing when it is not this account's. */
+   batch; nothing when it is not this account's. The account keeps a note
+   of it (unlinked_identities), so that it does not link itself back the
+   next time it signs in with the account's address. */
 export async function detach(env, { user, org, provider, subject }) {
   const db = env.LIST;
   const mine = await db.prepare(
@@ -452,6 +507,9 @@ export async function detach(env, { user, org, provider, subject }) {
     .bind(provider, subject, user).first();
   if (!mine) return [];
   return [
+    db.prepare(`INSERT INTO unlinked_identities (provider, provider_subject, user_id, unlinked_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT (provider, provider_subject, user_id) DO UPDATE SET unlinked_at = excluded.unlinked_at`)
+      .bind(provider, subject, user, now()),
     db.prepare("DELETE FROM identities WHERE provider = ? AND provider_subject = ? AND user_id = ?")
       .bind(provider, subject, user),
     event(db, { org, user, what: `unlinked_${provider}` }),
