@@ -112,7 +112,7 @@ class OrgAdmin(unittest.TestCase):
     def logged(self):
         return self.db.execute("SELECT org_id, user_id, event, subject FROM auth_events ORDER BY id").fetchall()
 
-    def test_link_lists_the_unrevoked_token_as_a_legacy_machine_and_logs_it_once_as_a_claim_does(self):
+    def test_link_lists_the_unrevoked_token_as_a_legacy_machine_and_logs_it_once(self):
         printed = self.run_tool("link", SUB, ORG)
         self.assertIn("This sends nothing: email the subscriber", printed)
         (machine,) = self.machines()
@@ -130,13 +130,15 @@ class OrgAdmin(unittest.TestCase):
         self.assertEqual(len(self.logged()), 1)
 
     def test_a_link_somewhere_else_lists_and_logs_nothing_here(self):
+        # Linked already by the Worker's webhook (stripe.js's linkOrg()), as a
+        # subscription bought from an account is.
         self.db.execute("INSERT INTO org_subscriptions (subscription, org_id, how, linked_by, linked_at) "
-                        "VALUES (?, ?, 'session', 'u1', 1)", (SUB, OTHER_ORG))
+                        "VALUES (?, ?, 'checkout', NULL, 1)", (SUB, OTHER_ORG))
         self.run_tool("link", SUB, ORG)
-        self.assertEqual(self.links(), [(SUB, OTHER_ORG, "session")])
+        self.assertEqual(self.links(), [(SUB, OTHER_ORG, "checkout")])
         self.assertEqual(self.machines(), [])
         self.assertEqual(self.logged(), [])
-        # Nor is a claim from the dashboard logged as the script's, though its tokens are listed.
+        # Nor is the webhook's link logged as the script's, though its tokens are listed.
         self.run_tool("link", SUB, OTHER_ORG)
         self.assertEqual([m[2] for m in self.machines()], [OTHER_ORG])
         self.assertEqual(self.logged(), [])

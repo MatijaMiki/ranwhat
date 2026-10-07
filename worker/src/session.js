@@ -41,7 +41,6 @@
  */
 import { sha256 } from "./auth.js";
 import { REPLY_TO, escape, mail, resend, same } from "./list.js";
-import { CHECKOUT_ID } from "./stripe.js";
 import {
   ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, NOTICES_PER_USER_DAY, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
   authMailLeft, now, orgFor, spendAuthMail,
@@ -74,18 +73,12 @@ const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".
 
 /* Where a sign-in may send the browser on to: the account, the page that
    approves a terminal (device.js), the one that upgrades to Plus
-   (billing.js), the invite waiting in the browser's cookie (members.js,
+   (billing.js), or the invite waiting in the browser's cookie (members.js,
    which keeps the invite's token out of `next` and so out of the
-   database), or the one that attaches a subscription (claim.js), which
-   may carry the id of the Checkout it came from, of the shape Stripe
-   makes and nothing else, so it stays a path on this host. */
-const NEXT = new Set(["/", "/device", "/upgrade", "/claim", "/invite"]);
-const CLAIM_NEXT = /^\/claim\?session_id=(cs_[A-Za-z0-9_]+)$/;
-export const nextPath = (value) => {
-  if (NEXT.has(value)) return value;
-  const claim = typeof value === "string" ? CLAIM_NEXT.exec(value) : null;
-  return claim && CHECKOUT_ID.test(claim[1]) ? value : "/";
-};
+   database). Anything else, a query string included, goes to the
+   account. */
+const NEXT = new Set(["/", "/device", "/upgrade", "/invite"]);
+export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 /* ---------- secrets ---------- */
 
@@ -570,5 +563,5 @@ export async function current(request, env) {
 }
 
 /* For what needs a code typed in the last 15 minutes: approving a
-   terminal, a CI token, billing, claiming, members, deleting. */
+   terminal, a CI token, billing, members, deleting. */
 export const fresh = (who) => Boolean(who) && who.authed_at > now() - FRESH_FOR;

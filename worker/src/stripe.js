@@ -3,7 +3,9 @@
  *
  *   POST /api/checkout  The pricing page's form (plan=monthly or annual).
  *                       Makes a Checkout Session for the price with that
- *                       plan's lookup key and sends the browser to Stripe.
+ *                       plan's lookup key and sends the browser to Stripe;
+ *                       while accounts are on, to the account's upgrade
+ *                       instead (checkout()).
  *   GET  /api/welcome   Where Stripe sends the browser after paying. Shows
  *                       the token, the same one the email carries.
  *   POST /api/stripe    Stripe's webhook. After a checkout: the token, by
@@ -30,7 +32,7 @@
  * (sync()), once and for good, and the buyer is told to run ranwhat login
  * instead of being sent a token: an organisation's machines each get
  * their own (device.js), so no shared one is made for it, here or on the
- * welcome page. The pricing page's anonymous checkout is unchanged.
+ * welcome page.
  *
  * Such a Checkout is always on the organisation's own Stripe customer,
  * made here before its first one (orgCustomer()) with the owner's address,
@@ -40,11 +42,13 @@
  * and billing.js moves it to the owner's when whoever has it stops being
  * an owner or an admin.
  *
- * A subscription bought there can be attached to an organisation later,
- * on account.ranwhat.com/claim (claim.js): while accounts are on, the
- * welcome page and the token email link there with the Checkout that
- * bought it, and checkoutClaim(), subscriptionClaim() and
- * subscriptionsFor() below are what that page asks Stripe.
+ * While accounts are on, an account's upgrade is the only way to buy Plus:
+ * the pricing page's checkout makes no Checkout of its own and sends the
+ * browser there (checkout()). The welcome page, the webhook and the billing
+ * login go on serving what the pricing page sold before, a Checkout
+ * opened just before accounts were switched on and paid just after among
+ * it, exactly as they did; a subscription bought that way is attached to
+ * an organisation only by hand, with scripts/org_admin.py link.
  *
  * scripts/stripe_setup.py makes the product, its two prices, the webhook
  * endpoint and the portal. Secrets: STRIPE_SECRET_KEY and
@@ -61,11 +65,9 @@ export const PLANS = { monthly: "ranwhat_plus_monthly", annual: "ranwhat_plus_an
 
 const TOLERANCE = 300;            // seconds a webhook signature stays good
 const SHOW_FOR = 24 * 3600;       // the welcome page shows the token this long after checkout
-export const CLAIM_FOR = SHOW_FOR;  // and a checkout's id proves the purchase this long (claim.js)
 const PAID = new Set(["paid", "no_payment_required"]);
-/* A Checkout Session's id, as Stripe makes them; the account host's sign-in
-   may carry one on to /claim (session.js's nextPath()). */
-export const CHECKOUT_ID = /^cs_(test|live)_[A-Za-z0-9]{10,250}$/;
+/* A Checkout Session's id, as Stripe makes them. */
+const CHECKOUT_ID = /^cs_(test|live)_[A-Za-z0-9]{10,250}$/;
 export const SUBSCRIPTION = /^sub_[A-Za-z0-9]{6,250}$/;
 export const CUSTOMER = /^cus_[A-Za-z0-9]{6,250}$/;
 const ORG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -233,10 +235,10 @@ async function linkOrg(env, sub, org) {
 
 /* The subscription's token: the same one on every call, switched on (its
    hash stored and tied to the subscription) by the first. A token revoked
-   since stays revoked: both rows are INSERT OR IGNORE. claim.js calls it
-   for the hash alone, so that the token is listed on the account page
-   even when the welcome page and the email have not made it yet. */
-export async function issue(env, sub) {
+   since (on the account page, once scripts/org_admin.py has linked its
+   subscription to an organisation) stays revoked: both rows are INSERT OR
+   IGNORE. */
+async function issue(env, sub) {
   const db = env.LIST;
   const row = await db.prepare("SELECT gen FROM subscriptions WHERE id = ?").bind(sub.id).first();
   const token = "rw_" + await sign(env, `feed-token:${sub.id}:${row ? row.gen : 0}`);
@@ -252,7 +254,17 @@ export async function issue(env, sub) {
 
 /* ---------- checkout ---------- */
 
+/* The account's upgrade, where Plus is bought while accounts are on. */
+const UPGRADE = `${ACCOUNT_ORIGIN}/upgrade`;
+
 export async function checkout(request, env) {
+  /* With accounts on, Plus belongs to an organisation and is bought from
+     its account (billing.js), so this sends every browser there, before
+     reading the form, asking Stripe or writing anything, and to the same
+     address whatever the request says. Nobody had bought Plus here when
+     that was decided; anything bought here before the switch is attached
+     to an organisation by hand, with scripts/org_admin.py link. */
+  if (accountsOn(env)) return Response.redirect(UPGRADE, 303);
   if (!sellable(env)) return closed();
   let plan = null;
   try {
@@ -438,69 +450,9 @@ export async function welcome(request, env) {
     <p>After that, <code>uvx ranwhat update</code> fetches the newest catalogue
        with no token to type.</p>
     <p>Keep the token to yourself: anyone holding it gets your feed. It stops
-       working when the subscription ends.</p>${attachHtml(env, session)}
+       working when the subscription ends.</p>
     <p><a href="/api/billing">Manage billing</a>: change plan or card, get
        invoices, or cancel.</p>`);
-}
-
-/* Where a subscription bought here is attached to an account
-   (claim.js), with the Checkout that bought it, which shows it is the
-   buyer's for CLAIM_FOR from when the Checkout was made. Only while
-   accounts are on: dark, the account host answers nothing, and the
-   welcome page and the email say what they always have.
-
-   The checkout's own link is given only while it has CLAIM_LINK_LEFT or
-   more to work: a checkout paid with something that takes days (a bank
-   debit) is mailed when the payment clears, by when its link has run out
-   or nearly, so that email (and the welcome page by then) points to Find
-   my subscription instead, which looks the subscription up by the
-   address it was paid with. */
-const claimUrl = (id) => `${ACCOUNT_ORIGIN}/claim?session_id=${id}`;
-const FIND_URL = `${ACCOUNT_ORIGIN}/claim`;
-const CLAIM_LINK_LEFT = 2 * 3600;
-const stamp = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
-
-/* { url, until }: the checkout's link and when it stops working, or Find
-   my subscription's page with until null; null while accounts are dark. */
-function attachVia(env, session) {
-  if (!accountsOn(env) || !session || !CHECKOUT_ID.test(String(session.id))) return null;
-  const until = Number.isInteger(session.created) ? session.created + CLAIM_FOR : 0;
-  return until - now() >= CLAIM_LINK_LEFT ? { url: claimUrl(session.id), until } : { url: FIND_URL, until: null };
-}
-
-function attachHtml(env, session) {
-  const via = attachVia(env, session);
-  if (!via) return "";
-  const how = via.until ? `<a href="${escape(via.url)}">Attach to an account</a>, one you have or one you make
-       there` : `Attach it to an account, one you have or one you make there, with Find my subscription on
-       <a href="${escape(via.url)}">${ACCOUNT_HOST}/claim</a>, which looks it up by the address you paid with`;
-  return `
-    <h2>Attach it to an account</h2>
-    <p>${how}: your organisation is then on Plus, and each machine links itself with
-       <code>uvx ranwhat login</code> instead of sharing this token. The token keeps working, listed on
-       your account page, where you can revoke it.</p>`;
-}
-
-function attachText(env, session) {
-  const via = attachVia(env, session);
-  if (!via) return [];
-  return [
-    ...(via.until ? [
-      "Attach to an account, one you have or one you make there (the link",
-      `works until ${stamp(via.until)}; after that, Find my subscription on`,
-      "the same page looks it up by this address):",
-    ] : [
-      "Attach to an account, one you have or one you make there, with Find",
-      "my subscription, which looks it up by this address:",
-    ]),
-    "",
-    `  ${via.url}`,
-    "",
-    "Then link each machine with `uvx ranwhat login` instead of sharing the",
-    "token. The token keeps working, listed on your account page, where you",
-    "can revoke it.",
-    "",
-  ];
 }
 
 const closed = () => page("Not open yet", `<h1>Checkout is not open yet.</h1>
@@ -593,7 +545,7 @@ async function completed(env, session) {
     "UPDATE subscriptions SET mailed_at = ? WHERE id = ? AND mailed_at IS NULL").bind(now(), sub.id).run();
   if (!claimed.meta.changes) return;
   try {
-    await mailToken(env, to, token, session);
+    await mailToken(env, to, token);
   } catch (err) {
     await db.prepare("UPDATE subscriptions SET mailed_at = NULL WHERE id = ?").bind(sub.id).run();
     throw err;
@@ -690,20 +642,8 @@ async function mailPlusOn(env, to, orgName, { twice = false } = {}) {
   });
 }
 
-/* checkout: the Checkout Session it was bought with, for the link that
-   attaches it to an account (attachVia()). */
-async function mailToken(env, to, token, checkout) {
+async function mailToken(env, to, token) {
   const t = escape(token);
-  const via = attachVia(env, checkout);
-  const where = !via ? "" : via.until
-    ? `one you have or one you make there (the link works until ${stamp(via.until)}; after that, Find
-         my subscription on the same page looks it up by this address)`
-    : "one you have or one you make there, with Find my subscription, which looks it up by this address";
-  const attach = via ? `
-      <p style="margin-top:22px"><a href="${escape(via.url)}" style="color:#b8482d">Attach to
-         an account</a>, ${where}. Then link each machine with <code style="${CODE}">uvx ranwhat login</code>
-         instead of sharing the token. The token keeps working, listed on your account page, where you
-         can revoke it.</p>` : "";
   await resend(env, "POST", "/emails", {
     from: SENDER,
     to: [to],
@@ -726,7 +666,6 @@ async function mailToken(env, to, token, checkout) {
       "token to type. Keep the token to yourself: anyone holding it gets your",
       "feed. It stops working when the subscription ends.",
       "",
-      ...attachText(env, checkout),
       `Change plan or card, get invoices, or cancel: ${ORIGIN}/api/billing`,
       "Questions: reply to this email.",
       "",
@@ -741,7 +680,7 @@ async function mailToken(env, to, token, checkout) {
       <p><code style="${CODE};word-break:break-all">$env:RANWHAT_TOKEN="${t}"; uvx ranwhat update --save-token</code></p>
       <p>After that, <code style="${CODE}">uvx ranwhat update</code> fetches the newest catalogue
          with no token to type. Keep the token to yourself: anyone holding it gets your feed.
-         It stops working when the subscription ends.</p>${attach}
+         It stops working when the subscription ends.</p>
       <p style="margin-top:22px"><a href="${ORIGIN}/api/billing" style="color:#b8482d">Manage billing</a>:
          change plan or card, get invoices, or cancel. Questions: reply to this email.</p>`),
   });
@@ -821,116 +760,20 @@ function termsOf(sub) {
    does. */
 export const refreshTerms = (env, id) => sync(env, id);
 
-/* ---------- claiming, from an account ---------- */
-
-/* A subscription bought on the pricing page, attached to an organisation
-   later (claim.js, which checks who asks, their role and the fresh code
-   before calling any of these). Two things show it is the asker's, each
-   fetched from Stripe again here and never taken from the form: the
-   Checkout Session that bought it, up to CLAIM_FOR after paying
-   (checkoutClaim()), or its Stripe customer's email being the address
-   the asker has just typed a code for (subscriptionClaim()). A feed token
-   is neither: it is a shared secret, and holding one shows nothing about
-   who paid.
-
-   Each returns { sub, email }: sub as sync() returns it, its status kept
-   now, and email where the notice of the claim goes, the customer's as
-   Stripe has it (or the checkout's), used for that email and kept
-   nowhere. Or { refused } with why:
-     unknown   not found, not something this sells, or (by email) not the
-               asker's: one answer for each, so it tells nobody whose a
-               subscription is
-     account   bought from an account, so it is that organisation's
-     old       a checkout made more than CLAIM_FOR ago
-     unpaid    a checkout that is not complete and paid
-     inactive  a subscription that is not LIVE
-   Throws as stripe() does, but for a 404, which is unknown. */
-
 const idOf = (v) => (typeof v === "string" ? v : v && typeof v.id === "string" ? v.id : "");
-const lower = (v) => (typeof v === "string" ? v.trim().toLowerCase() : "");
 
-async function found(env, path) {
+/* The email Stripe holds for a customer, or null for one deleted, without
+   one, or not found (billing.js's billingEmailFollows()). Throws as
+   stripe() does, but for a 404. */
+export async function customerEmail(env, customer) {
+  const id = idOf(customer);
+  if (!CUSTOMER.test(id)) return null;
+  let c;
   try {
-    return await stripe(env, "GET", path);
+    c = await stripe(env, "GET", `/customers/${id}`);
   } catch (err) {
     if (err.status === 404) return null;
     throw err;
   }
-}
-
-/* The email Stripe holds for a customer, or null for one deleted, without
-   one, or not found. */
-export async function customerEmail(env, customer) {
-  const id = idOf(customer);
-  if (!CUSTOMER.test(id)) return null;
-  const c = await found(env, `/customers/${id}`);
   return c && !c.deleted && typeof c.email === "string" && c.email ? c.email : null;
-}
-
-const ours = (sub) => Boolean(sub && sub.metadata && sub.metadata.product === PRODUCT);
-
-export async function checkoutClaim(env, id) {
-  if (typeof id !== "string" || !CHECKOUT_ID.test(id)) return { refused: "unknown" };
-  const session = await found(env, `/checkout/sessions/${id}`);
-  if (!ours(session) || session.mode !== "subscription") return { refused: "unknown" };
-  if (session.metadata.org !== undefined) return { refused: "account" };
-  if (!Number.isInteger(session.created) || now() - session.created > CLAIM_FOR) return { refused: "old" };
-  if (session.status !== "complete" || !PAID.has(session.payment_status)) return { refused: "unpaid" };
-  const subId = idOf(session.subscription);
-  const fetched = SUBSCRIPTION.test(subId) ? await found(env, `/subscriptions/${subId}`) : null;
-  if (!ours(fetched)) return { refused: "unknown" };
-  if (fetched.metadata.org !== undefined) return { refused: "account" };
-  const sub = await keep(env, fetched);
-  if (!LIVE.has(sub.status)) return { refused: "inactive" };
-  const paidWith = session.customer_details && typeof session.customer_details.email === "string"
-    ? session.customer_details.email : null;
-  return { sub, email: await customerEmail(env, fetched.customer) || paidWith };
-}
-
-/* `email`: the address the asker has just typed a code for. The
-   subscription's customer is checked against it before anything else
-   about the subscription is told. */
-export async function subscriptionClaim(env, id, email) {
-  if (typeof id !== "string" || !SUBSCRIPTION.test(id) || !lower(email)) return { refused: "unknown" };
-  const fetched = await found(env, `/subscriptions/${id}`);
-  if (!ours(fetched)) return { refused: "unknown" };
-  const theirs = await customerEmail(env, fetched.customer);
-  if (!theirs || lower(theirs) !== lower(email)) return { refused: "unknown" };
-  if (fetched.metadata.org !== undefined) return { refused: "account" };
-  const sub = await keep(env, fetched);
-  if (!LIVE.has(sub.status)) return { refused: "inactive" };
-  return { sub, email: theirs };
-}
-
-/* Find my subscription: the live subscriptions this sells, bought on the
-   pricing page, whose Stripe customer's email is `email`, the address the
-   asker has just typed a code for (claim.js asks only after they click).
-   Stripe keeps a customer's email as the buyer typed it at Checkout, and
-   its list filter (/customers?email=) matches it exactly, capitals and
-   all, while an account's address is lower-cased; so the customers are
-   also looked up with Stripe's customer search, whose exact match
-   (email:"...") ignores case (the M0 test-mode check confirms both).
-   Each customer found either way is checked again here, case aside, and
-   counted once. At most ten customers each way, and twenty subscriptions
-   of each. Read only: [{ id, status, interval, since }]. */
-export async function subscriptionsFor(env, email) {
-  const address = lower(email);
-  if (!address) return [];
-  const { data: listed = [] } = await stripe(env, "GET", "/customers", { email: address, limit: 10 });
-  /* No quote or backslash can be in an address session.js accepts; one
-     that had either is not searched for, rather than escaped. */
-  const { data: searched = [] } = /["\\]/.test(address) ? {}
-    : await stripe(env, "GET", "/customers/search", { query: `email:"${address}"`, limit: 10 });
-  const seen = new Set();
-  const out = [];
-  for (const c of [...listed, ...searched]) {
-    if (!c || c.deleted || !CUSTOMER.test(idOf(c)) || lower(c.email) !== address || seen.has(c.id)) continue;
-    seen.add(c.id);
-    const { data: subs = [] } = await stripe(env, "GET", "/subscriptions", { customer: c.id, limit: 20 });
-    for (const sub of subs) {
-      if (!ours(sub) || !SUBSCRIPTION.test(idOf(sub)) || sub.metadata.org !== undefined || !LIVE.has(sub.status)) continue;
-      out.push({ id: sub.id, status: sub.status, interval: intervalOf(sub), since: at(sub.start_date) || at(sub.created) });
-    }
-  }
-  return out;
 }

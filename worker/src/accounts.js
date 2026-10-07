@@ -65,10 +65,7 @@ export const STEPUPS_PER_USER_DAY = 5;
    mail a signed-in account causes, so it comes out of the same reserve,
    under a daily share of its own for each account, which step-ups cannot
    use up. Past either, the notice is skipped: the account's activity
-   still lists what was added. The notice to a Stripe customer that their
-   subscription was attached to an organisation (claim.js) comes out of
-   the same reserve, at most once for each subscription ever sold, and is
-   never skipped: without it, nothing is attached. */
+   still lists what was added. */
 export const NOTICES_PER_USER_DAY = 3;
 
 /* Invites to an organisation (members.js) have a day of their own, apart
@@ -240,9 +237,10 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS org_subscriptions_org ON org_subscriptions (org_id)`,
 
   /* What the billing panel shows of a Stripe subscription, as stripe.js's
-     keep() last fetched it (every webhook event about it, and every
-     claim): monthly or yearly, and when it renews or ends. Drawing the
-     account page reads this and asks Stripe nothing. */
+     keep() last fetched it (every webhook event about it, and the billing
+     panel's one read of a subscription linked by scripts/org_admin.py):
+     monthly or yearly, and when it renews or ends. Drawing the account
+     page reads this and asks Stripe nothing. */
   `CREATE TABLE IF NOT EXISTS subscription_terms (
      subscription TEXT PRIMARY KEY,
      interval TEXT,

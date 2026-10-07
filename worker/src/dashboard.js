@@ -82,11 +82,6 @@
  *                       the customer of a subscription linked to the
  *                       organisation, for an owner or admin with a fresh
  *                       code.
- *   GET  /claim         Attaches a subscription bought without an account
- *   POST /claim         to the organisation (claim.js): from the welcome
- *   POST /claim/find    page's or the email's link, or found by the email
- *                       just confirmed, for an owner or admin with a fresh
- *                       code.
  *   POST /members/invite   Invites someone by email to a Plus or Team
  *                       organisation, as an owner or admin with a fresh
  *                       code (members.js).
@@ -147,7 +142,6 @@ import {
 } from "./passkeys.js";
 import { approve, deny, deviceLookup, devicePage } from "./device.js";
 import { billingPanel, billingPost, upgradePage, upgradePost } from "./billing.js";
-import { CLAIM_EVENTS, claimFind, claimPage, claimPost } from "./claim.js";
 import {
   MEMBER_EVENTS, acceptPost, inviteAgain, invitePage, invitePost, leavePost, membersPanel, removePost,
   revokeInvitePost, rolePost, switchPost, switcher, transferPost,
@@ -748,7 +742,6 @@ const EVENTS = {
   upgrade_started: "Checkout for Plus opened",
   billing_opened: "Billing opened, with a fresh code",
   plus_linked: "Plus subscription linked to the organisation",
-  ...CLAIM_EVENTS,
   ...MEMBER_EVENTS,
 };
 
@@ -1637,8 +1630,6 @@ const ROUTES = {
   "/tokens/ci": { POST: ciTokenPost },
   "/upgrade": { GET: upgradePage, POST: upgradePost },
   "/billing": { POST: billingPost },
-  "/claim": { GET: claimPage, POST: claimPost },
-  "/claim/find": { POST: claimFind },
   "/members/invite": { POST: invitePost },
   "/invite": { GET: inviteAgain, POST: acceptPost },
   "/invites/revoke": { POST: revokeInvitePost },

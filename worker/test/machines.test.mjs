@@ -174,7 +174,7 @@ function join(e, email, orgId, role = "member") {
   run(e, "UPDATE sessions SET org_id = ? WHERE user_id = ?", orgId, user);
 }
 
-/* A subscription's emailed token, claimed by `orgId`: a legacy machine. */
+/* A subscription's emailed token, its subscription linked to `orgId` by scripts/org_admin.py: a legacy machine. */
 function legacy(e, orgId) {
   const t = unix();
   const token = madeToken();

@@ -322,7 +322,7 @@ test("a subscription linked to an organisation shows it, on that organisation's 
   grant(e, o, "team");
   const who = await identify(asking(tok), e);
   assert.deepEqual([who.kind, who.account, who.org, who.plan], ["subscription", sub, o, "team"]);
-  /* An emailed token listed as a legacy machine on claiming stays on the
+  /* An emailed token listed as a legacy machine on linking stays on the
      subscription's path: it works while the subscription does. */
   run(e, "INSERT INTO machines (id, hash, org_id, kind, label, created_at) VALUES (?, ?, ?, 'legacy', 'emailed', ?)",
       randomUUID(), hash(tok), o, now());

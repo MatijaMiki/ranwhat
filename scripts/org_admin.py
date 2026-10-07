@@ -14,17 +14,22 @@ feed token who now has an account. Without --days a grant has no end date.
 
 link ties a Stripe subscription (SUB_ID, sub_..., from the subscriptions
 table or Stripe) to an organisation, which then has Plus while the
-subscription is live: for a subscriber who paid with another address, or
-who cannot claim it from the dashboard. A subscription is linked once and
-never moved, so linking one that already has an organisation changes
-nothing. As a claim from the dashboard does (worker/src/claim.js), it lists
-the subscription's emailed tokens that are not revoked among the
-organisation's machines (kind legacy), where they can be revoked, and logs
-the link in the organisation's audit log, once. A token the welcome page or
-the email has not made yet is listed by running link again once it has.
-The organisation's own Stripe customer is left as it is, as a claim leaves
-it. Nothing is sent: tell the subscriber yourself, by email to the address
-Stripe has for them, that their subscription is now attached.
+subscription is live. It is the only way a subscription bought on the
+pricing page without an account becomes an organisation's: the account
+page has no way to do it, and once accounts are on, /api/checkout sends
+every buyer to the account's upgrade instead, so these are the ones bought
+before. Link one
+when whoever paid asks, by email from the address Stripe has for it. A
+subscription is linked once and never moved, so linking one that already
+has an organisation changes nothing. It lists the subscription's emailed
+tokens that are not revoked among the organisation's machines (kind
+legacy), where they can be revoked, and logs the link in the
+organisation's audit log, once. A token the welcome page or the email has
+not made yet is listed by running link again once it has. The
+organisation's own Stripe customer is left as it is, so whoever paid keeps
+Stripe's billing-page login to their own subscription and gets none to the
+organisation's. Nothing is sent: tell the subscriber yourself, by email to
+the address Stripe has for them, that their subscription is now attached.
 
 This writes nothing and sends nothing: it prints the SQL, to paste into the
 database's console in the Cloudflare dashboard or to run with the printed

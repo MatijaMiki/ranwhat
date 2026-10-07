@@ -980,7 +980,7 @@ test("whoami and logout take a Bearer token, never a cookie, and leave shared an
                    { kind: "hand", email: null, org: null, role: null, plan: "plus", machine: null });
   const ciWho = (await whoami(e, ci)).json;
   assert.deepEqual([ciWho.kind, ciWho.email, ciWho.org, ciWho.plan, ciWho.machine.label], ["ci", null, "Personal", "plus", "build"]);
-  /* Once claimed, a subscription's token names its organisation. */
+  /* Once linked to an organisation (scripts/org_admin.py), a subscription's token names it. */
   run("INSERT INTO org_subscriptions (subscription, org_id, how, linked_at) VALUES ('sub_test1', ?, 'script', ?)", org, t);
   assert.equal((await whoami(e, paid)).json.org, "Personal");
 

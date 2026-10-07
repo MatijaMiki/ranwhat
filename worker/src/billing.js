@@ -19,10 +19,12 @@
  *                   session for that subscription's customer, and off to
  *                   it.
  *
- * The pricing page's anonymous checkout (/api/checkout) and the portal
- * login behind /api/billing are stripe.js's and unchanged. A subscription
- * bought there and attached to an organisation later is billed here like
- * any other.
+ * With accounts on, this is the one way to buy Plus: the pricing page's
+ * checkout (/api/checkout, stripe.js) sends the browser to /upgrade
+ * instead. A subscription bought on the pricing page before then is
+ * attached to an organisation only by hand (scripts/org_admin.py link),
+ * and once it is, it is billed here like any other. The portal login
+ * behind /api/billing is stripe.js's and unchanged.
  *
  * Both forms are bound to the organisation they were drawn for (session.js's
  * orgFormOk()): one left open in a tab acts on nothing once the session
@@ -72,6 +74,10 @@ const SHOWN = 5;                         // subscriptions the panel lists at mos
 /* What each choice costs, as the pricing page says it. Stripe's price,
    found by its lookup key (stripe.js's INTERVALS), is what is charged. */
 const PRICES = Object.freeze({ monthly: "€12 a month", yearly: "€120 a year" });
+
+/* A subscription bought without an account is moved to an organisation by
+   hand (scripts/org_admin.py link), on request from whoever paid. */
+const MOVE = "mailto:hello@ranwhat.com?subject=Move%20a%20ranwhat%20Plus%20subscription";
 
 /* Stripe's statuses, in words. */
 const STATUS = Object.freeze({
@@ -209,7 +215,8 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
     standing = manager
       ? `<p>${name} is on Free. Plus is ${PRICES.monthly} or ${PRICES.yearly}, one price for the organisation.</p>
       <p><a class="button" href="/upgrade">Upgrade to Plus</a></p>
-      <p><small>Bought Plus on ranwhat.com without an account? <a href="/claim">Attach it to ${name}</a>.</small></p>`
+      <p><small>To move a Plus subscription bought without an account to ${name}, write to
+         <a href="${MOVE}">hello@ranwhat.com</a>.</small></p>`
       : `<p>${name} is on Free. An owner or an admin of it can upgrade it to Plus.</p>`;
   }
 
