@@ -428,6 +428,19 @@ const SCHEMA = [
      expires_at INTEGER NOT NULL,
      used_at INTEGER)`,
 
+  /* An organisation whose Stripe customer email (billing.js) is still to
+     be checked after someone stopped being an owner or an admin of it:
+     written in the batch that changes their role, deleted once Stripe has
+     the right address, and tried again by the cron while Stripe fails.
+     lost_user: who stopped (or handed on ownership), as their id, never an
+     address. ticket: random, so that a check only deletes the row it
+     read, never one a later change wrote. */
+  `CREATE TABLE IF NOT EXISTS billing_email_due (
+     org_id TEXT PRIMARY KEY,
+     lost_user TEXT,
+     ticket TEXT NOT NULL,
+     since INTEGER NOT NULL)`,
+
   `INSERT OR IGNORE INTO settings (key, value) VALUES ('accounts_schema', '1')`,
 ];
 

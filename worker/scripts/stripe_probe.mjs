@@ -46,7 +46,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { ACCOUNT_ORIGIN, schema as accountsSchema } from "../src/accounts.js";
-import { CHECKOUT_ORIGIN, PORTAL_ORIGIN, billingEmailFollows } from "../src/billing.js";
+import { CHECKOUT_ORIGIN, PORTAL_ORIGIN, billingEmailDue, billingEmailFollows } from "../src/billing.js";
 import {
   CUSTOMER, INTERVALS, ORG_CHECKOUT_FOR, PRODUCT, customerEmail, orgCheckout, orgCustomer, portalSession, stripe,
 } from "../src/stripe.js";
@@ -329,20 +329,25 @@ export async function probe({
           throw stop(`worker/test's SQLite stand-in did not load (node:sqlite needs Node 22.13 or later): ${scrub(err.message)}`);
         }
         /* As when the owner who made the customer hands ownership on: the
-           organisation now has another owner, and the address it lost is
-           the one Stripe has. */
+           organisation now has another owner, the old one is an admin, and
+           the address Stripe has is the old owner's, which the batch that
+           handed ownership on left to be checked. */
         const db = d1();
         env.LIST = db;
         await accountsSchema(db);
-        const t = now(), user = crypto.randomUUID();
+        const t = now(), user = crypto.randomUUID(), before = crypto.randomUUID();
         await db.batch([
           db.prepare("INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)").bind(user, run.newOwner, t),
+          db.prepare("INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)").bind(before, run.owner, t),
           db.prepare("INSERT INTO orgs (id, name, personal, customer, created_at) VALUES (?, ?, 0, ?, ?)")
             .bind(run.org, "Stripe probe", customer, t),
           db.prepare("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)")
             .bind(run.org, user, t),
+          db.prepare("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'admin', ?)")
+            .bind(run.org, before, t),
+          billingEmailDue(db, run.org, before),
         ]);
-        await billingEmailFollows(env, run.org, run.owner);
+        await billingEmailFollows(env, run.org);
         /* billingEmailFollows() logs a failure and goes on, as it runs after
            the change it follows: Stripe's answer says what went wrong. */
         const refused = mine().findLast((c) => c.status === 0 || c.status >= 400);

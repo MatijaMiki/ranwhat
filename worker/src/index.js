@@ -48,6 +48,7 @@ import { EmailMessage } from "cloudflare:email";
 import { announce, confirm, subscribe, switchedOn } from "./list.js";
 import { catalogue } from "./feed.js";
 import { billing, checkout, webhook, welcome } from "./stripe.js";
+import { billingEmailsDue } from "./billing.js";
 import { ACCOUNT_HOST, accountsOn, sweep } from "./accounts.js";
 import { account } from "./dashboard.js";
 import { deviceRoute } from "./device.js";
@@ -281,13 +282,15 @@ export default {
 
   /* The cron trigger in wrangler.toml: send any new release to the list,
      delete the account codes, sessions and counts that are out of date,
-     and revoke terminals' tokens unused for 90 days (machines.js). That
+     revoke terminals' tokens unused for 90 days (machines.js), and try
+     again a Stripe billing email a role change left unchecked
+     (billing.js). That
      goes on while accounts are switched off again after being on; where
      they never were, neither makes nor touches anything. */
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(announce(env));
     if (env.LIST) {
-      ctx.waitUntil(sweep(env).then(() => revokeIdle(env))
+      ctx.waitUntil(sweep(env).then(() => revokeIdle(env)).then(() => billingEmailsDue(env))
         .catch((err) => console.log(`account sweep: ${err.name || "error"}`)));
     }
   },

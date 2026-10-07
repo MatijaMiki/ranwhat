@@ -218,10 +218,13 @@
             Worker creates its customer record at Stripe with the email address
             of the organisation&rsquo;s owner and the organisation&rsquo;s ID,
             and the checkout and the subscription carry that ID, so the
-            subscription is linked to the organisation. When an owner or an admin
-            leaves, is removed, is made a member or hands on ownership, the
-            Worker changes that address to the current owner&rsquo;s if it was
-            theirs. Our Worker keeps the
+            subscription is linked to the organisation. An owner or an admin
+            may change that address on Stripe&rsquo;s billing page. When an
+            owner or an admin leaves, is removed, is made a member or hands on
+            ownership, the Worker changes it back to the current owner&rsquo;s,
+            unless it is the address of someone who is still an owner or an
+            admin and did not just hand ownership on, and tries again until
+            Stripe takes the change. Our Worker keeps the
             Stripe IDs of the subscription and customer record, the
             subscription&rsquo;s status, whether it is monthly or yearly and
             when it renews or ends, and the organisation it belongs to, in the

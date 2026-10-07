@@ -69,9 +69,12 @@
  * organisation's and stay, listed under Machines for an owner or an admin
  * to revoke. Someone left with no organisation at all gets a new personal
  * one in that batch, as at their first sign-in. Whoever stops being an
- * owner or an admin, by any of these or by handing on ownership, stops
- * being the organisation's billing email in Stripe if they were
- * (billing.js's billingEmailFollows()).
+ * owner or an admin, by any of these or by handing on ownership, leaves
+ * the organisation's billing email in Stripe to be checked in that batch
+ * too (billing.js's billingEmailDue()): it goes back to the owner's
+ * address unless it is the address of someone still an owner or an admin,
+ * after the response and, while Stripe fails, from the cron
+ * (billingEmailFollows()).
  *
  * Everything is written to the audit log in the batch that does it: for
  * whoever did it, and, when it was done to someone else, for them too.
@@ -87,7 +90,7 @@ import {
   nextPath, orgFormOk, peek, randomToken, readCookie, setCookie, unbump,
 } from "./session.js";
 import { fields, form, page, redirect, refused } from "./ui.js";
-import { billingEmailFollows } from "./billing.js";
+import { billingEmailDue, billingEmailFollows } from "./billing.js";
 
 export const INVITE_COOKIE = "__Host-rw_invite";
 export const INVITE_FOR = 7 * DAY;          // an invite works this long
@@ -455,10 +458,12 @@ function departure(db, { org, user, role, events, guard = "1", binds = [] }) {
   return { statements, deleted };
 }
 
-/* Stripe's billing email for the organisation, moved off `email` once
-   they are no longer an owner or an admin of it, after the response. */
-const billingFollows = (env, ctx, orgId, email) => {
-  ctx.waitUntil(billingEmailFollows(env, orgId, email).catch((err) => {
+/* Stripe's billing email for the organisation, checked after the
+   response once someone is no longer an owner or an admin of it: the
+   batch that changed it left it due (billingEmailDue()), so the cron
+   tries again should this fail. */
+const billingFollows = (env, ctx, orgId) => {
+  ctx.waitUntil(billingEmailFollows(env, orgId).catch((err) => {
     console.log(`billing email: ${err.code || err.name || "error"}`);
   }));
 };
@@ -746,11 +751,12 @@ export async function rolePost(request, env, ctx) {
   const changed = statements.length;
   statements.push(db.prepare(`UPDATE memberships SET role = ? WHERE org_id = ? AND user_id = ? AND role = ? AND ${IS}`)
     .bind(role, org.id, target.user_id, target.role, org.id, who.user, "owner"));
+  if (role === "member") statements.push(billingEmailDue(db, org.id, target.user_id));
   const done = await db.batch(statements);
   if (done[changed].meta.changes !== 1) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
-  if (role === "member") billingFollows(env, ctx, org.id, target.email);
+  if (role === "member") billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
@@ -788,11 +794,12 @@ export async function removePost(request, env, ctx) {
       { org: org.id, user: target.user_id, what: "removed_from_org", subject: who.user },
     ],
   });
+  if (target.role === "admin") statements.push(billingEmailDue(db, org.id, target.user_id));
   const done = await db.batch(statements);
   if (done[deleted].meta.changes !== 1) {
     return trouble(env, who, 409, "They left, or their role changed, a moment ago, so nothing was done. Reload your account page.");
   }
-  billingFollows(env, ctx, org.id, target.email);
+  if (target.role === "admin") billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
@@ -814,8 +821,9 @@ export async function leavePost(request, env, ctx) {
     org: org.id, user: who.user, role: org.role,
     events: [{ org: org.id, user: who.user, what: "org_left" }],
   });
+  if (org.role === "admin") statements.push(billingEmailDue(db, org.id, who.user));
   const done = await db.batch(statements);
-  if (done[deleted].meta.changes === 1) billingFollows(env, ctx, org.id, who.email);
+  if (done[deleted].meta.changes === 1 && org.role === "admin") billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
@@ -864,11 +872,12 @@ export async function transferPost(request, env, ctx) {
     db.prepare(`UPDATE memberships SET role = 'owner' WHERE org_id = ? AND user_id = ? AND role = 'admin'
                 AND NOT EXISTS (SELECT 1 FROM memberships WHERE org_id = ? AND role = 'owner') AND ${IS}`)
       .bind(org.id, target.user_id, org.id, org.id, who.user, "admin"),
+    billingEmailDue(db, org.id, who.user),
   ]);
   if (done[3].meta.changes !== 1) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
-  billingFollows(env, ctx, org.id, who.email);
+  billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
