@@ -113,11 +113,11 @@ class Settings(unittest.TestCase):
 
     def write(self, settings):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, "w") as fh:
+        with open(self.path, "w", encoding="utf-8") as fh:
             fh.write(settings if isinstance(settings, str) else json.dumps(settings))
 
     def read(self):
-        with open(self.path) as fh:
+        with open(self.path, encoding="utf-8") as fh:
             return json.load(fh)
 
     def test_scopes_name_claude_codes_own_files(self):
@@ -168,7 +168,7 @@ class Settings(unittest.TestCase):
             self.write(text)
             with self.assertRaises(hook.SettingsError):
                 hook.install(self.path, "p -m ranwhat hook run")
-            with open(self.path) as fh:
+            with open(self.path, encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), text)
 
     def test_uninstall_takes_out_only_ours(self):
@@ -286,13 +286,13 @@ class CommandLine(unittest.TestCase):
             self.assertIn("uv tool install ranwhat", cli._hook_cannot_find_us())
 
     def test_a_broken_settings_file_is_reported_not_overwritten(self):
-        with open(self.path, "w") as fh:
+        with open(self.path, "w", encoding="utf-8") as fh:
             fh.write("{oops")
         with mock.patch.object(cli, "_hook_cannot_find_us", return_value=None):
             status, _, err = self.cli("hook", "install")
         self.assertEqual(status, 1)
         self.assertIn("not valid JSON", err)
-        with open(self.path) as fh:
+        with open(self.path, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "{oops")
 
     def test_an_unknown_action_is_refused(self):
