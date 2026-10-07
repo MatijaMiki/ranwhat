@@ -598,11 +598,18 @@ class Whoami(AccountCase):
 
     def test_a_ci_token(self):
         self.save(made("rw_" "c_"))
-        self.server.on("GET", "/whoami", (200, device_doc(kind="ci", label="deploy")))
+        doc = dict(device_doc(kind="ci", label="deploy"), email=None, role=None)
+        self.server.on("GET", "/whoami", (200, doc))
         status, out, _err = self.run_cli("whoami")
         self.assertEqual(status, 0)
         self.assertIn("CI token", out)
         self.assertIn("deploy", out)
+        self.assertIn("Acme", out)
+        # The server names no person for a CI token, and the CLI shows no
+        # empty account or role for it.
+        self.assertNotIn("Account", out)
+        self.assertNotIn("Role", out)
+        self.assertNotIn("unknown", out)
 
     def test_shared_and_hand_issued_tokens(self):
         self.save(made("rw_"))

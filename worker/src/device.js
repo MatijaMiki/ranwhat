@@ -308,7 +308,10 @@ export async function deviceToken(request, env) {
 }
 
 /* What /v1/whoami says of a token identify() accepted. Never the token,
-   its hash, an id or anything that could stand in for one. */
+   its hash, an id or anything that could stand in for one. A CI token
+   names its organisation and never the person who made it (machines.js
+   keeps who did, for the account page): it sits in a pipeline's secrets,
+   where others may read it. */
 async function describe(env, who) {
   const db = env.LIST;
   const out = { kind: who.kind, email: null, org: null, role: null, plan: who.plan, machine: null };
@@ -317,7 +320,7 @@ async function describe(env, who) {
       `SELECT o.name, u.email, m.role FROM orgs o
          LEFT JOIN users u ON u.id = ?
          LEFT JOIN memberships m ON m.org_id = o.id AND m.user_id = u.id
-       WHERE o.id = ?`).bind(who.machine.user, who.org).first();
+       WHERE o.id = ?`).bind(who.kind === "device" ? who.machine.user : null, who.org).first();
     return { ...out, email: row ? row.email : null, org: row ? row.name : null, role: row ? row.role : null,
              machine: { label: who.machine.label, created_at: who.machine.linked_at } };
   }
@@ -537,7 +540,8 @@ async function confirmPage(env, who, code, row) {
       <dt>Plan</dt><dd>${PLAN_NAMES[onPlan]}</dd>
     </dl>
     <p>The terminal gets a token of its own for <strong>${escape(org.name)}</strong>. Running
-       <strong>ranwhat logout</strong> there revokes it.</p>
+       <strong>ranwhat logout</strong> there revokes it, as Revoke under Machines on your account
+       page does, where you can name it too.</p>
     ${free}
     ${form("/device/approve", await formToken(env, who.id, approveAction(code, org.id)), `
       <input type="hidden" name="user_code" value="${escape(code)}">

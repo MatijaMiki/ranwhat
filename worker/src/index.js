@@ -46,6 +46,7 @@ import { billing, checkout, webhook, welcome } from "./stripe.js";
 import { ACCOUNT_HOST, accountsOn, sweep } from "./accounts.js";
 import { account } from "./dashboard.js";
 import { deviceRoute } from "./device.js";
+import { revokeIdle } from "./machines.js";
 import { challenge } from "./challenge.js";
 
 const TO = "ranwhatcom@gmail.com";
@@ -274,13 +275,15 @@ export default {
   },
 
   /* The cron trigger in wrangler.toml: send any new release to the list,
-     and delete the account codes, sessions and counts that are out of
-     date. That goes on while accounts are switched off again after being
-     on; where they never were, sweep() makes and touches nothing. */
+     delete the account codes, sessions and counts that are out of date,
+     and revoke terminals' tokens unused for 90 days (machines.js). That
+     goes on while accounts are switched off again after being on; where
+     they never were, neither makes nor touches anything. */
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(announce(env));
     if (env.LIST) {
-      ctx.waitUntil(sweep(env).catch((err) => console.log(`account sweep: ${err.name || "error"}`)));
+      ctx.waitUntil(sweep(env).then(() => revokeIdle(env))
+        .catch((err) => console.log(`account sweep: ${err.name || "error"}`)));
     }
   },
 };

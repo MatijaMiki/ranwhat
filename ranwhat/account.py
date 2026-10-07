@@ -570,10 +570,14 @@ def whoami(token=None, out=None, err=None):
     plan = doc.get("plan") if doc.get("plan") in PLANS else None
     rows = []
     if kind in ("device", "ci"):
-        rows += [("Account", _shown(doc.get("email")) or "unknown"),
-                 ("Organisation", _shown(doc.get("org")) or "unknown"),
-                 ("Role", _shown(doc.get("role"), 20) or "unknown"),
-                 ("Plan", _plan_name(plan))]
+        # A CI token belongs to its organisation; the server never names
+        # the person who made it, so there is no account or role to show.
+        if kind == "device":
+            rows.append(("Account", _shown(doc.get("email")) or "unknown"))
+        rows.append(("Organisation", _shown(doc.get("org")) or "unknown"))
+        if kind == "device":
+            rows.append(("Role", _shown(doc.get("role"), 20) or "unknown"))
+        rows.append(("Plan", _plan_name(plan)))
         machine = doc.get("machine") if isinstance(doc.get("machine"), dict) else {}
         label = _shown(machine.get("label"), 80)
         rows.append(("Machine" if kind == "device" else "CI token",
