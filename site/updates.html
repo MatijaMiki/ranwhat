@@ -124,6 +124,46 @@
         <span class="icode nowrap">pipx upgrade ranwhat</span>.
       </p>
       <div class="releases">
+        <article class="release" id="v0-6-0">
+          <p class="rel-meta"><span class="rel-v">0.6.0</span> <time datetime="2026-10-07T18:00:00Z">7 October 2026</time></p>
+          <h3>Twenty coding agents, accounts and a Claude Code hook</h3>
+          <ul>
+            <li><span class="icode">check</span>, <span class="icode">watch</span> and
+              <span class="icode">clean</span> read Cursor, Windsurf, Cline, Roo Code, OpenCode,
+              Continue, Aider and Goose too, twenty coding agents in all, each from the history it
+              keeps on disk. Windsurf is read from the plaintext transcripts its Cascade hook
+              writes.</li>
+            <li>New: <a href="/commands#login">ranwhat login</a> links a machine to an optional
+              account at account.ranwhat.com. It prints a code to type at ranwhat.com/device,
+              signed in, and the machine gets a token of its own for
+              <span class="icode">update</span>. <span class="icode">ranwhat whoami</span> says
+              whose a token is, and <span class="icode">ranwhat logout</span> revokes the
+              machine&rsquo;s token and deletes it. Nothing that runs locally needs an
+              account.</li>
+            <li>New: <a href="/commands#reach">ranwhat reach</a> lists the MCP servers your agents
+              are configured with and what each runs or connects to, flags a secret written
+              inline or a package fetched at no fixed version, and lists the credential files no
+              Claude Code deny rule covers. It writes nothing.</li>
+            <li>New: <a href="/commands#hook">ranwhat hook install</a> adds an opt-in Claude Code
+              hook, so a call watch would rate high or critical waits for your yes before it
+              runs. It judges on your machine and sends nothing.</li>
+            <li><span class="icode">check</span>, <span class="icode">watch</span> and
+              <span class="icode">clean</span> take <span class="icode">--fail-on SEVERITY</span>,
+              which exits 3 when anything at or above it is found, and
+              <span class="icode">--sarif PATH</span> for code scanning. The repository&rsquo;s
+              <span class="icode">action.yml</span> runs them in GitHub Actions.</li>
+            <li><span class="icode">keep</span> in <span class="icode">clean</span>&rsquo;s review
+              is remembered, so a value you keep is not reported again.</li>
+            <li>The bundled catalogue rates 204 scopes across twelve providers, up from 104,
+              taking in the 100 the Plus feed added after 0.5.0.</li>
+            <li>On a terminal, <span class="icode">scan</span>, <span class="icode">live</span>
+              and <span class="icode">update --status</span> may add one dim line about the Plus
+              feed, never with <span class="icode">--json</span>.
+              <span class="icode">RANWHAT_NO_HINTS=1</span> turns it off.</li>
+            <li><span class="icode">watch</span> flags <span class="icode">aws s3 rb</span> as a
+              cloud delete.</li>
+          </ul>
+        </article>
         <article class="release" id="v0-5-0">
           <p class="rel-meta"><span class="rel-v">0.5.0</span> <time datetime="2026-10-04T00:17:46Z">4 October 2026</time></p>
           <h3>Twelve coding agents</h3>
