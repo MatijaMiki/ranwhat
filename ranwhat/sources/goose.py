@@ -33,8 +33,10 @@ What is there:
   sessions.db once, under its file name as the session id, and leave the
   file where it is (session/legacy.rs). A file whose name is a session id
   in the database is a second copy: it is still searched for secrets and
-  can be masked, but its calls are read from the database only, so none is
-  counted twice. The .backup and .tmp files beside them are not read.
+  can be masked, and its calls are read from the database, so none is
+  counted twice, except a call the database does not hold: the import
+  keeps only lines that still parse in the version importing them. The
+  .backup and .tmp files beside them are not read.
 
 A message's content (content_json, or "content" in a jsonl line) is an
 array of blocks tagged by "type" (goose-provider-types conversation/
@@ -108,9 +110,23 @@ DAMAGED = "part of it is damaged"
 DECLINED = "declined"
 
 # The text Goose answers a call with instead of running it
-# (tool_execution.rs DECLINED_RESPONSE, CHAT_MODE_TOOL_SKIPPED_RESPONSE).
-NEVER_RAN = ("The user has declined to run this tool",
-             "Let the user know the tool call was skipped in goose chat mode")
+# (tool_execution.rs DECLINED_RESPONSE, CHAT_MODE_TOOL_SKIPPED_RESPONSE, the
+# same from v1.9.3 to v1.53.0 but for "Goose chat mode", capitalised in
+# v1.9.3). The whole text, alone in the result: a command's output that
+# only starts with it ran.
+DECLINED_RESPONSE = ("The user has declined to run this tool. DO NOT attempt "
+                     "to call this tool again. If there are no alternative "
+                     "methods to proceed, clearly explain the situation and "
+                     "STOP.")
+SKIPPED_RESPONSES = tuple(
+    "Let the user know the tool call was skipped in %s chat mode. DO NOT "
+    "apologize for skipping the tool call. DO NOT say sorry. Provide an "
+    "explanation of what the tool call would do, structured as a plan for "
+    "the user. Again, DO NOT apologize. **Example Plan:**\n 1. **Identify "
+    "Task Scope** - Determine the purpose and expected outcome.\n 2. "
+    "**Outline Steps** - Break down the steps.\n If needed, adjust the "
+    "explanation based on user preferences or questions." % goose
+    for goose in ("goose", "Goose"))
 
 # Anything above this is milliseconds (session_manager.rs
 # MILLISECOND_TIMESTAMP_THRESHOLD).
@@ -256,12 +272,28 @@ def output_text(result):
 
 
 def never_ran(result):
-    """True when Goose answered the call instead of running it."""
-    for block in result_blocks(result):
-        if (isinstance(block, dict) and isinstance(block.get("text"), str)
-                and block["text"].startswith(NEVER_RAN)):
-            return True
-    return False
+    """True when Goose answered the call instead of running it: the result
+    is that one text, whole and alone. Goose writes the declined text as an
+    error result (isError true, from v1.20; a bare array before), the
+    chat-mode one as a success, and neither with structuredContent, which
+    every shell result has. So a command that echoes the text, and then
+    fails, still ran."""
+    if not isinstance(result, dict) or result.get("status") != "success":
+        return False
+    value = result.get("value")
+    blocks = result_blocks(result)
+    if len(blocks) != 1 or not isinstance(blocks[0], dict) \
+            or blocks[0].get("type") != "text":
+        return False
+    text = blocks[0].get("text")
+    if isinstance(value, dict):
+        if "structuredContent" in value:
+            return False
+        error = value.get("isError")
+        if text == DECLINED_RESPONSE:
+            return error is not False
+        return text in SKIPPED_RESPONSES and error is not True
+    return text == DECLINED_RESPONSE or text in SKIPPED_RESPONSES
 
 
 def _entries(folder):
@@ -291,7 +323,7 @@ class _Message(object):
 class GooseSource(Source):
     id = "goose"
     name = "Goose"
-    unit = "session"
+    unit = "file"           # sessions.db holds many sessions; see agents.amount
     env = (ENV,)
     path_means = "a Goose data folder (the one holding sessions/)"
     checked = "1.53.0"
@@ -304,6 +336,7 @@ class GooseSource(Source):
         self._bad = set()           # stores already counted as unreadable
         self._tallied = set()       # stores whose odd records are counted
         self._ids = {}              # database path -> its session ids
+        self._db_calls = {}         # (database path, session) -> call ids
 
     # -- where to look ------------------------------------------------------
 
@@ -368,7 +401,7 @@ class GooseSource(Source):
                         header = self._header(entry.path) or {}
                         store = self.store(
                             entry.path, "jsonl", role="transcript",
-                            session=name[:-len(SUFFIX)],
+                            unit="session", session=name[:-len(SUFFIX)],
                             project=_string(header.get("working_dir")))
                     if store is not None:
                         found.append(store)
@@ -672,10 +705,61 @@ class GooseSource(Source):
                 if isinstance(b, dict) and b.get("type") in kinds]
 
     def _imported(self, store):
-        """True for a jsonl file whose session is also in the database
-        beside it: Goose imported it, and its calls are read there."""
-        return (store.format == "jsonl" and store.session is not None
-                and store.session in self._db_ids(os.path.dirname(store.path)))
+        """For a jsonl file whose session is also in the database beside it
+        (Goose imported it), the ids of the calls the database holds for
+        that session: those are read there. None for any other store.
+
+        Goose's import keeps only the lines that still parse as a Message
+        of the version importing them (legacy.rs load_session): one that
+        went from 1.9 to 1.50 or later dropped every message holding a
+        frontendToolRequest, whatever else it held. So a call the database
+        does not hold is read from the file."""
+        if store.format != "jsonl" or store.session is None:
+            return None
+        folder = os.path.dirname(store.path)
+        if store.session not in self._db_ids(folder):
+            return None
+        return self._db_call_ids(folder, store.session)
+
+    def _db_call_ids(self, folder, session):
+        """The ids of the toolRequest blocks sessions.db in `folder` holds
+        for one session, read once a run."""
+        path = os.path.normcase(os.path.abspath(os.path.join(folder,
+                                                             DB_NAME)))
+        key = (path, session)
+        if key in self._db_calls:
+            return self._db_calls[key]
+        ids = set()
+        self._db_calls[key] = ids
+        with _sqlite.readonly(path) as conn:
+            if conn is None:
+                return ids
+            try:
+                tables = set(_sqlite.tables(conn))
+                for table in MESSAGE_TABLES:
+                    if table not in tables:
+                        continue
+                    cols = _sqlite.columns(conn, table)
+                    if not {"session_id", "content_json"} <= set(cols):
+                        continue
+                    sql = ("SELECT content_json FROM %s WHERE session_id = ? "
+                           "AND content_json LIKE '%%oolRequest%%'"
+                           % _sqlite.quote_ident(table))
+                    for (raw,) in conn.execute(sql, (session,)):
+                        if isinstance(raw, bytes):
+                            raw = raw.decode("utf-8", "surrogateescape")
+                        try:
+                            blocks = json.loads(raw)
+                        except (TypeError, ValueError, RecursionError):
+                            continue
+                        for block in blocks if isinstance(blocks, list) else ():
+                            if (isinstance(block, dict)
+                                    and block.get("type") in REQUESTS
+                                    and isinstance(block.get("id"), str)):
+                                ids.add(block["id"])
+            except sqlite3.Error:
+                pass
+        return ids
 
     def tool_calls(self, store):
         """Every call, once per (session, id), with its result's text as
@@ -690,8 +774,16 @@ class GooseSource(Source):
             self.stopped(store, e)
 
     def _tool_calls(self, store):
-        if self._imported(store):
+        imported = self._imported(store)
+        if imported is not None:
+            for call in self._calls(store):
+                if call.tool_call_id not in imported:
+                    yield call
             return
+        for call in self._calls(store):
+            yield call
+
+    def _calls(self, store):
         tally = self._first(store)
         pending = {}            # (session, id) -> ToolCall awaiting result
         done = set()            # (session, id) already yielded

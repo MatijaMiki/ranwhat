@@ -50,8 +50,10 @@ them where they were. Each session file is a store, read for its calls
 through its message and part files; each message and part file is a store
 of its own, searched and masked as one JSON file (a JSON file has to be
 one file to be rewritten byte for byte). A session the database holds too
-gives no calls from its files: the database is the newer copy. Its files
-are still searched, since they are copies on disk. So are
+gives from its files only the calls the database does not hold, by call id:
+the import ran once and could drop a batch, and v1.1 could go on writing
+the session after it. Its files are still searched, since they are copies
+on disk. Folders are named by an id only when it is one folder name. So are
 storage/session_diff/<sessionID>.json (the files a session changed, before
 and after) and storage/todo/<sessionID>.json, and the full output of a
 tool OpenCode cut short, kept as plain text in <data>/tool-output/tool_*
@@ -285,6 +287,18 @@ def _folders(folder):
     return sorted(out)
 
 
+def _name(value):
+    """value when it can name one folder under storage/ (an id OpenCode
+    made), else None: never a path that climbs out of it."""
+    if not isinstance(value, str) or value in ("", ".", "..") \
+            or "\x00" in value:
+        return None
+    if "/" in value or "\\" in value or os.sep in value \
+            or (os.altsep and os.altsep in value):
+        return None
+    return value
+
+
 def _stem(path):
     name = os.path.basename(path)
     return name[:-len(JSON_SUFFIX)] if name.endswith(JSON_SUFFIX) else name
@@ -430,7 +444,7 @@ def _no_data_uri(item, key):
 class OpenCodeSource(Source):
     id = "opencode"
     name = "OpenCode"
-    unit = "session"
+    unit = "file"           # one database holds many sessions; see agents.amount
     env = (DB_ENV,)
     path_means = ("an OpenCode data folder (~/.local/share/opencode), or "
                   "its database file")
@@ -441,6 +455,7 @@ class OpenCodeSource(Source):
         self._bad = set()           # stores counted as unreadable
         self._tallied = set()       # files and stores whose skips are counted
         self._sessions = {}         # database path -> session ids it holds
+        self._held = {}             # (database path, session) -> call ids
 
     # -- where to look ------------------------------------------------------
 
@@ -506,7 +521,7 @@ class OpenCodeSource(Source):
                 sid = _string(info.get("id")) or _stem(path)
                 project = _string(info.get("directory"))
                 store = add(self.store(path, "json", role="transcript",
-                                       session=sid, project=project))
+                                       unit="session", session=sid, project=project))
                 if store is not None:
                     transcripts.setdefault(sid, store)
                     projects.setdefault(sid, project)
@@ -1030,17 +1045,65 @@ class OpenCodeSource(Source):
         return os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.dirname(session_file))))
 
-    def _in_database(self, data, sid):
+    @staticmethod
+    def _db_paths(data):
         paths = databases(data)
         named = env_database(data)
         if named and named not in paths:
             paths.append(named)
-        return any(sid in self._session_ids(p) for p in paths)
+        return paths
+
+    def _in_database(self, data, sid):
+        return any(sid in self._session_ids(p) for p in self._db_paths(data))
+
+    def _held_calls(self, data, sid):
+        """The call ids the databases in `data` hold for session `sid`: its
+        v1 tool parts, and its session_message tool items and commands."""
+        out = set()
+        for path in self._db_paths(data):
+            if sid in self._session_ids(path):
+                out |= self._db_calls(path, sid)
+        return out
+
+    def _db_calls(self, path, sid):
+        key = (path, sid)
+        if key in self._held:
+            return self._held[key]
+        ids = set()
+        self._held[key] = ids
+        with _sqlite.readonly(path) as conn:
+            if conn is None:
+                return ids
+            try:
+                tables = set(_sqlite.tables(conn))
+                if "part" in tables:
+                    for (raw,) in conn.execute(
+                            "SELECT data FROM part WHERE session_id = ? AND "
+                            "data LIKE '%\"tool\"%'", (sid,)):
+                        part = _dict(self._json_cell(raw))
+                        cid = _string(part.get("callID"))
+                        if part.get("type") == "tool" and cid:
+                            ids.add(cid)
+                if "session_message" in tables:
+                    for (raw,) in conn.execute(
+                            "SELECT data FROM session_message WHERE "
+                            "session_id = ?", (sid,)):
+                        data = _dict(self._json_cell(raw))
+                        for item in _list(data.get("content")):
+                            cid = _string(_dict(item).get("id"))
+                            if _dict(item).get("type") == "tool" and cid:
+                                ids.add(cid)
+                        cid = _string(data.get("callID"))
+                        if cid:
+                            ids.add(cid)
+            except sqlite3.Error:
+                pass
+        return ids
 
     def _json_calls(self, store):
         """The calls of one JSON session: its message files in id order,
-        each with its part files. None when the database holds the
-        session."""
+        each with its part files. A session the database holds too gives
+        only the calls the database does not hold."""
         session, _text = self._load(store.path, store)
         if session is None:
             return
@@ -1048,15 +1111,18 @@ class OpenCodeSource(Source):
         sid = _string(info.get("id")) or store.session or _stem(store.path)
         project = _string(info.get("directory")) or store.project
         data = self._data_of(store.path)
-        if self._in_database(data, sid):
+        folder = _name(sid) or _name(_stem(store.path))
+        if folder is None:
             return
+        held = (self._held_calls(data, sid) if self._in_database(data, sid)
+                else frozenset())
         storage = os.path.join(data, STORAGE)
         users = set()
-        for mpath in _files(os.path.join(storage, MESSAGE_DIR, sid)):
+        for mpath in _files(os.path.join(storage, MESSAGE_DIR, folder)):
             message, _t = self._load(mpath)
             if not isinstance(message, dict):
                 continue
-            mid = _string(message.get("id")) or _stem(mpath)
+            mid = _name(message.get("id")) or _stem(mpath)
             role = message.get("role")
             for ppath in _files(os.path.join(storage, PART_DIR, mid)):
                 part, _t = self._load(ppath)
@@ -1076,6 +1142,8 @@ class OpenCodeSource(Source):
                 call = self._v1_part_call(
                     store, part, sid, project, message, users,
                     _dict(message.get("time")).get("created"))
+                if call.tool_call_id and call.tool_call_id in held:
+                    continue
                 yield call
                 for inner in self._nested(store, call, _dict(
                         part.get("state")).get("metadata")):

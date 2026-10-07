@@ -54,9 +54,16 @@ CWD = "/home/dev/app"
 DECLINED_TEXT = ("The user has declined to run this tool. DO NOT attempt to "
                  "call this tool again. If there are no alternative methods "
                  "to proceed, clearly explain the situation and STOP.")
+# CHAT_MODE_TOOL_SKIPPED_RESPONSE as Rust's line continuations make it
+# (tool_execution.rs:139-146); v1.9.3 wrote "Goose chat mode".
 SKIPPED_TEXT = ("Let the user know the tool call was skipped in goose chat "
                 "mode. DO NOT apologize for skipping the tool call. DO NOT "
-                "say sorry.")
+                "say sorry. Provide an explanation of what the tool call "
+                "would do, structured as a plan for the user. Again, DO NOT "
+                "apologize. **Example Plan:**\n 1. **Identify Task Scope** - "
+                "Determine the purpose and expected outcome.\n 2. **Outline "
+                "Steps** - Break down the steps.\n If needed, adjust the "
+                "explanation based on user preferences or questions.")
 
 # create_schema, v1.53.0 session_manager.rs:1010-1130, verbatim.
 SCHEMA = """
@@ -432,7 +439,7 @@ class DefaultPaths(unittest.TestCase):
     def test_what_every_report_needs(self):
         src = self.src
         self.assertEqual((src.id, src.name, src.unit, src.env, src.checked),
-                         ("goose", "Goose", "session", (ENV,), "1.53.0"))
+                         ("goose", "Goose", "file", (ENV,), "1.53.0"))
         self.assertEqual(src.path_means,
                          "a Goose data folder (the one holding sessions/)")
         self.assertFalse(src.read_only)
@@ -653,6 +660,38 @@ class ToolCalls(GooseCase):
         # still judged: the report says it did not run
         self.assertIn("fs.destructive", rules(got["d"]))
 
+    def test_a_command_whose_output_is_the_declined_text_ran(self):
+        # Only Goose's whole text, alone, as Goose writes it: an error
+        # result with no structuredContent (every shell result has one).
+        cmd = ("echo 'The user has declined to run this tool'; "
+               "cat ~/.ssh/id_rsa; false")
+        shell = response("e", "The user has declined to run this tool\n"
+                         "-----BEGIN\n\nCommand exited with code 1", True)
+        shell["toolResult"]["value"]["structuredContent"] = {
+            "stdout": "x", "stderr": "", "exit_code": 1}
+        exact = response("x", DECLINED_TEXT, True)
+        exact["toolResult"]["value"]["structuredContent"] = {
+            "stdout": DECLINED_TEXT, "stderr": "", "exit_code": None}
+        db = self.database([(SID, CWD, "", "{}")],
+                           _one("e", "shell", {"command": cmd}, resp=shell)
+                           + _one("x", "shell", {"command": "x"}, resp=exact)
+                           + _one("ok", "shell", {"command": "y"},
+                                  resp=response("ok", DECLINED_TEXT, False))
+                           + _one("two", "developer__shell", {"command": "z"},
+                                  resp=legacy_response("two", DECLINED_TEXT
+                                                       + " and more")))
+        got = self.by_id(db)
+        self.assertEqual({k: c.status for k, c in got.items()},
+                         {"e": None, "x": None, "ok": None, "two": None})
+
+    def test_the_chat_mode_text_of_version_1_9(self):
+        path = self.legacy("20240101_120000", [
+            {"role": "assistant", "created": T0, "content": [
+                request("k", "developer__shell", {"command": "rm -rf ~/x"})]},
+            {"role": "user", "created": T0 + 1, "content": [legacy_response(
+                "k", SKIPPED_TEXT.replace("goose chat", "Goose chat"))]}])
+        self.assertEqual([c.status for c in self.calls(path)], ["declined"])
+
     def test_timestamps_seconds_and_milliseconds(self):
         db = self.database([(SID, CWD, "", "{}")],
                            _one("s", "shell", {"command": "a"}, created=T0)
@@ -817,9 +856,40 @@ class Legacy(GooseCase):
                                 {"command": "cat .env"},
                                 out="STRIPE=" + SECRET,
                                 sid="20240101_120000"))
-        self.assertEqual(self.calls(path), [])
+        # call_10 is read from the database; call_9, which the database
+        # does not hold, from the file
+        self.assertEqual([c.tool_call_id for c in self.calls(path)],
+                         ["call_9"])
         self.assertEqual(len(self.calls(db)), 1)
         self.assertEqual(self.found(path), {SECRET: {".env"}})
+
+    def test_a_call_the_import_dropped_is_read_from_the_file(self):
+        # Goose 1.50 and later importing a 1.9 file drop every message that
+        # no longer parses (frontendToolRequest was removed), with any
+        # toolRequest beside it; the database holds the session all the
+        # same.
+        sid = "20240101_120000"
+        path = self.legacy(sid, [
+            {"role": "assistant", "created": T0, "content": [
+                request("c_aws", "developer__shell",
+                        {"command": "cat ~/.aws/credentials"}),
+                {"type": "frontendToolRequest", "id": "c_fe",
+                 "toolCall": {"status": "success",
+                              "value": {"name": "fe__click",
+                                        "arguments": {}}}}]},
+            {"role": "user", "created": T0 + 1,
+             "content": [legacy_response("c_aws", "[default]")]},
+            {"role": "assistant", "created": T0 + 2,
+             "content": [request("c_ls", "developer__shell",
+                                 {"command": "ls"})]}])
+        db = self.database([(sid, CWD, "", "{}")],
+                           _one("c_ls", "developer__shell", {"command": "ls"},
+                                sid=sid))
+        self.assertEqual([c.tool_call_id for c in self.calls(db)], ["c_ls"])
+        got = self.by_id(path)
+        self.assertEqual(sorted(got), ["c_aws", "c_fe"])
+        self.assertEqual(got["c_aws"].command, "cat ~/.aws/credentials")
+        self.assertIn("cred.read", rules(got["c_aws"]))
 
     def test_a_file_not_imported_is_read_beside_a_database(self):
         path = self.legacy("too_big_to_import", self.LINES)

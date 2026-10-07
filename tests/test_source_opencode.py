@@ -397,7 +397,7 @@ class DefaultPaths(unittest.TestCase):
 
     def test_class_attributes(self):
         self.assertEqual((self.src.id, self.src.name, self.src.unit),
-                         ("opencode", "OpenCode", "session"))
+                         ("opencode", "OpenCode", "file"))
         self.assertEqual(self.src.env, ("OPENCODE_DB",))
         self.assertFalse(self.src.read_only)
         self.assertTrue(self.src.checked)
@@ -905,6 +905,44 @@ class JsonTree(_Case):
         self.src.reset()
         with mock.patch.dict(os.environ, {"OPENCODE_DB": "mine.sqlite"}):
             self.assertEqual(self.calls(path), [])
+
+    def test_a_call_only_the_files_hold_is_read_from_them(self):
+        # v1.2.0 imported the tree once (a failed batch is dropped, the
+        # session row kept), and v1.1 could go on writing the session
+        # after; v2 rows count as held too.
+        path = self.json_session(messages=[
+            (assistant(), [v1_tool("c1", "bash", {"command": "ls"}),
+                           v1_tool("c2", "read",
+                                   {"filePath": "~/.ssh/id_rsa"}),
+                           v1_tool("c3", "bash", {"command": "pwd"})])])
+        db = self.db(v2=True)
+        db.session()
+        m = db.message(assistant())
+        db.part(m, v1_tool("c1", "bash", {"command": "ls"}))
+        db.v2_session()
+        db.row("assistant", v2_assistant(v2_tool("c3", "bash",
+                                                 {"command": "pwd"})))
+        db.close()
+        got = self.calls(path)
+        self.assertEqual([c.tool_call_id for c in got], ["c2"])
+        self.assertEqual(rules(got[0]), [("cred.read", "~/.ssh/id_rsa")])
+
+    def test_an_id_that_climbs_out_of_storage_is_not_followed(self):
+        outside = tempfile.mkdtemp(prefix="oc-outside-")
+        self.addCleanup(shutil.rmtree, outside, True)
+        up = "../" * 40 + outside.lstrip("/\\")
+        path = self.write_json("storage/session/%s/ses_x.json" % PID,
+                               {"id": up, "directory": CWD})
+        os.makedirs(os.path.join(self.data, "storage", "message"))
+        os.makedirs(os.path.join(self.data, "storage", "part"))
+        with open(os.path.join(outside, "m.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"id": "m", "role": "assistant"}, fh)
+        os.makedirs(os.path.join(self.data, "storage", "part", "m"))
+        with open(os.path.join(self.data, "storage", "part", "m", "p.json"),
+                  "w", encoding="utf-8") as fh:
+            json.dump(v1_tool("planted", "bash", {"command": "x"}), fh)
+        self.assertEqual(self.calls(path), [])
 
 
 # --------------------------------------------------------------------------
