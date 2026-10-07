@@ -16,10 +16,10 @@ link ties a Stripe subscription (SUB_ID, sub_..., from the subscriptions
 table or Stripe) to an organisation, which then has Plus while the
 subscription is live. It is the only way a subscription bought on the
 pricing page without an account becomes an organisation's: the account
-page has no way to do it, and once accounts are on, /api/checkout sends
-every buyer to the account's upgrade instead, so these are the ones bought
-before. Link one
-when whoever paid asks, by email from the address Stripe has for it. A
+page has no way to do it, and once accounts are on and ready,
+/api/checkout sends every buyer to the account's upgrade instead, so these
+are the ones bought before. Link one when whoever paid asks, by email from
+the address Stripe has for it. A
 subscription is linked once and never moved, so linking one that already
 has an organisation changes nothing. It lists the subscription's emailed
 tokens that are not revoked among the organisation's machines (kind

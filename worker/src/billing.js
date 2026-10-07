@@ -19,9 +19,9 @@
  *                   session for that subscription's customer, and off to
  *                   it.
  *
- * With accounts on, this is the one way to buy Plus: the pricing page's
- * checkout (/api/checkout, stripe.js) sends the browser to /upgrade
- * instead. A subscription bought on the pricing page before then is
+ * With accounts on and the account host ready, this is the one way to buy
+ * Plus: the pricing page's checkout (/api/checkout, stripe.js) sends the
+ * browser to /upgrade instead. A subscription bought on the pricing page before then is
  * attached to an organisation only by hand (scripts/org_admin.py link),
  * and once it is, it is billed here like any other. The portal login
  * behind /api/billing is stripe.js's and unchanged.
