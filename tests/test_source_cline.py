@@ -1282,5 +1282,80 @@ class Parser(unittest.TestCase):
         self.assertEqual(rb("[x]\nsomething] Result:\n"), (None, None))
 
 
+    def test_large_inputs_stay_linear(self):
+        # Many tools without a parameter, a patch line with a long run of
+        # spaces and a text repeating the working directory's opening were
+        # each quadratic (minutes at these sizes).
+        src = ClineSource
+        started = time.time()
+        text = "<list_files></list_files>" * 20000
+        self.assertEqual(len(_cline_tasks.parse_xml(
+            text, src.TOOL_TAGS, src.PARAM_TAGS)), 20000)
+        self.assertEqual(_cline_tasks.patch_paths(
+            "*** Add File: a" + " " * 50000 + "b\n"),
+            ("a" + " " * 50000 + "b",))
+        self.assertIsNone(_cline_tasks.cwd_from_messages([{"content": [
+            {"type": "text", "text": "# Current Working Directory (x" * 20000}]}]))
+        self.assertLess(time.time() - started, 5)
+
+    def test_a_multi_line_argument_in_a_result_header(self):
+        rb = _cline_tasks.result_body
+        self.assertEqual(rb("[execute_command for 'a\nb'] Result:\nx"),
+                         ("execute_command", "x"))
+        self.assertEqual(rb("[execute_command for 'a\nb'] Result:"),
+                         ("execute_command", ""))
+        self.assertEqual(rb("[x]\nsomething] Result:\n"), (None, None))
+        self.assertEqual(rb("[x y]\nsomething] Result: more"), (None, None))
+        nr = _cline_tasks.not_run_name
+        self.assertEqual(nr("Skipping tool [execute_command for 'a\nrm b'] "
+                            "due to user rejecting a previous tool."),
+                         "execute_command")
+        self.assertIsNone(nr("Skipping tool [x]\nand then due to user "
+                             "rejecting a previous tool. more"))
+
+
+class Review(ClineCase):
+
+    def test_a_stray_folder_in_the_editor_parent_hides_nothing(self):
+        parent = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(self.gs))))
+        for stray in ("sessions", "tasks"):
+            os.makedirs(os.path.join(parent, stray, "other", "x"),
+                        exist_ok=True)
+        path = self.task(spec_xml(), root=self.gs)
+        self.write(os.path.join(parent, "sessions", "other",
+                                "other.messages.json"), _pretty([]))
+        self.assertEqual([s.path for s in self.stores()], [path])
+
+    @unittest.skipIf(WINDOWS, "no FIFOs")
+    def test_a_fifo_manifest_or_index_does_not_block(self):
+        path = self.session(sdk_spec(), with_manifest=False)
+        os.mkfifo(os.path.join(os.path.dirname(path), SID + ".json"))
+        os.makedirs(os.path.join(self.data, "state"))
+        os.mkfifo(os.path.join(self.data, "state", "taskHistory.json"))
+        self.task(spec_xml())
+        done = []
+        import threading
+        t = threading.Thread(target=lambda: done.append(self.stores()),
+                             daemon=True)
+        t.start()
+        t.join(5)
+        self.assertTrue(done, "stores() blocked on a FIFO")
+        self.assertEqual(len(done[0]), 2)
+
+    def test_a_multi_line_command_s_result_is_paired(self):
+        cmd = "cat <<'EOF' > x\nhi\nEOF\ncat .env"
+        messages = [first_user(),
+                    assistant(xml("execute_command", command=cmd), ts=MS + 1),
+                    user(result_text("[execute_command for '%s']" % cmd,
+                                     DENIED)),
+                    assistant(xml("execute_command", command=cmd), ts=MS + 2),
+                    user(result_text("[execute_command for '%s']" % cmd,
+                                     "Output:\nK=1"))]
+        first, second = self.calls(self.task(messages))
+        self.assertEqual((first.status, first.output), ("declined", DENIED))
+        self.assertEqual((second.status, second.output), (None, "Output:\nK=1"))
+
+
 if __name__ == "__main__":
     unittest.main()

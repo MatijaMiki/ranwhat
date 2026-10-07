@@ -119,18 +119,22 @@ DENIED = "The user denied this operation"
 NOT_RUN = ("due to user rejecting a previous tool.",
            "was not executed because a tool has already been used in this "
            "message.")
+_SKIPPED_STARTS = ("Skipping tool [", "Tool [", "MCP tool ")
 
 # The environment details' working directory line (see the module notes),
-# searched in the JSON text of a file's head, so inside a JSON string.
-_CWD_JSON = re.compile(r"# Current (?:Working|Workspace) Directory \("
-                       r"((?:[^\"\\]|\\[^n])*?)\) Files\\n")
-_CWD_TEXT = re.compile(r"# Current (?:Working|Workspace) Directory \((.*?)\)"
-                       r" Files\n")
+# searched in the JSON text of a file's head, so inside a JSON string, or
+# in decoded text. Each opening is looked for its ") Files" within
+# _CWD_MAX characters: a lazy regex scanning on to the end from every
+# opening was quadratic on a text repeating the opening.
+_CWD_OPEN = re.compile(r"# Current (?:Working|Workspace) Directory \(")
+_CWD_JSON_VALUE = re.compile(r"(?:[^\"\\]|\\[^n])*")
+_CWD_MAX = 1 << 14
 _HEAD_MAX = 1 << 18
 
-# apply_patch's own grammar names its files on these lines.
+# apply_patch's own grammar names its files on these lines (greedy, then
+# stripped: a lazy group before \s*$ was quadratic on a run of spaces).
 _PATCH_FILE = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): "
-                         r"(.+?)\s*$", re.M)
+                         r"(.+)$", re.M)
 
 _WIN_ABS = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)")
 
@@ -166,12 +170,28 @@ def editor_locations(env, home, platform, ext):
     return out
 
 
+def editor_parents():
+    """The editor parent folders as editor_locations names them now (the
+    default one and VSCODE_APPDATA), normcased."""
+    env, home, plat = os.environ, _paths.home(), _paths.platform_name()
+    out = {_paths.editor_parent(env, home, plat)}
+    moved = _paths._set(env, "VSCODE_APPDATA")
+    if moved:
+        out.add(moved)
+    return {os.path.normcase(os.path.abspath(os.path.expanduser(p)))
+            for p in out if p}
+
+
 def task_roots(folder, ids):
-    """The storage folders at a location: the folder itself when it holds
-    tasks/ or sessions/ (a globalStorage/<id> folder, a Cline data folder,
-    a --path), else each <folder>/<editor>/User/globalStorage/<id> that
-    exists, for an editor parent folder."""
-    if any(os.path.isdir(os.path.join(folder, d)) for d in (TASKS, "sessions")):
+    """The storage folders at a location: each <folder>/<editor>/User/
+    globalStorage/<id> that exists, for an editor parent folder (never the
+    parent itself: another program's tasks/ or sessions/ folder there is
+    not the agent's); else the folder itself when it holds tasks/ or
+    sessions/ (a globalStorage/<id> folder, a Cline data folder, a
+    --path)."""
+    parent = os.path.normcase(os.path.abspath(folder)) in editor_parents()
+    if not parent and any(os.path.isdir(os.path.join(folder, d))
+                          for d in (TASKS, "sessions")):
         return [folder]
     out = []
     for editor in EDITORS:
@@ -212,7 +232,10 @@ def is_file(path):
 
 
 def read_json(path, limit=None):
-    """The decoded JSON in `path`, or None: never raises."""
+    """The decoded JSON in `path`, or None: never raises. Only a regular
+    file is opened (a FIFO would block the read)."""
+    if not is_file(path):
+        return None
     try:
         with open(path, "rb") as fh:
             raw = fh.read() if limit is None else fh.read(limit + 1)
@@ -241,14 +264,26 @@ def cwd_from_head(path):
             head = fh.read(_HEAD_MAX).decode("utf-8", "replace")
     except (OSError, ValueError):
         return None
-    m = _CWD_JSON.search(head)
-    if not m:
+    raw = _cwd_in(head, ") Files\\n",
+                  lambda v: _CWD_JSON_VALUE.fullmatch(v) is not None)
+    if raw is None:
         return None
     try:
-        value = json.loads('"%s"' % m.group(1))
+        value = json.loads('"%s"' % raw)
     except (ValueError, RecursionError):
         return None
     return value if isinstance(value, str) and _absolute(value) else None
+
+
+def _cwd_in(text, close, valid):
+    """What lies between the first working directory opening in `text` and
+    its `close`, when `valid` takes it, within _CWD_MAX characters."""
+    for m in _CWD_OPEN.finditer(text):
+        start = m.end()
+        end = text.find(close, start, start + _CWD_MAX + len(close))
+        if end != -1 and valid(text[start:end]):
+            return text[start:end]
+    return None
 
 
 def cwd_from_messages(messages):
@@ -257,9 +292,9 @@ def cwd_from_messages(messages):
         for _j, block in blocks(message):
             text = block.get("text")
             if isinstance(text, str):
-                m = _CWD_TEXT.search(text)
-                if m and _absolute(m.group(1)):
-                    return m.group(1)
+                value = _cwd_in(text, ") Files\n", lambda v: "\n" not in v)
+                if value and _absolute(value):
+                    return value
     return None
 
 
@@ -278,7 +313,8 @@ def patch_paths(patch):
     """The files an apply_patch payload names, in order."""
     if not isinstance(patch, str):
         return ()
-    return tuple(m.group(1) for m in _PATCH_FILE.finditer(patch))
+    found = (m.group(1).rstrip() for m in _PATCH_FILE.finditer(patch))
+    return tuple(p for p in found if p)
 
 
 # --------------------------------------------------------------------------
@@ -322,6 +358,11 @@ def parse_xml(text, tools, params, newline_content=False):
     both agents read it."""
     out = []
     pos, n = 0, len(text)
+    # The first parameter tag at or after pos, found again only once pos
+    # has passed it (False: not looked for yet; None: there is none left).
+    # Looking for it from every tool made many tools without parameters
+    # quadratic.
+    p = False
     while pos < n:
         m = tools.search(text, pos)
         if not m:
@@ -336,7 +377,8 @@ def parse_xml(text, tools, params, newline_content=False):
         # with many parameters and no closing tag quadratic.
         c = text.find(close, pos)
         while pos < n:
-            p = params.search(text, pos)
+            if p is False or (p is not None and p.start() < pos):
+                p = params.search(text, pos)
             if c != -1 and c < pos:
                 c = text.find(close, pos)
             if c != -1 and (p is None or c < p.start()):
@@ -361,6 +403,7 @@ def parse_xml(text, tools, params, newline_content=False):
                 break
             found[pname] = _trim(text[p.end():end], pname, newline_content)
             pos = end + len(pname) + 3
+            p = False
         if closed or found:
             out.append((name, found, closed))
     return out
@@ -391,8 +434,15 @@ def result_body(text):
     m = _HEADER.match(text)
     i = text.find(RESULT)
     first = text.find("\n")
-    if not m or i == -1 or (first != -1 and i > first):
+    if not m or i == -1:
         return None, None
+    if first != -1 and i > first:
+        # A header past the first line is one whose argument holds a line
+        # break ("[execute_command for 'cat <<EOF\n...']"): taken when the
+        # name has an argument and the header ends its line.
+        after = text[i + len(RESULT):i + len(RESULT) + 1]
+        if text[m.end() - 1] != " " or after not in ("", "\n"):
+            return None, None
     body = text[i + len(RESULT):]
     if body.startswith("\n"):
         body = body[1:]
@@ -404,7 +454,12 @@ def not_run_name(text):
     or None when `text` is not one."""
     head = text.split("\n", 1)[0]
     if not any(marker in head for marker in NOT_RUN):
-        return None
+        # "Skipping tool [<description>] due to user rejecting a previous
+        # tool." (Cline 3.0-3.20, Roo), whose description can hold a line
+        # break: the whole text is the agent's.
+        if not (text.startswith(_SKIPPED_STARTS)
+                and text.rstrip().endswith(NOT_RUN[0])):
+            return None
     m = re.search(r"\[([A-Za-z0-9_.:\-]+)", head)
     return m.group(1) if m else ""
 
@@ -432,6 +487,9 @@ class TaskSource(Source):
     TOOL_TAGS = None        # alternation(...) of the XML tool names
     PARAM_TAGS = None       # alternation(...) of the XML parameter names
     NEWLINE_CONTENT = False
+    # False: an assistant message holding a tool_use block was written in
+    # the native protocol, whose text the agent never parses for XML (Roo).
+    XML_BESIDE_NATIVE = True
 
     def reset(self):
         Source.reset(self)
@@ -589,7 +647,11 @@ class TaskSource(Source):
     def _assistant(self, store, i, message, when, cwd, extra, seen, pending,
                    found, xml):
         out = []
-        for j, block in blocks(message):
+        items = blocks(message)
+        if xml and not self.XML_BESIDE_NATIVE and any(
+                b.get("type") == "tool_use" for _j, b in items):
+            xml = False
+        for j, block in items:
             kind = block.get("type")
             if kind == "tool_use":
                 name = string(block.get("name")) or ""

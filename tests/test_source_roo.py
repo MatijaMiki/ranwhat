@@ -735,5 +735,61 @@ class Damaged(RooCase):
         self.assertEqual(dirs, sorted(d for d, _s, _f in os.walk(self.home)))
 
 
+class Review(RooCase):
+
+    def test_a_stray_folder_in_the_editor_parent_hides_nothing(self):
+        parent = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(self.gs))))
+        for stray in ("sessions", "tasks"):
+            os.makedirs(os.path.join(parent, stray, "other"), exist_ok=True)
+        path = self.task(spec_native())
+        self.assertIn(path, [s.path for s in self.stores()])
+
+    @unittest.skipIf(os.name == "nt", "no FIFOs")
+    def test_a_fifo_history_item_does_not_block(self):
+        path = self.task(spec_native(), item=False)
+        os.mkfifo(os.path.join(os.path.dirname(path), "history_item.json"))
+        done = []
+        import threading
+        t = threading.Thread(target=lambda: done.append(self.stores()),
+                             daemon=True)
+        t.start()
+        t.join(5)
+        self.assertTrue(done, "stores() blocked on a FIFO")
+        self.assertIn(path, [s.path for s in done[0]])
+
+    def test_xml_in_a_native_message_is_not_a_call(self):
+        messages = [first_user(),
+                    assistant([{"type": "text", "text": "Not this: " + xml(
+                        "execute_command", command="rm -rf ~")},
+                        tool_use("t1", "read_file", {"path": "a"})], ts=MS + 1),
+                    user(result("t1", "x"))]
+        self.assertEqual([c.tool_name for c in self.calls(self.task(messages))],
+                         ["read_file"])
+
+    def test_a_skipped_multi_line_command_is_declined(self):
+        messages = [first_user(),
+                    assistant(xml("read_file", path="a") + "\n" + xml(
+                        "execute_command", command="echo a\nrm -rf b"),
+                        ts=MS + 1),
+                    user(*xml_result("[read_file for 'a']",
+                                     "The user denied this operation."),
+                         {"type": "text", "text": "Skipping tool "
+                          "[execute_command for 'echo a\nrm -rf b'] due to "
+                          "user rejecting a previous tool."})]
+        self.assertEqual([(c.tool_name, c.status)
+                          for c in self.calls(self.task(messages))],
+                         [("read_file", "declined"),
+                          ("execute_command", "declined")])
+
+    def test_xml_args_paths_stay_linear(self):
+        from ranwhat.sources import roo
+        started = time.time()
+        self.assertEqual(roo._paths_in({"args": "<path>" + " " * 20000
+                                        + "x </path>"}), (("x",), ("args",)))
+        self.assertEqual(roo._paths_in({"args": "<path>x" * 20000}), ((), ()))
+        self.assertLess(time.time() - started, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

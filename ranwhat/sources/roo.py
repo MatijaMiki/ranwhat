@@ -141,7 +141,23 @@ PARAMS = ("command", "path", "content", "line_count", "regex", "file_pattern",
 
 PATH_KEYS = ("path", "file_path")
 
-_ARGS_PATH = re.compile(r"<path>\s*(.*?)\s*</path>", re.S)
+
+
+def _args_paths(xml):
+    """The <path> values of an XML args string, stripped. Found with str.find:
+    a lazy regex between \\s* runs was cubic on whitespace and quadratic on
+    unclosed tags."""
+    out, pos = [], 0
+    while True:
+        start = xml.find("<path>", pos)
+        if start == -1:
+            return out
+        start += len("<path>")
+        end = xml.find("</path>", start)
+        if end == -1:
+            return out
+        out.append(xml[start:end].strip())
+        pos = end + len("</path>")
 
 
 def _string(value):
@@ -163,7 +179,7 @@ def _paths_in(args):
             return found, ("files",)
     xml = args.get("args")
     if isinstance(xml, str):
-        found = tuple(p for p in _ARGS_PATH.findall(xml) if p)
+        found = tuple(p for p in _args_paths(xml) if p)
         if found:
             return found, ("args",)
     return (), ()
@@ -199,6 +215,9 @@ class RooSource(T.TaskSource):
     TOOL_TAGS = T.alternation(TOOLS)
     PARAM_TAGS = T.alternation(PARAMS)
     NEWLINE_CONTENT = True
+    # Roo parses XML only in an XML-protocol request (Task.ts at 3.36.0
+    # creates no AssistantMessageParser for a native one).
+    XML_BESIDE_NATIVE = False
 
     # -- where to look ------------------------------------------------------
 
