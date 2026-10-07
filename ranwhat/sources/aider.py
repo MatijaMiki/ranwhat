@@ -236,15 +236,25 @@ def _git_root(start):
     return None
 
 
-def _same(path):
-    """A key that is equal for two spellings of one place: the folder's
-    links resolved, the file name kept as it is."""
-    folder, name = os.path.split(os.path.abspath(path))
+def _same(a, b):
+    """True when two places name one file: spelled alike, or the same
+    file name in the same folder spelled two ways. getcwd() gives the
+    current directory resolved (/private/var on macOS) where the home
+    directory may be spelled through a link (/var). The folders are
+    compared on disk only when their own names match, so an absent Aider,
+    whose places all differ there, costs no stat for it."""
+    a, b = os.path.abspath(a), os.path.abspath(b)
+    if os.path.normcase(a) == os.path.normcase(b):
+        return True
+    (fa, na), (fb, nb) = os.path.split(a), os.path.split(b)
+    if (os.path.normcase(na) != os.path.normcase(nb)
+            or os.path.normcase(os.path.basename(fa))
+            != os.path.normcase(os.path.basename(fb))):
+        return False
     try:
-        folder = os.path.realpath(folder)
+        return os.path.samefile(fa, fb)
     except (OSError, ValueError):
-        pass
-    return os.path.normcase(os.path.join(folder, name))
+        return False
 
 
 def _is_file(path):
@@ -354,16 +364,10 @@ class AiderSource(Source):
         if override:
             return self._input_alone(found)
         try:
-            # Compared by real path: the current directory comes back from
-            # getcwd() resolved (/private/var on macOS) where the home
-            # directory may be spelled through a link (/var).
-            seen = set(_same(loc.path) for loc in found)
             for path in self.here():
                 path = os.path.abspath(path)
-                key = _same(path)
-                if key in seen:
+                if any(_same(path, loc.path) for loc in found):
                     continue
-                seen.add(key)
                 loc = Location(self.id, path, HERE, exists=os.path.exists(path))
                 if loc.exists:
                     loc.found = len(list(self.stores([loc])))

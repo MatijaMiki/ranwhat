@@ -377,14 +377,16 @@ class Discovery(AiderCase):
         self.assertEqual(len(self.src.stores(self.src.locations())), 1)
 
     def test_a_home_reached_through_a_link_is_looked_at_once(self):
-        # macOS: the home is /var/..., getcwd() says /private/var/...
-        real = os.path.join(self.home, "real-home")
+        # macOS: the home is /var/.../u, getcwd() says /private/var/.../u:
+        # one folder, its own name the same, reached through a link above.
+        private = os.path.join(self.home, "private", "var")
+        real = os.path.join(private, "u")
         os.makedirs(real)
-        link = os.path.join(self.home, "home-link")
         try:
-            os.symlink(real, link)
+            os.symlink(private, os.path.join(self.home, "var"))
         except (OSError, NotImplementedError):
             self.skipTest("no symlinks here")
+        link = os.path.join(self.home, "var", "u")
         os.chdir(link)
         with mock.patch.object(_paths, "home", return_value=link):
             paths = [os.path.realpath(l.path) for l in self.src.locations()]
