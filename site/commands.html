@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat commands: check, watch, clean, scan and every flag</title>
-<meta name="description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<meta name="description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo, update and hook, what each one reads and sends, and every flag it takes.">
 <link rel="canonical" href="https://ranwhat.com/commands">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/commands">
 <meta property="og:title" content="ranwhat commands: check, watch, clean, scan and every flag">
-<meta property="og:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<meta property="og:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo, update and hook, what each one reads and sends, and every flag it takes.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat commands: check, watch, clean, scan and every flag">
-<meta name="twitter:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo and update, what each one reads and sends, and every flag it takes.">
+<meta name="twitter:description" content="Every ranwhat command in one place: check, watch, clean, sources, scan, live, demo, update and hook, what each one reads and sends, and every flag it takes.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -79,6 +79,7 @@
     <li><a class="cmdname" href="/commands#live">live</a></li>
     <li><a class="cmdname" href="/commands#demo">demo</a></li>
     <li><a class="cmdname" href="/commands#update">update</a></li>
+    <li><a class="cmdname" href="/commands#hook">hook</a></li>
   </ul>
   <p class="docnav-h">Reference</p>
   <ul>
@@ -92,7 +93,7 @@
     <p class="eyebrow">Commands</p>
     <h1>Every ranwhat command</h1>
     <p class="lede">
-      Eight commands in one tool, and no account for any of them. Start
+      Nine commands in one tool, and no account for any of them. Start
       with <span class="icode">check</span>: it reads what your agents ran and what they left
       on disk, and changes nothing.
     </p>
@@ -106,7 +107,7 @@
       <h2>A bare ranwhat lists them all.</h2>
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
-        page of their own. The other five are below, and every flag is at the end.
+        page of their own. The other six are below, and every flag is at the end.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -120,6 +121,7 @@
   <span class="c-b">live</span>     the same, asked of each token's own provider
   <span class="c-b">demo</span>     see the output without setting anything up
   <span class="c-b">update</span>   refresh the capability catalogue (needs a subscription)
+  <span class="c-b">hook</span>     opt in: ask before a high-risk Claude Code call runs
 
   Start here:
     uvx ranwhat check
@@ -294,9 +296,51 @@
   </div>
 </section>
 
+<section class="mark-3" id="hook">
+  <div class="shell band split">
+    <div class="marginal">07 / hook</div>
+    <div>
+      <h2>hook: ask before the call, not after.</h2>
+      <p class="lede">
+        Every other command works after the fact, and the agent
+        never knows. <span class="icode">hook install</span> is the opt-in
+        exception: it adds a PreToolUse hook to Claude Code's settings, and
+        each tool call watch would rate high or critical then waits for your yes
+        before it runs.
+      </p>
+      <div class="term" aria-label="Installing the hook">
+        <div class="term-bar"><span>ranwhat hook</span></div>
+        <div class="term-body"><pre><span class="c-mut">$</span> uv tool install ranwhat
+<span class="c-mut">$</span> ranwhat hook install
+<span class="c-mut">$</span> ranwhat hook status
+<span class="c-mut">$</span> ranwhat hook uninstall</pre></div>
+      </div>
+      <p class="cmdnote">
+        It runs watch's own rules on the call, on your machine, and sends
+        nothing anywhere. A call no rule rates high or critical gets no answer, so Claude Code
+        decides as it would have without the hook. If the hook itself fails,
+        the call goes ahead. <span class="icode">--mode deny</span> refuses
+        critical calls outright and still asks for high ones, for an agent you
+        check on only now and then. <span class="icode">RANWHAT_HOOK=0</span> lets everything
+        through for one session.
+      </p>
+      <p class="cmdnote">
+        It needs a lasting install, <span class="icode">uv tool install</span>,
+        <span class="icode">pipx install</span> or <span class="icode">pip install</span>,
+        because Claude Code runs it again on every call; a <span class="icode">uvx</span>
+        run is refused. Each check takes about a fifth of a second.
+        <span class="icode">--scope project</span> writes <span class="icode">.claude/settings.json</span>
+        for everyone on the repository, <span class="icode">--scope local</span>
+        <span class="icode">.claude/settings.local.json</span> for you alone.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-scope"><span class="icode">--scope</span></a>, <a href="#flag-mode"><span class="icode">--mode</span></a>, <a href="#flag-json"><span class="icode">--json</span></a> (status).</p>
+    </div>
+  </div>
+</section>
+
 <section class="mark-2" id="flags">
   <div class="shell band split">
-    <div class="marginal">07 / Flags</div>
+    <div class="marginal">08 / Flags</div>
     <div>
       <h2>Every flag, and the commands that take it.</h2>
       <p class="lede">
@@ -322,7 +366,7 @@
               <td data-label="Commands">check, watch, clean</td>
               <td data-label="What it does">OpenClaw's state directory, <span class="icode">~/.openclaw</span> by default. The same as <span class="icode">--path openclaw=PATH</span>.</td></tr>
           <tr><td><code id="flag-json">--json</code></td>
-              <td data-label="Commands">every command but update</td>
+              <td data-label="Commands">every command but update; hook only with status</td>
               <td data-label="What it does">Print the result as JSON instead of the report.</td></tr>
           <tr><td><code id="flag-apply">--apply</code></td>
               <td data-label="Commands">clean</td>
@@ -360,6 +404,12 @@
           <tr><td><code id="flag-status">--status</code></td>
               <td data-label="Commands">update</td>
               <td data-label="What it does">Report the cached catalogue and exit, without going online.</td></tr>
+          <tr><td><code id="flag-scope">--scope SCOPE</code></td>
+              <td data-label="Commands">hook</td>
+              <td data-label="What it does">Which Claude Code settings file: <span class="icode">user</span> (<span class="icode">~/.claude/settings.json</span>, or <span class="icode">$CLAUDE_CONFIG_DIR/settings.json</span> when that is set; the default), <span class="icode">project</span> (<span class="icode">.claude/settings.json</span> here) or <span class="icode">local</span> (<span class="icode">.claude/settings.local.json</span> here). <span class="icode">hook status</span> shows all three without it.</td></tr>
+          <tr><td><code id="flag-mode">--mode MODE</code></td>
+              <td data-label="Commands">hook install</td>
+              <td data-label="What it does"><span class="icode">ask</span>, the default, makes each call watch would rate high or critical wait for your yes. <span class="icode">deny</span> refuses the critical ones and still asks for the high ones.</td></tr>
         </tbody>
       </table>
     </div>
