@@ -79,6 +79,7 @@
     <li><a class="cmdname" href="/commands#live">live</a></li>
     <li><a class="cmdname" href="/commands#demo">demo</a></li>
     <li><a class="cmdname" href="/commands#update">update</a></li>
+    <li><a class="cmdname" href="/commands#hook">hook</a></li>
   </ul>
   <p class="docnav-h">Reference</p>
   <ul>
@@ -160,7 +161,7 @@ pip install ranwhat</pre></div>
         <div class="row"><span class="k">Claude Code</span>
           <span class="v">Reads <span class="icode">~/.claude/projects/*/*.jsonl</span> and the subagent transcripts beside them, the last 30 days by default (<span class="icode">--days N</span>). If <span class="icode">CLAUDE_CONFIG_DIR</span> is set, it reads <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> instead, and <span class="icode">--root PATH</span> points it at any other directory. <a href="/guides/claude-code-history">Where Claude Code keeps its history</a> covers what else is in that directory. The <a href="/watch">watch page</a> lists every agent ranwhat reads.</span></div>
         <div class="row"><span class="k">Writes</span>
-          <span class="v">None of your files, unless you ask. <span class="icode">clean</span> masks secrets only on <span class="icode">--apply</span> or <span class="icode">mask</span>, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">--html</span> writes the report you name, mode 600. <span class="icode">check</span> and <span class="icode">watch</span> keep an index of the secrets <span class="icode">clean</span> finds in <span class="icode">~/.ranwhat/known</span> (<span class="icode">$RANWHAT_HOME/known</span> when that is set), so they can hide every one in what they print: salted fingerprints, never a secret, readable by you alone. <span class="icode">update</span> caches the catalogue under <span class="icode">~/.ranwhat/feed</span>, and stores its token at <span class="icode">~/.ranwhat/token</span> (0600) only with <span class="icode">--save-token</span>.</span></div>
+          <span class="v">None of your files, unless you ask. <span class="icode">clean</span> masks secrets only on <span class="icode">--apply</span> or <span class="icode">mask</span>, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">--html</span> writes the report you name, mode 600. <span class="icode">check</span> and <span class="icode">watch</span> keep an index of the secrets <span class="icode">clean</span> finds in <span class="icode">~/.ranwhat/known</span> (<span class="icode">$RANWHAT_HOME/known</span> when that is set), so they can hide every one in what they print: salted fingerprints, never a secret, readable by you alone. <span class="icode">update</span> caches the catalogue under <span class="icode">~/.ranwhat/feed</span>, and stores its token at <span class="icode">~/.ranwhat/token</span> (0600) only with <span class="icode">--save-token</span>. <span class="icode">hook install</span> and <span class="icode">hook uninstall</span> add or remove one PreToolUse entry in the Claude Code settings file you choose, and leave the rest of it as it was.</span></div>
       </div>
     </div>
   </div>

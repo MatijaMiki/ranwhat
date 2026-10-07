@@ -31,6 +31,7 @@ from . import catalog as catalog_mod
 from . import agents as agents_mod
 from . import sources as sources_mod
 from . import hints
+from . import hook as hook_mod
 from . import term
 
 # introspect, usage, feed and account talk to providers and to ranwhat's
@@ -240,6 +241,7 @@ COMMANDS = (
     ("live", "the same, asked of each token's own provider"),
     ("demo", "see the output without setting anything up"),
     ("update", "refresh the capability catalogue (needs a subscription)"),
+    ("hook", "opt in: ask before a high-risk Claude Code call runs"),
 )
 
 # The opt-in commands that link this machine to an account (account.py).
@@ -1041,6 +1043,122 @@ def _progress_line(args):
     return bar, step
 
 
+_HOOK_ACTIONS = ("install", "uninstall", "status", "run")
+
+
+def _hook(p, args):
+    """ranwhat hook install | uninstall | status. (run is Claude Code's,
+    and normally reached through `python -m ranwhat` without this parser.)"""
+    action = args.profile or "status"
+    if action not in _HOOK_ACTIONS:
+        p.error("hook takes install, uninstall or status, not %s" % action)
+    if action == "run":
+        return hook_mod.run(mode=args.mode or hook_mod.DEFAULT_MODE)
+    # Another command's flag, taken and ignored, looked like it did
+    # something: `hook install --json` printed prose.
+    allowed = {"command", "profile", "scope"}
+    allowed |= {"json"} if action == "status" else set()
+    allowed |= {"mode"} if action == "install" else set()
+    stray = [a.option_strings[-1] for a in p._actions
+             if a.option_strings and a.dest not in allowed
+             and a.dest != "help" and getattr(args, a.dest, None) != a.default]
+    if stray:
+        p.error("hook %s does not take %s" % (action, ", ".join(stray)))
+    mode = args.mode or hook_mod.DEFAULT_MODE
+    if action == "status":
+        return _hook_status(args)
+    path = hook_mod.settings_path(args.scope or hook_mod.DEFAULT_SCOPE)
+    try:
+        if action == "uninstall":
+            removed = hook_mod.uninstall(path)
+            print("Removed the ranwhat hook from %s." % path if removed
+                  else "No ranwhat hook in %s; nothing changed." % path)
+            return 0
+        problem = _hook_cannot_find_us()
+        if problem:
+            print(problem, file=sys.stderr)
+            return 1
+        command = hook_mod.command_for(mode)
+        changed = hook_mod.install(path, command)
+    except (hook_mod.SettingsError, OSError) as error:
+        print("ranwhat hook: %s" % error, file=sys.stderr)
+        return 1
+    what = ("each call watch rates high or critical waits for your yes"
+            if mode == "ask"
+            else "critical calls are refused, and high ones wait for your yes")
+    print("%s %s." % ("Installed the ranwhat hook in" if changed
+                      else "The ranwhat hook is already in", path))
+    print("From the next Claude Code session, %s. Nothing it judges leaves "
+          "this machine, and if the hook fails the call goes ahead." % what)
+    print("Turn it off with: %s hook uninstall%s"
+          % (invocation(), "" if args.scope in (None, "user")
+             else " --scope %s" % args.scope))
+    return 0
+
+
+def _hook_cannot_find_us():
+    """Why the hook, run later by Claude Code from another directory, would
+    not find this ranwhat; None when it would. A throwaway uvx or pipx run
+    is gone by then, and a checkout run as python -m is found only from
+    inside it."""
+    try:
+        kind = _ephemeral(_real(sys.prefix), os.environ, os.path.expanduser("~"))
+    except Exception:
+        kind = None
+    if kind:
+        return ("This ranwhat runs from a throwaway environment (%s), which "
+                "will be gone when Claude Code next calls the hook. Install "
+                "it first, with `uv tool install ranwhat` or `pipx install "
+                "ranwhat`, then run `ranwhat hook install`." % kind)
+    import subprocess
+    import tempfile
+    try:
+        probe = subprocess.run(
+            [sys.executable] + list(hook_mod.ISOLATED)
+            + ["-c", "import ranwhat.hook"],
+            cwd=tempfile.gettempdir(), stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=30, check=False)
+        found = probe.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        found = False
+    if not found:
+        return ("%s cannot import ranwhat outside this directory, so the hook "
+                "would fail wherever Claude Code runs it. (The hook runs it "
+                "isolated, -I, so a pip install --user is not seen.) Install "
+                "ranwhat "
+                "(`uv tool install ranwhat`, `pipx install ranwhat` or "
+                "`pip install ranwhat`), then run hook install with it."
+                % sys.executable)
+    return None
+
+
+def _hook_status(args):
+    scopes = [args.scope] if args.scope else list(hook_mod.SCOPES)
+    found = {}
+    for scope in scopes:
+        path = hook_mod.settings_path(scope)
+        try:
+            found[scope] = {"path": path, "commands": hook_mod.installed(path)}
+        except hook_mod.SettingsError as error:
+            # Not "not installed": Claude Code cannot read the file either.
+            found[scope] = {"path": path, "commands": [], "error": str(error)}
+    if args.json:
+        print(_json_text(found))
+        return 0
+    for scope in scopes:
+        entry = found[scope]
+        state = ("installed: %s" % "; ".join(entry["commands"])
+                 if entry["commands"] else
+                 "unreadable: %s" % entry["error"] if "error" in entry
+                 else "not installed")
+        print("  %-8s %s\n           %s" % (scope, entry["path"], state))
+    if not any(e["commands"] for e in found.values()):
+        print("\nThe hook is off. %s hook install asks before a Claude Code "
+              "call watch rates high or critical." % invocation())
+    return 0
+
+
 def _takes_no_path(command, path):
     """The error for a path given to a command other than scan. For one
     that reads transcripts, which flag reads that path: --root, or --root
@@ -1421,10 +1539,11 @@ def _main(argv=None):
     p.add_argument("command", nargs="?",
                    choices=["check", "demo", "scan", "live", "watch",
                             "clean", "sources", "reach", "update", "login",
-                            "whoami", "logout"])
+                            "whoami", "logout", "hook"])
     p.add_argument("profile", nargs="?",
-                   help="scan: path to a profile JSON; reach: a project "
-                        "directory to look at")
+                   help="scan: path to a profile JSON. reach: a project "
+                        "directory to look at. hook: install, uninstall or "
+                        "status")
     p.add_argument("--json", action="store_true", help="emit raw JSON")
     p.add_argument("--html", metavar="PATH",
                    help="demo, scan, live: also write the report as HTML")
@@ -1491,10 +1610,27 @@ def _main(argv=None):
     p.add_argument("--local", action="store_true",
                    help="logout: delete the saved token without asking the "
                         "server to revoke it")
+    p.add_argument("--scope", choices=hook_mod.SCOPES,
+                   help="hook: which Claude Code settings file: user "
+                        "(~/.claude/settings.json, or $CLAUDE_CONFIG_DIR's; "
+                        "the default), project "
+                        "(.claude/settings.json here) or local "
+                        "(.claude/settings.local.json here)")
+    p.add_argument("--mode", choices=sorted(hook_mod.MODES),
+                   help="hook install: ask (the default) makes each call "
+                        "watch rates high or critical wait for your yes; "
+                        "deny refuses the critical ones and still asks for "
+                        "the high ones")
     # Intermixed, so a flag may come before scan's path: on Python 3.9,
     # `scan --json profile.json` ended the positionals at --json and then
     # refused the path as an unrecognized argument.
     args = p.parse_intermixed_args(argv)
+
+    if args.command == "hook":
+        return _hook(p, args)
+    if args.scope or args.mode:
+        # Taken and ignored, `check --mode deny` looked like it did something.
+        p.error("--scope and --mode are only for hook")
 
     if args.profile is not None and args.command not in ("scan", "reach"):
         # Taken and ignored, `check DIR` reported on the default history as
