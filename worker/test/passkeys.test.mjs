@@ -258,7 +258,7 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
     [{ user_id: userOf(e, "ana@example.com"), handle: options.user.id }]);
 
   const made = device.create(options);
-  const added = await b.post("/passkeys", { form: tokenFor(page.text, "/passkeys"), label: "  Work‮ laptop\n ", ...made });
+  const added = await b.post("/passkeys", { form: tokenFor(page.text, "/passkeys"), label: "  Work\u202e laptop\n ", ...made });
   assert.equal(added.status, 303, added.text);
   assert.equal(added.location, "/");
   const [row] = passkeysOf(e, "ana@example.com");
@@ -306,7 +306,7 @@ test("adding a passkey takes RS256 and Ed25519 keys too, and labels are cleaned,
   assert.deepEqual(passkeysOf(e, "ana@example.com").map((p) => [coseKey(unb64(p.public_key)).alg, p.label]).sort(),
                    [[-257, "Passkey"], [-8, "Passkey"]]);
   assert.equal(passkeyLabel("x".repeat(500)), "x".repeat(MAX_LABEL));
-  assert.equal(passkeyLabel("\u0000​"), "Passkey");
+  assert.equal(passkeyLabel("\u0000\u200b"), "Passkey");
   assert.equal(passkeyLabel(" Phone  \t one "), "Phone one");
   assert.equal(passkeyLabel("Work\nlaptop"), "Work laptop");
   assert.equal(passkeyLabel("a\u200b b"), "a b");

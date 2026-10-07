@@ -71,8 +71,9 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;   // 32 random bytes, base64url
    goes into an email's To. */
 const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
 
-/* Where a sign-in may send the browser on to. M3 adds /device. */
-const NEXT = new Set(["/"]);
+/* Where a sign-in may send the browser on to: the account, or the page
+   that approves a terminal (device.js). */
+const NEXT = new Set(["/", "/device"]);
 export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 /* ---------- secrets ---------- */
@@ -186,9 +187,11 @@ export async function formOk(env, form, binding, action) {
 /* The network a request comes from, as the limits count it: an IPv4
    address by itself (with `v4: 24`, its /24), and an IPv6 address by its
    /64, which is what one home, phone or server is given, so that walking
-   through the addresses of one /64 is still one network. An address that
-   cannot be read is counted as itself. */
-export function network(request, { v4 = 32 } = {}) {
+   through the addresses of one /64 is still one network. With `v6: 56` or
+   `v6: 48`, an IPv6 address counts by that wider prefix instead, for a
+   limit that a holder of many /64s (a /48 has 65,536 of them) must not
+   multiply. An address that cannot be read is counted as itself. */
+export function network(request, { v4 = 32, v6 = 64 } = {}) {
   const ip = (request.headers.get("cf-connecting-ip") || "unknown").trim().toLowerCase();
   const four = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
   if (four) return v4 === 24 ? `${four[1]}.${four[2]}.${four[3]}.0/24` : four.slice(1).join(".");
@@ -200,7 +203,12 @@ export function network(request, { v4 = 32 } = {}) {
   if (halves.length === 1 ? gap !== 0 : gap < 1) return ip;
   const groups = [...head, ...Array(halves.length === 2 ? gap : 0).fill("0"), ...tail];
   if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return ip;
-  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
+  const bits = v6 === 48 || v6 === 56 ? v6 : 64;
+  const kept = groups.slice(0, Math.ceil(bits / 16)).map((g, i) => {
+    const left = bits - 16 * i;    // bits of this group inside the prefix
+    return (parseInt(g, 16) & (left >= 16 ? 0xffff : (0xffff << (16 - left)) & 0xffff)).toString(16);
+  });
+  return `${kept.join(":")}::/${bits}`;
 }
 
 /* One key for two things counted together, such as an address as asked
@@ -229,6 +237,15 @@ export async function peek(env, kind, who, window) {
   const row = await env.LIST.prepare("SELECT count FROM throttle WHERE key = ? AND window_start > ?")
     .bind(key, now() - window).first();
   return row ? row.count : 0;
+}
+
+/* One fewer in the window, for a count bumped before the thing it limits
+   turned out not to be one (a right code, counted as a try before it was
+   looked up). Never below nothing. */
+export async function unbump(env, kind, who, window) {
+  const key = await throttleKey(env, kind, who);
+  await env.LIST.prepare("UPDATE throttle SET count = count - 1 WHERE key = ? AND window_start > ? AND count > 0")
+    .bind(key, now() - window).run();
 }
 
 /* The statement that starts a count again from nothing, for the caller's

@@ -290,7 +290,7 @@ def _read_summary(path):
         if os.path.getsize(path) > _SUMMARY_MAX:
             return None, None
         with open(path, encoding="utf-8", errors="replace") as fh:
-            doc = json.loads(fh.read().lstrip("﻿"))
+            doc = json.loads(fh.read().lstrip("\ufeff"))
     except (OSError, ValueError, RecursionError):
         return None, None
     info = _dict(_dict(doc).get("info"))
@@ -808,7 +808,7 @@ class GrokBuildSource(Source):
         with open(store.path, "rb") as fh:
             raw = fh.read()
         try:
-            doc = json.loads(raw.decode("utf-8", "surrogateescape").lstrip("﻿"))
+            doc = json.loads(raw.decode("utf-8", "surrogateescape").lstrip("\ufeff"))
         except (ValueError, RecursionError):
             self._cannot_read(store, "not JSON")
             return

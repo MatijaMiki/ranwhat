@@ -35,6 +35,11 @@ DEFAULT_ENDPOINT = "https://feed.ranwhat.com/v1/catalogue"
 USER_AGENT = "ranwhat-feed/1"
 TIMEOUT = 20
 
+# Where a token whose organisation is on Free is sent to upgrade
+# (worker/src/auth.js's UPGRADE). The server names it in its refusal, and
+# that is printed only when it is an https address on ranwhat.com.
+UPGRADE = "https://account.ranwhat.com/"
+
 SCHEMA = 1
 
 # A catalogue is a few hundred kilobytes. Anything past this is not one, and
@@ -86,11 +91,31 @@ def read_token():
     tok = os.environ.get("RANWHAT_TOKEN")
     if tok:
         return tok.strip()
+    return saved_token()[0]
+
+
+def saved_token():
+    """(token, why): the token saved at ~/.ranwhat/token, read without
+    following a symlink, or None and why not: 'none', 'symlink' or
+    'unreadable'. `ranwhat login` writes that file; a symlink planted there
+    would otherwise have whatever it points to sent as a Bearer token."""
+    path = token_path()
+    if os.path.islink(path):
+        return None, "symlink"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     try:
-        with open(token_path(), encoding="utf-8") as fh:
-            return fh.read().strip() or None
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None, "none"
     except OSError:
-        return None
+        return None, "unreadable"
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            data = fh.read(4096)
+        token = data.decode("utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None, "unreadable"
+    return (token, "ok") if token else (None, "unreadable")
 
 
 def save_token(token):
@@ -119,6 +144,17 @@ def save_token(token):
     return path
 
 
+def delete_token():
+    """Remove the saved token. unlink never follows a symlink: a link at
+    ~/.ranwhat/token goes, and whatever it points to stays as it was.
+    True when there was something to remove."""
+    try:
+        os.unlink(token_path())
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def digest(payload):
     """Hash over the catalogue only, so metadata can change without breaking it."""
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -127,6 +163,49 @@ def digest(payload):
 
 class FeedError(Exception):
     pass
+
+
+class PlusRequired(FeedError):
+    """The token was read and is good, but its organisation's plan does not
+    include the feed: a machine linked to a Free organisation. `needs` is
+    the plan that does, `upgrade` where to get it."""
+
+    def __init__(self, needs="Plus", upgrade=UPGRADE):
+        self.needs, self.upgrade = needs, upgrade
+        super().__init__(
+            "This token's organisation is on Free. The catalogue feed is part "
+            "of %s: %s" % (needs, upgrade))
+
+
+def _upgrade_link(value):
+    """The server's upgrade address when it is an https one on ranwhat.com
+    with nothing in it a terminal would act on; UPGRADE otherwise."""
+    if not isinstance(value, str) or len(value) > 200 or not _plain(value):
+        return UPGRADE
+    try:
+        parts = urllib.parse.urlsplit(value)
+        host, port = parts.hostname or "", parts.port
+    except ValueError:
+        return UPGRADE
+    if (parts.scheme == "https" and port is None and not parts.username
+            and (host == "ranwhat.com" or host.endswith(".ranwhat.com"))):
+        return value
+    return UPGRADE
+
+
+def _refused(exc):
+    """A 403's body, when it says why: {"error": "plus_required", "upgrade":
+    ...} from a server that knows plans. 0.5.0's server, and any body that
+    is not that, is the plain refusal it always was."""
+    try:
+        body = exc.read(64 * 1024 + 1)
+        doc = json.loads(body.decode("utf-8")) if len(body) <= 64 * 1024 else None
+    except Exception:
+        doc = None
+    if isinstance(doc, dict) and doc.get("error") in ("plus_required", "team_required"):
+        return PlusRequired("Plus" if doc["error"] == "plus_required" else "Team",
+                            _upgrade_link(doc.get("upgrade")))
+    return None
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -139,21 +218,28 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
                         "with your token." % newurl)
 
 
+_LOOPBACK = ("localhost", "127.0.0.1", "::1")
+
+
 def _check_url(url):
     """https only. Plain http is allowed to this machine alone, for testing a
     feed server locally; anywhere else it would send the token in clear."""
     parts = urllib.parse.urlsplit(url)
     if parts.scheme == "https" and parts.hostname:
         return
-    if parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1"):
+    if parts.scheme == "http" and parts.hostname in _LOOPBACK:
         return
     raise FeedError("The feed URL must be https: %s" % url)
 
 
 def _open(req, timeout, context):
-    opener = urllib.request.build_opener(
-        _NoRedirect, urllib.request.HTTPSHandler(context=context))
-    return opener.open(req, timeout=timeout)
+    handlers = [_NoRedirect, urllib.request.HTTPSHandler(context=context)]
+    # A server on this machine, the only one plain http may reach
+    # (_check_url), is asked directly: through an http_proxy from the
+    # environment the token would go, in clear, to wherever the proxy is.
+    if urllib.parse.urlsplit(req.full_url).hostname in _LOOPBACK:
+        handlers.append(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(*handlers).open(req, timeout=timeout)
 
 
 def _check_token(token):
@@ -187,6 +273,9 @@ def fetch(token, url=None, timeout=TIMEOUT):
         with _open(req, timeout, ctx) as resp:
             body = resp.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
+        why = _refused(exc) if exc.code == 403 else None
+        if why is not None:
+            raise why from None
         if exc.code in (401, 403):
             raise FeedError(
                 "That token was not accepted. Check it at ranwhat.com/contact.")

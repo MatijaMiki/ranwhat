@@ -370,7 +370,7 @@ test("a Free organisation's dashboard shows Plus and Team locked, from the map, 
     assert.ok(plus.html.includes(f.status === "live" ? "Needs Plus" : "Coming, included in Plus"), f.key);
   }
   assert.deepEqual(plus.features.slice(0, 2), ["feed", "ci_tokens"], "the feed and CI tokens lead the Plus panel");
-  assert.match(plus.html, /<li data-feature="ci_tokens"><strong>CI tokens<\/strong> <span class="tag">Coming, included in Plus<\/span>/);
+  assert.match(plus.html, /<li data-feature="ci_tokens"><strong>CI tokens<\/strong> <span class="tag">Needs Plus<\/span>/);
   assert.match(plus.html, /<a href="https:\/\/ranwhat\.com\/pricing">Upgrade to Plus<\/a>/);
   // Team: no price and nothing to buy, only a way to talk to us.
   assert.doesNotMatch(team.html, /<form|€|\$|£|\/\s*(month|year)|per (month|year|seat)|pricing|checkout/i);

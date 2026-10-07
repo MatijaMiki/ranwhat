@@ -59,6 +59,19 @@
  *                       answer for every way it can be wrong.
  *   GET  /passkeys.js   The script the two passkey pages load, the only
  *                       script of ours on this host.
+ *   GET  /device        The box for the code a terminal printed after
+ *                       ranwhat login, with a fresh code (device.js).
+ *   POST /device        Looks the typed code up, under its limits, and
+ *                       shows what approving it would do.
+ *   POST /device/approve  Links the terminal to the organisation shown,
+ *                       with a fresh code.
+ *   POST /device/deny   Tells the terminal no.
+ *   POST /machines/rename  Names one of the organisation's machines (an
+ *                       owner or admin, or whoever linked it; machines.js).
+ *   POST /machines/revoke  Revokes one, on the same terms, with a fresh
+ *                       code.
+ *   POST /tokens/ci     Makes a CI token, on Plus or Team, as an owner or
+ *                       admin, with a fresh code, and shows it this once.
  *
  * Nothing changes on a GET but a passkey challenge, made for whoever
  * asks and good once (and, the first time an account asks to add a
@@ -77,14 +90,14 @@
  */
 import { escape } from "./list.js";
 import { plan } from "./auth.js";
-import { PLAN_NAMES, atLeast, featuresOf } from "./features.js";
+import { FEATURES, PLAN_NAMES, allows, atLeast, featuresOf } from "./features.js";
 import {
-  ACCOUNT_HOST, SESSION_MAX, canManage, event, forgetWaysIn, history, now, orgFor, orgName, ready, schema,
+  ACCOUNT_HOST, DAY, SESSION_MAX, canManage, event, forgetWaysIn, history, now, orgFor, orgName, ready, schema,
   userForVerifiedEmail,
 } from "./accounts.js";
 import { challenge } from "./challenge.js";
 import {
-  CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, checkCode,
+  CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, bump, checkCode,
   clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, randomToken, readCookie,
   requestCode, sameOrigin, setCookie, tellWayIn,
 } from "./session.js";
@@ -99,20 +112,16 @@ import {
   MAX_LABEL, MAX_PASSKEYS, PAGE_SCRIPT, forgetPasskey, passkeyLabel, passkeysOf, register,
   registrationOptions, signIn, signinOptions,
 } from "./passkeys.js";
-import { away, data, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
+import { approve, deny, deviceLookup, devicePage } from "./device.js";
+import {
+  EXPIRIES, IDLE_DAYS, MAX_CI, MAX_LABEL as MAX_MACHINE_LABEL, liveCi, machineIn, machineLabel, machinesOf,
+  mayChange, mintCi, renameMachine, revokeMachine,
+} from "./machines.js";
+import { away, data, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
 const PRICING = "https://ranwhat.com/pricing";
 const TALK = "mailto:hello@ranwhat.com?subject=ranwhat%20Team";
-
-/* A form's fields, or none when the body is not a form. */
-async function fields(request) {
-  try {
-    return await request.formData();
-  } catch {
-    return new FormData();
-  }
-}
 
 /* No session: to the sign-in page, dropping a cookie that no longer opens one. */
 const signedOut = (request) =>
@@ -687,6 +696,14 @@ const EVENTS = {
   passkey_added: "Passkey added, confirmed with an emailed code",
   passkey_removed: "Passkey removed",
   ways_removed: "Every Google, GitHub and passkey way in removed",
+  device_approved: "Terminal approved for ranwhat login, with a fresh code",
+  device_denied: "Terminal denied for ranwhat login",
+  machine_linked: "Terminal linked",
+  machine_logout: "Terminal unlinked with ranwhat logout",
+  machine_renamed: "Machine renamed",
+  machine_revoked: "Machine revoked, with a fresh code",
+  machine_idle_revoked: `Terminal revoked after ${IDLE_DAYS} days unused`,
+  ci_token_created: "CI token made, with a fresh code",
 };
 
 const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -841,7 +858,8 @@ async function passkeys(env, who, error, code) {
 }
 
 async function dashboard(env, who, {
-  error = "", passwordError = "", providerError = null, passkeyError = "", signoutError = "", status = 200,
+  error = "", passwordError = "", providerError = null, passkeyError = "", signoutError = "", machinesError = "",
+  status = 200,
 } = {}) {
   const org = who.org;
   const events = await history(env, who.user);
@@ -864,6 +882,7 @@ async function dashboard(env, who, {
     </dl>
     ${panel("plus", onPlan)}
     ${panel("team", onPlan)}
+    ${await machinesPanel(env, who, onPlan, machinesError)}
     ${await methods(env, who, passwordError, providerError, passkeyError)}
     ${rename}
     <h2>Recent activity</h2>
@@ -1326,6 +1345,204 @@ async function passkeySignin(request, env) {
 
 const pageScript = () => script(PAGE_SCRIPT);
 
+/* ---------- machines and CI tokens ---------- */
+
+const KINDS = { device: "terminal", ci: "CI", legacy: "old subscription token" };
+const UNNAMED = { device: "Unnamed terminal", ci: "Unnamed CI token", legacy: "Subscription token" };
+
+/* The select's choices for a CI token's expiry, in this order. */
+const EXPIRY_CHOICES = [["never", "Never"], ["30", "In 30 days"], ["90", "In 90 days"], ["365", "In a year"]];
+
+const NONCE = /^[A-Za-z0-9_-]{43}$/;
+const ciAction = (nonce) => `ci-token:${nonce}`;
+
+const day = (t) => escape(when(t).slice(0, 10));
+
+/* Every machine of the organisation being looked at: what it is called,
+   what kind it is, who linked or made it and when, and the day it was last
+   used, with a form to rename it and one to revoke it for whoever may
+   (machines.js's mayChange()); revoking needs a fresh code. Then CI tokens:
+   locked below the plan features.js names for them, and made by an owner
+   or admin with a fresh code. */
+async function machinesPanel(env, who, onPlan, error) {
+  const org = who.org;
+  const confirmed = fresh(who);
+  const t = now();
+  const list = await machinesOf(env, org.id);
+  const renameToken = await formToken(env, who.id, "machine-rename");
+  const revokeToken = await formToken(env, who.id, "machine-revoke");
+  const items = list.map((m) => {
+    const may = mayChange(who, m);
+    const id = escape(m.id);
+    const name = m.label ? escape(m.label) : UNNAMED[m.kind];
+    const by = m.kind === "legacy"
+      ? `The token emailed with a subscription, attached here on ${day(m.created_at)}.`
+      : `${m.kind === "ci" ? "Made" : "Linked"} by ${m.email ? escape(m.email) : "someone no longer here"} on ${day(m.created_at)}.`;
+    const used = m.kind === "legacy" ? "Its use is not recorded."
+      : m.last_used_day === null ? "Not used yet." : `Last used ${day(m.last_used_day)}.`;
+    const expired = m.expires_at !== null && m.expires_at <= t;
+    const expiry = m.expires_at === null ? "" : expired ? ` Expired ${day(m.expires_at)}.` : ` Expires ${day(m.expires_at)}.`;
+    const forms = may ? `
+        <details><summary>${m.label ? "Rename" : "Name it"}</summary>
+        ${form("/machines/rename", renameToken, `
+          <input type="hidden" name="id" value="${id}">
+          <label for="label-${id}">Name</label>
+          <input id="label-${id}" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required value="${escape(m.label)}">
+          <button type="submit">Rename</button>`)}</details>
+        ${confirmed ? form("/machines/revoke", revokeToken, `
+          <input type="hidden" name="id" value="${id}">
+          <button type="submit">${expired ? "Remove" : "Revoke"}</button>`) : ""}` : "";
+    return `<li data-machine="${id}"><strong>${name}</strong> <span class="tag">${KINDS[m.kind]}${expired ? ", expired" : ""}</span>
+        <br>${by} ${used}${expiry}${forms}</li>`;
+  }).join("");
+  const anyMine = list.some((m) => mayChange(who, m));
+
+  const revokeStep = anyMine && !confirmed
+    ? `<p>Revoking a machine needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${form("/stepup", await formToken(env, who.id, "stepup"),
+        `<input type="hidden" name="next" value="/"><button type="submit">Email me a code</button>`)}`
+    : "";
+
+  let ci;
+  const feature = FEATURES.ci_tokens;
+  if (!allows(onPlan, "ci_tokens")) {
+    ci = `<div class="panel locked" id="ci-tokens" data-feature="ci_tokens">
+      <h2>${escape(feature.name)} <span class="tag">locked, needs ${PLAN_NAMES[feature.plan]}</span></h2>
+      <p>${escape(feature.says)} Each pipeline gets a token of its own, named, with an expiry if you
+         like.</p>
+      <p><a href="${PRICING}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></p></div>`;
+  } else if (!canManage(org)) {
+    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
+      <p>An owner or an admin of ${escape(org.name)} can make a CI token here.</p></div>`;
+  } else if (await liveCi(env, org.id) >= MAX_CI) {
+    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
+      <p>${escape(org.name)} holds ${MAX_CI} CI tokens, the most it can. Revoke one to make another.</p></div>`;
+  } else if (!confirmed) {
+    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
+      <p>${escape(feature.says)} Making one needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
+      ${form("/stepup", await formToken(env, who.id, "stepup"),
+        `<input type="hidden" name="next" value="/"><button type="submit">Email me a code</button>`)}</div>`;
+  } else {
+    const nonce = randomToken();
+    const options = EXPIRY_CHOICES.map(([value, text]) => `<option value="${value}">${text}</option>`).join("");
+    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
+      <p>${escape(feature.says)} The token is shown once, on the next page, and never again.</p>
+      ${form("/tokens/ci", await formToken(env, who.id, ciAction(nonce)), `
+        <input type="hidden" name="nonce" value="${nonce}">
+        <label for="ci-label">Name</label>
+        <input id="ci-label" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required placeholder="GitHub Actions">
+        <label for="ci-expires">Expires</label>
+        <select id="ci-expires" name="expires">${options}</select>
+        <button type="submit">Make a CI token</button>`)}</div>`;
+  }
+  return `<section class="panel" id="machines">
+    <h2>Machines</h2>
+    <p>Terminals linked with ranwhat login, CI tokens, and a subscription's emailed token once it is
+       attached here, each with a token of its own. Revoking one stops it at once. A terminal unused for
+       ${IDLE_DAYS} days is revoked by itself; ranwhat login links it again.</p>
+    ${items ? `<ul>${items}</ul>` : "<p>None yet. Run <strong>ranwhat login</strong> in a terminal to link it.</p>"}
+    ${problem(error)}
+    ${revokeStep}
+    ${ci}</section>`;
+}
+
+const notInOrg = (env, who) => dashboard(env, who, { status: 404,
+  machinesError: "That machine is not one of this organisation's, or it is already revoked, so nothing was changed." });
+
+const notYours = (env, who) => dashboard(env, who, { status: 403,
+  machinesError: "Only an owner or an admin, or whoever linked it, can rename or revoke that machine." });
+
+/* Names it. The id is looked up in the organisation this session is
+   looking at, never trusted. */
+async function renameMachinePost(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "machine-rename")) return refused();
+  const machine = await machineIn(env, who.org.id, f.get("id"));
+  if (!machine) return notInOrg(env, who);
+  if (!mayChange(who, machine)) return notYours(env, who);
+  const label = machineLabel(f.get("label"));
+  if (!label) {
+    return dashboard(env, who, { status: 400,
+      machinesError: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
+  }
+  await renameMachine(env, who, machine, label);
+  return redirect("/");
+}
+
+/* Revokes it, with a fresh code: the feed refuses its token from the next
+   request on. */
+async function revokeMachinePost(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  if (!await formOk(env, f, who.id, "machine-revoke")) return refused();
+  const machine = await machineIn(env, who.org.id, f.get("id"));
+  if (!machine) return notInOrg(env, who);
+  if (!mayChange(who, machine)) return notYours(env, who);
+  if (!fresh(who)) {
+    return dashboard(env, who, { status: 403,
+      machinesError: `Revoking a machine needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so nothing was revoked.` });
+  }
+  await revokeMachine(env, who, machine);
+  return redirect("/");
+}
+
+/* Makes a CI token: an owner or admin, of an organisation whose plan has
+   ci_tokens (features.js), with a fresh code. The form carries a random
+   nonce its token is bound to, and each nonce makes one token: sent again
+   (a reload of the page that showed it), it goes back to the account,
+   where the token it made is listed, rather than make a second. The token
+   is in this response and nowhere else. */
+async function ciTokenPost(request, env) {
+  const who = await current(request, env);
+  if (!who) return signedOut(request);
+  const f = await fields(request);
+  const nonce = f.get("nonce");
+  if (typeof nonce !== "string" || !NONCE.test(nonce) || !await formOk(env, f, who.id, ciAction(nonce))) return refused();
+  if (!canManage(who.org)) {
+    return dashboard(env, who, { status: 403, machinesError: "Only an owner or an admin can make a CI token." });
+  }
+  const tier = FEATURES.ci_tokens.plan;
+  if (!allows(await plan(env, who.org.id), "ci_tokens")) {
+    return dashboard(env, who, { status: 403,
+      machinesError: `CI tokens come with ${PLAN_NAMES[tier]}, so none was made.` });
+  }
+  if (!fresh(who)) {
+    return dashboard(env, who, { status: 403,
+      machinesError: `Making a CI token needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so none was made.` });
+  }
+  const label = machineLabel(f.get("label"));
+  if (!label) {
+    return dashboard(env, who, { status: 400,
+      machinesError: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
+  }
+  const expires = String(f.get("expires") ?? "never");
+  if (!Object.hasOwn(EXPIRIES, expires)) {
+    return dashboard(env, who, { status: 400, machinesError: "Choose when the token expires from the list." });
+  }
+  if (await bump(env, "ci-form", nonce, DAY) > 1) return redirect("/");
+  const made = await mintCi(env, who, { label, days: EXPIRIES[expires] });
+  if (made.refused) {
+    return dashboard(env, who, { status: 400,
+      machinesError: `${who.org.name} holds ${MAX_CI} CI tokens, the most it can. Revoke one to make another.` });
+  }
+  return page("Your CI token", `<h1>Your CI token</h1>
+    <p class="bad"><strong>Copy it now: this is the only time it is shown.</strong> We keep only a hash
+       of it, so nobody, us included, can show it again. A lost one is revoked and replaced, never
+       recovered.</p>
+    <code class="secret">${escape(made.token)}</code>
+    <dl>
+      <dt>Name</dt><dd>${escape(label)}</dd>
+      <dt>Organisation</dt><dd>${escape(who.org.name)}</dd>
+      <dt>Expires</dt><dd>${made.expires_at === null ? "Never; revoke it on your account page" : day(made.expires_at)}</dd>
+    </dl>
+    <p>Keep it in your CI's secrets as <strong>RANWHAT_TOKEN</strong>, where <strong>ranwhat update</strong>
+       reads it. Never put it in a repository, a command line or a log.</p>
+    <p><a href="/">Back to your account</a></p>`);
+}
+
 /* ---------- the host ---------- */
 
 /* Path: { method: handler }. */
@@ -1350,6 +1567,12 @@ const ROUTES = {
   "/signin/passkey": { GET: passkeySigninPage, POST: passkeySignin },
   "/passkeys/challenge": { GET: passkeyChallenge },
   "/passkeys.js": { GET: pageScript },
+  "/device": { GET: devicePage, POST: deviceLookup },
+  "/device/approve": { POST: approve },
+  "/device/deny": { POST: deny },
+  "/machines/rename": { POST: renameMachinePost },
+  "/machines/revoke": { POST: revokeMachinePost },
+  "/tokens/ci": { POST: ciTokenPost },
 };
 for (const provider of Object.keys(PROVIDERS)) {
   const as = (handle) => (request, env, ctx, url) => handle(request, env, ctx, url, provider);

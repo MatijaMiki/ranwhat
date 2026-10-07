@@ -33,11 +33,13 @@ from . import sources as sources_mod
 from . import hints
 from . import term
 
-# introspect, usage and feed talk to providers and to the feed, and import
-# urllib's HTTP stack to do it: a fifth of the time `watch` took to start.
-# Only live, scan --pull-usage and update use them, so each is imported
-# there, and cli.introspect, cli.usage_mod and cli.feed_mod still name them.
-_LAZY = {"introspect": "introspect", "usage_mod": "usage", "feed_mod": "feed"}
+# introspect, usage, feed and account talk to providers and to ranwhat's
+# server, and import urllib's HTTP stack to do it: a fifth of the time
+# `watch` took to start. Only live, scan --pull-usage, update, login, whoami
+# and logout use them, so each is imported there, and cli.introspect,
+# cli.usage_mod, cli.feed_mod and cli.account_mod still name them.
+_LAZY = {"introspect": "introspect", "usage_mod": "usage", "feed_mod": "feed",
+         "account_mod": "account"}
 # introspect.PROVIDERS, named here for the flags each takes, and usage's
 # default window (tests/test_work_done.py checks that they agree).
 _PROVIDER_NAMES = ("google", "github", "slack", "stripe")
@@ -218,6 +220,10 @@ TAGLINE = "Flight recorder and authority scanner for AI agents."
 # What reaches the network, said once for the overview and --help. "Nothing is
 # transmitted" was false for live and --pull-usage, which send each token to
 # the provider that issued it, and for update, which fetches the catalogue.
+# site/install.html quotes it word for word. It names login, whoami and
+# logout, as COMMANDS lists them, in the change that switches accounts on
+# (with install.html, commands.html, llms.txt and the README): until then
+# the server answers them 404, and no page or overview offers them.
 NETWORK = ("No account needed. live and --pull-usage ask only the provider "
            "that issued each token, and update only fetches the catalogue. "
            "Everything else reads locally and sends nothing.")
@@ -234,6 +240,10 @@ COMMANDS = (
     ("demo", "see the output without setting anything up"),
     ("update", "refresh the capability catalogue (needs a subscription)"),
 )
+
+# The opt-in commands that link this machine to an account (account.py).
+# They run, but are not listed above until accounts go live (see NETWORK).
+_ACCOUNT_COMMANDS = ("login", "whoami", "logout")
 
 # The commands whose report html_report can write.
 _HTML_COMMANDS = ("demo", "scan", "live")
@@ -487,6 +497,10 @@ def _update(args):
     # Stripped as every other token is: a \r from a CRLF file would make
     # http.client quote the header, token and all, into its error.
     token = (args.token or "").strip() or feed_mod.read_token()
+    if not token and feed_mod.saved_token()[1] == "symlink":
+        sys.stderr.write("  %s is a symlink; not reading a token through it.\n"
+                         % feed_mod.token_path())
+        return 1
     if not token:
         sys.stderr.write(
             "  No token. Set RANWHAT_TOKEN, or pass --token with --save-token\n"
@@ -504,9 +518,25 @@ def _update(args):
     try:
         doc = feed_mod.fetch(token)
         feed_mod.save(doc)
+    except feed_mod.PlusRequired as exc:
+        # A machine linked to a Free organisation: the token is good, the
+        # plan is not. Noted, so the hints about Plus go on showing.
+        account_mod = _module("account_mod")
+        known = account_mod.cached(token) or {}
+        org = account_mod._shown(known.get("org"))
+        sys.stderr.write("  This machine is linked to %s, which is on Free. The\n"
+                         "  catalogue feed is part of %s: %s\n"
+                         % (org or "an organisation", exc.needs, exc.upgrade))
+        account_mod.remember(token, "free", known.get("org"), known.get("email"))
+        return 1
     except feed_mod.FeedError as exc:
         sys.stderr.write("  %s\n" % exc)
         return 1
+    # Served the feed, so not on Free, whatever was last heard.
+    account_mod = _module("account_mod")
+    known = account_mod.cached(token)
+    if known and known["plan"] == "free":
+        account_mod.remember(token, "plus", known.get("org"), known.get("email"))
 
     if args.save_token:
         try:
@@ -524,15 +554,53 @@ def _update(args):
     return 0
 
 
+def _account(p, args):
+    """login, whoami and logout: opt-in, and the only commands besides
+    update that talk to ranwhat's server (account.py)."""
+    token = (args.token or "").strip()
+    if args.token is not None and args.command != "whoami":
+        # login saves the token it is given by the server, and logout
+        # removes the saved one: neither has a use for one in argv.
+        p.error("--token is for update and whoami; %s uses the token saved "
+                "on this machine" % args.command)
+    account_mod = _module("account_mod")
+    # Each waits on the server for up to account.TIMEOUT. Ctrl-C there is
+    # an answer, not a traceback; login and logout say what it left where
+    # it matters (a token linked or revoked), and anything else is this.
+    try:
+        if args.command == "login":
+            return account_mod.login(force=args.force, no_browser=args.no_browser)
+        if args.command == "logout":
+            return account_mod.logout(local=args.local)
+        if token:
+            sys.stderr.write(
+                "  Warning: a token in the command line is readable by every user\n"
+                "  on this machine through the process table, and is written to\n"
+                "  your shell history. Prefer RANWHAT_TOKEN.\n\n")
+        return account_mod.whoami(token=token or None)
+    except KeyboardInterrupt:
+        sys.stderr.write("\n  Cancelled.\n")
+        return 130
+
+
 def _has_plus():
     """A token, in the environment or saved, or a cached feed with a scope
     this release lacks: someone a hint about the feed would only repeat
-    itself to. Read from this machine; the server is never asked."""
+    itself to. A token that login, whoami or update last heard is on a Free
+    organisation's machine is not: its person still sees the hints. Read
+    from this machine; the server is never asked."""
     try:
-        return bool(_module("feed_mod").read_token()) or catalog_mod.feed_adds_scopes()
+        feed_mod = _module("feed_mod")
+        token = feed_mod.read_token()
+        if token is None and feed_mod.saved_token()[1] != "none":
+            # A token file that cannot be read, or a symlink, is still one.
+            return True
+        if token and _module("account_mod").cached_plan(token) != "free":
+            return True
+        return catalog_mod.feed_adds_scopes()
     except Exception:
-        # A token file that cannot be read (not UTF-8, say) is still one.
-        # The hint is skipped, and nothing fails after a report has printed.
+        # Whatever else goes wrong here, the hint is skipped, and nothing
+        # fails after a report has printed.
         return True
 
 
@@ -1323,7 +1391,8 @@ def _main(argv=None):
                                        "a terminal. None is printed with --json.")
     p.add_argument("command", nargs="?",
                    choices=["check", "demo", "scan", "live", "watch",
-                            "clean", "sources", "update"])
+                            "clean", "sources", "update", "login", "whoami",
+                            "logout"])
     p.add_argument("profile", nargs="?", help="path to a profile JSON")
     p.add_argument("--json", action="store_true", help="emit raw JSON")
     p.add_argument("--html", metavar="PATH",
@@ -1372,16 +1441,25 @@ def _main(argv=None):
                    help="clean: report and exit instead of opening the review "
                         "session")
     p.add_argument("--token", metavar="TOKEN",
-                   help="update: subscription token. Prefer RANWHAT_TOKEN in "
-                        "the environment, or run update once to save it: a "
-                        "value passed here is visible to every user on this "
-                        "machine via ps, and lands in your shell history.")
+                   help="update, whoami: subscription or CI token. Prefer "
+                        "RANWHAT_TOKEN in the environment, ranwhat login, or "
+                        "update --save-token: a value passed here is visible "
+                        "to every user on this machine via ps, and lands in "
+                        "your shell history.")
     p.add_argument("--save-token", action="store_true",
                    help="update: write the token to ~/.ranwhat/token (0600) "
                         "so later runs need no flag")
     p.add_argument("--status", action="store_true",
                    help="update: report the cached feed and exit without "
                         "touching the network")
+    p.add_argument("--force", action="store_true",
+                   help="login: replace the token this machine already has")
+    p.add_argument("--no-browser", action="store_true",
+                   help="login: print the page to open without opening a "
+                        "browser")
+    p.add_argument("--local", action="store_true",
+                   help="logout: delete the saved token without asking the "
+                        "server to revoke it")
     # Intermixed, so a flag may come before scan's path: on Python 3.9,
     # `scan --json profile.json` ended the positionals at --json and then
     # refused the path as an unrecognized argument.
@@ -1402,8 +1480,17 @@ def _main(argv=None):
         _overview(p)
         return 0
 
+    for flag, value, command in (("--force", args.force, "login"),
+                                 ("--no-browser", args.no_browser, "login"),
+                                 ("--local", args.local, "logout")):
+        if value and args.command != command:
+            p.error("%s is only for %s" % (flag, command))
+
     if args.command == "update":
         return _update(args)
+
+    if args.command in _ACCOUNT_COMMANDS:
+        return _account(p, args)
 
     if args.days is not None and args.days < 1:
         p.error("--days must be at least 1")

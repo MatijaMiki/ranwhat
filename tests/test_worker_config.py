@@ -44,7 +44,8 @@ class BranchBuildsCanRun(unittest.TestCase):
         self.assertEqual(config["name"], "ranwhat-contact")
         self.assertEqual([b["name"] for b in config["send_email"]], ["CONTACT_EMAIL"])
         self.assertEqual([r["pattern"] for r in config["routes"]],
-                         ["ranwhat.com/api/*", "feed.ranwhat.com/v1/*", "account.ranwhat.com/*"])
+                         ["ranwhat.com/api/*", "feed.ranwhat.com/v1/*", "account.ranwhat.com/*",
+                          "ranwhat.com/device*"])
         # Routes, not custom domains, so a deploy needs no DNS permission.
         for route in config["routes"]:
             self.assertEqual(route["zone_name"], "ranwhat.com")
@@ -60,6 +61,20 @@ class BranchBuildsCanRun(unittest.TestCase):
         # iterations, so password.js runs its 600,000 as a chain of calls
         # within that. An override here could only lower the count.
         self.assertNotIn("PBKDF2_ITERATIONS", config["vars"])
+
+    @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
+    def test_device_codes_have_their_burst_limit(self):
+        # src/device.js asks DEVICE_RL before it touches the database for a
+        # device code. Workers takes a period of 10 or 60 seconds only.
+        with WRANGLER.open("rb") as fh:
+            config = tomllib.load(fh)
+        limits = {r["name"]: r for r in config.get("ratelimits", [])}
+        self.assertIn("DEVICE_RL", limits)
+        self.assertRegex(limits["DEVICE_RL"]["namespace_id"], r"^[1-9][0-9]*$")
+        self.assertIn(limits["DEVICE_RL"]["simple"]["period"], (10, 60))
+        self.assertGreaterEqual(limits["DEVICE_RL"]["simple"]["limit"], 2)
+        device = (WRANGLER.parent / "src" / "device.js").read_text(encoding="utf-8")
+        self.assertIn("env.DEVICE_RL", device)
 
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
     def test_the_contact_binding_reaches_one_inbox(self):

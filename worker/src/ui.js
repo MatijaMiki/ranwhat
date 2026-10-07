@@ -37,18 +37,20 @@ h2{font-size:15px;margin:26px 0 8px}
 p{color:var(--muted);margin:0 0 14px}a{color:var(--ink)}
 .bad{color:var(--bad)}
 label{display:block;font-size:14px;margin:14px 0 6px}
-input[type=email],input[type=text],input[type=password]{width:100%;font:16px Menlo,Consolas,monospace;padding:10px 12px;background:var(--ground);color:var(--ink);border:1px solid var(--rule)}
+input[type=email],input[type=text],input[type=password],select{width:100%;font:16px Menlo,Consolas,monospace;padding:10px 12px;background:var(--ground);color:var(--ink);border:1px solid var(--rule)}
 button{margin-top:12px;font:13px Menlo,Consolas,monospace;padding:11px 16px;background:transparent;color:var(--ink);border:1px solid var(--ink);cursor:pointer}
 button:hover{background:var(--ink);color:var(--surface)}
 a.button{display:inline-block;margin:12px 8px 0 0;font:13px Menlo,Consolas,monospace;padding:11px 16px;color:var(--ink);border:1px solid var(--ink);text-decoration:none}
 a.button:hover{background:var(--ink);color:var(--surface)}
 form.row{display:inline-block;margin-right:8px}
+details{margin:6px 0}summary{cursor:pointer;font-size:14px;color:var(--ink)}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0 0 8px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
 ul{padding-left:18px;color:var(--muted)}li{margin:2px 0}
 small{color:var(--muted)}
 .panel{border:1px solid var(--rule);padding:2px 18px 6px;margin:18px 0}.panel h2{margin-top:16px}
 .locked{border-style:dashed}.locked strong{color:var(--muted)}
 .tag{font:12px Menlo,Consolas,monospace;color:var(--muted)}
+.secret{display:block;margin:0 0 14px;padding:10px 12px;font:15px/1.5 Menlo,Consolas,monospace;color:var(--ink);background:var(--ground);border:1px solid var(--rule);overflow-wrap:anywhere;user-select:all}
 .cf-turnstile{min-height:65px;margin-top:14px}`;
 
 let styleHash = null;
@@ -133,6 +135,15 @@ export async function script(text) {
    (challenge.js). Only on a page made with { challenge: true }. */
 export const widget = (action) =>
   `<div class="cf-turnstile" data-sitekey="${SITEKEY}" data-action="${escape(action)}"></div>`;
+
+/* A form's fields, or none when the body is not a form. */
+export async function fields(request) {
+  try {
+    return await request.formData();
+  } catch {
+    return new FormData();
+  }
+}
 
 /* 303, so the browser follows a POST with a GET. Always a path on this
    host: nothing here redirects anywhere a request named. */
