@@ -394,7 +394,7 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in your ag
       </div>
       <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
         One read-only pass: the risky actions in the history of Claude Code
-        and eleven other coding agents, and the credentials left in it. Every
+        and nineteen other coding agents, and the credentials left in it. Every
         <span class="icode">ranwhat</span> command on this page also runs as
         <span class="icode">uvx ranwhat &hellip;</span> without installing
         anything.
@@ -578,7 +578,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
       </p>
       <div class="rows">
         <div class="row"><span class="k">Covers</span>
-          <span class="v"><span class="icode">watch</span>: risky actions in the history of Claude Code and eleven other coding agents. <span class="icode">clean</span>: credentials in their transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries. <span class="icode">reach</span>: the MCP servers in your agents' configuration, with secrets written inline, packages fetched at no fixed version and remote URLs, and the credential files no Read deny rule covers.</span></div>
+          <span class="v"><span class="icode">watch</span>: risky actions in the history of Claude Code and nineteen other coding agents. <span class="icode">clean</span>: credentials in their transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries. <span class="icode">reach</span>: the MCP servers in your agents' configuration, with secrets written inline, packages fetched at no fixed version and remote URLs, and the credential files no Read deny rule covers.</span></div>
         <div class="row"><span class="k">Does not</span>
           <span class="v">Block anything while the agent works, unless you install its opt-in <a href="/commands#hook">hook</a> for Claude Code; beyond that, Claude Code's permission rules, hooks and sandbox do it. <span class="icode">reach</span> reads how an MCP server is configured, not what it is: it does not inspect a server's code, its tool descriptions or skills for malicious content. It flags a WebFetch call only when a secret-shaped value is in it, and does not flag a setup command that fetches its payload at run time.</span></div>
         <div class="row"><span class="k">OWASP</span>

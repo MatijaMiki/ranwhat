@@ -207,7 +207,8 @@ class Registry(unittest.TestCase):
     # Design 4.2: the order agents are listed everywhere. OpenClaw sits near
     # the end on purpose (decision 7); grok-dev is last.
     ORDER = ("claude-code", "codex", "gemini", "copilot-cli", "vscode-copilot",
-             "cline", "roo", "kilo", "opencode", "continue", "aider", "goose",
+             "cursor", "windsurf", "cline", "roo", "kilo", "opencode",
+             "continue", "aider", "goose",
              "zed", "qwen", "grok", "droid", "amp", "crush", "kimi-code",
              "kimi", "pi", "muse-code", "vibe", "zoo", "cecli", "openclaw",
              "grok-dev")

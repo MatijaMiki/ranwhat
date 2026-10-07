@@ -176,7 +176,7 @@
     <div>
       <h2>sources: every agent it reads, and where it looked.</h2>
       <p class="lede">
-        Twelve agents, each from where it keeps its history. <span class="icode">sources</span>
+        Twenty agents, each from where it keeps its history. <span class="icode">sources</span>
         says which it found on this machine, the folders it checked, and whether
         <span class="icode">clean</span> can mask secrets there or only read them.
       </p>
@@ -205,8 +205,8 @@
         <span class="icode">--path ID=PATH</span> reads one from somewhere else, a backup or a
         copy from another machine. The <a href="/watch">watch page</a> lists every agent.
         On one machine, <span class="icode">sources</span> also shows which of
-        those twelve agents have run here, going by the history each one left.
-        It does not see an agent ranwhat does not read, Cursor among them.
+        those twenty agents have run here, going by the history each one left.
+        It does not see an agent ranwhat does not read, Kilo Code among them.
       </p>
       <p class="flaglist">Flags: <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
     </div>
@@ -437,7 +437,7 @@
               <td data-label="What it does">How far back to read each agent's history, in days. 30 by default.</td></tr>
           <tr><td><code id="flag-source">--source ID</code></td>
               <td data-label="Commands">check, watch, clean,&nbsp;sources</td>
-              <td data-label="What it does">Read only this agent, and repeat it for more; every agent by default. IDs: <span class="icode">claude-code</span>, <span class="icode">codex</span>, <span class="icode">gemini</span>, <span class="icode">copilot-cli</span>, <span class="icode">qwen</span>, <span class="icode">grok</span>, <span class="icode">droid</span>, <span class="icode">kimi-code</span>, <span class="icode">kimi</span>, <span class="icode">pi</span>, <span class="icode">muse-code</span>, <span class="icode">openclaw</span>.</td></tr>
+              <td data-label="What it does">Read only this agent, and repeat it for more; every agent by default. IDs: <span class="icode">claude-code</span>, <span class="icode">codex</span>, <span class="icode">gemini</span>, <span class="icode">copilot-cli</span>, <span class="icode">cursor</span>, <span class="icode">windsurf</span>, <span class="icode">cline</span>, <span class="icode">roo</span>, <span class="icode">opencode</span>, <span class="icode">continue</span>, <span class="icode">aider</span>, <span class="icode">goose</span>, <span class="icode">qwen</span>, <span class="icode">grok</span>, <span class="icode">droid</span>, <span class="icode">kimi-code</span>, <span class="icode">kimi</span>, <span class="icode">pi</span>, <span class="icode">muse-code</span>, <span class="icode">openclaw</span>.</td></tr>
           <tr><td><code id="flag-path">--path ID=PATH</code></td>
               <td data-label="Commands">check, watch, clean,&nbsp;sources</td>
               <td data-label="What it does">Read this agent's history from PATH instead of its default place, one per agent. <span class="icode">sources</span> says what each PATH is.</td></tr>

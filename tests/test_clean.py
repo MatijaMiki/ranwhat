@@ -812,7 +812,7 @@ class CopiesInAnotherAgentsFiles(_AgentsHome):
         bytes, and as text just its last lines. A value found in another
         agent's files was looked for there only as text."""
         import test_source_grok as gk
-        grok = af.AGENTS[4]
+        [grok] = [a for a in af.AGENTS if a.id == "grok"]
         root = grok.root(self.home)
         path = grok.write(root, [("g1", "shell", "./build.sh", "", time.time() - 3000)])
         with open(path, encoding="utf-8") as fh:

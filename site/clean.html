@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat clean: secret scanning for AI agent transcripts</title>
-<meta name="description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
+<meta name="description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and eighteen more agents' transcripts, see what to rotate, mask them.">
 <link rel="canonical" href="https://ranwhat.com/clean">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/clean">
 <meta property="og:title" content="ranwhat clean: secret scanning for AI agent transcripts">
-<meta property="og:description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
+<meta property="og:description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and eighteen more agents' transcripts, see what to rotate, mask them.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat clean: secret scanning for AI agent transcripts">
-<meta name="twitter:description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and ten more agents' transcripts, see what to rotate, mask them.">
+<meta name="twitter:description" content="Your agent ran cat .env and the key is still on disk. Find leaked secrets in Claude Code, Codex and eighteen more agents' transcripts, see what to rotate, mask them.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -220,7 +220,7 @@ ranwhat clean --apply           <span class="c-mut">mask everything, backups fir
         <div class="row"><span class="k">Reads</span>
           <span class="v">The history of every agent <a href="/watch">watch</a> reads, for the last 30 days by default (<span class="icode">--days N</span>). For Claude Code that is <a href="/guides/claude-code-history">its transcripts</a>, <span class="icode">~/.claude/projects/*/*.jsonl</span> and the transcripts subagents write beside them, or the same under <span class="icode">$CLAUDE_CONFIG_DIR/projects</span> when that is set. Not the large tool outputs in <span class="icode">tool-results/</span> yet.</span></div>
         <div class="row"><span class="k">Masks</span>
-          <span class="v">Only in a file the agent lets it rewrite: plain JSONL, JSON or text that nothing has written to in the last two minutes. That covers Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, Grok Build, Droid, Kimi Code, Kimi CLI, Pi and Muse Code. Read only: OpenClaw, whose history is a database, and any agent's databases and compressed files, such as Codex's thread index. The report names each of those files that holds a secret, and how to remove it in the agent instead.</span></div>
+          <span class="v">Only in a file the agent lets it rewrite: plain JSONL, JSON or text that nothing has written to in the last two minutes. That covers Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Windsurf, Cline, Roo Code, OpenCode, Continue, Aider, Goose, Qwen Code, Grok Build, Droid, Kimi Code, Kimi CLI, Pi and Muse Code. Read only: Cursor and OpenClaw, whose histories are databases, and any agent's databases and compressed files, such as Codex's thread index and the databases OpenCode and Goose keep now. The report names each of those files that holds a secret, and how to remove it in the agent instead.</span></div>
         <div class="row"><span class="k">Recognises</span>
           <span class="v">Stripe <span class="icode">sk_live_</span> and <span class="icode">rk_live_</span> keys, <span class="icode">sk-</span> style OpenAI and Anthropic keys, GitHub <span class="icode">ghp_</span>, <span class="icode">gho_</span>, <span class="icode">ghu_</span>, <span class="icode">ghs_</span>, <span class="icode">ghr_</span> and <span class="icode">github_pat_</span> tokens, Slack <span class="icode">xox</span> tokens, AWS <span class="icode">AKIA</span> and <span class="icode">ASIA</span> key IDs, Twilio SIDs, SendGrid keys, PEM private keys and JWTs, passwords inside connection strings, passwords typed where a command takes one (<span class="icode">mysql -pPASSWORD</span>, <span class="icode">sshpass -p</span>, <span class="icode">redis-cli -a</span>, <span class="icode">docker login -p</span>, <span class="icode">curl -u user:password</span>, <span class="icode">--password</span> and the like), and <span class="icode">KEY=value</span> pairs whose key names a secret.</span></div>
         <div class="row"><span class="k">Index</span>

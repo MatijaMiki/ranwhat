@@ -23,9 +23,9 @@ __all__ = ["ADAPTERS", "CLOUD_ONLY", "NEXT", "REGISTRY", "Location",
            "ids", "register", "sources", "unregister"]
 
 # (module, class) under ranwhat.sources, in registry order (design 4.2):
-#   Claude Code, Codex, Gemini CLI, Copilot CLI, VS Code Copilot, Cline,
-#   Roo Code, Kilo Code, OpenCode, Continue, Aider, Goose, Zed, Qwen Code,
-#   Grok Build, Droid, Amp, Crush, Kimi Code, Kimi CLI, Pi, Muse Code,
+#   Claude Code, Codex, Gemini CLI, Copilot CLI, VS Code Copilot, Cursor,
+#   Windsurf, Cline, Roo Code, Kilo Code, OpenCode, Continue, Aider, Goose,
+#   Zed, Qwen Code, Grok Build, Droid, Amp, Crush, Kimi Code, Kimi CLI, Pi, Muse Code,
 #   Mistral Vibe, Zoo Code, cecli, OpenClaw, grok-dev.
 # Only the adapters that exist are listed; a later one goes in at its place
 # in that order, not at the end. OpenClaw stays near the end on purpose
@@ -35,6 +35,14 @@ ADAPTERS = (
     ("codex", "CodexSource"),
     ("gemini", "GeminiSource"),
     ("copilot_cli", "CopilotCliSource"),
+    ("cursor", "CursorSource"),
+    ("windsurf", "WindsurfSource"),
+    ("cline", "ClineSource"),
+    ("roo", "RooSource"),
+    ("opencode", "OpenCodeSource"),
+    ("continue_dev", "ContinueSource"),
+    ("aider", "AiderSource"),
+    ("goose", "GooseSource"),
     ("qwen", "QwenSource"),
     ("grok", "GrokBuildSource"),
     ("droid", "DroidSource"),
@@ -59,11 +67,9 @@ CLOUD_ONLY = (
 )
 
 # Agents next in line, (name, what to say): their local format waits on a
-# primary source (design section 8). Cursor is first.
-NEXT = (
-    ("Cursor", "Its history is read once its format is checked against a "
-               "primary source."),
-)
+# primary source (design section 8). None is waiting now: Cursor, the last
+# one, is read.
+NEXT = ()
 
 REGISTRY = OrderedDict()
 

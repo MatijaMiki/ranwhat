@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat watch: an AI agent audit trail for Claude Code</title>
-<meta name="description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and nine more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta name="description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="canonical" href="https://ranwhat.com/watch">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/watch">
 <meta property="og:title" content="ranwhat watch: an AI agent audit trail for Claude Code">
-<meta property="og:description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and nine more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta property="og:description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat watch: an AI agent audit trail for Claude Code">
-<meta name="twitter:description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and nine more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta name="twitter:description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -93,7 +93,7 @@
     <p class="eyebrow">ranwhat watch</p>
     <h1>See the risky commands Claude Code already ran.</h1>
     <p class="lede">
-      ranwhat watch reads what Claude Code and eleven other coding agents
+      ranwhat watch reads what Claude Code and nineteen other coding agents
       have already written to disk, the audit trail they keep anyway, and
       reports the nine kinds of action worth a second look. It changes
       nothing.
@@ -231,6 +231,38 @@
               <td data-label="Location"><code>~/.copilot/session-state/&lt;session&gt;/events.jsonl</code> (<code>$COPILOT_HOME</code>)</td>
               <td data-label="Format">JSONL</td>
               <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Cursor</strong></td>
+              <td data-label="Location">The editor's <code>Cursor/User/globalStorage/state.vscdb</code>, and <code>~/.cursor/chats/</code> for <code>cursor-agent</code></td>
+              <td data-label="Format">SQLite</td>
+              <td data-label="Status">Shipped, secrets read-only</td></tr>
+          <tr><td><strong>Windsurf</strong></td>
+              <td data-label="Location"><code>~/.windsurf/transcripts/</code>, written when Windsurf's <code>post_cascade_response_with_transcript</code> hook is on</td>
+              <td data-label="Format">JSONL; Cascade's own history is encrypted and not read</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Cline</strong></td>
+              <td data-label="Location">The editor's <code>globalStorage/saoudrizwan.claude-dev/tasks/</code>, and <code>~/.cline/data</code> (<code>$CLINE_DATA_DIR</code>)</td>
+              <td data-label="Format">JSON</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Roo Code</strong></td>
+              <td data-label="Location">The editor's <code>globalStorage/rooveterinaryinc.roo-cline/tasks/</code></td>
+              <td data-label="Format">JSON, text</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>OpenCode</strong></td>
+              <td data-label="Location"><code>~/.local/share/opencode/</code> (<code>$XDG_DATA_HOME/opencode</code>, <code>$OPENCODE_DB</code>)</td>
+              <td data-label="Format">SQLite, read only; older JSON files</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Continue</strong></td>
+              <td data-label="Location"><code>~/.continue/sessions/</code> (<code>$CONTINUE_GLOBAL_DIR</code>)</td>
+              <td data-label="Format">JSON</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Aider</strong></td>
+              <td data-label="Location"><code>.aider.chat.history.md</code> in the repository ranwhat runs in, and in your home folder (<code>$AIDER_CHAT_HISTORY_FILE</code>)</td>
+              <td data-label="Format">Text</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Goose</strong></td>
+              <td data-label="Location"><code>~/.local/share/goose/sessions/</code> (<code>$GOOSE_PATH_ROOT</code>)</td>
+              <td data-label="Format">SQLite, read only; older JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Qwen Code</strong></td>
               <td data-label="Location"><code>~/.qwen/projects/&lt;project&gt;/chats/</code>, and older <code>tmp/&lt;hash&gt;/chats/</code> (<code>$QWEN_RUNTIME_DIR</code>, <code>$QWEN_HOME</code>)</td>
               <td data-label="Format">JSONL, JSON</td>
@@ -275,10 +307,6 @@
               <td data-label="Location"><code>ampcode.com</code>, for the current Amp</td>
               <td data-label="Format">Nothing on your machine</td>
               <td data-label="Status">Cloud only</td></tr>
-          <tr><td><strong>Cursor</strong></td>
-              <td data-label="Location">Its local history</td>
-              <td data-label="Format">Not read yet</td>
-              <td data-label="Status">Next</td></tr>
         </tbody>
       </table>
       </div>
@@ -291,9 +319,11 @@
         and what it found.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
-        Databases and compressed files are only ever read. OpenClaw keeps its
-        history in SQLite, so <a href="/clean">clean</a> finds its secrets
-        but cannot mask them there. Not read yet: the large tool outputs
+        Databases and compressed files are only ever read. Cursor and
+        OpenClaw keep their history in SQLite, so <a href="/clean">clean</a>
+        finds their secrets but cannot mask them there. Windsurf keeps
+        Cascade's own history encrypted, so ranwhat counts those files and
+        reads the plaintext transcripts Windsurf's hook writes instead. Not read yet: the large tool outputs
         Claude Code stores in
         <span class="icode">&lt;session&gt;/tool-results/</span>, and
         <span class="icode">~/.claude/history.jsonl</span>.
@@ -303,8 +333,7 @@
       <p style="font-size:14.5px;color:var(--muted)">
         Meta Muse, Grok Bot and the current Amp keep their history in their
         vendor's cloud, so there is nothing on your machine to read. Muse
-        Code and Grok Build, Meta's and xAI's coding CLIs, are read. Cursor
-        is next, once its format is checked against a primary source.
+        Code and Grok Build, Meta's and xAI's coding CLIs, are read.
       </p>
     </div>
   </div>
