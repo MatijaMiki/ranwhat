@@ -76,7 +76,29 @@ Python 3.9+. No dependencies, and nothing is built on your machine.
 
 ### `ranwhat check`: everything worth knowing, in one read-only pass
 
-Runs watch and clean together and changes nothing.
+Runs watch and clean together and changes nothing. Its last lines suggest
+`reach` for the MCP servers and credential files your agents can reach.
+
+`check`, `watch` and `clean` exit with status 0 when they ran, 1 on an
+error, and 2 when they found no agent history to read (argparse's usage
+errors are 2 as well), so a script can tell a machine with nothing on it
+from a clean one. With `--fail-on SEVERITY` they exit 3 when anything at
+or above `medium`, `high` or `critical` is found: every action watch rates
+that high or higher, and every secret clean finds, each of which is
+`critical`. A secret masked with `--apply` still counts: it has to be
+rotated. An error (1) or nothing read (2) wins over 3.
+
+```bash
+ranwhat check --fail-on high --sarif ranwhat.sarif
+```
+
+`--sarif PATH` also writes what was found as SARIF 2.1.0, for code
+scanning: one result for each rule an action tripped, and one for each
+secret. A secret is in it as the report shows it, masked (`sk_…dc  32
+chars`), never its value or its fingerprint, and every value `clean`
+finds is masked wherever else it shows up there, as in the report. Agent
+history lives outside your repository, so each result points at the
+transcript or project directory it came from on the machine that ran it.
 
 On a terminal, check, watch and clean keep one status line on stderr while
 they read, counting transcripts through each pass: `indexing secrets`
@@ -157,9 +179,16 @@ ranwhat> list           the findings again
 ranwhat> show 3         where it appears, and what to roll it at
 ranwhat> mask 3         mask just that one
 ranwhat> mask all       mask everything listed
-ranwhat> keep 3         leave it alone
+ranwhat> keep 3         leave it alone, and do not report it again
 ranwhat> rotate         what to rotate, grouped by provider
 ```
+
+`keep` is remembered: a value you keep is neither listed nor counted by
+`clean`, `check` or `--fail-on` on later runs, and `clean --apply` leaves
+it as it is. Each report says how many it left out. What is kept is a
+keyed hash of each value in `~/.ranwhat/known/kept.json`, beside the
+secrets index and under its key, never the value; delete that file to
+have them all reported again.
 
 Each finding says which project it was found in and, when the transcript
 names it, the file it was read out of, because a 64-character string is
@@ -219,6 +248,104 @@ A copy the mask missed is then still hidden where it stands apart from
 what is around it, and where it is glued into a command `check` or `watch`
 shows, if it is no longer than 64 characters. Glued into anything else, it
 is not. So keep the index unless you are starting over.
+
+### `ranwhat reach`: MCP servers and credential files your agents can reach
+
+Reads the configuration your agents keep on disk and reports two things,
+then the Claude Code deny rules that would close what it found. It only
+reads, and writes no settings.
+
+**MCP servers.** Every server in Claude Code's `~/.claude.json` (user
+scope, and each project's local scope), each project's `.mcp.json`, and
+`managed-mcp.json`; plus Claude Desktop's `claude_desktop_config.json`,
+Cursor's `~/.cursor/mcp.json` and `.cursor/mcp.json`, VS Code's
+`.vscode/mcp.json`, Gemini CLI's and Qwen Code's `settings.json`, GitHub
+Copilot CLI's `~/.copilot/mcp-config.json`, Windsurf's `mcp_config.json`
+and Codex's `~/.codex/config.toml` (on Python 3.11 and later). For each:
+what it runs or connects to, and
+
+- a secret written inline, in `env`, an argument, a header or the URL,
+  found by the rules `clean` uses and shown the way `clean` shows one
+  (`<ghp…x4>`), never whole. `${VAR}` references are left alone.
+- a package fetched at its newest version on every start: `npx`, `uvx`,
+  `bunx`, `pnpm dlx`, `pipx run` and the like with no exact version
+- a remote URL, plain `http`, or a URL on this machine
+- a project `.mcp.json` whose servers Claude Code starts without asking,
+  because `enableAllProjectMcpServers` is on
+
+It reads the configuration, not the server: it does not inspect a
+server's code or its tool descriptions for malicious content.
+
+**Credential files.** `.env` and `.env.*` (not `.env.example` and other
+templates), private keys, `.npmrc`, `.pypirc`, `.netrc` and
+`.git-credentials` under the directories your agents work in (the current
+one, every project in `~/.claude.json`, and `additionalDirectories`,
+six levels deep, past `node_modules` and `.git` and into only the top of
+`build/` and `dist/`; the report says when a project goes deeper), and
+`~/.env`, `~/.aws/credentials`, `~/.ssh/id_*`, `~/.netrc`, `~/.npmrc`,
+`~/.docker/config.json`, `~/.kube/config`, `~/.config/gh/hosts.yml` and
+Google Cloud's application default credentials, each only when it holds a
+credential and no Claude Code `Read(...)` deny rule covers it. Only paths
+are printed, never what is in them.
+
+```bash
+ranwhat reach               # every project Claude Code knows, and the current directory
+ranwhat reach ~/code/app    # one project
+ranwhat reach --json
+```
+
+The report ends with a `permissions.deny` block to paste into
+`~/.claude/settings.json`, one rule for each file found:
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Read(~/.aws/credentials)",
+      "Read(~/.ssh/**)",
+      "Read(//**/.env.local)"
+    ]
+  }
+}
+```
+
+A Read rule stops Claude's file tools and the Bash file commands Claude
+Code recognises, not a script that opens the file itself; the
+[`.env` guide](https://ranwhat.com/guides/claude-code-env-secrets) covers
+the sandbox for that.
+
+### In CI: the GitHub Action
+
+`action.yml` at the root of this repository is a composite GitHub Action.
+It runs `ranwhat check` (or `watch`, or `clean`, which there only
+reports) over the agent history on the runner, with `--fail-on`, and
+uploads the SARIF to code scanning with GitHub's own `upload-sarif`. It
+runs ranwhat from the action's own checkout with the runner's Python, so
+nothing is installed and nothing is fetched from PyPI. Put it after the
+steps where an agent ran, in the same job: that is where the agent's
+history is.
+
+```yaml
+permissions:
+  contents: read
+  security-events: write      # for the SARIF upload
+
+steps:
+  # ... the steps that run Claude Code or another agent ...
+  - uses: MatijaMiki/ranwhat@main      # pin a commit SHA in production
+    with:
+      fail-on: high                    # medium, high, critical, or "" to never fail
+      # command: check                 # or watch, or clean
+      # days: "30"
+      # args: --source claude-code     # any other flags
+      # upload-sarif: "true"
+      # sarif-file: ranwhat.sarif
+      # allow-empty: "false"           # "true" passes when there is no history
+```
+
+The step fails with ranwhat's exit status, which is also its `exit-code`
+output: 3 for findings at or above `fail-on`, 2 when there was no agent
+history to read (unless `allow-empty`), 1 on an error.
 
 ### `ranwhat scan`: score what an agent's credentials can do
 
