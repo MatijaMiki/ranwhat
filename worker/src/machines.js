@@ -37,7 +37,7 @@
  * tokens are the subscription's to end.
  */
 import { schema as feedSchema, sha256 } from "./auth.js";
-import { DAY, accountsOn, canManage, now, schema as accountsSchema } from "./accounts.js";
+import { DAY, accountsOn, canManage, now, schema as accountsSchema, seenAddress } from "./accounts.js";
 import { randomToken } from "./session.js";
 
 export const CI_PREFIX = "rw_c_";
@@ -79,13 +79,18 @@ async function tables(db) {
 }
 
 /* The organisation's machines whose tokens are not revoked, newest first.
-   An expired CI token stays listed, saying so, until it is revoked. */
-export async function machinesOf(env, orgId) {
+   An expired CI token stays listed, saying so, until it is revoked.
+   email: the address of whoever linked or made each, as someone who
+   joined the organisation at `since` may see it (accounts.js's
+   seenAddress()): null for someone who had left before they joined. */
+export async function machinesOf(env, orgId, since = 0) {
   const db = env.LIST;
   await tables(db);
   const { results } = await db.prepare(
-    `SELECT ${COLUMNS} FROM ${FROM} WHERE m.org_id = ? AND k.revoked_at IS NULL
-     ORDER BY m.created_at DESC, m.id LIMIT ?`).bind(orgId, MAX_LISTED).all();
+    `SELECT m.id, m.kind, m.label, m.user_id, m.created_at, m.last_used_day, k.expires_at,
+            ${seenAddress("m.user_id", "u.email")} AS email
+     FROM ${FROM} WHERE m.org_id = ? AND k.revoked_at IS NULL
+     ORDER BY m.created_at DESC, m.id LIMIT ?`).bind(orgId, orgId, since, orgId, MAX_LISTED).all();
   return results;
 }
 

@@ -23,9 +23,10 @@
  * GET ranwhat.com/device sends the browser to account.ranwhat.com/device,
  * where someone signed in, with an emailed code typed in the last 15
  * minutes, types the user code, sees the organisation the terminal will
- * belong to and the warning to approve only a terminal they started
- * themselves, names the terminal, and approves or denies (dashboard.js
- * routes them here).
+ * belong to, its owner and their own role in it (and that it is not their
+ * own, when it is not), and the warning to approve only a terminal they
+ * started themselves, names the terminal, and approves or denies
+ * (dashboard.js routes them here).
  *
  * At rest. The device code is 32 random bytes, kept as its SHA-256. The
  * user code is kept as two HMACs under ACCOUNT_SECRET, of its first four
@@ -69,7 +70,7 @@
  * and each needs a fresh emailed code for every session.
  */
 import { identify, plan, schema as feedSchema, sha256 } from "./auth.js";
-import { ACCOUNT_ORIGIN, HOUR, event, now, ready, schema as accountsSchema } from "./accounts.js";
+import { ACCOUNT_ORIGIN, HOUR, event, now, ownerOf, ready, schema as accountsSchema } from "./accounts.js";
 import { PLAN_NAMES } from "./features.js";
 import { escape, same } from "./list.js";
 import { MAX_LABEL, machineLabel } from "./machines.js";
@@ -561,16 +562,25 @@ async function needsCode(env, who, { status = 200, error = "" } = {}) {
     <p><a href="/">Your account</a></p>`, { status });
 }
 
+const ROLES = Object.freeze({ owner: "Owner", admin: "Admin", member: "Member" });
+
+/* Whose organisation the terminal would join: names are not unique (every
+   personal organisation is "Personal"), so its owner is named too, unless
+   that is the person approving. */
+const owned = async (env, who) => (who.org.role === "owner" ? null : await ownerOf(env, who.org.id) || "nobody");
+
 /* The box the code is typed in, saying which organisation the terminal
-   will be linked to, and, for someone in more than one, the switcher that
-   picks another (members.js) and comes back here. */
+   will be linked to, and whose, and, for someone in more than one, the
+   switcher that picks another (members.js) and comes back here. */
 async function codeBox(request, env, who, { error = "", status = 200 } = {}) {
   if (!fresh(who)) return needsCode(env, who, { status: status === 200 ? 200 : 403, error });
   const over = await overLimit(request, env, who);
   if (over) return tooMany(over);
+  const owner = await owned(env, who);
   return page("Link a terminal", `<h1>Link a terminal</h1>
     <p>Type the code your terminal printed after <strong>ranwhat login</strong>. The terminal is
-       linked to <strong>${escape(who.org.name)}</strong>.</p>
+       linked to <strong>${escape(who.org.name)}</strong>${owner
+         ? `, owned by <strong>${escape(owner)}</strong>, not an organisation of your own` : ""}.</p>
     ${await switcher(env, who, "/device")}
     ${WARNING}
     ${form("/device", await formToken(env, who.id, "device"), `
@@ -651,14 +661,20 @@ export async function deviceLookup(request, env) {
 const approveAction = (code, org) => `device-approve:${code}:${org}`;
 const denyAction = (code) => `device-deny:${code}`;
 
-/* Only what the server knows: the organisation, its plan, and when and
-   from which country the code was asked for. Nothing the terminal wrote.
-   The name the terminal goes by on the account page is typed here, with
-   the approval: a terminal sends none. */
+/* Only what the server knows: the organisation, whose it is and the
+   approver's role in it, its plan, and when and from which country the
+   code was asked for. Nothing the terminal wrote. An organisation that is
+   not the approver's own is said to be so, with its owner, as its name
+   alone may be the same as theirs. The name the terminal goes by on the
+   account page is typed here, with the approval: a terminal sends none. */
 async function confirmPage(env, who, code, row, { error = "", status = 200 } = {}) {
   const org = who.org;
   const onPlan = await plan(env, org.id);
   const where = countryName(row.country);
+  const owner = await owned(env, who);
+  const notOwn = owner ? `<p class="bad"><strong>${escape(org.name)}</strong> is not an organisation of your own: it is
+       owned by <strong>${escape(owner)}</strong>. Everyone in it sees this terminal, who linked it and the day it
+       was last used, and its owner and admins can revoke it.</p>` : "";
   const free = onPlan === "free"
     ? `<p>${escape(org.name)} is on Free: the terminal is linked, and what needs the server
        (ranwhat update's feed) asks for Plus.</p>` : "";
@@ -668,8 +684,11 @@ async function confirmPage(env, who, code, row, { error = "", status = 200 } = {
       <dt>Code</dt><dd>${escape(shownCode(code))}</dd>
       <dt>Asked for</dt><dd>${escape(ago(now() - row.created_at))}${where ? `, from ${escape(where)}` : ""}</dd>
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
+      <dt>Owner</dt><dd>${owner ? escape(owner) : "You"}</dd>
+      <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd>${PLAN_NAMES[onPlan]}</dd>
     </dl>
+    ${notOwn}
     <p>The terminal gets a token of its own for <strong>${escape(org.name)}</strong>, listed
        under Machines on your account page by the name you give it here. Running
        <strong>ranwhat logout</strong> there revokes it, as Revoke on your account page does.</p>
@@ -729,10 +748,12 @@ export async function approve(request, env) {
       || { expires_at: 0 });
   }
   await event(db, { org: who.org.id, user: who.user, what: "device_approved" }).run();
+  const owner = await owned(env, who);
   return page("Approved", `<h1>Approved.</h1>
     <p>Go back to your terminal. Within a few seconds it says it is linked to
        <strong>${escape(who.org.name)}</strong> as <strong>${escape(who.email)}</strong>. If it names
        anything else, run <strong>ranwhat logout</strong> there.</p>
+    ${owner ? `<p><strong>${escape(who.org.name)}</strong> is owned by <strong>${escape(owner)}</strong>, not you.</p>` : ""}
     <p>It is listed under Machines on your account page as <strong>${escape(label)}</strong>.</p>
     <p><a href="/">Your account</a></p>`);
 }

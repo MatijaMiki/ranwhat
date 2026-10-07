@@ -120,8 +120,8 @@ import { escape } from "./list.js";
 import { plan } from "./auth.js";
 import { FEATURES, PLAN_NAMES, allows, atLeast, featuresOf } from "./features.js";
 import {
-  ACCOUNT_HOST, DAY, RENAMES_PER_DAY, SESSION_MAX, STEPUPS_PER_USER_DAY, canManage, event, forgetWaysIn, history, now,
-  orgFor, orgName, ready, schema, userForVerifiedEmail,
+  ACCOUNT_HOST, DAY, RENAMES_PER_DAY, SESSION_MAX, STEPUPS_PER_USER_DAY, canManage, event, forgetWaysIn, history,
+  joinedAt, now, orgFor, orgName, ownerOf, ready, schema, userForVerifiedEmail,
 } from "./accounts.js";
 import { challenge } from "./challenge.js";
 import {
@@ -931,6 +931,7 @@ async function dashboard(env, who, {
     <dl>
       <dt>Signed in as</dt><dd>${escape(who.email)}</dd>
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
+      <dt>Owner</dt><dd>${org.role === "owner" ? "You" : escape(await ownerOf(env, org.id) || "nobody")}</dd>
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd id="plan">${PLAN_NAMES[onPlan]}</dd>
     </dl>
@@ -1487,7 +1488,7 @@ async function machinesPanel(env, who, onPlan, error) {
   const org = who.org;
   const confirmed = fresh(who);
   const t = now();
-  const list = await machinesOf(env, org.id);
+  const list = await machinesOf(env, org.id, await joinedAt(env, org.id, who.user));
   const renameToken = await formToken(env, who.id, "machine-rename");
   const revokeToken = await formToken(env, who.id, "machine-revoke");
   const items = list.map((m) => {
@@ -1496,7 +1497,7 @@ async function machinesPanel(env, who, onPlan, error) {
     const name = m.label ? escape(m.label) : UNNAMED[m.kind];
     const by = m.kind === "legacy"
       ? `The token emailed with a subscription, attached here on ${day(m.created_at)}.`
-      : `${m.kind === "ci" ? "Made" : "Linked"} by ${m.email ? escape(m.email) : "someone no longer here"} on ${day(m.created_at)}.`;
+      : `${m.kind === "ci" ? "Made" : "Linked"} by ${m.email ? escape(m.email) : "a former member"} on ${day(m.created_at)}.`;
     const used = m.kind === "legacy" ? "Its use is not recorded."
       : m.last_used_day === null ? "Not used yet." : `Last used ${day(m.last_used_day)}.`;
     const expired = m.expires_at !== null && m.expires_at <= t;

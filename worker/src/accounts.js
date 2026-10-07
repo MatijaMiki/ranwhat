@@ -554,6 +554,37 @@ export function orgName(input) {
 
 export const canManage = (org) => Boolean(org) && (org.role === "owner" || org.role === "admin");
 
+/* The address of the organisation's owner, or null. Names are not unique
+   (every personal organisation is "Personal"), so a page that asks for a
+   decision about one names its owner too. */
+export async function ownerOf(env, orgId) {
+  const row = await env.LIST.prepare(
+    `SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.role = 'owner'`)
+    .bind(orgId).first();
+  return row ? row.email : null;
+}
+
+/* When `userId` joined the organisation, or 0 when they are not in it. */
+export async function joinedAt(env, orgId, userId) {
+  const row = await env.LIST.prepare("SELECT created_at FROM memberships WHERE org_id = ? AND user_id = ?")
+    .bind(orgId, userId).first();
+  return row ? row.created_at : 0;
+}
+
+/* SQL for the address `email` of the user whose id is `id` (both SQL
+   expressions), as someone who joined the organisation at a given time
+   may see it: while that user is in the organisation, or when they left
+   it after the viewer joined, so that the two shared it; otherwise NULL,
+   which the pages show as a former member. Someone who joins later never
+   learns the address of someone who had already gone. Three values to
+   bind where it stands: the organisation, the organisation again, and
+   the time the viewer joined (joinedAt()). */
+export const seenAddress = (id, email) => `CASE
+  WHEN EXISTS (SELECT 1 FROM memberships sx WHERE sx.org_id = ? AND sx.user_id = ${id}) THEN ${email}
+  WHEN (SELECT max(sg.at) FROM auth_events sg WHERE sg.org_id = ? AND sg.user_id = ${id}
+        AND sg.event IN ('org_left', 'removed_from_org')) >= ? THEN ${email}
+  END`;
+
 /* ---------- ways in ---------- */
 
 /* The statements that take away every Google and GitHub account linked to

@@ -83,7 +83,7 @@ import { plan, schema as feedSchema, sha256 } from "./auth.js";
 import { REPLY_TO, escape, mail, resend } from "./list.js";
 import { FEATURES, PLAN_NAMES, allows } from "./features.js";
 import {
-  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SWITCHES_PER_DAY, canManage, event, now, spendAuthMail,
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SWITCHES_PER_DAY, canManage, event, joinedAt, now, seenAddress, spendAuthMail,
 } from "./accounts.js";
 import {
   ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, current, formOk, formToken, fresh,
@@ -127,7 +127,9 @@ export const MEMBER_EVENTS = Object.freeze({
 
 /* The organisation's own record of who came, went and changed role, shown
    to its owner and admins: whoever did it first, whoever it was done to
-   second, both read from users as the page is drawn. */
+   second, both read from users as the page is drawn, and each shown as a
+   former member to a viewer who joined after they left
+   (accounts.js's seenAddress()). */
 const ORG_ACTIVITY = Object.freeze({
   member_invited: (a) => `${a} invited someone`,
   invite_revoked: (a) => `${a} took an invite back`,
@@ -204,13 +206,15 @@ async function inviteBy(env, token) {
      WHERE i.token_hash = ?`).bind(await sha256(token)).first();
 }
 
-async function orgActivity(env, orgId) {
+async function orgActivity(env, orgId, since) {
   const kinds = Object.keys(ORG_ACTIVITY);
   const { results } = await env.LIST.prepare(
-    `SELECT e.event, e.at, a.email AS actor, s.email AS subject FROM auth_events e
+    `SELECT e.event, e.at, ${seenAddress("e.user_id", "a.email")} AS actor,
+            ${seenAddress("e.subject", "s.email")} AS subject FROM auth_events e
      LEFT JOIN users a ON a.id = e.user_id LEFT JOIN users s ON s.id = e.subject
      WHERE e.org_id = ? AND e.event IN (${kinds.map(() => "?").join(", ")})
-     ORDER BY e.at DESC, e.id DESC LIMIT ?`).bind(orgId, ...kinds, SHOWN_ACTIVITY).all();
+     ORDER BY e.at DESC, e.id DESC LIMIT ?`)
+    .bind(orgId, orgId, since, orgId, orgId, since, orgId, ...kinds, SHOWN_ACTIVITY).all();
   return results;
 }
 
@@ -322,15 +326,16 @@ export async function membersPanel(env, who, onPlan, error = "") {
   if (!owner) {
     leave = form("/members/leave", await formToken(env, who.id, `member-leave:${org.id}`), `${orgField}
       <button type="submit">Leave ${name}</button>`) +
-      `<p><small>Leaving revokes the terminals you linked to ${name}.</small></p>`;
+      `<p><small>Leaving revokes the terminals you linked to ${name}.${org.role === "admin"
+        ? ` CI tokens you made are ${name}'s, and keep working until an owner or an admin revokes them.` : ""}</small></p>`;
   } else if (people.length > 1) {
     leave = `<p><small>As its owner you cannot leave ${name}: make one of its admins the owner first.</small></p>`;
   }
 
   let record = "";
   if (manager) {
-    const someone = "someone no longer here";
-    const done = await orgActivity(env, org.id);
+    const someone = "a former member";
+    const done = await orgActivity(env, org.id, await joinedAt(env, org.id, who.user));
     if (done.length) {
       record = `<p><strong>Who came, went and changed role</strong></p>
     <ul>${done.map((e) => `<li>${escape(when(e.at))}: ${ORG_ACTIVITY[e.event](escape(e.actor || someone),
@@ -534,10 +539,16 @@ export async function invitePost(request, env, ctx) {
 
 /* The link is the only way in, so it is in the email, and nothing else
    is: the email says who sent it and where it goes, and that it does
-   nothing for anyone not signed in as this address. */
+   nothing for anyone not signed in as this address. The organisation's
+   name is whatever its owner or an admin typed, so it is quoted, on a line
+   of its own that says so, and the email says ranwhat sends it on the
+   inviter's behalf and that the link to the account host is the only one
+   that is ours: it is never read as ranwhat's own words. */
 async function mailInvite(env, { to, by, orgName, token }) {
   const link = `${ACCOUNT_ORIGIN}/invite/${token}`;
-  const said = `${by} invited you to join ${orgName} on ranwhat, as a member.`;
+  const said = `${by} invited you to join an organisation on ranwhat, as a member.`;
+  const named = `Its name, as its owner or an admin typed it: "${orgName}"`;
+  const behalf = `ranwhat sends this on their behalf, and wrote none of that name. The only link from us is the one below, to ${ACCOUNT_HOST}.`;
   const terms = `The link works once, for ${INVITE_FOR / DAY} days, and only signed in to ${ACCOUNT_HOST} as ${to}. If you have no account yet, a code mailed to this address makes one.`;
   const ignore = `If you do not know ${by}, ignore this email: nothing happens unless you sign in and choose Join.`;
   await resend(env, "POST", "/emails", {
@@ -545,9 +556,12 @@ async function mailInvite(env, { to, by, orgName, token }) {
     to: [to],
     reply_to: REPLY_TO,
     subject: "An invite to an organisation on ranwhat",
-    text: [said, "", "See the invite, and join:", "", `    ${link}`, "", terms, "", ignore, "", "ranwhat.com"].join("\n"),
+    text: [said, "", named, behalf, "", "See the invite, and join:", "", `    ${link}`, "", terms, "", ignore, "", "ranwhat.com"]
+      .join("\n"),
     html: mail(`
       <p>${escape(said)}</p>
+      <p>${escape(named)}</p>
+      <p>${escape(behalf)}</p>
       <p><a href="${escape(link)}" style="color:#b8482d">See the invite, and join</a></p>
       <p>${escape(terms)}</p>
       <p style="color:#5a6672">${escape(ignore)}</p>`),
@@ -615,8 +629,9 @@ async function invitation(request, env, token) {
     <p>Switch to it on your account page.</p>${back}`, { cookies: [clearCookie(INVITE_COOKIE)] });
   }
   return page("Join an organisation", `${head}
-    <p>Joining shares ${name}'s plan with you. Everyone in ${name} sees your email address, and the
-       terminals you link to it.</p>
+    <p>Joining shares ${name}'s plan with you. Everyone in ${name} sees your email address and the
+       terminals you link to it, with the day each was last used; its owners and admins see when you join,
+       leave or change role; and anyone who joins after you leave sees you only as a former member.</p>
     ${form("/invite", await formToken(env, who.id, acceptAction(inv)), `
       <input type="hidden" name="token" value="${escape(token)}">
       <button type="submit">Join ${name}</button>`)}
