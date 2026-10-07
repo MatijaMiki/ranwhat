@@ -78,6 +78,27 @@ Python 3.9+. No dependencies, and nothing is built on your machine.
 
 Runs watch and clean together and changes nothing.
 
+`check`, `watch` and `clean` exit with status 0 when they ran, 1 on an
+error, and 2 when they found no agent history to read (argparse's usage
+errors are 2 as well), so a script can tell a machine with nothing on it
+from a clean one. With `--fail-on SEVERITY` they exit 3 when anything at
+or above `medium`, `high` or `critical` is found: every action watch rates
+that high or higher, and every secret clean finds, each of which is
+`critical`. A secret masked with `--apply` still counts: it has to be
+rotated. An error (1) or nothing read (2) wins over 3.
+
+```bash
+ranwhat check --fail-on high --sarif ranwhat.sarif
+```
+
+`--sarif PATH` also writes what was found as SARIF 2.1.0, for code
+scanning: one result for each rule an action tripped, and one for each
+secret. A secret is in it as the report shows it, masked (`sk_…dc  32
+chars`), never its value or its fingerprint, and every value `clean`
+finds is masked wherever else it shows up there, as in the report. Agent
+history lives outside your repository, so each result points at the
+transcript or project directory it came from on the machine that ran it.
+
 On a terminal, check, watch and clean keep one status line on stderr while
 they read, counting transcripts through each pass: `indexing secrets`
 (`(first run)` the first time), `checking actions`, `looking for secrets`.
@@ -164,9 +185,16 @@ ranwhat> list           the findings again
 ranwhat> show 3         where it appears, and what to roll it at
 ranwhat> mask 3         mask just that one
 ranwhat> mask all       mask everything listed
-ranwhat> keep 3         leave it alone
+ranwhat> keep 3         leave it alone, and do not report it again
 ranwhat> rotate         what to rotate, grouped by provider
 ```
+
+`keep` is remembered: a value you keep is neither listed nor counted by
+`clean`, `check` or `--fail-on` on later runs, and `clean --apply` leaves
+it as it is. Each report says how many it left out. What is kept is a
+keyed hash of each value in `~/.ranwhat/known/kept.json`, beside the
+secrets index and under its key, never the value; delete that file to
+have them all reported again.
 
 Each finding says which project it was found in and, when the transcript
 names it, the file it was read out of, because a 64-character string is
@@ -226,6 +254,39 @@ A copy the mask missed is then still hidden where it stands apart from
 what is around it, and where it is glued into a command `check` or `watch`
 shows, if it is no longer than 64 characters. Glued into anything else, it
 is not. So keep the index unless you are starting over.
+
+### In CI: the GitHub Action
+
+`action.yml` at the root of this repository is a composite GitHub Action.
+It runs `ranwhat check` (or `watch`, or `clean`, which there only
+reports) over the agent history on the runner, with `--fail-on`, and
+uploads the SARIF to code scanning with GitHub's own `upload-sarif`. It
+runs ranwhat from the action's own checkout with the runner's Python, so
+nothing is installed and nothing is fetched from PyPI. Put it after the
+steps where an agent ran, in the same job: that is where the agent's
+history is.
+
+```yaml
+permissions:
+  contents: read
+  security-events: write      # for the SARIF upload
+
+steps:
+  # ... the steps that run Claude Code or another agent ...
+  - uses: MatijaMiki/ranwhat@main      # pin a commit SHA in production
+    with:
+      fail-on: high                    # medium, high, critical, or "" to never fail
+      # command: check                 # or watch, or clean
+      # days: "30"
+      # args: --source claude-code     # any other flags
+      # upload-sarif: "true"
+      # sarif-file: ranwhat.sarif
+      # allow-empty: "false"           # "true" passes when there is no history
+```
+
+The step fails with ranwhat's exit status, which is also its `exit-code`
+output: 3 for findings at or above `fail-on`, 2 when there was no agent
+history to read (unless `allow-empty`), 1 on an error.
 
 ### `ranwhat scan`: score what an agent's credentials can do
 

@@ -39,11 +39,13 @@ compared whole.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import stat
+import time
 
 from . import agents, clean
 from .watch import _transcripts, claude_projects
@@ -362,16 +364,40 @@ def _stored_key(where):
 
 
 def _store_key(where, key):
-    """Keep key as this install's, in a 0700 directory. False where
-    nothing can be written there."""
+    """Keep key as this install's, in a 0700 directory, unless another run
+    has kept one there meanwhile: whether key is the one kept now. False
+    too where nothing can be written there. Only a damaged key is ever
+    replaced: written over another run's, everything hashed under that one
+    (the index, what clean's review was told to keep) was lost."""
+    path = os.path.join(where, "key")
+    tmp = "%s.%d.new" % (path, os.getpid())
     try:
         os.makedirs(where, mode=0o700, exist_ok=True)
         if os.name != "nt":
             os.chmod(where, 0o700)
-        _write_new(os.path.join(where, "key"), key)
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        fd = os.open(tmp, _CREATE, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(key)
+        try:
+            os.link(tmp, path)          # never over one there already
+        except FileExistsError:
+            if _stored_key(where) is None:
+                os.replace(tmp, path)   # damaged: replaced
+        except (OSError, AttributeError, NotImplementedError):
+            # No hard links here (some file systems): the narrower check.
+            if _stored_key(where) is None:
+                os.replace(tmp, path)
     except OSError:
         return False
-    return True
+    finally:
+        try:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
+        except OSError:
+            pass
+    return _stored_key(where) == key
 
 
 def _writable(where):
@@ -620,6 +646,11 @@ class Index(object):
         if not self.kept:
             return
         if not self._stored:
+            # Another run, or clean's review keeping a value (Kept.add),
+            # may have kept a key since this index was opened; _store_key
+            # never writes over it. This index's hashes are under its own
+            # key, so it is then kept in memory for this run, and the next
+            # run builds it under the stored one.
             self._stored = _store_key(self.where, self._key)
             if not self._stored:
                 self.kept = False
@@ -635,3 +666,129 @@ class Index(object):
             self._migrated = False
         except OSError:
             self.kept = False
+
+
+_LOCK_WAIT = 5.0                # seconds a keep waits for another's
+_LOCK_STALE = 60.0              # a lock older than this was left by a crash
+
+
+@contextlib.contextmanager
+def _locked(path):
+    """Hold path as a lock file, made exclusively, while the block runs:
+    two runs keeping a value at once each read the file, add theirs and
+    write it, and one would lose the other's. Yields False when it could
+    not be had in _LOCK_WAIT seconds, or not made at all."""
+    deadline = time.time() + _LOCK_WAIT
+    while True:
+        try:
+            fd = os.open(path, _CREATE, 0o600)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.lstat(path).st_mtime > _LOCK_STALE:
+                    os.unlink(path)
+                    continue
+            except OSError:
+                continue
+            if time.time() > deadline:
+                yield False
+                return
+            time.sleep(0.05)
+        except OSError:
+            yield False
+            return
+    try:
+        yield True
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+# What clean's review was told to keep, by the keyed hash of each value,
+# beside the index and under its key: a value someone chose to leave as it
+# is (a test fixture's password, a key already rotated) is not reported
+# again on the next run, nor masked by clean --apply.
+KEPT_VERSION = 1
+KEPT_FILE = "kept.json"
+
+
+class Kept(object):
+    """The values clean's review was told to keep, as keyed BLAKE2b hashes
+    of each whole value under this install's key: never a value, nor any
+    part or unkeyed hash of one. A file damaged, of another version, or
+    written under another key (the key lost and made again) is read as
+    none kept. `value in kept` asks whether one is."""
+
+    def __init__(self, key=None, hashes=()):
+        self._key = key
+        self._hashes = frozenset(hashes)
+
+    @classmethod
+    def open(cls):
+        """What is kept on this machine, or none."""
+        where = index_dir()
+        key = _stored_key(where)
+        if key is None:
+            return cls()
+        return cls(key, cls._load(where, key))
+
+    @staticmethod
+    def _load(where, key):
+        try:
+            doc = json.loads(_read(os.path.join(where, KEPT_FILE)).decode("utf-8"))
+            if (doc["version"] != KEPT_VERSION
+                    or doc["key"] != _Hashes(key).key_id):
+                return frozenset()
+            return frozenset(_hex(h, _VALUE_SIZE) for h in doc["values"])
+        except (OSError, ValueError, TypeError, KeyError, AttributeError,
+                RecursionError):
+            return frozenset()
+
+    @staticmethod
+    def _of(key, value):
+        h = _hasher(key, b"ranwhat:kept", _VALUE_SIZE)
+        h.update(_bytes(value))
+        return h.digest()
+
+    def __contains__(self, value):
+        return (self._key is not None and isinstance(value, str)
+                and self._of(self._key, value) in self._hashes)
+
+    def __len__(self):
+        return len(self._hashes)
+
+    def __bool__(self):
+        return bool(self._hashes)
+
+    __nonzero__ = __bool__
+
+    @classmethod
+    def add(cls, values):
+        """Keep values, read again from disk first so that nothing another
+        run kept meanwhile is lost: the Kept now on disk, or None where
+        nothing could be written (the values are then reported again next
+        run)."""
+        where = index_dir()
+        key = _stored_key(where)
+        if key is None:
+            _store_key(where, os.urandom(_KEY_SIZE))
+            key = _stored_key(where)        # this run's, or another's that won
+            if key is None:
+                return None
+        with _locked(os.path.join(where, KEPT_FILE + ".lock")) as held:
+            if not held:
+                return None
+            hashes = set(cls._load(where, key))
+            hashes.update(cls._of(key, v) for v in values
+                          if isinstance(v, str) and v)
+            doc = {"version": KEPT_VERSION, "key": _Hashes(key).key_id,
+                   "values": sorted(h.hex() for h in hashes)}
+            try:
+                _write_new(os.path.join(where, KEPT_FILE),
+                           json.dumps(doc, sort_keys=True).encode("utf-8"))
+            except OSError:
+                return None
+        return cls(key, hashes)

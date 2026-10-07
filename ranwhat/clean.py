@@ -1968,12 +1968,14 @@ def _each_string(node, change):
     return node, changed
 
 
-def _walk(node, collect, replace=None, only=None, seen=None):
+def _walk(node, collect, replace=None, only=None, seen=None, spare=None):
     """Visit every string in a decoded JSON structure, and with replace
     mask in it what was found: (node, whether anything changed).
 
     `only` limits masking to a set of fingerprints, so acting on one finding
-    does not rewrite every other secret in the same file.
+    does not rewrite every other secret in the same file. `spare`, a test
+    of a value, leaves each it is true of as it is (one clean's review was
+    told to keep, known.Kept).
 
     collect is called with each value, its label, the string it is in and
     where in that string its copies start. `seen`, a list, is given each
@@ -1987,7 +1989,8 @@ def _walk(node, collect, replace=None, only=None, seen=None):
             collect(value, label, text, copies)
         if replace:
             for value, _label, _copies in secrets:
-                if only is None or _fingerprint(value) in only:
+                if ((only is None or _fingerprint(value) in only)
+                        and not (spare and spare(value))):
                     text = text.replace(value, REDACTION % _fingerprint(value))
         return text
     return _each_string(node, visit)
@@ -2308,7 +2311,7 @@ def _dumped(obj, line):
 
 
 def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
-              remember=None, skipped=None):
+              remember=None, skipped=None, spare=None):
     """Find (and optionally mask) secrets in one transcript.
 
     Returns (findings, changed). Each finding is a dict describing one
@@ -2333,6 +2336,7 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
     With apply the transcript is replaced as an agent's file is
     (_replace): not when it was written to in the last two minutes, or
     while it was read. `skipped`, a dict, is then given why, by path.
+    `spare`, a test of a value, leaves each it is true of unmasked (_walk).
     """
     findings = {}
     rewritten = []
@@ -2411,7 +2415,7 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
                 origin_now[0] = _origin_for_line(obj, last_call, call_origins)
                 before = len(texts)
                 new, masked = _walk(obj, collect, replace=apply, only=only,
-                                    seen=texts)
+                                    seen=texts, spare=spare)
                 owners.extend([len(lines) - 1] * (len(texts) - before))
                 written = _dumped(new, line) if apply and masked else None
                 if written is not None:
@@ -2443,7 +2447,8 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
         asked = {fp: v for fp, v in asked.items() if fp in only}
     elsewhere, spent = (_copies_elsewhere(texts, owners, sum(map(len, lines)), asked, found)
                         if asked else ({}, 0))
-    masking = {fp for fp in elsewhere if only is None or fp in only} if apply else ()
+    masking = {fp for fp in elsewhere if (only is None or fp in only)
+               and not (spare and spare(values[fp]))} if apply else ()
     places = dict.fromkeys(elsewhere, 0)
     on_line = {}
     for fp, held in elsewhere.items():
@@ -2510,7 +2515,9 @@ def scan_file(path, apply=False, only=None, known=None, extra=None, read=None,
         why = _in_use(path, st)
         if why is None:
             if remember is not None:
-                remember([v for fp, v in values.items() if only is None or fp in only])
+                remember([v for fp, v in values.items()
+                          if (only is None or fp in only)
+                          and not (spare and spare(v))])
             why = _replace(path, st, "".join(
                 raw.get(i, new) if new is lines[i] else new
                 for i, new in enumerate(rewritten)))
@@ -2689,7 +2696,7 @@ def _backup(path):
 
 def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
          known=None, copies=True, read=None, remember=None, skipped=None,
-         unread=None):
+         unread=None, spare=None):
     """Scan every transcript. Returns (merged_findings, files_read, files_changed):
     a transcript this run counted as a file not read (agents.notes names it)
     is not among those read, and `unread`, a dict, is given under
@@ -2709,7 +2716,8 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
     rather than read each transcript a second time. `remember`, with
     apply, is given each value before a transcript loses it to a mask.
     `skipped`, with apply, is given why each transcript left as it was
-    was not masked (scan_file).
+    was not masked (scan_file). `spare`, a test of a value, leaves each
+    it is true of unmasked.
     """
     merged, scanned, changed_files = {}, 0, []
     values = {}
@@ -2728,13 +2736,15 @@ def scan(root=CLAUDE_PROJECTS, since_days=None, apply=False, progress=None,
                 def took(found, masks, path=path, st=st):
                     read(path, st, found, masks)
         findings, changed = scan_file(path, apply=apply, known=values, read=took,
-                                      remember=remember, skipped=skipped)
+                                      remember=remember, skipped=skipped,
+                                      spare=spare)
         if changed:
             changed_files.append(path)
         _merge(merged, findings)
     if copies and merged:
         _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
-                                     remember=remember, skipped=skipped)
+                                     remember=remember, skipped=skipped,
+                                     spare=spare)
     if known is not None:
         known.update(values)
     files_read = _registry.get("claude-code").read_of(paths)
@@ -2782,7 +2792,8 @@ _SHAPE_LABELS = frozenset(name for _shape, name in _SHAPES_NAMED)
 
 
 def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
-                                 remember=None, least=2, skipped=None):
+                                 remember=None, least=2, skipped=None,
+                                 spare=None):
     """Count, and with apply mask, each value of `merged` in the transcripts
     of `paths` it was not found in. Each look costs what it reads, and a
     little more for asking at all, so a thousand small transcripts and ten
@@ -2826,7 +2837,7 @@ def _copies_in_other_transcripts(paths, merged, values, apply, changed_files,
         if present:
             findings, changed = scan_file(path, apply=apply, only=set(present),
                                           extra=present, remember=remember,
-                                          skipped=skipped)
+                                          skipped=skipped, spare=spare)
             if changed and path not in changed_files:
                 changed_files.append(path)
             _merge(merged, {fp: f for fp, f in findings.items() if f["count"]},
@@ -3073,7 +3084,7 @@ def _claude_code_keys(findings):
 
 def scan_sources(sources=None, root=None, paths=None, since_days=None,
                  apply=False, progress=None, known=None, read=None,
-                 remember=None):
+                 remember=None, spare=None):
     """Find (and with apply mask) the secrets in every requested agent's
     history: a Searched.
 
@@ -3091,7 +3102,9 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     it is, and said so (read_only, skipped). `progress`, `known`, `read`
     and `remember` are scan's, for every agent's files: `read` is called
     with (path, its signature or os.stat, values, mask fingerprints), and
-    for a file of another agent whether it was read whole (_read_store)."""
+    for a file of another agent whether it was read whole (_read_store).
+    `spare`, a test of a value, leaves each it is true of unmasked: one
+    clean's review was told to keep (known.Kept)."""
     paths = dict(paths or {})
     root = root or paths.get("claude-code") or CLAUDE_PROJECTS
     selected = list(_registry.ids() if sources is None else sources)
@@ -3115,7 +3128,7 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
         merged, scanned, changed = scan(root, since_days, apply=apply,
                                         progress=step, known=values, read=read,
                                         remember=remember, skipped=held,
-                                        unread=out.unread)
+                                        unread=out.unread, spare=spare)
         _claude_code_keys(merged)
         out.findings.update(merged)
         out.counts["claude-code"] = scanned
@@ -3153,10 +3166,11 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                      if "claude-code" not in f["sources"]}
         if elsewhere and claude_paths:
             if apply and remember is not None:
-                remember([values[fp] for fp in elsewhere if fp in values])
+                remember([values[fp] for fp in elsewhere if fp in values
+                          and not (spare and spare(values[fp]))])
             _copies_in_other_transcripts(claude_paths, elsewhere, values, apply,
                                          out.changed, remember=remember, least=1,
-                                         skipped=held)
+                                         skipped=held, spare=spare)
             _claude_code_keys(elsewhere)
     out.skipped.update((path, ("claude-code", why)) for path, why in held.items())
 
@@ -3166,18 +3180,21 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
             if store is not None:
                 out.read_only[path] = store
     if apply:
-        _mask_stores(out, values, by_id, remember)
+        _mask_stores(out, values, by_id, remember, spare)
     out.values = values
     if known is not None:
         known.update(values)
     return out
 
 
-def _mask_stores(out, values, by_id, remember=None):
+def _mask_stores(out, values, by_id, remember=None, spare=None):
     """Mask, in each adapter file a finding is in, every value found there
-    that the adapter lets ranwhat rewrite, and say what was left."""
+    that the adapter lets ranwhat rewrite, but for those `spare` is true
+    of, and say what was left."""
     plan = {}
     for fp, entry in out.findings.items():
+        if fp in values and spare and spare(values[fp]):
+            continue
         for path, source_id in entry["stores"].items():
             if source_id in by_id and fp in values:
                 plan.setdefault(path, []).append(values[fp])
@@ -3470,7 +3487,7 @@ _COMMANDS = (
     ("show <n>", "where that secret appears, and what it looks like"),
     ("mask <n>", "mask just that one"),
     ("mask all", "mask everything listed"),
-    ("keep <n>", "leave it alone, drop it from the list"),
+    ("keep <n>", "leave it alone, and do not report it again"),
     ("rotate", "what to rotate, grouped by provider"),
     ("quit", "leave (nothing is masked unless you asked)"),
 )
@@ -3532,7 +3549,7 @@ def _as_it_is(text):
 
 
 def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
-           remember=None, stores=None):
+           remember=None, stores=None, keep=None):
     """Interactive review of an already-completed scan. Returns the number of
     files changed. Every line fits the terminal, as in render().
 
@@ -3547,7 +3564,9 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
     however the session ends. `stores` ({path: Store}, Searched.stores)
     are the other agents' files the scan read: a mask reaches a finding
     in them through each one's adapter, and one that cannot be rewritten
-    is named, with what to do instead."""
+    is named, with what to do instead. `keep` is given the value of each
+    finding kept, to remember it (known.Kept.add): it returns whether it
+    could, and one remembered is not reported on the next run."""
     import sys as _sys
     from .report import BOLD, DIM, RED, GRN, YEL
 
@@ -3665,7 +3684,18 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
                 _print()
             elif cmd == "keep":
                 items.remove(target)
-                _print(DIM("  kept. %d left." % len(items)))
+                kept = None
+                if keep is not None:
+                    known = _values_of([target], values, stores)
+                    kept = bool(known) and keep(list(known.values()))
+                if kept:
+                    _print(DIM("  kept, and not reported again on this "
+                               "machine. %d left." % len(items)))
+                elif keep is not None:
+                    _print(DIM("  kept for this session; it could not be "
+                               "remembered. %d left." % len(items)))
+                else:
+                    _print(DIM("  kept. %d left." % len(items)))
             else:
                 did, later = _mask([target], scanned, _print, GRN, RED, DIM,
                                    values, paths=paths, remember=remember,
@@ -3677,6 +3707,35 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
 
         _print(RED("  unknown command: %s" % _fit(cmd, width - 33))
                + DIM("  (try 'help')"))
+
+
+def _values_of(targets, values=None, stores=None):
+    """{fingerprint: value} for targets: from `values`, as the scan kept
+    them, else read back from where the rules found each, in a Claude Code
+    transcript or through another agent's adapter (`stores`)."""
+    stores = stores or {}
+    wanted = {t["fingerprint"] for t in targets}
+    paths, others = set(), set()
+    for t in targets:
+        for path in t["files"]:
+            held = (t.get("stores") or {}).get(path, "claude-code")
+            (paths if held == "claude-code" else others).add(path)
+    known = {fp: v for fp, v in (values or {}).items() if fp in wanted}
+    for path in sorted(paths):
+        if len(known) == len(wanted):
+            break
+        found = {}
+        scan_file(path, known=found)
+        known.update((fp, v) for fp, v in found.items() if fp in wanted)
+    for path in sorted(others):
+        if len(known) == len(wanted):
+            break
+        store = stores.get(path)
+        if store is not None:
+            found = {}
+            scan_store(_registry.get(store.source), store, found)
+            known.update((fp, v) for fp, v in found.items() if fp in wanted)
+    return known
 
 
 def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
@@ -3714,21 +3773,7 @@ def _mask(targets, scanned, _print, GRN, RED, DIM, values=None, paths=None,
         for path in t["files"]:
             (others if adapter_file(path, t) else paths).add(path)
     paths, others = sorted(paths), sorted(others)
-    known = {fp: v for fp, v in (values or {}).items() if fp in wanted}
-    for path in paths:
-        if len(known) == len(wanted):
-            break
-        found = {}
-        scan_file(path, known=found)
-        known.update((fp, v) for fp, v in found.items() if fp in wanted)
-    for path in others:
-        if len(known) == len(wanted):
-            break
-        store = stores.get(path)
-        if store is not None:
-            found = {}
-            scan_store(_registry.get(store.source), store, found)
-            known.update((fp, v) for fp, v in found.items() if fp in wanted)
+    known = _values_of(targets, values, stores)
     if remember is not None and known:
         remember(list(known.values()))
 
