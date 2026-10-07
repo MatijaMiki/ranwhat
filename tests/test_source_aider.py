@@ -376,6 +376,20 @@ class Discovery(AiderCase):
         os.chdir(self.repo)
         self.assertEqual(len(self.src.stores(self.src.locations())), 1)
 
+    def test_a_home_reached_through_a_link_is_looked_at_once(self):
+        # macOS: the home is /var/..., getcwd() says /private/var/...
+        real = os.path.join(self.home, "real-home")
+        os.makedirs(real)
+        link = os.path.join(self.home, "home-link")
+        try:
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("no symlinks here")
+        os.chdir(link)
+        with mock.patch.object(_paths, "home", return_value=link):
+            paths = [os.path.realpath(l.path) for l in self.src.locations()]
+        self.assertEqual(len(paths), len(set(paths)), paths)
+
     def test_the_current_directory_once_when_it_is_the_home(self):
         os.chdir(self.home)
         paths = [os.path.realpath(l.path) for l in self.src.locations()]

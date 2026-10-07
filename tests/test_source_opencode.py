@@ -1029,7 +1029,7 @@ class Secrets(_Case):
     def test_tool_output_files(self):
         out = os.path.join(self.data, "tool-output", "tool_0123456789abXyZ")
         os.makedirs(os.path.dirname(out))
-        with open(out, "w", encoding="utf-8") as fh:
+        with open(out, "w", encoding="utf-8", newline="") as fh:
             fh.write("line\n" * 3 + "STRIPE_KEY=" + SECRET + "\n")
         self.assertEqual(set(self.found(out)), {SECRET})
         with mock.patch.object(opencode, "_CHUNK", 7):

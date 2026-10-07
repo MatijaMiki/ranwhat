@@ -236,6 +236,17 @@ def _git_root(start):
     return None
 
 
+def _same(path):
+    """A key that is equal for two spellings of one place: the folder's
+    links resolved, the file name kept as it is."""
+    folder, name = os.path.split(os.path.abspath(path))
+    try:
+        folder = os.path.realpath(folder)
+    except (OSError, ValueError):
+        pass
+    return os.path.normcase(os.path.join(folder, name))
+
+
 def _is_file(path):
     try:
         return os.path.isfile(path)
@@ -343,10 +354,13 @@ class AiderSource(Source):
         if override:
             return self._input_alone(found)
         try:
-            seen = set(os.path.normcase(loc.path) for loc in found)
+            # Compared by real path: the current directory comes back from
+            # getcwd() resolved (/private/var on macOS) where the home
+            # directory may be spelled through a link (/var).
+            seen = set(_same(loc.path) for loc in found)
             for path in self.here():
                 path = os.path.abspath(path)
-                key = os.path.normcase(path)
+                key = _same(path)
                 if key in seen:
                     continue
                 seen.add(key)

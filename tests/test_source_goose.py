@@ -262,8 +262,9 @@ class GooseCase(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp(prefix="goose-home-")
         self.addCleanup(shutil.rmtree, self.home, True)
-        patches = [mock.patch.dict(os.environ, {"HOME": self.home,
-                                                "USERPROFILE": self.home}),
+        patches = [mock.patch.dict(os.environ, {
+                       "HOME": self.home, "USERPROFILE": self.home,
+                       "APPDATA": os.path.join(self.home, "AppData", "Roaming")}),
                    mock.patch.object(_paths, "home", return_value=self.home)]
         for p in patches:
             p.start()
@@ -274,7 +275,10 @@ class GooseCase(unittest.TestCase):
         p = mock.patch.object(clean, "BACKUP_ROOT", self.backups)
         p.start()
         self.addCleanup(p.stop)
-        self.data = os.path.join(self.home, ".local", "share", "goose")
+        # Where Goose keeps its data on this platform: the first default
+        # (on Windows %APPDATA%\\Block\\goose\\data, not ~/.local/share).
+        self.data = GooseSource().default_paths(
+            os.environ, self.home, _paths.platform_name())[0][0]
         self.folder = os.path.join(self.data, "sessions")
         self.db_path = os.path.join(self.folder, "sessions.db")
         self.src = GooseSource()
@@ -488,8 +492,10 @@ class Discovery(GooseCase):
              CWD))
 
     def test_a_missing_root_is_zero_stores(self):
-        [loc] = self.src.locations()
-        self.assertEqual((loc.exists, loc.found), (False, 0))
+        locations = self.src.locations()
+        self.assertTrue(locations)      # macOS probes a second folder
+        self.assertEqual({(loc.exists, loc.found) for loc in locations},
+                         {(False, 0)})
         self.assertEqual(self.stores(), [])
 
     def test_path_may_name_the_data_or_the_sessions_folder(self):
