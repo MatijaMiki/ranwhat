@@ -331,6 +331,17 @@ async function upgraded(b, s, e, plan = "yearly") {
   return { id, sub };
 }
 
+
+/* Every account page's HTML, one after another, for what may be on any of them. */
+async function everyPage(b) {
+  let html = "";
+  for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) {
+    const r = await b.get(path);
+    assert.equal(r.status, 200, `${path}: ${r.status}`);
+    html += r.text;
+  }
+  return html;
+}
 test("the locked panels lead to the upgrade, which signs in first and comes back", async () => {
   const s = services();
   const e = env();
@@ -341,9 +352,9 @@ test("the locked panels lead to the upgrade, which signs in first and comes back
   const done = await signIn(ana, s, "ana@example.com", "/upgrade");
   assert.equal(done.location, "/upgrade");
 
-  const home = (await ana.get("/")).text;
-  const plus = home.match(/<section class="panel locked" id="plus">([\s\S]*?)<\/section>/)[1];
-  assert.match(plus, /<a href="\/upgrade">Upgrade to Plus<\/a>/);
+  const home = await everyPage(ana);
+  const plus = home.match(/<section class="card upsell locked" id="plus">([\s\S]*?)<\/section>/)[1];
+  assert.match(plus, /<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.match(home, /<div class="panel locked" id="ci-tokens"[\s\S]*?<a href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.doesNotMatch(home, /ranwhat\.com\/pricing">Upgrade/);
   const billing = home.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
@@ -448,7 +459,7 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   assert.match(page.text, /Only an owner or an admin of Personal can upgrade it\./);
   assert.doesNotMatch(page.text, /action="\/upgrade"/);
   assert.doesNotMatch(page.headers.get("content-security-policy"), /stripe/);
-  const memberHome = (await bo.get("/")).text;
+  const memberHome = (await bo.get("/billing")).text;
   assert.match(memberHome, /Personal is on Free\. An owner or an admin of it can upgrade it to Plus\./);
   assert.doesNotMatch(memberHome, /bought without an account|subject=Move/, "only owners and admins are told how to move one");
 
@@ -463,7 +474,7 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   const carl = new Browser(e, { ip: "203.0.113.31" });
   await signIn(carl, s, "carl@example.com");
   join(e, "carl@example.com", org, "admin");
-  assert.match((await carl.get("/")).text, /To move a Plus subscription bought without an account to Personal, write to/);
+  assert.match((await carl.get("/billing")).text, /To move a Plus subscription bought without an account to Personal, write to/);
   const id = await upgrade(carl, s, "monthly");
   assert.equal(checkouts(s).at(-1).form["metadata[org]"], org);
   const sub = pay(s, id);
@@ -471,8 +482,8 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   assert.deepEqual(links(e), [{ subscription: sub.id, org_id: org, how: "checkout" }]);
 
   /* Plus now: the member sees the plan and status, but no Manage billing, and is refused it. */
-  const home = await bo.get("/");
-  assert.match(home.text, /<dd id="plan">Plus<\/dd>/);
+  const home = await bo.get("/billing");
+  assert.match((await bo.get("/")).text, /id="plan">Plus</);
   assert.match(home.text, /An owner or an admin of Personal manages its billing\./);
   assert.doesNotMatch(home.text, /action="\/billing"/);
   assert.doesNotMatch(home.headers.get("content-security-policy"), /billing\.stripe\.com/);
@@ -602,13 +613,13 @@ test("the webhook links the subscription once, in any order and however often St
 
   /* The account page: Plus, yearly, active, and the day it renews. */
   const home = await ana.get("/?upgraded=1");
-  assert.match(home.text, /<dd id="plan">Plus<\/dd>/);
-  const billing = home.text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  assert.match(home.text, /id="plan">Plus</);
+  const billing = (await ana.get("/billing")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
   assert.match(billing, new RegExp(`<div data-subscription="${sub.id}">`));
   assert.match(billing, /<dt>Plan<\/dt><dd>Plus, yearly<\/dd>/);
   assert.match(billing, /<dd data-status="active">Active<\/dd>/);
   assert.match(billing, new RegExp(`<dt>Renews</dt><dd data-renews>${isoDay(sub.items.data[0].current_period_end)}</dd>`));
-  assert.match(billing, /<p data-upgraded>Plus is on for Personal\./);
+  assert.match(home.text, /<p data-upgraded>Plus is on for Personal\./);
   assert.doesNotMatch(home.text, /Upgrade to Plus/);
 });
 
@@ -642,7 +653,7 @@ test("an org mismatch links nothing to the wrong organisation, mails nothing, an
     sub.metadata.org = other;
     assert.equal((await deliver(e, subEvent(sub))).status, 200);
     assert.deepEqual(links(e), [{ subscription: sub.id, org_id: acme, how: "checkout" }]);
-    assert.match((await bo.get("/")).text, /<dd id="plan">Free<\/dd>/);
+    assert.match((await bo.get("/")).text, /id="plan">Free</);
     assert.equal(one(e, "SELECT customer FROM orgs WHERE id = ?", other).customer, null);
 
     /* An organisation that is not there gets nothing, and neither does anyone else. */
@@ -672,7 +683,7 @@ test("Manage billing opens the portal for the organisation's own customer, with 
   const org = orgOf(e, "ana@example.com");
   const { sub } = await upgraded(ana, s, e);
 
-  const home = await ana.get("/");
+  const home = await ana.get("/billing");
   assert.match(home.headers.get("content-security-policy"), /form-action 'self' https:\/\/billing\.stripe\.com; /);
   assert.doesNotMatch(home.text, /<script/);
   const r = await ana.post("/billing", hidden(home.text, "/billing"));
@@ -691,7 +702,7 @@ test("Manage billing opens the portal for the organisation's own customer, with 
 
   /* Fifteen minutes on: the step-up instead of the form, and a kept form refused. */
   later(FRESH_FOR + 1);
-  const stale = await ana.get("/");
+  const stale = await ana.get("/billing");
   assert.doesNotMatch(stale.text, /action="\/billing"/);
   assert.match(stale.text, /Manage billing needs an emailed code typed in the last 15 minutes/);
   assert.doesNotMatch(stale.headers.get("content-security-policy"), /stripe/);
@@ -742,8 +753,8 @@ test("the next upgrade reuses the organisation's customer, and makes it a new on
   await deliver(e, subEvent(sub, "customer.subscription.deleted"));
 
   /* Free again: the panel shows how it ended, and the way back. */
-  let home = (await ana.get("/")).text;
-  assert.match(home, /<dd id="plan">Free<\/dd>/);
+  let home = await everyPage(ana);
+  assert.match(home, /id="plan">Free</);
   assert.match(home, /<dd data-status="canceled">Cancelled<\/dd>/);
   assert.match(home, /<dt>Ended<\/dt><dd data-ends>/);
   assert.match(home, /action="\/billing"/, "invoices stay a click away");
@@ -795,32 +806,34 @@ test("the billing panel is drawn from what the webhook kept, asking Stripe nothi
   const renews = new RegExp(`<dd data-status="active">Active</dd>\\s*<dt>Renews</dt><dd data-renews>${isoDay(sub.items.data[0].current_period_end)}</dd>`);
   const calls = s.calls.length;
   for (let i = 0; i < 25; i++) {
-    assert.match((await ana.get("/")).text, renews);
-    assert.match((await bo.get("/")).text, renews);
+    assert.match((await ana.get("/billing")).text, renews);
+    assert.equal((await ana.get("/")).status, 200);
+    assert.match((await bo.get("/billing")).text, renews);
+    assert.equal((await bo.get("/")).status, 200);
   }
   assert.equal(s.calls.length, calls);
-  assert.match((await bo.get("/")).text, /<dt>Plan<\/dt><dd>Plus, yearly<\/dd>/);
+  assert.match((await bo.get("/billing")).text, /<dt>Plan<\/dt><dd>Plus, yearly<\/dd>/);
 
   /* Cancelled at the period's end in Stripe's billing page: its event brings the day it ends. */
   sub.cancel_at_period_end = true;
-  let home = await ana.get("/");
+  let home = await ana.get("/billing");
   assert.match(home.text, renews, "nothing changes here before Stripe's event");
   await deliver(e, subEvent(sub));
-  home = await ana.get("/");
+  home = await ana.get("/billing");
   assert.match(home.text, new RegExp(`<dt>Ends</dt><dd data-ends>${isoDay(sub.items.data[0].current_period_end)}</dd>`));
   assert.doesNotMatch(home.text, /data-renews/);
 
   sub.status = "past_due";
   await deliver(e, subEvent(sub));
-  home = await ana.get("/");
-  assert.match(home.text, /<dd id="plan">Plus<\/dd>/);
+  home = await ana.get("/billing");
+  assert.match((await ana.get("/")).text, /id="plan">Plus</);
   assert.match(home.text, /<dd data-status="past_due">Payment overdue: Stripe is trying the card again<\/dd>/);
 
   /* Plus given by a grant: nothing to pay, nothing to manage. */
   const eve = new Browser(e, { ip: "203.0.113.70" });
   await signIn(eve, s, "eve@example.com");
   grant(e, orgOf(e, "eve@example.com"), "plus");
-  const given = (await eve.get("/")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  const given = (await eve.get("/billing")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
   assert.match(given, /Personal has Plus from ranwhat directly, with nothing to pay here\./);
   assert.doesNotMatch(given, /action="\/billing"|Upgrade to Plus/);
 });
@@ -848,7 +861,7 @@ test("a subscription linked by hand, with no terms kept yet, is read from Stripe
 
   /* A plain member's page asks Stripe nothing, and says it is not known yet. */
   const calls = s.calls.length;
-  for (let i = 0; i < 5; i++) assert.match((await dee.get("/")).text, unknown);
+  for (let i = 0; i < 5; i++) assert.match((await dee.get("/billing")).text, unknown);
   assert.equal(s.calls.length, calls);
 
   /* The owner's page asks, and with Stripe failing, only so many times an hour. */
@@ -858,7 +871,7 @@ test("a subscription linked by hand, with no terms kept yet, is read from Stripe
   try {
     s.fail["GET /v1/subscriptions"] = [500, { error: { type: "api_error" } }];
     for (let i = 0; i < TERMS_READS_PER_HOUR; i++) {
-      const page = await carl.get("/");
+      const page = await carl.get("/billing");
       assert.equal(page.status, 200);
       assert.match(page.text, unknown);
     }
@@ -867,16 +880,16 @@ test("a subscription linked by hand, with no terms kept yet, is read from Stripe
   }
   assert.equal(lines.filter((l) => l.startsWith("stripe billing panel:")).length, TERMS_READS_PER_HOUR);
   delete s.fail["GET /v1/subscriptions"];
-  assert.match((await carl.get("/")).text, unknown);
+  assert.match((await carl.get("/billing")).text, unknown);
   assert.equal(s.calls.length, calls, "past the hour's reads, not even the owner's page asks");
 
   /* An hour on: once, and kept, for everyone. */
   later(HOUR + 1);
-  assert.match((await carl.get("/")).text, known);
+  assert.match((await carl.get("/billing")).text, known);
   assert.deepEqual(s.calls.slice(calls).map((c) => c.key), [`GET /v1/subscriptions/${id}`]);
   for (let i = 0; i < 5; i++) {
-    assert.match((await carl.get("/")).text, known);
-    assert.match((await dee.get("/")).text, known);
+    assert.match((await carl.get("/billing")).text, known);
+    assert.match((await dee.get("/billing")).text, known);
   }
   assert.equal(s.calls.length, calls + 1);
 });
@@ -1059,9 +1072,9 @@ test("a subscription bought before the switch and linked by hand gives its organ
   run(e, `INSERT INTO machines (id, hash, org_id, user_id, kind, label, created_at)
           VALUES ('0b6f6a52-6c1e-4f43-9d0e-5c2a7f3e9b10', ?, ?, NULL, 'legacy', '', ?)`, sha(token), org, unix());
 
-  let home = await ana.get("/");
-  assert.match(home.text, /<dd id="plan">Plus<\/dd>/);
-  assert.match(home.text, new RegExp(`<div data-subscription="${sub.id}">`));
+  let home = await ana.get("/machines");
+  assert.match((await ana.get("/")).text, /id="plan">Plus</);
+  assert.match((await ana.get("/billing")).text, new RegExp(`<div data-subscription="${sub.id}">`));
   const mid = home.text.match(/<li data-machine="([^"]+)"><strong>Subscription token<\/strong>/)[1];
   const r = await ana.post("/machines/revoke", { form: tokenFor(home.text, "/machines/revoke"), id: mid });
   assert.equal(r.status, 303, r.text);
@@ -1073,7 +1086,7 @@ test("a subscription bought before the switch and linked by hand gives its organ
   assert.equal(await feed(e, token), 403);
   /* The organisation keeps Plus: the subscription is what pays, not the token. */
   home = await ana.get("/");
-  assert.match(home.text, /<dd id="plan">Plus<\/dd>/);
+  assert.match(home.text, /id="plan">Plus</);
   assert.deepEqual(links(e), [{ subscription: sub.id, org_id: org, how: "script" }]);
 });
 
@@ -1167,7 +1180,7 @@ test("a form drawn for one organisation does nothing once another is switched to
   assert.match(upgradePage.text, /everyone in <strong>Acme<\/strong>/);
   const upgradeForm = hidden(upgradePage.text, "/upgrade");
   assert.equal(upgradeForm.org, acme);
-  const renameForm = hidden((await bo.get("/")).text, "/org");
+  const renameForm = hidden((await bo.get("/members")).text, "/org");
   assert.equal(renameForm.org, acme);
 
   /* Tab 2: Bo switches to his own organisation. */
@@ -1192,7 +1205,7 @@ test("a form drawn for one organisation does nothing once another is switched to
   /* Back on Acme, now on Plus: Manage billing and a CI token, drawn for Acme. */
   await switchTo(bo, acme);
   const { sub } = await upgraded(ana, s, e);
-  const acmeHome = (await bo.get("/")).text;
+  const acmeHome = await everyPage(bo);
   const billingForm = hidden(acmeHome, "/billing");
   assert.equal(billingForm.org, acme);
   assert.equal(billingForm.subscription, sub.id);
@@ -1211,7 +1224,7 @@ test("a form drawn for one organisation does nothing once another is switched to
 
   /* Drawn again for the organisation looked at, they work. */
   await switchTo(bo, acme);
-  const again = await bo.post("/billing", hidden((await bo.get("/")).text, "/billing"));
+  const again = await bo.post("/billing", hidden((await bo.get("/billing")).text, "/billing"));
   assert.equal(again.status, 303, again.text);
   assert.equal(portals(s).length, 1);
 });
@@ -1253,16 +1266,16 @@ test("the organisation's Stripe customer is its own, with the owner's address, a
   try {
     /* Yan, while an admin, makes the billing email his own in Stripe's billing page; made a member, it is Ana's again. */
     s.customers.get(cus).email = "yan@example.com";
-    let r = await ana.post("/members/role", formsOf((await ana.get("/")).text, "/members/role").find((f) => f.user === yanId));
+    let r = await ana.post("/members/role", formsOf((await ana.get("/members")).text, "/members/role").find((f) => f.user === yanId));
     assert.equal(r.status, 303, r.text);
     assert.equal(s.customers.get(cus).email, "ana@example.com");
     assert.deepEqual(updates(), ["ana@example.com"]);
 
     /* An admin again, the same, and removed: Ana's again. */
-    r = await ana.post("/members/role", formsOf((await ana.get("/")).text, "/members/role").find((f) => f.user === yanId));
+    r = await ana.post("/members/role", formsOf((await ana.get("/members")).text, "/members/role").find((f) => f.user === yanId));
     assert.equal(r.status, 303, r.text);
     s.customers.get(cus).email = "Yan@Example.com";
-    r = await ana.post("/members/remove", formsOf((await ana.get("/")).text, "/members/remove").find((f) => f.user === yanId));
+    r = await ana.post("/members/remove", formsOf((await ana.get("/members")).text, "/members/remove").find((f) => f.user === yanId));
     assert.equal(r.status, 303, r.text);
     assert.equal(s.customers.get(cus).email, "ana@example.com");
     assert.equal(updates().length, 2);
@@ -1273,7 +1286,7 @@ test("the organisation's Stripe customer is its own, with the owner's address, a
     const dee = new Browser(e, { ip: "203.0.113.92" });
     await signIn(dee, s, "dee@example.com");
     join(e, "dee@example.com", acme, "admin");
-    r = await ana.post("/members/remove", formsOf((await ana.get("/")).text, "/members/remove")
+    r = await ana.post("/members/remove", formsOf((await ana.get("/members")).text, "/members/remove")
       .find((f) => f.user === userId(e, "dee@example.com")));
     assert.equal(r.status, 303, r.text);
     assert.equal(s.customers.get(cus).email, "ana@example.com");
@@ -1282,7 +1295,7 @@ test("the organisation's Stripe customer is its own, with the owner's address, a
     /* Ownership handed on: the owner's address becomes the new owner's. */
     s.customers.get(cus).email = "ana@example.com";
     const asked = await ana.post("/members/transfer",
-      formsOf((await ana.get("/")).text, "/members/transfer").find((f) => f.user === carlId));
+      formsOf((await ana.get("/members")).text, "/members/transfer").find((f) => f.user === carlId));
     assert.equal(asked.status, 200, asked.text);
     r = await ana.post("/members/transfer", hidden(asked.text, "/members/transfer"));
     assert.equal(r.status, 303, r.text);
@@ -1291,7 +1304,7 @@ test("the organisation's Stripe customer is its own, with the owner's address, a
     /* Stripe down: the change is made, and the failure only logged. */
     s.customers.get(cus).email = "ana@example.com";
     s.fail[`POST /v1/customers/${cus}`] = [500, { error: { type: "api_error" } }];
-    r = await carl.post("/members/remove", formsOf((await carl.get("/")).text, "/members/remove")
+    r = await carl.post("/members/remove", formsOf((await carl.get("/members")).text, "/members/remove")
       .find((f) => f.user === userId(e, "ana@example.com")));
     assert.equal(r.status, 303, r.text);
     assert.equal(rows(e, "SELECT 1 FROM memberships WHERE org_id = ? AND user_id = ?", acme, userId(e, "ana@example.com")).length, 0);
@@ -1316,7 +1329,7 @@ test("Stripe's billing email never stays with someone who is no longer an owner 
   assert.equal((await deliver(e, completedEvent(s, (pay(s, id), id)))).status, 200);
   const adamId = userId(e, "adam@corp.example");
   const remove = async (who) => olga.post("/members/remove",
-    formsOf((await olga.get("/")).text, "/members/remove").find((f) => f.user === who));
+    formsOf((await olga.get("/members")).text, "/members/remove").find((f) => f.user === who));
 
   /* Adam, an admin, makes the billing email a private address of his in
      Stripe's billing page, then is removed: it is Olga's again. */
@@ -1330,7 +1343,7 @@ test("Stripe's billing email never stays with someone who is no longer an owner 
   await signIn(bea, s, "bea@corp.example");
   join(e, "bea@corp.example", acme, "admin");
   s.customers.get(cus).email = "bea.home@elsewhere.example";
-  const demote = formsOf((await olga.get("/")).text, "/members/role").find((f) => f.user === userId(e, "bea@corp.example"));
+  const demote = formsOf((await olga.get("/members")).text, "/members/role").find((f) => f.user === userId(e, "bea@corp.example"));
   assert.equal((await olga.post("/members/role", demote)).status, 303);
   assert.equal(s.customers.get(cus).email, "olga@corp.example");
 
@@ -1363,7 +1376,7 @@ test("Stripe's billing email never stays with someone who is no longer an owner 
   assert.equal(count(e, "billing_email_due"), 0);
 
   /* The billing panel says what that address is for, and that it follows the owner. */
-  const panel = (await olga.get("/")).text;
+  const panel = (await olga.get("/billing")).text;
   assert.match(panel, /billing email/);
   assert.match(panel, /goes back to the owner's address/);
 });
@@ -1420,7 +1433,7 @@ test("a new checkout expires the organisation's open one, and two paid at once a
   assert.match(sent[1].html, /two Plus subscriptions/);
 
   /* The billing panel says so too, with Manage billing for each. */
-  const billing = (await ana.get("/")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  const billing = (await ana.get("/billing")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
   assert.match(billing, /<p class="bad" data-twice="2">Personal has 2 live Plus\s+subscriptions, and needs one\./);
   assert.equal(formsOf(billing, "/billing").length, 2);
 });

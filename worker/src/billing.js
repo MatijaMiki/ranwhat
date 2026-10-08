@@ -76,7 +76,7 @@ const SHOWN = 5;                         // subscriptions the panel lists at mos
 
 /* What each choice costs, as the pricing page says it. Stripe's price,
    found by its lookup key (stripe.js's INTERVALS), is what is charged. */
-const PRICES = Object.freeze({ monthly: "€12 a month", yearly: "€120 a year" });
+export const PRICES = Object.freeze({ monthly: "€12 a month", yearly: "€120 a year" });
 
 /* A subscription bought without an account is moved to an organisation by
    hand (scripts/org_admin.py link), on request from whoever paid. */
@@ -97,6 +97,7 @@ const STATUS = Object.freeze({
 const day = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 const problem = (text) => (text ? `<p class="bad">${escape(text)}</p>` : "");
 const back = `<p><a href="/">Your account</a></p>`;
+const backToBilling = `<p><a href="/billing">Back to Billing</a></p>`;
 
 /* No session: sign in first, and come back to the upgrade. */
 const toSignin = (request) =>
@@ -158,7 +159,7 @@ async function grantOf(env, orgId) {
 
    { html, away }: away is the origin its form goes on to, for the page's
    form-action, and only when the form is there. */
-export async function billingPanel(env, who, onPlan, { error = "", upgraded = false } = {}) {
+export async function billingPanel(env, who, onPlan, { error = "" } = {}) {
   const org = who.org;
   const name = escape(org.name);
   const manager = canManage(org);
@@ -209,7 +210,7 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
          still an owner or an admin here and did not just hand ownership on.</small></p>`
           : `<p>Manage billing needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
       ${form("/stepup", await formToken(env, who.id, "stepup"),
-        `<input type="hidden" name="next" value="/"><button type="submit">Email me a code</button>`)}`;
+        `<input type="hidden" name="next" value="/billing"><button type="submit">Email me a code</button>`)}`;
   }
 
   let standing = "";
@@ -236,18 +237,9 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
        <a href="mailto:hello@ranwhat.com?subject=ranwhat%20Plus%20paid%20twice">hello@ranwhat.com</a> for a refund
        of it.</p>` : "";
 
-  let notice = "";
-  if (upgraded) {
-    notice = atLeast(onPlan, "plus")
-      ? `<p data-upgraded>Plus is on for ${name}. Link a machine with <strong>uvx ranwhat login</strong>.</p>`
-      : `<p data-upgraded>Thank you. Stripe is confirming the payment, and Plus switches on here as soon as
-       it has, usually within a minute. Reload this page to see it.</p>`;
-  }
-
   return {
     html: `<section class="panel" id="billing">
     <h2>Billing</h2>
-    ${notice}
     ${twice}
     ${items.join("\n    ")}
     ${standing}
@@ -256,6 +248,14 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
     away: canOpen && shown.length ? [PORTAL_ORIGIN] : [],
   };
 }
+
+/* Back from a paid Checkout (stripe.js's success_url, the overview with
+   ?upgraded=1): thanks until the webhook has switched Plus on, then the
+   first thing to do with it. */
+export const upgradedNotice = (org, onPlan) => (atLeast(onPlan, "plus")
+  ? `<p data-upgraded>Plus is on for ${escape(org.name)}. Link a machine with <strong>uvx ranwhat login</strong>.</p>`
+  : `<p data-upgraded>Thank you. Stripe is confirming the payment, and Plus switches on here as soon as
+       it has, usually within a minute. Reload this page to see it.</p>`);
 
 /* ---------- upgrading ---------- */
 
@@ -479,9 +479,9 @@ async function billingProblem(env, who, status, text, { stepup = false, fallback
     ${fallback ? `<p>Try again in a minute, or sign in to Stripe's billing page with your billing email at
        <a href="https://ranwhat.com/api/billing">ranwhat.com/api/billing</a>.</p>` : ""}
     ${stepup ? form("/stepup", await formToken(env, who.id, "stepup"), `
-      <input type="hidden" name="next" value="/">
+      <input type="hidden" name="next" value="/billing">
       <button type="submit">Email me a code</button>`) : ""}
-    ${back}`, { status });
+    ${backToBilling}`, { status });
 }
 
 /* POST /billing: Stripe's billing portal for the customer of a

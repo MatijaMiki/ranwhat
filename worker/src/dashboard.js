@@ -3,11 +3,20 @@
  * behind them. index.js sends every request for this host here, and only
  * while ACCOUNTS_ON is set (wrangler.toml sets it).
  *
- *   GET  /              The account: who you are, your organisation, its
- *                       plan and what each plan has (features.js), its
- *                       billing (billing.js), how you sign in, what
- *                       happened lately, and signing out.
- *                       Without a session it sends you to /signin.
+ *   GET  /              The account's overview: the organisation's plan,
+ *                       machines, members and your ways in at a glance,
+ *                       what is left to set up, what each paid plan has
+ *                       (features.js) and what happened lately.
+ *   GET  /machines      Its machines and CI tokens (machines.js).
+ *   GET  /members       The organisation, its members and invites
+ *                       (members.js).
+ *   GET  /billing       Its billing (billing.js).
+ *   GET  /security      How you sign in, and signing out.
+ *   GET  /activity      What happened on your account.
+ *                       Each of these is ui.js's shell(), and without a
+ *                       session sends you to /signin. A form on one of
+ *                       them that works goes back to it; one that does
+ *                       not draws it again with what went wrong.
  *   GET  /signin        The email form.
  *   POST /signin        Mails a code; the same answer for every address.
  *   GET  /signin/code   The box to type the code in (with a new password,
@@ -142,9 +151,9 @@ import {
   registrationOptions, signIn, signinOptions,
 } from "./passkeys.js";
 import { approve, deny, deviceLookup, devicePage } from "./device.js";
-import { billingPanel, billingPost, upgradePage, upgradePost } from "./billing.js";
+import { PRICES, billingPanel, billingPost, upgradePage, upgradePost, upgradedNotice } from "./billing.js";
 import {
-  MEMBER_EVENTS, acceptPost, inviteAgain, invitePage, invitePost, leavePost, membersPanel, removePost,
+  MEMBER_EVENTS, acceptPost, inviteAgain, invitePage, invitePost, leavePost, membersOf, membersPanel, removePost,
   revokeInvitePost, rolePost, switchPost, switcher, transferPost,
 } from "./members.js";
 import {
@@ -152,7 +161,8 @@ import {
   mayChange, mintCi, renameMachine, revokeMachine,
 } from "./machines.js";
 import {
-  away, data, elsewhere, fields, form, notFound, page, redirect, refused, script, widget, wrongMethod,
+  APP_PAGES, away, callout, card, command, data, elsewhere, empty, fields, form, icon, lockBadge, notFound, page, pill,
+  redirect, refused, script, shell, stat, widget, wrongMethod,
 } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
@@ -224,7 +234,7 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
              value="${escape(email)}">
       ${widget("signin")}
       ${problem(error)}
-      <button type="submit">Email me a code</button>`)}
+      <button type="submit" class="primary">Email me a code</button>`)}
     ${providerButtons(env)}
     <p>Have a passkey? <a href="/signin/passkey">Sign in with it</a>.
        Have a password? <a href="/signin/password">Sign in with it</a>.
@@ -300,14 +310,22 @@ async function codePage(request, env) {
   return codeForm(env, token, row);
 }
 
+/* The page a step-up was asked for from, which offers it again: the one
+   its form named (nextPath()), and for the overview, which has no step-up
+   form of its own, Security. */
+const askedFrom = (row) => {
+  const next = nextPath(row.next);
+  return next === "/" ? "/security" : next;
+};
+
 /* Where a code page sends someone for a new code: a step-up asks again
-   from the account page, as it asked the first time, so that Turnstile's
-   script never loads for someone signed in. */
-const anew = (row, text) => `<a href="${row.purpose === "stepup" ? "/" : "/signin/again"}">${text}</a>`;
+   from the account page it was asked from, so that Turnstile's script
+   never loads for someone signed in. */
+const anew = (row, text) => `<a href="${row.purpose === "stepup" ? askedFrom(row) : "/signin/again"}">${text}</a>`;
 
 /* Where a code page sends someone who wants to start again. */
 const startOver = (row) => ({
-  stepup: `<a href="/">Back to your account</a>`,
+  stepup: `<a href="${askedFrom(row)}">Back to your account</a>`,
   verify: `<a href="/signup">Use a different email</a>`,
   reset: `<a href="/reset">Use a different email</a>`,
 }[row.purpose] || `<a href="/signin">Use a different email</a>`);
@@ -335,7 +353,7 @@ async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
       <label><input type="checkbox" name="ways" value="remove"> Also unlink every Google and GitHub account
         and remove every passkey, in case one is in someone else's hands</label>` : ""}
       ${problem(error)}
-      <button type="submit">${stepup ? "Confirm" : verify ? "Confirm and sign in" : reset ? "Set password and sign in" : "Sign in"}</button>`)}
+      <button type="submit" class="primary">${stepup ? "Confirm" : verify ? "Confirm and sign in" : reset ? "Set password and sign in" : "Sign in"}</button>`)}
     <p>Nothing after a minute? Look in spam, then ${anew(row, "ask for a new code")}.</p>
     <p>${startOver(row)}</p>`,
   { status });
@@ -480,12 +498,13 @@ async function resetCode(request, env, token, row, f) {
 
 /* A new code for the browser's attempt, on a page of its own, so that
    Turnstile's script never runs on the page a code is typed into. A
-   step-up asks again from the account page instead (anew()). */
+   step-up asks again from the account page it came from instead
+   (anew()). */
 async function againPage(request, env) {
   const token = readCookie(request, SIGNIN_COOKIE);
   const row = await attempt(env, token);
   if (!row) return redirect("/signin");
-  if (row.purpose === "stepup") return redirect("/");
+  if (row.purpose === "stepup") return redirect(askedFrom(row));
   return againForm(env, token, row);
 }
 
@@ -496,7 +515,7 @@ async function againForm(env, token, row, { error = "", status = 200 } = {}) {
     ${form("/signin/again", await formToken(env, token, "again"), `
       ${widget("again")}
       ${problem(error)}
-      <button type="submit">Send a new code</button>`)}
+      <button type="submit" class="primary">Send a new code</button>`)}
     <p>${startOver(row)}</p>`,
   { status, challenge: true });
 }
@@ -540,7 +559,7 @@ async function signupForm(env, browser, { next = "/", email = "", error = "", st
          work well. Passwords known from data breaches are refused.</small></p>
       ${widget("signup")}
       ${problem(error)}
-      <button type="submit">Email me a code</button>`)}
+      <button type="submit" class="primary">Email me a code</button>`)}
     <p>Rather not have a password? <a href="/signin">Sign in with an emailed code</a>; it makes
        the account too.</p>
     <p><small>The address is used to send the code, and kept only once the code is typed, as
@@ -607,7 +626,7 @@ async function passwordForm(env, browser, { next = "/", email = "", error = "", 
       <input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096"
              required${email ? " autofocus" : ""}>
       ${problem(error)}
-      <button type="submit">Sign in</button>`)}
+      <button type="submit" class="primary">Sign in</button>`)}
     <p>Forgot it? <a href="/reset">Reset it with an emailed code</a></p>
     <p>No password? <a href="/signin">Sign in with an emailed code</a>; it makes the account too.</p>
     <p><small>This page sets a cookie only to sign you in, and nothing on it tracks
@@ -658,7 +677,7 @@ async function locked(env, binding, email, next) {
       <input type="hidden" name="next" value="${escape(next)}">
       <input type="hidden" name="email" value="${escape(email)}">
       ${widget("signin")}
-      <button type="submit">Email a code to ${escape(email)}</button>`)}
+      <button type="submit" class="primary">Email a code to ${escape(email)}</button>`)}
     <p><a href="/signin">Use a different email</a></p>`,
   { status: 429, challenge: true });
 }
@@ -682,7 +701,7 @@ async function resetForm(env, browser, { email = "", error = "", status = 200 } 
              value="${escape(email)}">
       ${widget("reset")}
       ${problem(error)}
-      <button type="submit">Email me a code</button>`)}
+      <button type="submit" class="primary">Email me a code</button>`)}
     <p><a href="/signin/password">Back to signing in</a></p>`,
   { status, cookies, challenge: true });
 }
@@ -758,49 +777,265 @@ const ROLES = { owner: "Owner", admin: "Admin", member: "Member" };
 
 const when = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
-/* ?upgraded=1: back from a paid Stripe Checkout (billing.js), which the
-   billing panel thanks for until the webhook has switched Plus on. */
-async function home(request, env, ctx, url) {
+/* Each signed-in page's path, by its name in ui.js's APP_PAGES. */
+const PATHS = Object.freeze(Object.fromEntries(APP_PAGES.map(([key, path]) => [key, path])));
+
+/* How long ago `t` was, for a list read at a glance; the time itself is
+   in the title, and in the datetime for anything that reads it. */
+function ago(t, at = now()) {
+  const s = Math.max(0, at - t);
+  const n = (count, unit) => `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  if (s < 60) return "just now";
+  if (s < 3600) return n(Math.floor(s / 60), "minute");
+  if (s < DAY) return n(Math.floor(s / 3600), "hour");
+  if (s < 7 * DAY) return n(Math.floor(s / DAY), "day");
+  return new Date(t * 1000).toISOString().slice(0, 10);
+}
+
+const stamp = (t) =>
+  `<time datetime="${new Date(t * 1000).toISOString()}" title="${escape(when(t))}">${escape(ago(t))}</time>`;
+
+const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+
+/* A signed-in page, `current` among APP_PAGES: the sidebar (the
+   organisation, its plan, your role in it, the switcher back to this
+   page, and signing out), then the page's header and body. */
+async function app(env, who, current, { title, sub = "", action = "", body, status = 200, away: to = [], onPlan }) {
+  const org = who.org;
+  const on = onPlan || await plan(env, org.id);
+  return shell({
+    current,
+    side: {
+      email: who.email, org: org.name, plan: PLAN_NAMES[on], planTone: on === "free" ? "" : "brand",
+      role: ROLES[org.role] || "Member",
+      switcher: await switcher(env, who, PATHS[current], { compact: true }),
+      signout: form("/signout", await formToken(env, who.id, "signout"),
+        `<button type="submit" class="compact">${icon("exit")}Sign out</button>`),
+    },
+    head: { title, sub, action },
+    body, status, away: to,
+  });
+}
+
+/* A signed-in page's GET: its page, or sign in first. */
+const signedInPage = (draw) => async (request, env, ctx, url) => {
   const who = await current(request, env);
   if (!who) return signedOut(request);
-  return dashboard(env, who, { upgraded: url.searchParams.get("upgraded") === "1" });
-}
+  return draw(env, who, {}, url);
+};
 
-/* One panel per paid plan, drawn from features.js, so what the page shows
+/* ---------- the overview ---------- */
+
+/* The paid plans' cards, drawn from features.js, so what the page shows
    locked is what the server refuses. Locked while the organisation's plan
-   is below it. Plus links to the upgrade (billing.js); Team has no price
-   and no checkout, only a way to talk to us. */
-function panel(tier, onPlan) {
+   is below the tier. Plus links to the upgrade (billing.js) for whoever
+   may buy it; Team has no price and no checkout, only a way to talk to
+   us. */
+function featureTiles(tier, onPlan) {
   const open = atLeast(onPlan, tier);
-  const items = featuresOf(tier).map((f) => {
-    const state = open
-      ? (f.status === "live" ? "Included" : "Coming, included in your plan")
-      : (f.status === "live" ? `Needs ${PLAN_NAMES[tier]}` : `Coming, included in ${PLAN_NAMES[tier]}`);
-    return `<li data-feature="${escape(f.key)}"><strong>${escape(f.name)}</strong> <span class="tag">${state}</span>
-      <br>${escape(f.says)}</li>`;
-  }).join("");
-  const after = open ? "" : tier === "plus"
-    ? `<p>Everything ranwhat does on your machines stays free. Plus adds what needs a server.</p>
-       <p><a href="${UPGRADE}">Upgrade to Plus</a></p>`
-    : `<p>Team is arranged with each organisation. <a href="${TALK}">Talk to us</a></p>`;
-  return `<section class="panel${open ? "" : " locked"}" id="${tier}">
-    <h2>${PLAN_NAMES[tier]}${open ? "" : ` <span class="tag">locked</span>`}</h2>
-    <ul>${items}</ul>${after}</section>`;
+  return featuresOf(tier).map((f) => {
+    const state = f.status === "live"
+      ? (open ? pill("Included", "ok") : pill(`Needs ${PLAN_NAMES[tier]}`, "brand"))
+      : pill("Coming");
+    const mark = !open ? icon("lock") : f.status === "live" ? icon("check") : `<span class="soon">${icon("clock")}</span>`;
+    return `<li class="feat${open ? " on" : ""}" data-feature="${escape(f.key)}"><div class="feat-top">${mark}` +
+      `<strong>${escape(f.name)}</strong>${state}</div><p>${escape(f.says)}</p></li>`;
+  }).join("\n      ");
 }
 
-/* How this account can sign in. The emailed code always works. A password
-   is added, changed or removed with the current password or a code typed
-   in the last 15 minutes (fresh() in session.js); without a password, only
-   the code will do. Google and GitHub, where they are set up, are linked
-   and unlinked with such a code too, and passkeys added and removed.
+function plusCard(who, onPlan) {
+  const org = who.org;
+  const name = escape(org.name);
+  const open = atLeast(onPlan, "plus");
+  const features = featuresOf("plus");
+  const live = features.filter((f) => f.status === "live").length;
+  const coming = features.length - live;
+  let intro;
+  if (open) {
+    intro = `<span class="label">In your plan</span>
+      <h2>Plus</h2>
+      <p class="lead">${name} has Plus${onPlan === "plus" ? "" : `, as part of ${PLAN_NAMES[onPlan]}`}: what needs a server,
+         for everyone in it.</p>
+      <p>${plural(live, "feature")} ${live === 1 ? "is" : "are"} live and included now, and ${coming} more
+         ${coming === 1 ? "comes" : "come"} with it as ${coming === 1 ? "it is" : "they are"} ready.</p>
+      ${canManage(org) ? `<div class="actions"><a class="btn" href="${PATHS.billing}">Billing</a></div>` : ""}`;
+  } else {
+    intro = `<span class="label">Your plan: Free</span>
+      <h2>${lockBadge()}Plus</h2>
+      <p class="lead">Plus adds what needs a server, for everyone in ${name}: ${plural(live, "feature")} now, and
+         ${coming} more as ${coming === 1 ? "it comes" : "they come"}.</p>
+      <p>Everything ranwhat does on your machines stays free.</p>
+      <p class="price">${escape(PRICES.monthly)}, or ${escape(PRICES.yearly)}</p>
+      <p class="hint">One price for the organisation, however many people are in it.</p>
+      ${canManage(org) ? `<div class="actions"><a class="btn primary" href="${UPGRADE}">Upgrade to Plus</a></div>`
+        : `<p>Only an owner or an admin of ${name} can upgrade it. Ask one of them.</p>`}`;
+  }
+  return `<section class="card upsell${open ? "" : " locked"}" id="plus">
+    <div class="upsell-intro">
+      ${intro}
+    </div>
+    <ul class="feats" aria-label="What Plus has">
+      ${featureTiles("plus", onPlan)}
+    </ul></section>`;
+}
+
+function teamCard(who, onPlan) {
+  const open = atLeast(onPlan, "team");
+  return `<section class="card team${open ? "" : " locked"}" id="team">
+    <header class="card-head"><h2>${icon("team")}Team</h2>${open ? pill("Your plan", "brand") : pill("By arrangement")}</header>
+    ${open ? `<p>${escape(who.org.name)} is on Team, with everything in Plus.</p>`
+      : `<p>Team is arranged with each organisation: everything in Plus, and the features below as they come.
+         <a href="${TALK}">Talk to us</a></p>`}
+    <ul class="feats" aria-label="What Team has">
+      ${featureTiles("team", onPlan)}
+    </ul></section>`;
+}
+
+/* What is left to set up, each step done or not from what is there (a
+   terminal or CI token of your own, a second way in, someone else in the
+   organisation): null once every step is done. */
+function setup(who, { machines, people, ways, onPlan }) {
+  const org = who.org;
+  const name = escape(org.name);
+  const invite = allows(onPlan, "members");
+  const steps = [
+    {
+      done: machines.some((m) => m.user_id === who.user),
+      title: "Link a machine",
+      text: `<p>Run this in a terminal, then approve the code it shows. The terminal is linked to ${name}, on its
+         plan. <a href="${PATHS.machines}">Machines</a></p>
+         ${command("uvx ranwhat login")}`,
+    },
+    {
+      done: ways > 1,
+      title: "Add a second way in",
+      text: `<p>A passkey or a password, as well as the emailed code, so that your inbox is not the only way
+         in. <a href="${PATHS.security}">Security</a></p>`,
+    },
+    {
+      done: people.length > 1,
+      title: "Invite your team",
+      tag: invite ? "" : pill("Needs Plus", "brand"),
+      text: !invite ? `<p>Plus lets ${name} invite people by email, one price however many there are.
+         <a href="#plus">What Plus adds</a></p>`
+        : canManage(org) ? `<p>Invite people by email; they join as members. <a href="${PATHS.members}">Members</a></p>`
+          : `<p>An owner or an admin of ${name} can invite people. <a href="${PATHS.members}">Members</a></p>`,
+    },
+  ];
+  const done = steps.filter((s) => s.done).length;
+  if (done === steps.length) return null;
+  const items = steps.map((s, n) => `<li class="step${s.done ? " done" : ""}">
+        <span class="step-mark">${s.done ? icon("check") : n + 1}</span>
+        <div><span class="step-title">${s.title}${s.done ? pill("Done", "ok") : s.tag || ""}</span>
+        ${s.text}</div></li>`).join("");
+  return card({
+    title: "Get started", icon: "spark", cls: "c7", attributes: 'id="setup"',
+    aside: pill(`${done} of ${steps.length} done`, done === steps.length ? "ok" : ""),
+    body: `<ol class="steps">${items}</ol>`,
+  });
+}
+
+/* The organisation's machines, the newest few, once setting up is done. */
+function machinesCard(machines) {
+  const today = Math.floor(now() / DAY) * DAY;
+  const used = (m) => {
+    if (m.kind === "legacy") return "use not recorded";
+    if (m.last_used_day === null) return "not used yet";
+    const days = Math.round((today - m.last_used_day) / DAY);
+    return days <= 0 ? "used today" : days === 1 ? "used yesterday" : `used ${days} days ago`;
+  };
+  const rows = machines.slice(0, 5).map((m) => `<li><span>${m.label ? escape(m.label) : UNNAMED[m.kind]}
+        ${pill(KINDS[m.kind])}</span><span class="when">${used(m)}</span></li>`).join("");
+  return card({
+    title: "Machines", icon: "machines", cls: "c7",
+    aside: `<a href="${PATHS.machines}">All machines</a>`,
+    body: `<ul class="events">${rows}</ul>`,
+  });
+}
+
+/* ?upgraded=1: back from a paid Stripe Checkout (billing.js), thanked for
+   until the webhook has switched Plus on. */
+async function overview(env, who, opts = {}, url = null) {
+  const upgraded = url ? url.searchParams.get("upgraded") === "1" : false;
+  const org = who.org;
+  const name = escape(org.name);
+  const onPlan = await plan(env, org.id);
+  const machines = await machinesOf(env, org.id, await joinedAt(env, org.id, who.user));
+  const people = await membersOf(env, org.id);
+  const events = await history(env, who.user, 5);
+  const stored = await passwordOf(env, who.user);
+  const keys = await passkeysOf(env, who.user);
+  const providers = await linked(env, who.user);
+  const ways = 1 + (stored ? 1 : 0) + providers.length + keys.length;
+
+  const kinds = (kind) => machines.filter((m) => m.kind === kind).length;
+  const linkedSay = [
+    kinds("device") && plural(kinds("device"), "terminal"),
+    kinds("ci") && plural(kinds("ci"), "CI token"),
+    kinds("legacy") && plural(kinds("legacy"), "old token"),
+  ].filter(Boolean).join(", ") || "None linked yet";
+  const roles = (role) => people.filter((p) => p.role === role).length;
+  const peopleSay = !allows(onPlan, "members") && people.length <= 1 ? "Inviting needs Plus"
+    : [plural(roles("owner"), "owner"), roles("admin") && plural(roles("admin"), "admin"),
+      roles("member") && plural(roles("member"), "member")].filter(Boolean).join(", ");
+  const waysSay = ["Emailed code", stored && "password",
+    ...Object.keys(PROVIDERS).filter((p) => providers.some((w) => w.provider === p)).map((p) => PROVIDERS[p].name),
+    keys.length && plural(keys.length, "passkey")].filter(Boolean).join(", ");
+  const planSay = { free: "Everything local stays free", plus: "Plus features on", team: "Plus and Team features on" }[onPlan];
+
+  const stats = `<div class="stats">
+      ${stat({ label: "Plan", value: PLAN_NAMES[onPlan], sub: planSay, href: PATHS.billing, icon: "billing", id: "plan" })}
+      ${stat({ label: "Machines linked", value: String(machines.length), sub: linkedSay, href: PATHS.machines, icon: "machines" })}
+      ${stat({ label: "Members", value: String(people.length), sub: peopleSay, href: PATHS.members, icon: "members" })}
+      ${stat({ label: "Ways to sign in", value: String(ways), sub: waysSay, href: PATHS.security, icon: "security" })}
+    </div>`;
+
+  const recent = card({
+    title: "Recent activity", icon: "activity", cls: "c5",
+    aside: `<a href="${PATHS.activity}">All activity</a>`,
+    body: events.length
+      ? `<ol class="events">${events.map((e) => `<li><span>${escape(EVENTS[e.event] || e.event)}</span>${stamp(e.at)}</li>`).join("")}</ol>`
+      : empty("<p>Nothing yet.</p>"),
+  });
+
+  const notice = upgraded ? callout({ tone: atLeast(onPlan, "plus") ? "ok" : "info", icon: atLeast(onPlan, "plus") ? "check" : "info",
+    text: upgradedNotice(org, onPlan) }) : "";
+  return app(env, who, "overview", {
+    title: "Overview",
+    sub: `Welcome, ${escape(who.email)}. Here is ${name} at a glance.`,
+    action: onPlan === "free" && canManage(org) ? `<a class="btn primary" href="${UPGRADE}">Upgrade to Plus</a>` : "",
+    onPlan,
+    body: `<div class="grid">
+    ${notice}
+    ${stats}
+    ${setup(who, { machines, people, ways, onPlan }) || machinesCard(machines)}
+    ${recent}
+    ${plusCard(who, onPlan)}
+    ${teamCard(who, onPlan)}
+    </div>`,
+    status: opts.status || 200,
+  });
+}
+
+/* ---------- security ---------- */
+
+/* How this account can sign in, a card each. The emailed code always
+   works. A password is added, changed or removed with the current
+   password or a code typed in the last 15 minutes (fresh() in session.js);
+   without a password, only the code will do. Google and GitHub, where
+   they are set up, are linked and unlinked with such a code too, and
+   passkeys added and removed. The way to that code is once, at the top of
+   the page (securityView()); each card says what of it needs one.
    Changing the password, or taking any way in away, signs the account out
    everywhere else, as the page says. */
 async function methods(env, who, error, providerError, passkeyError) {
   const stored = await passwordOf(env, who.user);
   const confirmed = fresh(who);
-  const stepupToken = await formToken(env, who.id, "stepup");
-  const code = (label) => form("/stepup", stepupToken,
-    `<input type="hidden" name="next" value="/"><button type="submit">${label}</button>`, "row");
+  const method = (key, name, iconName, tag, tone, body) => card({
+    title: name, icon: iconName, level: 3, attributes: `id="method-${key}" data-method="${key}"`,
+    aside: pill(tag, tone), body,
+  });
+  const toConfirm = `<a href="#confirm">Email me a code</a>`;
   const currentField = (id) => (confirmed ? "" : `
       <label for="${id}">Current password</label>
       <input id="${id}" name="current" type="password" autocomplete="current-password" maxlength="4096" required>`);
@@ -808,36 +1043,33 @@ async function methods(env, who, error, providerError, passkeyError) {
       <label for="new-password">New password</label>
       <input id="new-password" name="password" type="password" autocomplete="new-password" minlength="${MIN_LENGTH}" required>
       ${NEW_PASSWORD}`;
-  const recent = `<p>You typed an emailed code in the last ${FRESH_FOR / 60} minutes, so your current
+  /* Not sent: it tells a password manager whose password this is. */
+  const username = `<input type="email" autocomplete="username" value="${escape(who.email)}" hidden readonly>`;
+  const recent = `<p class="hint">You typed an emailed code in the last ${FRESH_FOR / 60} minutes, so your current
        password is not asked for.</p>`;
   let password;
   if (stored) {
     const remove = await otherWaysIn(env, who.user) > 0
-      ? form("/password/remove", await formToken(env, who.id, "password-remove"), `${currentField("current-password-remove")}
-      <button type="submit">Remove password</button>`)
+      ? form("/password/remove", await formToken(env, who.id, "password-remove"), `${username}${currentField("current-password-remove")}
+      <button type="submit" class="danger">Remove password</button>`, "method-form split")
       : "";
-    password = `<li data-method="password"><strong>Password</strong> <span class="tag">set</span>
-      <br>Sign in with your email and this password.
+    password = method("password", "Password", "password", "set", "ok", `<p>Sign in with your email and this password.</p>
       ${problem(error)}
       ${confirmed ? recent : ""}
-      ${form("/password", await formToken(env, who.id, "password"), `${currentField("current-password")}${newField}
-      <button type="submit">Change password</button>`)}
-      <p>Changing it signs this account out everywhere else.</p>
-      ${remove}${remove ? "\n      <p>Removing it signs this account out everywhere else.</p>" : ""}
-      ${confirmed ? "" : `<p>Forgot it? Confirm with an emailed code, and it is not asked for.</p>
-      ${code("Email me a code")}`}</li>`;
+      ${form("/password", await formToken(env, who.id, "password"), `${username}${currentField("current-password")}${newField}
+      <button type="submit">Change password</button>`, "method-form")}
+      <p class="hint">Changing it signs this account out everywhere else.</p>
+      ${remove}${remove ? "\n      <p class=\"hint\">Removing it signs this account out everywhere else.</p>" : ""}
+      ${confirmed ? "" : `<p class="hint">Forgot it? Confirm with an emailed code, and it is not asked for: ${toConfirm}.</p>`}`);
   } else {
-    password = `<li data-method="password"><strong>Password</strong> <span class="tag">not set</span>
-      <br>Add one to sign in with your email and a password, as well as with a code.
+    password = method("password", "Password", "password", "not set", "", `<p>Add one to sign in with your email and a
+         password, as well as with a code.</p>
       ${problem(error)}
       ${confirmed
-        ? form("/password", await formToken(env, who.id, "password"), `${newField}
-      <button type="submit">Add password</button>`)
-        : `<p>Adding one needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
-      ${code("Email me a code")}`}</li>`;
+        ? form("/password", await formToken(env, who.id, "password"), `${username}${newField}
+      <button type="submit">Add password</button>`, "method-form")
+        : `<p class="hint">Adding one needs an emailed code typed in the last ${FRESH_FOR / 60} minutes: ${toConfirm}.</p>`}`);
   }
-  const coming = (key, name, says) => `<li data-method="${key}"><strong>${name}</strong> <span class="tag">coming</span>
-      <br>${says}</li>`;
   const ways = await linked(env, who.user);
   /* A provider switched off after accounts were linked to it still lists
      them, and still unlinks them, so nothing linked is left that cannot
@@ -846,12 +1078,12 @@ async function methods(env, who, error, providerError, passkeyError) {
     const { name } = PROVIDERS[key];
     const on = configured(env, key);
     const mine = ways.filter((w) => w.provider === key);
-    if (!on && !mine.length) return coming(key, name, says);
+    if (!on && !mine.length) return method(key, name, "link", "coming", "", `<p>${says}</p>`);
     const unlinkToken = await formToken(env, who.id, `unlink-${key}`);
-    const items = mine.map((w) => `<li>${escape(w.verified_email || "no address")}, linked
-        ${escape(when(w.created_at).slice(0, 10))}${confirmed ? form(`/auth/${key}/unlink`, unlinkToken, `
+    const items = mine.map((w) => `<li><span>${escape(w.verified_email || "no address")}, linked
+        ${escape(when(w.created_at).slice(0, 10))}</span>${confirmed ? form(`/auth/${key}/unlink`, unlinkToken, `
         <input type="hidden" name="subject" value="${escape(w.provider_subject)}">
-        <button type="submit">Unlink</button>`) : ""}</li>`).join("");
+        <button type="submit" class="compact">Unlink</button>`) : ""}</li>`).join("");
     const err = providerError && providerError.provider === key ? providerError.text : "";
     const accounts = mine.length === 1 ? "account" : "accounts";
     const tag = !on ? "not offered now" : mine.length ? "linked" : "not linked";
@@ -865,112 +1097,180 @@ async function methods(env, who, error, providerError, passkeyError) {
       ? form(`/auth/${key}`, await formToken(env, who.id, `link-${key}`),
         `<button type="submit">Link ${mine.length ? "another" : "a"} ${name} account</button>`)
       : "";
-    return `<li data-method="${key}"><strong>${name}</strong> <span class="tag">${tag}</span>
-      <br>${about}
-      ${mine.length ? `<ul>${items}</ul>` : ""}
-      ${mine.length && confirmed ? `<p>Unlinking one keeps its id here, so that it does not link itself back; linking it again does.
+    return method(key, name, "link", tag, !on ? "warn" : mine.length ? "ok" : "", `<p>${about}</p>
+      ${mine.length ? `<ul class="method-items">${items}</ul>` : ""}
+      ${mine.length && confirmed ? `<p class="hint">Unlinking one keeps its id here, so that it does not link itself back; linking it again does.
         Unlinking one also signs this account out everywhere else.</p>` : ""}
       ${problem(err)}
       ${confirmed ? linkForm
-        : `<p>${on ? "Linking or unlinking" : "Unlinking"} ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
-      ${code("Email me a code")}`}</li>`;
+        : `<p class="hint">${on ? "Linking or unlinking" : "Unlinking"} ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes: ${toConfirm}.</p>`}`);
   };
-  return `<section class="panel" id="methods">
-    <h2>Sign-in methods</h2>
-    <ul>
-      <li data-method="code"><strong>Emailed code</strong> <span class="tag">always on</span>
-      <br>A code mailed to ${escape(who.email)} signs you in, and confirms what needs confirming.</li>
-      ${password}
-      ${await provider("google", "Sign in with a Google account linked here.")}
-      ${await provider("github", "Sign in with a GitHub account linked here.")}
-      ${await passkeys(env, who, passkeyError, code)}
-    </ul></section>`;
+  return [
+    method("code", "Emailed code", "mail", "always on", "ok",
+      `<p>A code mailed to ${escape(who.email)} signs you in, and confirms what needs confirming.</p>`),
+    password,
+    await provider("google", "Sign in with a Google account linked here."),
+    await provider("github", "Sign in with a GitHub account linked here."),
+    await passkeys(env, who, passkeyError, method, toConfirm),
+  ];
 }
 
 /* The account's passkeys, with the day each was added and last used, and
    the way to add or remove one, which needs a fresh code. */
-async function passkeys(env, who, error, code) {
+async function passkeys(env, who, error, method, toConfirm) {
   const confirmed = fresh(who);
   const mine = await passkeysOf(env, who.user);
   const removeToken = await formToken(env, who.id, "passkey-remove");
-  const items = mine.map((k) => `<li>${escape(k.label)}, added ${escape(when(k.created_at).slice(0, 10))},
-        ${k.used_at === null ? "never used" : `last used ${escape(when(k.used_at).slice(0, 10))}`}${confirmed
+  const items = mine.map((k) => `<li><span>${escape(k.label)}, added ${escape(when(k.created_at).slice(0, 10))},
+        ${k.used_at === null ? "never used" : `last used ${escape(when(k.used_at).slice(0, 10))}`}</span>${confirmed
           ? form("/passkeys/remove", removeToken, `
         <input type="hidden" name="id" value="${escape(k.id)}">
-        <button type="submit">Remove</button>`) : ""}</li>`).join("");
-  return `<li data-method="passkeys"><strong>Passkeys</strong> <span class="tag">${mine.length ? `${mine.length} added` : "none added"}</span>
-      <br>${mine.length ? `Sign in with ${mine.length === 1 ? "this passkey" : "any of these"} on the
+        <button type="submit" class="compact">Remove</button>`) : ""}</li>`).join("");
+  return method("passkeys", "Passkeys", "key", mine.length ? `${mine.length} added` : "none added", mine.length ? "ok" : "",
+    `<p>${mine.length ? `Sign in with ${mine.length === 1 ? "this passkey" : "any of these"} on the
         <a href="/signin/passkey">passkey sign-in page</a>.`
-        : "Sign in with this device's screen lock or a security key, once you add a passkey here."}
-      ${mine.length ? `<ul>${items}</ul>` : ""}
-      ${mine.length && confirmed ? "<p>Removing one signs this account out everywhere else.</p>" : ""}
+      : "Sign in with this device's screen lock or a security key, once you add a passkey here."}</p>
+      ${mine.length ? `<ul class="method-items">${items}</ul>` : ""}
+      ${mine.length && confirmed ? `<p class="hint">Removing one signs this account out everywhere else.</p>` : ""}
       ${problem(error)}
       ${confirmed
-        ? (mine.length < MAX_PASSKEYS ? `<p><a class="button" href="/passkeys/add">Add a passkey</a></p>` : "")
-        : `<p>Adding or removing a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
-      ${code("Email me a code")}`}</li>`;
-}
-
-async function dashboard(env, who, {
-  error = "", passwordError = "", providerError = null, passkeyError = "", signoutError = "", machinesError = "",
-  upgraded = false, status = 200,
-} = {}) {
-  const org = who.org;
-  const events = await history(env, who.user);
-  const onPlan = await plan(env, org.id);
-  const billing = await billingPanel(env, who, onPlan, { upgraded });
-  const rename = canManage(org) ? `<h2>Organisation name</h2>
-    ${form("/org", await orgToken(env, who, "org"), `${orgInput(who)}
-      <label for="name">Name</label>
-      <input id="name" name="name" type="text" maxlength="80" required value="${escape(org.name)}">
-      ${problem(error)}
-      <button type="submit">Rename</button>`)}` : "";
-  const activity = events.length
-    ? `<ul>${events.map((e) => `<li>${escape(when(e.at))}: ${escape(EVENTS[e.event] || e.event)}</li>`).join("")}</ul>`
-    : "<p>Nothing yet.</p>";
-  return page("Your account", `<h1>Your account</h1>
-    <dl>
-      <dt>Signed in as</dt><dd>${escape(who.email)}</dd>
-      <dt>Organisation</dt><dd>${escape(org.name)}</dd>
-      <dt>Owner</dt><dd>${org.role === "owner" ? "You" : escape(await ownerOf(env, org.id) || "nobody")}</dd>
-      <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
-      <dt>Plan</dt><dd id="plan">${PLAN_NAMES[onPlan]}</dd>
-    </dl>
-    ${await switcher(env, who)}
-    ${panel("plus", onPlan)}
-    ${panel("team", onPlan)}
-    ${billing.html}
-    ${await machinesPanel(env, who, onPlan, machinesError)}
-    ${await membersPanel(env, who, onPlan)}
-    ${await methods(env, who, passwordError, providerError, passkeyError)}
-    ${rename}
-    <h2>Recent activity</h2>
-    ${activity}
-    <h2>Sign out</h2>
-    <p>Sign out everywhere ends this account's sessions in every browser.</p>
-    ${form("/signout", await formToken(env, who.id, "signout"), `<button type="submit">Sign out</button>`, "row")}
-    ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<button type="submit">Sign out everywhere</button>`, "row")}
-    ${await removeAll(env, who, signoutError)}
-    <p><small><a href="https://ranwhat.com/">ranwhat.com</a> &middot; <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status, away: [...(fresh(who) ? offered(env).map((p) => PROVIDERS[p].origin) : []), ...billing.away] });
+        ? (mine.length < MAX_PASSKEYS ? `<div class="actions"><a class="btn" href="/passkeys/add">Add a passkey</a></div>` : "")
+        : `<p class="hint">Adding or removing a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes: ${toConfirm}.</p>`}`);
 }
 
 /* Signing out everywhere and taking every other way in away with it: for
    someone who thinks a linked Google or GitHub account, or a passkey, is
    in someone else's hands. Only with a fresh code, as taking any one of
-   them away is, and only offered while there is one. */
+   them away is, and only offered while there is one: { html } for its
+   card, or nothing but what went wrong. */
 async function removeAll(env, who, error) {
-  if (await otherWaysIn(env, who.user) < 2) return problem(error);
-  if (!fresh(who)) {
-    return `<p>To take away every Google and GitHub link and every passkey as well, confirm with an
-       emailed code first (under Sign-in methods).</p>${problem(error)}`;
-  }
-  return `<p>Or sign out everywhere and take away every Google and GitHub account linked here and
-       every passkey with it, leaving the emailed code${await passwordOf(env, who.user) ? " and your password" : ""}.
-       None of them links itself back.</p>
+  if (await otherWaysIn(env, who.user) < 2) return { html: "", error: problem(error) };
+  const body = !fresh(who)
+    ? `<p>To take away every Google and GitHub link and every passkey as well, confirm with an
+       emailed code first (<a href="#confirm">at the top of this page</a>).</p>${problem(error)}`
+    : `<p>Sign out everywhere and take away every Google and GitHub account linked here and every passkey
+       with it, leaving the emailed code${await passwordOf(env, who.user) ? " and your password" : ""}. None of them
+       links itself back.</p>
     ${problem(error)}
     ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<input type="hidden" name="ways" value="remove">
-      <button type="submit">Sign out everywhere and remove every other way in</button>`)}`;
+      <button type="submit" class="danger">Sign out everywhere and remove every other way in</button>`)}`;
+  return {
+    html: card({ title: "Remove every other way in", icon: "alert", cls: "danger-zone", attributes: 'id="remove-ways"', body }),
+    error: "",
+  };
+}
+
+async function securityView(env, who, {
+  passwordError = "", providerError = null, passkeyError = "", signoutError = "", status = 200,
+} = {}) {
+  const confirmed = fresh(who);
+  const top = confirmed
+    ? callout({ tone: "ok", icon: "check", title: "Confirmed", attributes: 'id="confirm"',
+      text: `<p>You typed an emailed code in the last ${FRESH_FOR / 60} minutes, so the changes on this page go through
+         without asking for one again.</p>` })
+    : callout({ tone: "warn", icon: "security", title: "Confirm it is you", attributes: 'id="confirm"',
+      text: `<p>Some changes here need an emailed code typed in the last ${FRESH_FOR / 60} minutes; each card says
+         which. We send it to ${escape(who.email)}, and you come back here once it is typed.</p>`,
+      act: form("/stepup", await formToken(env, who.id, "stepup"),
+        `<input type="hidden" name="next" value="${PATHS.security}"><button type="submit" class="primary">Email me a code</button>`) });
+  const danger = await removeAll(env, who, signoutError);
+  const sessions = card({
+    title: "Sessions", icon: "exit", attributes: 'id="sessions"',
+    body: `<p>Sign out ends this browser's session. Sign out everywhere ends this account's sessions in every
+         browser.</p>
+      ${danger.error}
+      <div class="actions">
+      ${form("/signout", await formToken(env, who.id, "signout"), `<button type="submit">Sign out</button>`)}
+      ${form("/signout-all", await formToken(env, who.id, "signout-all"), `<button type="submit">Sign out everywhere</button>`)}
+      </div>`,
+  });
+  return app(env, who, "security", {
+    title: "Security",
+    sub: "How you sign in to ranwhat, and the browsers signed in as you.",
+    body: `<div class="grid">
+    ${top}
+    <div class="c8 stack">
+      <h2 class="label section-label">Ways to sign in</h2>
+      ${(await methods(env, who, passwordError, providerError, passkeyError)).join("\n      ")}
+    </div>
+    <div class="c4 stack">
+      ${sessions}
+      ${danger.html}
+    </div>
+    </div>`,
+    status,
+    away: confirmed ? offered(env).map((p) => PROVIDERS[p].origin) : [],
+  });
+}
+
+/* ---------- the other pages ---------- */
+
+async function machinesView(env, who, { error = "", status = 200 } = {}) {
+  const onPlan = await plan(env, who.org.id);
+  return app(env, who, "machines", {
+    title: "Machines",
+    sub: `The terminals and CI tokens linked to ${escape(who.org.name)}, each with a token of its own.`,
+    onPlan, status,
+    body: `<div class="grid">${await machinesPanel(env, who, onPlan, error)}</div>`,
+  });
+}
+
+async function membersView(env, who, { error = "", status = 200 } = {}) {
+  const org = who.org;
+  const onPlan = await plan(env, org.id);
+  const rename = canManage(org) ? `<div class="method-form">${form("/org", await orgToken(env, who, "org"), `${orgInput(who)}
+      <label for="name">Name</label>
+      <input id="name" name="name" type="text" maxlength="80" required value="${escape(org.name)}">
+      ${problem(error)}
+      <button type="submit">Rename</button>`)}</div>` : problem(error);
+  const about = card({
+    title: "Organisation", icon: "team", attributes: 'id="organisation"',
+    body: `<dl>
+      <dt>Organisation</dt><dd>${escape(org.name)}</dd>
+      <dt>Owner</dt><dd>${org.role === "owner" ? "You" : escape(await ownerOf(env, org.id) || "nobody")}</dd>
+      <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
+      <dt>Plan</dt><dd>${PLAN_NAMES[onPlan]}</dd>
+    </dl>
+    ${rename}`,
+  });
+  return app(env, who, "members", {
+    title: "Members",
+    sub: `Who is in ${escape(org.name)}, and their roles.`,
+    onPlan, status,
+    body: `<div class="grid">${about}${await membersPanel(env, who, onPlan)}</div>`,
+  });
+}
+
+async function billingView(env, who, { status = 200 } = {}) {
+  const onPlan = await plan(env, who.org.id);
+  const billing = await billingPanel(env, who, onPlan);
+  return app(env, who, "billing", {
+    title: "Billing",
+    sub: `What ${escape(who.org.name)} is on, and how it is paid for.`,
+    onPlan, status,
+    body: `<div class="grid">${billing.html}</div>`,
+    away: billing.away,
+  });
+}
+
+/* The account's own record, newest first. */
+async function activityView(env, who) {
+  const events = await history(env, who.user, 100);
+  const rows = events.map((e) => `<tr><td class="when">${stamp(e.at)}</td>` +
+    `<td>${escape(EVENTS[e.event] || e.event)}</td></tr>`).join("\n        ");
+  return app(env, who, "activity", {
+    title: "Activity",
+    sub: "What happened on your account, newest first.",
+    body: `<div class="grid">${card({
+      title: "Your account's history", icon: "activity",
+      aside: events.length ? pill(plural(events.length, "event")) : "",
+      body: events.length ? `<table class="table">
+      <thead><tr><th scope="col">When</th><th scope="col">What</th></tr></thead>
+      <tbody>
+        ${rows}
+      </tbody></table>` : empty("<p>Nothing yet.</p>"),
+    })}</div>`,
+  });
 }
 
 async function signout(request, env) {
@@ -996,7 +1296,7 @@ async function signoutAll(request, env) {
   if (!await formOk(env, f, who.id, "signout-all")) return refused();
   const ways = f.get("ways") === "remove";
   if (ways && !fresh(who)) {
-    return dashboard(env, who, { status: 403,
+    return securityView(env, who, { status: 403,
       signoutError: `Taking every other way in away needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so nothing was done.` });
   }
   const db = env.LIST;
@@ -1023,11 +1323,11 @@ async function rename(request, env) {
   }
   const name = orgName(f.get("name"));
   if (!name) {
-    return dashboard(env, who, { status: 400,
+    return membersView(env, who, { status: 400,
       error: "A name is 1 to 80 characters, with no control or formatting characters." });
   }
-  if (name === who.org.name) return redirect("/");
-  if (!await countRename(env, who)) return dashboard(env, who, { status: 429, error: TOO_MANY_RENAMES });
+  if (name === who.org.name) return redirect(PATHS.members);
+  if (!await countRename(env, who)) return membersView(env, who, { status: 429, error: TOO_MANY_RENAMES });
   /* Written, with its event, only while the name is still another: of
      renames to one name sent at once, one renames, and the rest write
      nothing and give their count back. */
@@ -1039,7 +1339,7 @@ async function rename(request, env) {
     db.prepare("UPDATE orgs SET name = ? WHERE id = ? AND name IS NOT ?").bind(name, who.org.id, name),
   ]);
   if (done[1].meta.changes !== 1) await uncountRename(env, who);
-  return redirect("/");
+  return redirect(PATHS.members);
 }
 
 /* Renames, of the organisation and its machines together, are counted
@@ -1062,7 +1362,7 @@ const TOO_MANY_RENAMES = `You have renamed things ${RENAMES_PER_DAY} times today
 async function allowed(request, env, who, stored, typed) {
   if (fresh(who)) return true;
   if (!stored) {
-    return dashboard(env, who, { status: 403,
+    return securityView(env, who, { status: 403,
       passwordError: `Adding a password needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` });
   }
   const result = await checkPassword(request, env, who.email, typed);
@@ -1072,7 +1372,7 @@ async function allowed(request, env, who, stored, typed) {
     network: [429, "More passwords were tried from your network in the last hour than we check. Confirm with an emailed code instead."],
     unavailable: [503, "Passwords are not available just now."],
   }[result.why] || [400, "Your current password is not right."];
-  return dashboard(env, who, { status, passwordError });
+  return securityView(env, who, { status, passwordError });
 }
 
 /* Adds or changes it, and ends every other session of the account: a
@@ -1087,7 +1387,7 @@ async function setPassword(request, env) {
   if (!await hashAllowed(request, env)) return tooManyHashes();
   const password = f.get("password");
   const wrong = await passwordProblem(env, password);
-  if (wrong) return dashboard(env, who, { status: 400, passwordError: wrong });
+  if (wrong) return securityView(env, who, { status: 400, passwordError: wrong });
   let hash;
   try {
     hash = await hashPassword(env, password);
@@ -1100,7 +1400,7 @@ async function setPassword(request, env) {
     ...await attachPassword(env, { user: who.user, org: who.org.id, hash }),
     db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").bind(who.user, who.id),
   ]);
-  return redirect("/");
+  return redirect(PATHS.security);
 }
 
 /* Only while another way in remains, which the emailed code always is.
@@ -1113,14 +1413,14 @@ async function removePassword(request, env) {
   const f = await fields(request);
   if (!await formOk(env, f, who.id, "password-remove")) return refused();
   const stored = await passwordOf(env, who.user);
-  if (!stored) return redirect("/");
+  if (!stored) return redirect(PATHS.security);
   if (await otherWaysIn(env, who.user) < 1) {
-    return dashboard(env, who, { status: 400, passwordError: "This password is your only way in, so it stays." });
+    return securityView(env, who, { status: 400, passwordError: "This password is your only way in, so it stays." });
   }
   const ok = await allowed(request, env, who, stored, f.get("current"));
   if (ok !== true) return ok;
   await env.LIST.batch([...detachPassword(env, { user: who.user, org: who.org.id }), othersOut(env, who)]);
-  return redirect("/");
+  return redirect(PATHS.security);
 }
 
 /* The statement that ends every session of this account but this one. */
@@ -1145,7 +1445,7 @@ async function providerStart(request, env, ctx, url, provider) {
   return away(started.to, [started.cookie]);
 }
 
-const needsCode = (env, who, provider) => dashboard(env, who, { status: 403, providerError: { provider,
+const needsCode = (env, who, provider) => securityView(env, who, { status: 403, providerError: { provider,
   text: `Linking or unlinking ${PROVIDERS[provider].name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` } });
 
 /* Off to the provider to link it to the account signed in: a form on the
@@ -1189,7 +1489,7 @@ async function providerBack(request, env, ctx, url, provider) {
     if (result.what !== "linked") await releaseNotice(env, hold);
     if (result.refused) return notLinked(name, result.refused, cookies);
     if (result.what === "linked") tellWayIn(env, ctx, { user: who.user, what: provider, hold });
-    return redirect("/", cookies);
+    return redirect(PATHS.security, cookies);
   }
   const result = await arrive(env, provider, profile, {
     hold: (user) => holdNotice(request, env, user), release: (hold) => releaseNotice(env, hold),
@@ -1223,7 +1523,7 @@ function noNotice(name, why, linking, cookies) {
   <p class="bad">Linking ${name} to a ranwhat account sends that account's address an email to say so,
      and ${reason}, so nothing was linked${linking ? "" : " and nobody was signed in"}.</p>
   <p>${advice}</p>
-  <p>${linking ? `<a href="/">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
+  <p>${linking ? `<a href="/security">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
   { status: why === "network-day" ? 429 : 503, cookies });
 }
 
@@ -1238,7 +1538,7 @@ function providerProblem(name, why, flow, cookies) {
   }[why] || [400, "Start again", `${name}'s answer did not check out, so ${none}. Start it again from this site.`];
   return page(title, `<h1>${title}.</h1>
     <p class="bad">${text}</p>
-    <p>${linking ? `<a href="/">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
+    <p>${linking ? `<a href="/security">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
   { status, cookies });
 }
 
@@ -1281,7 +1581,7 @@ function notLinked(name, why, cookies) {
   }[why];
   return page("Not linked", `<h1>Not linked.</h1>
     <p class="bad">${text}</p>
-    <p><a href="/">Back to your account</a></p>`, { status: why === "unverified" ? 403 : 409, cookies });
+    <p><a href="/security">Back to your account</a></p>`, { status: why === "unverified" ? 403 : 409, cookies });
 }
 
 /* Takes a Google or GitHub account away, with a fresh code, while another
@@ -1296,19 +1596,19 @@ async function unlinkPost(request, env, ctx, url, provider) {
   const statements = await detach(env, {
     user: who.user, org: who.org.id, provider, subject: String(f.get("subject") ?? ""),
   });
-  if (!statements.length) return redirect("/");
+  if (!statements.length) return redirect(PATHS.security);
   const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
   if (left < 1) {
-    return dashboard(env, who, { status: 400, providerError: { provider,
+    return securityView(env, who, { status: 400, providerError: { provider,
       text: `This ${PROVIDERS[provider].name} account is your only way in, so it stays.` } });
   }
   await env.LIST.batch([...statements, othersOut(env, who)]);
-  return redirect("/");
+  return redirect(PATHS.security);
 }
 
 /* ---------- passkeys ---------- */
 
-const needsPasskeyCode = (env, who) => dashboard(env, who, { status: 403,
+const needsPasskeyCode = (env, who) => securityView(env, who, { status: 403,
   passkeyError: `Adding or removing a passkey needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` });
 
 /* The page that adds one: the form /passkeys.js sends once the device has
@@ -1335,9 +1635,9 @@ async function addPasskeyForm(env, who, { error = "", status = 200 } = {}) {
       <input id="label" name="label" type="text" maxlength="${MAX_LABEL}" placeholder="Work laptop" autofocus>
       <p class="bad passkey-problem" hidden></p>
       ${problem(error)}
-      <button type="submit">Add passkey</button>`, "", `data-passkey="/passkeys/new" data-ceremony="create"`)}
+      <button type="submit" class="primary">Add passkey</button>`, "", `data-passkey="/passkeys/new" data-ceremony="create"`)}
     ${NO_SCRIPT}
-    <p><a href="/">Back to your account</a></p>`,
+    <p><a href="/security">Back to your account</a></p>`,
   { status, passkeys: true });
 }
 
@@ -1377,7 +1677,7 @@ async function addPasskey(request, env, ctx) {
   });
   if (!result.refused) {
     tellWayIn(env, ctx, { user: who.user, what: "passkey", hold });
-    return redirect("/");
+    return redirect(PATHS.security);
   }
   await releaseNotice(env, hold);
   const [status, error] = {
@@ -1398,11 +1698,11 @@ async function removePasskey(request, env) {
   if (!await formOk(env, f, who.id, "passkey-remove")) return refused();
   if (!fresh(who)) return needsPasskeyCode(env, who);
   const statements = await forgetPasskey(env, { user: who.user, org: who.org.id, id: f.get("id") ?? "" });
-  if (!statements.length) return redirect("/");
+  if (!statements.length) return redirect(PATHS.security);
   const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
-  if (left < 1) return dashboard(env, who, { status: 400, passkeyError: "This passkey is your only way in, so it stays." });
+  if (left < 1) return securityView(env, who, { status: 400, passkeyError: "This passkey is your only way in, so it stays." });
   await env.LIST.batch([...statements, othersOut(env, who)]);
-  return redirect("/");
+  return redirect(PATHS.security);
 }
 
 /* The page that signs in with one. Its form token and its challenges are
@@ -1428,7 +1728,7 @@ async function passkeySigninForm(env, browser, { next = "/", error = "", status 
       <input type="hidden" name="userHandle" value="">
       <p class="bad passkey-problem" hidden></p>
       ${problem(error)}
-      <button type="submit">Sign in with a passkey</button>`, "", `data-passkey="/passkeys/challenge" data-ceremony="get"`)}
+      <button type="submit" class="primary">Sign in with a passkey</button>`, "", `data-passkey="/passkeys/challenge" data-ceremony="get"`)}
     ${NO_SCRIPT}
     <p>No passkey here? <a href="/signin">Sign in with an emailed code</a>, or
        <a href="/signin/password">with your password</a>. Passkeys are added from your
@@ -1530,7 +1830,7 @@ async function machinesPanel(env, who, onPlan, error) {
   const revokeStep = anyMine && !confirmed
     ? `<p>Revoking a machine needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
       ${form("/stepup", await formToken(env, who.id, "stepup"),
-        `<input type="hidden" name="next" value="/"><button type="submit">Email me a code</button>`)}`
+        `<input type="hidden" name="next" value="/machines"><button type="submit">Email me a code</button>`)}`
     : "";
 
   let ci;
@@ -1551,7 +1851,7 @@ async function machinesPanel(env, who, onPlan, error) {
     ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
       <p>${escape(feature.says)} Making one needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
       ${form("/stepup", await formToken(env, who.id, "stepup"),
-        `<input type="hidden" name="next" value="/"><button type="submit">Email me a code</button>`)}</div>`;
+        `<input type="hidden" name="next" value="/machines"><button type="submit">Email me a code</button>`)}</div>`;
   } else {
     const nonce = randomToken();
     const options = EXPIRY_CHOICES.map(([value, text]) => `<option value="${value}">${text}</option>`).join("");
@@ -1576,11 +1876,11 @@ async function machinesPanel(env, who, onPlan, error) {
     ${ci}</section>`;
 }
 
-const notInOrg = (env, who) => dashboard(env, who, { status: 404,
-  machinesError: "That machine is not one of this organisation's, or it is already revoked, so nothing was changed." });
+const notInOrg = (env, who) => machinesView(env, who, { status: 404,
+  error: "That machine is not one of this organisation's, or it is already revoked, so nothing was changed." });
 
-const notYours = (env, who) => dashboard(env, who, { status: 403,
-  machinesError: "Only an owner or an admin, or whoever linked it, can rename or revoke that machine." });
+const notYours = (env, who) => machinesView(env, who, { status: 403,
+  error: "Only an owner or an admin, or whoever linked it, can rename or revoke that machine." });
 
 /* Names it. The id is looked up in the organisation this session is
    looking at, never trusted. */
@@ -1594,13 +1894,13 @@ async function renameMachinePost(request, env) {
   if (!mayChange(who, machine)) return notYours(env, who);
   const label = machineLabel(f.get("label"));
   if (!label) {
-    return dashboard(env, who, { status: 400,
-      machinesError: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
+    return machinesView(env, who, { status: 400,
+      error: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
   }
-  if (label === machine.label) return redirect("/");
-  if (!await countRename(env, who)) return dashboard(env, who, { status: 429, machinesError: TOO_MANY_RENAMES });
+  if (label === machine.label) return redirect(PATHS.machines);
+  if (!await countRename(env, who)) return machinesView(env, who, { status: 429, error: TOO_MANY_RENAMES });
   if (!await renameMachine(env, who, machine, label)) await uncountRename(env, who);
-  return redirect("/");
+  return redirect(PATHS.machines);
 }
 
 /* Revokes it, with a fresh code: the feed refuses its token from the next
@@ -1614,11 +1914,11 @@ async function revokeMachinePost(request, env) {
   if (!machine) return notInOrg(env, who);
   if (!mayChange(who, machine)) return notYours(env, who);
   if (!fresh(who)) {
-    return dashboard(env, who, { status: 403,
-      machinesError: `Revoking a machine needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so nothing was revoked.` });
+    return machinesView(env, who, { status: 403,
+      error: `Revoking a machine needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so nothing was revoked.` });
   }
   await revokeMachine(env, who, machine);
-  return redirect("/");
+  return redirect(PATHS.machines);
 }
 
 /* Makes a CI token: an owner or admin, of an organisation whose plan has
@@ -1639,31 +1939,31 @@ async function ciTokenPost(request, env) {
   if (bound === "refused") return refused();
   if (bound === "elsewhere") return elsewhere();
   if (!canManage(who.org)) {
-    return dashboard(env, who, { status: 403, machinesError: "Only an owner or an admin can make a CI token." });
+    return machinesView(env, who, { status: 403, error: "Only an owner or an admin can make a CI token." });
   }
   const tier = FEATURES.ci_tokens.plan;
   if (!allows(await plan(env, who.org.id), "ci_tokens")) {
-    return dashboard(env, who, { status: 403,
-      machinesError: `CI tokens come with ${PLAN_NAMES[tier]}, so none was made.` });
+    return machinesView(env, who, { status: 403,
+      error: `CI tokens come with ${PLAN_NAMES[tier]}, so none was made.` });
   }
   if (!fresh(who)) {
-    return dashboard(env, who, { status: 403,
-      machinesError: `Making a CI token needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so none was made.` });
+    return machinesView(env, who, { status: 403,
+      error: `Making a CI token needs an emailed code typed in the last ${FRESH_FOR / 60} minutes, so none was made.` });
   }
   const label = machineLabel(f.get("label"));
   if (!label) {
-    return dashboard(env, who, { status: 400,
-      machinesError: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
+    return machinesView(env, who, { status: 400,
+      error: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
   }
   const expires = String(f.get("expires") ?? "never");
   if (!Object.hasOwn(EXPIRIES, expires)) {
-    return dashboard(env, who, { status: 400, machinesError: "Choose when the token expires from the list." });
+    return machinesView(env, who, { status: 400, error: "Choose when the token expires from the list." });
   }
-  if (await bump(env, "ci-form", nonce, DAY) > 1) return redirect("/");
+  if (await bump(env, "ci-form", nonce, DAY) > 1) return redirect(PATHS.machines);
   const made = await mintCi(env, who, { label, days: EXPIRIES[expires] });
   if (made.refused) {
-    return dashboard(env, who, { status: 400,
-      machinesError: `${who.org.name} holds ${MAX_CI} CI tokens, the most it can. Revoke one to make another.` });
+    return machinesView(env, who, { status: 400,
+      error: `${who.org.name} holds ${MAX_CI} CI tokens, the most it can. Revoke one to make another.` });
   }
   return page("Your CI token", `<h1>Your CI token</h1>
     <p class="bad"><strong>Copy it now: this is the only time it is shown.</strong> We keep only a hash
@@ -1677,14 +1977,18 @@ async function ciTokenPost(request, env) {
     </dl>
     <p>Keep it in your CI's secrets as <strong>RANWHAT_TOKEN</strong>, where <strong>ranwhat update</strong>
        reads it. Never put it in a repository, a command line or a log.</p>
-    <p><a href="/">Back to your account</a></p>`);
+    <p><a href="/machines">Back to Machines</a></p>`);
 }
 
 /* ---------- the host ---------- */
 
 /* Path: { method: handler }. */
 const ROUTES = {
-  "/": { GET: home },
+  "/": { GET: signedInPage(overview) },
+  "/machines": { GET: signedInPage(machinesView) },
+  "/members": { GET: signedInPage(membersView) },
+  "/security": { GET: signedInPage(securityView) },
+  "/activity": { GET: signedInPage(activityView) },
   "/signin": { GET: signinPage, POST: signinPost },
   "/signin/code": { GET: codePage, POST: codePost },
   "/signin/again": { GET: againPage, POST: again },
@@ -1712,7 +2016,7 @@ const ROUTES = {
   "/machines/revoke": { POST: revokeMachinePost },
   "/tokens/ci": { POST: ciTokenPost },
   "/upgrade": { GET: upgradePage, POST: upgradePost },
-  "/billing": { POST: billingPost },
+  "/billing": { GET: signedInPage(billingView), POST: billingPost },
   "/members/invite": { POST: invitePost },
   "/invite": { GET: inviteAgain, POST: acceptPost },
   "/invites/revoke": { POST: revokeInvitePost },

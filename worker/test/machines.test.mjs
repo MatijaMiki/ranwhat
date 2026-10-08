@@ -146,7 +146,7 @@ async function signIn(b, s, email = "ana@example.com") {
 /* A fresh code for a session that is no longer fresh: asked for from the
    account page, typed, and back there. */
 async function confirm(b, s) {
-  const home = await b.get("/");
+  const home = await b.get("/security");
   const asked = await b.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" });
   assert.equal(asked.location, "/signin/code");
   const back = await typeCode(b, codeIn(s.emails.at(-1)));
@@ -243,7 +243,7 @@ const listed = (html) => Object.fromEntries([...section(html).matchAll(/<li data
 
 /* Makes a CI token with the form on the account page. */
 async function makeCi(b, { label = "deploy", expires = "never" } = {}) {
-  const home = await b.get("/");
+  const home = await b.get("/machines");
   const sent = { ...hidden(home.text, "/tokens/ci"), label, expires };
   const r = await b.post("/tokens/ci", sent);
   const m = r.text.match(CI_TOKEN);
@@ -304,7 +304,7 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   const ana = new Browser(e);
   await signIn(ana, s);
   const org = orgOf(e, "ana@example.com");
-  let html = (await ana.get("/")).text;
+  let html = (await ana.get("/machines")).text;
   assert.match(section(html), /None yet\. Run <strong>ranwhat login<\/strong>/);
 
   const terminal = await linkTerminal(e, ana, "Ana's <laptop>");
@@ -320,7 +320,7 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   const theirs = await linkTerminal(e, mallory);
 
   assert.equal((await feed(e, terminal.token)).status, 200);
-  html = (await ana.get("/")).text;
+  html = (await ana.get("/machines")).text;
   const items = listed(html);
   assert.deepEqual(Object.keys(items).sort(), [terminal.id, ciId, old.id].sort());
   assert.ok(!html.includes(theirs.id), "another organisation's machine is not listed");
@@ -345,9 +345,9 @@ test("the Machines section lists each machine of the organisation: name, kind, w
 
   /* A CI token in use shows its day; a revoked one leaves the list. */
   assert.equal((await feed(e, ci.token)).status, 200);
-  assert.ok(listed((await ana.get("/")).text)[ciId].includes(`Last used ${today}.`));
+  assert.ok(listed((await ana.get("/machines")).text)[ciId].includes(`Last used ${today}.`));
   run(e, "UPDATE tokens SET revoked_at = ? WHERE hash = ?", unix(), sha(ci.token));
-  assert.equal(listed((await ana.get("/")).text)[ciId], undefined);
+  assert.equal(listed((await ana.get("/machines")).text)[ciId], undefined);
 });
 
 /* ---------- renaming ---------- */
@@ -369,14 +369,14 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   const theirs = await linkTerminal(e, mallory, "Mallory's");
 
   const rename = async (b, id, label, form) => b.post("/machines/rename",
-    { form: form || tokenFor((await b.get("/")).text, "/machines/rename"), id, label });
+    { form: form || tokenFor((await b.get("/machines")).text, "/machines/rename"), id, label });
   const labelOf = (id) => one(e, "SELECT label FROM machines WHERE id = ?", id).label;
 
   /* The owner names Bo's terminal; the name is kept as typed, shown escaped. */
   let r = await rename(ana, bos.id, "  Bo's <b>laptop</b> &\n co  ");
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/machines", r.text);
   assert.equal(labelOf(bos.id), "Bo's <b>laptop</b> & co");
-  const page = (await ana.get("/")).text;
+  const page = (await ana.get("/machines")).text;
   assert.ok(listed(page)[bos.id].startsWith("<strong>Bo's &lt;b&gt;laptop&lt;/b&gt; &amp; co</strong>"));
   assert.ok(page.includes('value="Bo\'s &lt;b&gt;laptop&lt;/b&gt; &amp; co"'));
   assert.ok(!page.includes("<b>laptop"));
@@ -396,7 +396,7 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   r = await rename(bo, bos.id, "Bo's");
   assert.equal(r.status, 303);
   assert.equal(labelOf(bos.id), "Bo's");
-  const boPage = listed((await bo.get("/")).text);
+  const boPage = listed((await bo.get("/machines")).text);
   assert.match(boPage[bos.id], /action="\/machines\/rename"/);
   assert.doesNotMatch(boPage[anas.id], /<form/);
   const boForm = await formToken(e, bo.session, "machine-rename");
@@ -419,7 +419,7 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   assert.equal(labelOf(theirs.id), "Mallory's");
 
   /* Another form's token, another session's, or another site's post renames nothing. */
-  const anaRevoke = tokenFor((await ana.get("/")).text, "/machines/revoke");
+  const anaRevoke = tokenFor((await ana.get("/machines")).text, "/machines/revoke");
   for (const [form, headers] of [[anaRevoke, FROM_PAGE], [boForm, FROM_PAGE],
                                  [await formToken(e, ana.session, "machine-rename"), { "sec-fetch-site": "same-site" }],
                                  [await formToken(e, ana.session, "machine-rename"), {}]]) {
@@ -437,11 +437,11 @@ test("renaming a machine to its own name writes nothing, and renames are counted
   await signIn(ana, s);
   const mine = await linkTerminal(e, ana, "Laptop");
   const rename = async (label) => ana.post("/machines/rename",
-    { form: tokenFor((await ana.get("/")).text, "/machines/rename"), id: mine.id, label });
+    { form: tokenFor((await ana.get("/machines")).text, "/machines/rename"), id: mine.id, label });
   const renamed = () => rows(e, "SELECT 1 FROM auth_events WHERE event = 'machine_renamed'").length;
-  assert.equal((await rename("  Laptop ")).location, "/");
+  assert.equal((await rename("  Laptop ")).location, "/machines");
   assert.equal(renamed(), 0, "the same name: nothing written");
-  for (let i = 0; i < RENAMES_PER_DAY; i++) assert.equal((await rename(`Laptop ${i}`)).location, "/");
+  for (let i = 0; i < RENAMES_PER_DAY; i++) assert.equal((await rename(`Laptop ${i}`)).location, "/machines");
   assert.equal(renamed(), RENAMES_PER_DAY);
   const over = await rename("Laptop again");
   assert.equal(over.status, 429);
@@ -449,7 +449,7 @@ test("renaming a machine to its own name writes nothing, and renames are counted
   assert.equal(renamed(), RENAMES_PER_DAY);
   assert.equal(one(e, "SELECT label FROM machines WHERE id = ?", mine.id).label, `Laptop ${RENAMES_PER_DAY - 1}`);
   later(DAY + 1);
-  assert.equal((await rename("Laptop again")).location, "/");
+  assert.equal((await rename("Laptop again")).location, "/machines");
 });
 
 test("machine renames sent at once are held to the day's count, and those that change nothing write and cost nothing, with D1's latency or without", async () => {
@@ -461,10 +461,10 @@ test("machine renames sent at once are held to the day's count, and those that c
     await signIn(ana, s);
     const mine = await linkTerminal(e, ana, "Laptop");
     const user = one(e, "SELECT id FROM users WHERE email = 'ana@example.com'").id;
-    const form = tokenFor((await ana.get("/")).text, "/machines/rename");
+    const form = tokenFor((await ana.get("/machines")).text, "/machines/rename");
     if (latency) e.LIST = slow(e.LIST, 3);
     const renamed = () => rows(e, "SELECT 1 FROM auth_events WHERE event = 'machine_renamed'").length;
-    const done = (replies) => replies.filter((r) => r.location === "/").length;
+    const done = (replies) => replies.filter((r) => r.location === "/machines").length;
 
     /* Ten at once to one new name: one is made, and counted once. */
     let replies = await Promise.all(Array.from({ length: 10 }, () =>
@@ -505,7 +505,7 @@ test("revoking needs a fresh code and the right to it, is checked against the or
 
   /* Not lately confirmed: no revoke button, the way to a code instead, and a forged form is refused. */
   later(16 * MINUTE);
-  const stale = await ana.get("/");
+  const stale = await ana.get("/machines");
   assert.doesNotMatch(section(stale.text), /action="\/machines\/revoke"/);
   assert.match(section(stale.text), /Revoking a machine needs an emailed code typed in the last 15 minutes/);
   assert.match(section(stale.text), /action="\/stepup"/);
@@ -526,22 +526,22 @@ test("revoking needs a fresh code and the right to it, is checked against the or
 
   /* Bo, a member, revokes his own terminal, not Ana's. */
   await confirm(bo, s);
-  const boRevoke = tokenFor((await bo.get("/")).text, "/machines/revoke");
+  const boRevoke = tokenFor((await bo.get("/machines")).text, "/machines/revoke");
   r = await bo.post("/machines/revoke", { form: boRevoke, id: anas.id });
   assert.equal(r.status, 403);
   r = await bo.post("/machines/revoke", { form: boRevoke, id: bos.id });
-  assert.equal(r.location, "/");
+  assert.equal(r.location, "/machines");
   assert.ok(revoked(e, bos.token));
   assert.deepEqual((await feed(e, bos.token)).json, { error: "That token was not accepted." });
 
   /* Confirmed, Ana revokes her terminal, the CI token and the old subscription token. */
   for (const t of [anas.token, ci.token, old.token]) assert.equal(revoked(e, t), null, "none revoked by the others' tries");
   await confirm(ana, s);
-  const home = await ana.get("/");
+  const home = await ana.get("/machines");
   const form = tokenFor(home.text, "/machines/revoke");
   for (const [id, token] of [[anas.id, anas.token], [ciId, ci.token], [old.id, old.token]]) {
     r = await ana.post("/machines/revoke", { form, id });
-    assert.equal(r.location, "/", r.text);
+    assert.equal(r.location, "/machines", r.text);
     assert.ok(revoked(e, token));
     const refused = await feed(e, token);
     assert.deepEqual([refused.status, refused.json], [403, { error: "That token was not accepted." }]);
@@ -549,7 +549,7 @@ test("revoking needs a fresh code and the right to it, is checked against the or
     r = await ana.post("/machines/revoke", { form, id });
     assert.equal(r.status, 404, "already revoked");
   }
-  assert.deepEqual(listed((await ana.get("/")).text), {});
+  assert.deepEqual(listed((await ana.get("/machines")).text), {});
   assert.equal(count(e, "machines"), 4, "the rows stay; the tokens are what is revoked");
   const events = rows(e, "SELECT user_id, subject FROM auth_events WHERE event = 'machine_revoked' ORDER BY id");
   assert.deepEqual(events.map((x) => x.subject), [bos.id, anas.id, ciId, old.id]);
@@ -566,7 +566,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   const acme = orgOf(e, "ana@example.com");
 
   /* Free: the panel is locked, from the map, with the way up, and the form is refused. */
-  let html = (await ana.get("/")).text;
+  let html = (await ana.get("/machines")).text;
   const locked = section(html).match(/<div class="panel locked" id="ci-tokens" data-feature="ci_tokens">([\s\S]*?)<\/div>/);
   assert.ok(locked, "a locked CI tokens panel");
   assert.match(locked[1], /CI tokens <span class="tag">locked, needs Plus<\/span>/);
@@ -579,7 +579,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
 
   /* Plus opens it, for the owner. */
   grant(e, acme, "plus");
-  html = (await ana.get("/")).text;
+  html = (await ana.get("/machines")).text;
   assert.doesNotMatch(section(html), /class="panel locked"|Upgrade to Plus/);
   assert.match(section(html), /<select id="ci-expires" name="expires"><option value="never">Never<\/option>/);
 
@@ -587,7 +587,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   const bo = new Browser(e, { ip: "203.0.113.60" });
   await signIn(bo, s, "bo@example.com");
   join(e, "bo@example.com", acme, "member");
-  html = (await bo.get("/")).text;
+  html = (await bo.get("/machines")).text;
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
   assert.match(section(html), /An owner or an admin of Personal can make a CI token here/);
   r = await forgedCi(e, bo);
@@ -601,7 +601,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
 
   /* Not lately confirmed: the way to a code, no form, and a forged one makes nothing. */
   later(16 * MINUTE);
-  html = (await ana.get("/")).text;
+  html = (await ana.get("/machines")).text;
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
   assert.match(section(html), /Making one needs an emailed code typed in the last 15 minutes/);
   r = await forgedCi(e, ana);
@@ -615,7 +615,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   grant(e, acme, "team");
   assert.equal((await makeCi(ana, { label: "on team" })).r.status, 200);
   run(e, "DELETE FROM grants");
-  html = (await ana.get("/")).text;
+  html = (await ana.get("/machines")).text;
   assert.match(section(html), /class="panel locked" id="ci-tokens"/);
   r = await forgedCi(e, ana);
   assert.equal(r.status, 403);
@@ -677,10 +677,13 @@ test("a CI token is shown once, right after it is made, and kept only as a hash;
 
   /* Sent again (a reload of that page), the same form makes nothing more and shows nothing. */
   const again = await ana.post("/tokens/ci", made.sent);
-  assert.deepEqual([again.status, again.location], [303, "/"]);
+  assert.deepEqual([again.status, again.location], [303, "/machines"]);
   assert.equal(count(e, "machines"), 1);
+  for (const path of ["/", "/machines", "/activity"]) {
+    const shown = (await ana.get(path)).text;
+    assert.ok(!shown.includes(token) && !shown.includes(sha(token)), `never shown again: ${path}`);
+  }
   const home = await ana.get("/");
-  assert.ok(!home.text.includes(token) && !home.text.includes(sha(token)), "never shown again");
   assert.match(home.text, /CI token made, with a fresh code/);
 
   /* The feed takes it, on the organisation's plan; whoami names the organisation, never who made it. */
@@ -704,7 +707,7 @@ test("a CI token is shown once, right after it is made, and kept only as a hash;
   assert.equal(revoked(e, token), null);
   const b = new Browser(e, { ip: "198.51.100.8" });
   await signIn(b, s);
-  const item = listed((await b.get("/")).text)[machine.id];
+  const item = listed((await b.get("/machines")).text)[machine.id];
   assert.match(item, /<span class="tag">CI, expired<\/span>/);
   assert.ok(item.includes(`Expired ${isoDay(row.created_at + 30 * DAY)}.`));
   assert.match(item, /<button type="submit">Remove<\/button>/);
@@ -726,7 +729,7 @@ test("an organisation holds at most fifty CI tokens at once; revoked and expired
       randomUUID(), hash, acme, `ci ${i}`, t);
   }
   assert.equal((await makeCi(ana, { label: "the fiftieth" })).r.status, 200);
-  let html = (await ana.get("/")).text;
+  let html = (await ana.get("/machines")).text;
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
   assert.match(section(html), /Personal holds 50 CI tokens, the most it can/);
   const r = await forgedCi(e, ana);
@@ -736,7 +739,7 @@ test("an organisation holds at most fifty CI tokens at once; revoked and expired
 
   run(e, "UPDATE tokens SET revoked_at = ? WHERE hash = (SELECT hash FROM machines WHERE label = 'ci 0')", t);
   run(e, "UPDATE tokens SET expires_at = ? WHERE hash = (SELECT hash FROM machines WHERE label = 'ci 1')", t);
-  html = (await ana.get("/")).text;
+  html = (await ana.get("/machines")).text;
   assert.match(html, /action="\/tokens\/ci"/);
   assert.equal((await makeCi(ana, { label: "room again" })).r.status, 200);
   assert.equal((await makeCi(ana, { label: "and again" })).r.status, 200);
@@ -824,9 +827,9 @@ test("the cron revokes a terminal's token after 90 days unused; CI and subscript
   e.ACCOUNTS_ON = "1";
   const b = new Browser(e, { ip: "198.51.100.9" });
   await signIn(b, s);
-  const home = await b.get("/");
+  const home = await b.get("/machines");
   assert.deepEqual(Object.keys(listed(home.text)).length, 2);
-  assert.match(home.text, /Terminal revoked after 90 days unused/);
+  assert.match((await b.get("/")).text, /Terminal revoked after 90 days unused/);
 });
 
 test("nothing logged carries a CI token", async () => {

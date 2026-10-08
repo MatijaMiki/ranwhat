@@ -195,6 +195,22 @@ function tokenFor(html, action, nth = 0) {
   return all[nth][1];
 }
 
+/* A way to sign in, as its card on the Security page names it:
+   [its name, its state]. */
+function method(html, key) {
+  const m = html.match(new RegExp(`data-method="${key}">\\s*<header class="card-head"><h3>(?:<svg[\\s\\S]*?</svg>)?` +
+    `([^<]*)</h3><span class="pill[^"]*">([^<]*)</span>`));
+  assert.ok(m, `no card for ${key}`);
+  return [m[1], m[2]];
+}
+
+/* Whom an account page says is signed in. */
+function signedInAs(html) {
+  const m = html.match(/<span class="label">Signed in as<\/span>\s*<span class="who">([^<]*)<\/span>/);
+  assert.ok(m, "no signed-in address");
+  return m[1];
+}
+
 const codeIn = (mail) => mail.text.match(/^ {4}([0-9A-Z]{4}-[0-9A-Z]{4})$/m)[1];
 
 async function signInByCode(b, s, email) {
@@ -211,7 +227,7 @@ async function signInByCode(b, s, email) {
 async function leave(b, provider, { link = false } = {}) {
   let res;
   if (link) {
-    const home = await b.get("/");
+    const home = await b.get("/security");
     res = await b.post(`/auth/${provider}`, { form: tokenFor(home.text, `/auth/${provider}`) });
   } else {
     res = await b.get(`/auth/${provider}`);
@@ -283,15 +299,15 @@ test("a provider switched off after an account linked it still lists that link, 
   await viaProvider(ana, s, "github", { user: { id: 9001 } }, { link: true });
   delete e.GITHUB_CLIENT_SECRET;
 
-  let home = await ana.get("/");
-  assert.match(home.text, /data-method="github"><strong>GitHub<\/strong> <span class="tag">not offered now<\/span>/);
+  let home = await ana.get("/security");
+  assert.deepEqual(method(home.text, "github"), ["GitHub", "not offered now"]);
   assert.match(home.text, /name="subject" value="9001"/);
   assert.doesNotMatch(home.text, /action="\/auth\/github"/, "nothing new links");
   for (const path of ["/auth/github", "/auth/github/callback"]) assert.equal((await ana.get(path)).status, 404, path);
   /* Not fresh: the page says unlinking needs a code, and the POST is refused. */
   const unlink = tokenFor(home.text, "/auth/github/unlink");
   later(FRESH_FOR + 1);
-  home = await ana.get("/");
+  home = await ana.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/github\/unlink"/);
   assert.match(home.text, /Unlinking GitHub needs an emailed code/);
   assert.equal((await ana.post("/auth/github/unlink", { form: unlink, subject: "9001" })).status, 403);
@@ -300,12 +316,12 @@ test("a provider switched off after an account linked it still lists that link, 
   await ana.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" });
   const page = await ana.get("/signin/code");
   await ana.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: codeIn(s.emails.at(-1)) });
-  home = await ana.get("/");
+  home = await ana.get("/security");
   const done = await ana.post("/auth/github/unlink", { form: tokenFor(home.text, "/auth/github/unlink"), subject: "9001" });
   assert.equal(done.status, 303);
   assert.deepEqual(identities(e).filter((i) => i.user_id === user).map((i) => i.provider), ["email"]);
   assert.equal(eventsOf(e, user).at(-1), "unlinked_github");
-  assert.match((await ana.get("/")).text, /data-method="github"><strong>GitHub<\/strong> <span class="tag">coming<\/span>/);
+  assert.deepEqual(method((await ana.get("/security")).text, "github"), ["GitHub", "coming"]);
 });
 
 test("the sign-in page offers both as plain links, with no script of ours and no change to its policy", async () => {
@@ -376,8 +392,9 @@ test("Google: PKCE, state and nonce leave with the browser, only their hashes st
   assert.equal(session.authed_at, 0, "Google is not a code typed just now: the session is not fresh");
   const home = await b.get("/");
   assert.match(home.text, /Account made, with Google/);
-  assert.match(home.text, /data-method="google"><strong>Google<\/strong> <span class="tag">linked/);
-  assert.match(home.text, /Linking or unlinking Google needs an emailed code/);
+  const security = (await b.get("/security")).text;
+  assert.deepEqual(method(security, "google"), ["Google", "linked"]);
+  assert.match(security, /Linking or unlinking Google needs an emailed code/);
   assert.equal(rows(e, "SELECT used_at FROM oauth_flows")[0].used_at > 0, true);
 });
 
@@ -605,7 +622,7 @@ test("Google: a verified address that has an account links to it and signs in; t
   assert.deepEqual(identities(e).filter((i) => i.provider === "google"),
                    [{ provider: "google", provider_subject: "1001", user_id: user, verified_email: "ana@example.com" }]);
   assert.deepEqual(eventsOf(e, user), ["signup", "linked_google", "signin_google"]);
-  assert.match((await b.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
+  assert.equal(signedInAs((await b.get("/")).text), "ana@example.com");
 
   /* Later the Google account's address is someone else's, verified: the id
      still opens the account it was linked to, not theirs. */
@@ -613,7 +630,7 @@ test("Google: a verified address that has an account links to it and signs in; t
   await signInByCode(bo, s, "bo@example.com");
   const c = new Browser(e, { ip: "203.0.113.7" });
   assert.equal((await viaProvider(c, s, "google", { claims: { email: "bo@example.com" } })).res.status, 303);
-  assert.match((await c.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
+  assert.equal(signedInAs((await c.get("/")).text), "ana@example.com");
   /* and even when Google no longer calls an address verified. */
   const d = new Browser(e, { ip: "203.0.113.8" });
   assert.equal((await viaProvider(d, s, "google", { claims: { email_verified: false } })).res.status, 303);
@@ -667,7 +684,7 @@ test("GitHub: PKCE and state, the numeric id as the subject, the primary verifie
   const elsewhere = new Browser(e, { ip: "203.0.113.25" });
   const back = await viaProvider(elsewhere, s, "github", { user: { id: 583231, login: "ana-codes" }, emails: [] });
   assert.equal(back.res.status, 303, back.res.text);
-  assert.match((await elsewhere.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
+  assert.equal(signedInAs((await elsewhere.get("/")).text), "ana@example.com");
   assert.deepEqual(eventsOf(e, user), ["signup", "linked_github", "signin_github"]);
   for (const token of s.tokens.keys()) assert.ok(!everything(e).includes(token), "the access token is kept nowhere");
   assert.ok(!everything(e).includes("ana-codes"), "nor the login");
@@ -735,8 +752,8 @@ test("signed in with a fresh code, a person links GitHub with another verified a
   const ana = new Browser(e);
   await signInByCode(ana, s, "ana@example.com");
   const user = userOf(e, "ana@example.com");
-  let home = await ana.get("/");
-  assert.match(home.text, /data-method="github"><strong>GitHub<\/strong> <span class="tag">not linked/);
+  let home = await ana.get("/security");
+  assert.deepEqual(method(home.text, "github"), ["GitHub", "not linked"]);
   assert.match(home.text, /<form method="post" action="\/auth\/github">/);
   assert.match(home.headers.get("content-security-policy"),
                /form-action 'self' https:\/\/accounts\.google\.com https:\/\/github\.com; /);
@@ -745,29 +762,29 @@ test("signed in with a fresh code, a person links GitHub with another verified a
   const { flow, res } = await viaProvider(ana, s, "github", {
     user: { id: 9001 }, emails: [{ email: "ana@work.example", primary: true, verified: true }] }, { link: true });
   assert.equal(res.status, 303, res.text);
-  assert.equal(res.location, "/");
+  assert.equal(res.location, "/security");
   const [row] = rows(e, "SELECT purpose, user_id, session_id FROM oauth_flows");
   assert.deepEqual(row, { purpose: "link", user_id: user, session_id: sha256(ana.jar.get(SESSION)) });
   assert.ok(flow.cookie);
   assert.deepEqual(identities(e).filter((i) => i.provider === "github"),
                    [{ provider: "github", provider_subject: "9001", user_id: user, verified_email: "ana@work.example" }]);
   assert.equal(eventsOf(e, user).at(-1), "linked_github");
-  home = await ana.get("/");
-  assert.match(home.text, /data-method="github"><strong>GitHub<\/strong> <span class="tag">linked/);
+  home = await ana.get("/security");
+  assert.deepEqual(method(home.text, "github"), ["GitHub", "linked"]);
   assert.match(home.text, /ana@work\.example, linked/);
-  assert.match(home.text, /GitHub account linked/);
+  assert.match((await ana.get("/")).text, /GitHub account linked/);
 
   /* GitHub then signs in to ana's account on its own. */
   const elsewhere = new Browser(e, { ip: "203.0.113.40" });
   assert.equal((await viaProvider(elsewhere, s, "github", {
     user: { id: 9001 }, emails: [{ email: "ana@work.example", primary: true, verified: true }] })).res.status, 303);
-  assert.match((await elsewhere.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
+  assert.equal(signedInAs((await elsewhere.get("/")).text), "ana@example.com");
 
   /* Fifteen minutes on, the code is no longer fresh: no link form, and
      a form kept from before is refused before anything leaves. */
   const token = tokenFor(home.text, "/auth/google");
   later(FRESH_FOR + 1);
-  home = await ana.get("/");
+  home = await ana.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/google"/);
   assert.match(home.text, /Linking or unlinking Google needs an emailed code typed in the last 15 minutes/);
   assert.match(home.headers.get("content-security-policy"), /form-action 'self'; /);
@@ -847,7 +864,7 @@ test("unlinking needs a fresh code, takes only this account's own, and leaves th
                     { link: true });
   assert.equal(count(e, "identities"), 5);
 
-  let home = await ana.get("/");
+  let home = await ana.get("/security");
   const unlink = tokenFor(home.text, "/auth/github/unlink");
   assert.match(home.text, /name="subject" value="9001"/);
   /* bo's GitHub, named in ana's form: nothing happens, and nothing is recorded. */
@@ -861,12 +878,12 @@ test("unlinking needs a fresh code, takes only this account's own, and leaves th
   assert.equal(stale.status, 403);
   assert.equal(count(e, "identities"), 5);
   /* Fresh again with a step-up code. */
-  home = await ana.get("/");
+  home = await ana.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/github\/unlink"/);
   await ana.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" });
   const page = await ana.get("/signin/code");
   await ana.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: codeIn(s.emails.at(-1)) });
-  const done = await ana.post("/auth/github/unlink", { form: tokenFor((await ana.get("/")).text, "/auth/github/unlink"), subject: "9001" });
+  const done = await ana.post("/auth/github/unlink", { form: tokenFor((await ana.get("/security")).text, "/auth/github/unlink"), subject: "9001" });
   assert.equal(done.status, 303);
   assert.deepEqual(identities(e).filter((i) => i.user_id === user).map((i) => i.provider), ["email", "google"]);
   assert.equal(eventsOf(e, user).at(-1), "unlinked_github");
@@ -925,7 +942,7 @@ test("Google: an address it verified but does not give out neither makes an acco
   const carla = new Browser(e, { ip: "203.0.113.68" });
   const made = (await viaProvider(carla, s, "google", { claims: { sub: "1234", email: "Carla@Gmail.com", hd: undefined } })).res;
   assert.equal(made.status, 303, made.text);
-  assert.match((await carla.get("/")).text, /Signed in as<\/dt><dd>carla@gmail\.com/);
+  assert.equal(signedInAs((await carla.get("/")).text), "carla@gmail.com");
 });
 
 test("GitHub never makes an account or joins one by its address, verified or not, and says the same either way", async () => {
@@ -990,7 +1007,7 @@ test("an unlinked Google or GitHub account never links itself back, and only a l
   assert.equal(identities(e).filter((i) => i.user_id === user).length, 3);
 
   for (const [provider, subject] of [["google", "2002"], ["github", "777"]]) {
-    const home = await ana.get("/");
+    const home = await ana.get("/security");
     assert.match(home.text, /Unlinking one keeps its id here, so that it does not link itself back/);
     const done = await ana.post(`/auth/${provider}/unlink`, { form: tokenFor(home.text, `/auth/${provider}/unlink`), subject });
     assert.equal(done.status, 303);
@@ -1023,7 +1040,7 @@ test("an unlinked Google or GitHub account never links itself back, and only a l
   assert.deepEqual(rows(e, "SELECT provider FROM unlinked_identities"), [{ provider: "github" }]);
   const g = new Browser(e, { ip: "203.0.113.94" });
   assert.equal((await viaProvider(g, s, "google", { claims: { sub: "2002" } })).res.status, 303);
-  assert.match((await g.get("/")).text, /Signed in as<\/dt><dd>ana@example\.com/);
+  assert.equal(signedInAs((await g.get("/")).text), "ana@example.com");
 });
 
 test("signing out everywhere can take every Google, GitHub and passkey way in with it, with a fresh code, for good", async () => {
@@ -1032,7 +1049,7 @@ test("signing out everywhere can take every Google, GitHub and passkey way in wi
   const ana = new Browser(e);
   await signInByCode(ana, s, "ana@example.com");
   const user = userOf(e, "ana@example.com");
-  let home = await ana.get("/");
+  let home = await ana.get("/security");
   assert.doesNotMatch(home.text, /remove every other way in/, "not offered with nothing to remove");
   await viaProvider(ana, s, "github", { user: { id: 777 } }, { link: true });
   await viaProvider(ana, s, "google", { claims: { sub: "2002" } }, { link: true });
@@ -1041,14 +1058,14 @@ test("signing out everywhere can take every Google, GitHub and passkey way in wi
   const elsewhere = new Browser(e, { ip: "203.0.113.95" });
   assert.equal((await viaProvider(elsewhere, s, "github", { user: { id: 777 } })).res.status, 303);
 
-  home = await ana.get("/");
-  assert.match(home.text, /<button type="submit">Sign out everywhere and remove every other way in<\/button>/);
+  home = await ana.get("/security");
+  assert.match(home.text, /<button type="submit" class="danger">Sign out everywhere and remove every other way in<\/button>/);
   assert.match(home.text, /leaving the emailed code\./);
   const token = tokenFor(home.text, "/signout-all");
   /* Not fresh: refused, and nothing changes, not even the sessions. */
   later(FRESH_FOR + 1);
-  home = await ana.get("/");
-  assert.doesNotMatch(home.text, /<button type="submit">Sign out everywhere and remove/);
+  home = await ana.get("/security");
+  assert.doesNotMatch(home.text, /<button type="submit"[^>]*>Sign out everywhere and remove/);
   assert.match(home.text, /confirm with an\s+emailed code first/);
   const stale = await ana.post("/signout-all", { form: token, ways: "remove" });
   assert.equal(stale.status, 403);
@@ -1108,7 +1125,7 @@ test("unlinking Google or GitHub ends every other session of the account, the on
   assert.equal((await viaProvider(thief, s, "github", { user: { id: 9001 } })).res.status, 303);
   assert.equal((await thief.get("/")).status, 200);
 
-  const home = await ana.get("/");
+  const home = await ana.get("/security");
   const r = await ana.post("/auth/github/unlink", { form: tokenFor(home.text, "/auth/github/unlink"), subject: "9001" });
   assert.equal(r.status, 303, r.text);
   assert.equal((await thief.get("/")).location, "/signin", "the GitHub session is over");
@@ -1218,7 +1235,7 @@ test("signed in already, the sign-in link goes home; a Google session is not fre
   const again = await b.get("/auth/google");
   assert.equal(again.status, 303);
   assert.equal(again.location, "/");
-  const home = await b.get("/");
+  const home = await b.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/github"/);
   const late = await b.post("/password", { form: await formToken(e, sha256(b.jar.get(SESSION)), "password"),
                                           password: "slipped in without a code" });

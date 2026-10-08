@@ -341,65 +341,80 @@ async function signedIn(e) {
   const o = await accounts.orgFor(e, user.id);
   const { value, statements } = await openSession(e, { user: user.id, org: o.id });
   await e.LIST.batch(statements);
-  const home = async () => {
-    const res = await worker.fetch(new Request("https://account.ranwhat.com/", {
+  const get = async (path) => {
+    const res = await worker.fetch(new Request(`https://account.ranwhat.com${path}`, {
       headers: { cookie: `__Host-rw_session=${value}` } }), e, ctx);
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 200, path);
     return res.text();
   };
-  return { org: o.id, home };
+  const home = () => get("/");
+  /* Every account page, one after another. */
+  const all = async () => {
+    let html = "";
+    for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) html += await get(path);
+    return html;
+  };
+  return { org: o.id, home, all };
 }
 
 const section = (html, tier) => {
-  const m = html.match(new RegExp(`<section class="panel( locked)?" id="${tier}">([\\s\\S]*?)</section>`));
+  const m = html.match(new RegExp(`<section class="([^"]*)" id="${tier}">([\\s\\S]*?)</section>`));
   assert.ok(m, `no ${tier} panel`);
-  return { locked: Boolean(m[1]), html: m[2], features: [...m[2].matchAll(/data-feature="([a-z_]+)"/g)].map((x) => x[1]) };
+  return { locked: /\blocked\b/.test(m[1]), html: m[2], features: [...m[2].matchAll(/data-feature="([a-z_]+)"/g)].map((x) => x[1]) };
+};
+
+/* One feature's tile in a plan's panel. */
+const tile = (html, key) => {
+  const m = html.match(new RegExp(`<li class="feat[^"]*" data-feature="${key}">([\\s\\S]*?)</li>`));
+  assert.ok(m, `no tile for ${key}`);
+  return m[1];
 };
 
 test("a Free organisation's dashboard shows Plus and Team locked, from the map, with the way up", async () => {
   const e = await stand();
-  const { home } = await signedIn(e);
+  const { home, all } = await signedIn(e);
   const html = await home();
-  assert.match(html, /<dt>Plan<\/dt><dd id="plan">Free<\/dd>/);
+  assert.match(html, /id="plan">Free</);
   const plus = section(html, "plus"), team = section(html, "team");
   assert.deepEqual([plus.locked, team.locked], [true, true]);
   assert.deepEqual(plus.features, featuresOf("plus").map((f) => f.key));
   assert.deepEqual(team.features, featuresOf("team").map((f) => f.key));
   for (const f of featuresOf("plus")) {
-    assert.ok(plus.html.includes(f.name), f.key);
-    assert.ok(plus.html.includes(f.status === "live" ? "Needs Plus" : "Coming, included in Plus"), f.key);
+    assert.ok(tile(plus.html, f.key).includes(`<strong>${f.name}</strong>`), f.key);
+    assert.match(tile(plus.html, f.key), f.status === "live" ? /<span class="pill brand">Needs Plus<\/span>/ : /<span class="pill">Coming<\/span>/, f.key);
   }
   assert.deepEqual(plus.features.slice(0, 2), ["feed", "ci_tokens"], "the feed and CI tokens lead the Plus panel");
-  assert.match(plus.html, /<li data-feature="ci_tokens"><strong>CI tokens<\/strong> <span class="tag">Needs Plus<\/span>/);
-  assert.match(plus.html, /<a href="\/upgrade">Upgrade to Plus<\/a>/);
+  assert.match(plus.html, /<li class="feat" data-feature="ci_tokens"><div class="feat-top"><svg[\s\S]*?<\/svg><strong>CI tokens<\/strong><span class="pill brand">Needs Plus<\/span>/);
+  assert.match(plus.html, /<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   // Team: no price and nothing to buy, only a way to talk to us.
   assert.doesNotMatch(team.html, /<form|€|\$|£|\/\s*(month|year)|per (month|year|seat)|pricing|checkout/i);
   assert.match(team.html, /href="mailto:hello@ranwhat\.com/);
+  const pages = await all();
   for (const c of ["check", "watch", "clean", "scan", "live", "demo", "sources"]) {
-    assert.doesNotMatch(html, new RegExp(`ranwhat ${c}\\b`), `local command ${c} on the dashboard`);
+    assert.doesNotMatch(pages, new RegExp(`ranwhat ${c}\\b`), `local command ${c} on the dashboard`);
   }
-  assert.doesNotMatch(html, /<script|\son[a-z]+=/i);
+  assert.doesNotMatch(pages, /<script|\son[a-z]+=/i);
 });
 
 test("Plus opens the Plus panel; Team opens both; neither shows the upgrade", async () => {
   const e = await stand();
-  const { org: o, home } = await signedIn(e);
+  const { org: o, home, all } = await signedIn(e);
   const { sub } = subscription(e, "trialing", o);
   let html = await home();
-  assert.match(html, /<dd id="plan">Plus<\/dd>/);
+  assert.match(html, /id="plan">Plus</);
   assert.deepEqual([section(html, "plus").locked, section(html, "team").locked], [false, true]);
   assert.ok(section(html, "plus").html.includes("Included"));
-  assert.doesNotMatch(html, /Upgrade to Plus/);
+  assert.doesNotMatch(await all(), /Upgrade to Plus/);
 
   grant(e, o, "team");
   html = await home();
-  assert.match(html, /<dd id="plan">Team<\/dd>/);
+  assert.match(html, /id="plan">Team</);
   assert.deepEqual([section(html, "plus").locked, section(html, "team").locked], [false, false]);
-  assert.doesNotMatch(html, /Upgrade to Plus|Talk to us/);
+  assert.doesNotMatch(await all(), /Upgrade to Plus|Talk to us/);
 
   run(e, "DELETE FROM grants");
   run(e, "UPDATE subscriptions SET status = 'canceled' WHERE id = ?", sub);
-  assert.match(await home(), /<dd id="plan">Free<\/dd>/, "derived on every request");
+  assert.match(await home(), /id="plan">Free</, "derived on every request");
 });
 
 /* ---------- locks ---------- */
@@ -431,7 +446,7 @@ const SOURCES = ["auth.js", "feed.js", "dashboard.js", "machines.js", "members.j
 
 test("locks: every locked panel names a server-side feature, and a live one is refused on the server", async () => {
   const e = await stand();
-  const { org: o, home } = await signedIn(e);
+  const { org: o, all } = await signedIn(e);
   const locals = ["check", "watch", "clean", "sources", "reach", "scan", "live", "demo", "hook"];
   const check = (html) => {
     const panels = lockedPanels(html);
@@ -460,14 +475,14 @@ test("locks: every locked panel names a server-side feature, and a live one is r
   };
 
   // Free: Plus and Team, and the two Plus features with panels of their own.
-  assert.deepEqual(check(await home()).sort(), ["ci-tokens", "members", "plus", "team"]);
+  assert.deepEqual(check(await all()).sort(), ["ci-tokens", "members", "plus", "team"]);
   // Plus: only Team stays locked.
   const { sub } = subscription(e, "active", o);
-  assert.deepEqual(check(await home()), ["team"]);
+  assert.deepEqual(check(await all()), ["team"]);
   // Team: nothing is locked.
   grant(e, o, "team");
-  assert.deepEqual(check(await home()), []);
+  assert.deepEqual(check(await all()), []);
   run(e, "DELETE FROM grants");
   run(e, "UPDATE subscriptions SET status = 'canceled' WHERE id = ?", sub);
-  assert.deepEqual(check(await home()).sort(), ["ci-tokens", "members", "plus", "team"]);
+  assert.deepEqual(check(await all()).sort(), ["ci-tokens", "members", "plus", "team"]);
 });

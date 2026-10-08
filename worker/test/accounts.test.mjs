@@ -492,7 +492,7 @@ test("a form is refused from another host, without its origin, or without its to
   const e = env();
   const b = new Browser(e);
   await signIn(b, s, "ana@example.com");
-  const home = await b.get("/");
+  const home = await b.get("/security");
   const token = tokenFor(home.text, "/signout");
   for (const headers of [
     { "sec-fetch-site": "same-site", origin: "https://ranwhat.com" },
@@ -539,6 +539,51 @@ test("sign-in sends you on only to a page on the list", async () => {
                               "cf-turnstile-response": solved("signin") });
     assert.equal((await typeCode(b, codeIn(s.emails.at(-1)))).location, "/", asked);
   }
+});
+
+test("every account page needs a session, sign-in comes back to it, and a form that fails draws its own page again", async () => {
+  const s = services();
+  const e = env();
+  const PAGES = ["/", "/machines", "/members", "/billing", "/security", "/activity"];
+  const nobody = new Browser(e);
+  for (const path of PAGES) {
+    const r = await nobody.get(path);
+    assert.deepEqual([r.status, r.location], [303, "/signin"], path);
+  }
+  for (const path of PAGES) {
+    const b = new Browser(e, { ip: `198.51.100.${60 + PAGES.indexOf(path)}` });
+    const form = await b.get(`/signin?next=${encodeURIComponent(path)}`);
+    assert.match(form.text, new RegExp(`name="next" value="${path}"`));
+    await b.post("/signin", { form: tokenFor(form.text, "/signin"), email: `p${PAGES.indexOf(path)}@example.com`, next: path,
+                              "cf-turnstile-response": solved("signin") });
+    assert.equal((await typeCode(b, codeIn(s.emails.at(-1)))).location, path);
+    const shown = await b.get(path);
+    assert.equal(shown.status, 200, path);
+    /* One page of the six is the current one, and says so. */
+    assert.deepEqual([...shown.text.matchAll(/<a href="([^"]+)" aria-current="page">/g)].map((m) => m[1]), [path]);
+    assert.equal(shown.text.match(/<h1>/g).length, 1, path);
+  }
+
+  /* A form that fails is answered with the page it is on, and what went wrong. */
+  const ana = new Browser(e, { ip: "198.51.100.70" });
+  await signIn(ana, s, "ana@example.com");
+  const members = await ana.get("/members");
+  const org = members.text.match(/<form method="post" action="\/org">[\s\S]*?name="org" value="([^"]+)"/)[1];
+  const badName = await ana.post("/org", { form: tokenFor(members.text, "/org"), org, name: "" });
+  assert.equal(badName.status, 400);
+  assert.match(badName.text, /<a href="\/members" aria-current="page">/);
+  assert.match(badName.text, /A name is 1 to 80 characters/);
+  later(20 * MINUTE);
+  const late = await ana.post("/password", { form: await formToken(e, sha(ana.jar.get(SESSION)), "password"),
+                                            password: "a password added too late" });
+  assert.equal(late.status, 403);
+  assert.match(late.text, /<a href="\/security" aria-current="page">/);
+  assert.match(late.text, /Adding a password needs an emailed code/);
+  const nowhere = await ana.post("/machines/rename", { form: await formToken(e, sha(ana.jar.get(SESSION)), "machine-rename"),
+                                                       id: crypto.randomUUID(), label: "x" });
+  assert.equal(nowhere.status, 404);
+  assert.match(nowhere.text, /<a href="\/machines" aria-current="page">/);
+  assert.match(nowhere.text, /That machine is not one of this organisation's/);
 });
 
 /* ---------- sessions ---------- */
@@ -588,7 +633,7 @@ test("sign out ends this session; sign out everywhere ends every one of the acco
   replay.jar.set(SESSION, old);
   assert.equal((await replay.get("/")).location, "/signin", "a signed-out cookie opens nothing");
 
-  page = await phone.get("/");
+  page = await phone.get("/security");
   r = await phone.post("/signout-all", { form: tokenFor(page.text, "/signout-all") });
   assert.equal(r.status, 303);
   assert.equal((await phone.get("/")).location, "/signin");
@@ -1180,16 +1225,16 @@ test("no page runs our script; Turnstile's alone loads, only on the forms that m
   plain.push(await b.get("/signin/code"));
   challenged.push(await b.get("/signin/again"));
   await typeCode(b, codeIn(s.emails.at(-1)));
-  plain.push(await b.get("/"));
+  for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) plain.push(await b.get(path));
   /* A step-up's code page sends a signed-in person back to the account
      page for a new code, never to a page with Turnstile on it. */
   later(20 * MINUTE);
   await b.post("/stepup", { form: await formToken(e, sha(b.jar.get(SESSION)), "stepup") });
   const stepup = await b.get("/signin/code");
-  assert.match(stepup.text, /<a href="\/">ask for a new code<\/a>/);
+  assert.match(stepup.text, /<a href="\/security">ask for a new code<\/a>/);
   assert.doesNotMatch(stepup.text, /\/signin\/again/);
   plain.push(stepup);
-  assert.equal((await b.get("/signin/again")).location, "/");
+  assert.equal((await b.get("/signin/again")).location, "/security");
   const POLICY = "default-src 'none'; style-src 'sha256-[A-Za-z0-9+/]+=*'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
   for (const [r, challenge] of [...challenged.map((r) => [r, true]), ...plain.map((r) => [r, false])]) {
     const csp = r.headers.get("content-security-policy");
@@ -1225,12 +1270,12 @@ test("an owner renames the organisation; a name is escaped, and a member cannot"
   const e = env();
   const ana = new Browser(e);
   await signIn(ana, s, "ana@example.com");
-  let home = await ana.get("/");
+  let home = await ana.get("/members");
   /* The form names the organisation it was drawn for. */
   const drawnFor = home.text.match(/<form method="post" action="\/org">[\s\S]*?name="org" value="([^"]+)"/)[1];
   let r = await ana.post("/org", { form: tokenFor(home.text, "/org"), org: drawnFor, name: "  Acme <b>&\n Co  " });
-  assert.equal(r.location, "/");
-  home = await ana.get("/");
+  assert.equal(r.location, "/members");
+  home = await ana.get("/members");
   assert.ok(home.text.includes("Acme &lt;b&gt;&amp; Co"));
   assert.ok(!home.text.includes("<b>&"));
   assert.equal(rows(e, "SELECT name FROM orgs")[0].name, "Acme <b>& Co");
@@ -1247,7 +1292,7 @@ test("an owner renames the organisation; a name is escaped, and a member cannot"
   const [{ id: boId }] = rows(e, "SELECT id FROM users WHERE email = 'bo@example.com'");
   e.LIST.sql.prepare("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', 0)").run(acme, boId);
   e.LIST.sql.prepare("UPDATE sessions SET org_id = ? WHERE user_id = ?").run(acme, boId);
-  const theirs = await bo.get("/");
+  const theirs = await bo.get("/members");
   assert.ok(theirs.text.includes("Acme &lt;b&gt;&amp; Co") && theirs.text.includes("Member"));
   assert.doesNotMatch(theirs.text, /action="\/org"/);
   r = await bo.post("/org", { form: await formToken(e, sha(bo.jar.get(SESSION)), `org:${acme}`), org: acme, name: "Taken" });
@@ -1266,7 +1311,7 @@ test("renames and organisation switches write only what changes, and only so man
   const e = env();
   const ana = new Browser(e, { ip: "203.0.113.5" });
   await signIn(ana, s, "ana@example.com");
-  const home = await ana.get("/");
+  const home = await ana.get("/members");
   const org = home.text.match(/<form method="post" action="\/org">[\s\S]*?name="org" value="([^"]+)"/)[1];
   const rename = (name) => ana.post("/org", { form: tokenFor(home.text, "/org"), org, name });
   const written = () => rows(e, "SELECT count(*) AS n FROM auth_events")[0].n;
@@ -1274,11 +1319,11 @@ test("renames and organisation switches write only what changes, and only so man
 
   /* A rename to the name it has writes nothing. */
   let before = written();
-  assert.equal((await rename("Personal")).location, "/");
+  assert.equal((await rename("Personal")).location, "/members");
   assert.equal(written(), before);
 
   /* RENAMES_PER_DAY renames, then a 429 that writes nothing. */
-  for (let i = 0; i < RENAMES_PER_DAY; i++) assert.equal((await rename(`Name ${i}`)).location, "/");
+  for (let i = 0; i < RENAMES_PER_DAY; i++) assert.equal((await rename(`Name ${i}`)).location, "/members");
   assert.equal(events("org_renamed"), RENAMES_PER_DAY);
   before = written();
   const throttles = rows(e, "SELECT count(*) AS n, coalesce(sum(count), 0) AS c FROM throttle")[0];
@@ -1309,7 +1354,7 @@ test("renames and organisation switches write only what changes, and only so man
 
   /* The next day, both go on. */
   later(DAY + 1);
-  assert.equal((await rename("Tomorrow")).location, "/");
+  assert.equal((await rename("Tomorrow")).location, "/members");
   assert.equal((await to(SWITCHES_PER_DAY % 2 ? org : other)).location, "/");
 });
 
@@ -1321,7 +1366,7 @@ test("renames and switches sent at once are held to the day's count, and those t
     const ana = new Browser(e, { ip: "203.0.113.5" });
     await signIn(ana, s, "ana@example.com");
     const [{ id: user }] = rows(e, "SELECT id FROM users WHERE email = 'ana@example.com'");
-    const home = await ana.get("/");
+    const home = await ana.get("/members");
     const org = home.text.match(/<form method="post" action="\/org">[\s\S]*?name="org" value="([^"]+)"/)[1];
     const form = tokenFor(home.text, "/org");
     const other = crypto.randomUUID();
@@ -1333,7 +1378,7 @@ test("renames and switches sent at once are held to the day's count, and those t
 
     /* Ten renames at once to one new name: one is made, and counted once. */
     let replies = await Promise.all(Array.from({ length: 10 }, () => ana.post("/org", { form, org, name: "Acme Two" })));
-    assert.equal(at(replies, "/"), 10);
+    assert.equal(at(replies, "/members"), 10);
     assert.equal(events("org_renamed"), 1);
     assert.equal(await peek(e, "rename-user", user, DAY), 1);
 
@@ -1342,7 +1387,7 @@ test("renames and switches sent at once are held to the day's count, and those t
        the day's number. */
     replies = await Promise.all(Array.from({ length: 2 * RENAMES_PER_DAY }, (_, i) =>
       ana.post("/org", { form, org, name: `Name ${i}` })));
-    assert.equal(at(replies, "/"), RENAMES_PER_DAY - 1);
+    assert.equal(at(replies, "/members"), RENAMES_PER_DAY - 1);
     assert.equal(replies.filter((r) => r.status === 429).length, RENAMES_PER_DAY + 1);
     assert.equal(events("org_renamed"), RENAMES_PER_DAY);
     assert.equal(await peek(e, "rename-user", user, DAY), RENAMES_PER_DAY);

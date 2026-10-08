@@ -17,41 +17,232 @@
  * escape() could not style itself either. Nothing loads from ranwhat.com,
  * so GTM, the analytics and the X pixel that run there never share a page
  * with a signed-in session.
+ *
+ * Two layouts share that one style. page() is the narrow centred card of
+ * the pages around signing in and of every one-off page (a code, a
+ * passkey, a terminal to approve, the upgrade, an invite, an error).
+ * shell() is the signed-in app: a sidebar with the organisation, the six
+ * account pages and signing out, which becomes a top bar on a phone, and
+ * the page's own header and cards. Neither needs a script: the nav is
+ * links, and the organisation switcher a form. Icons are inline SVG
+ * markup drawn here (icon()), since default-src 'none' lets no image,
+ * font or anything else be fetched.
  */
 import { escape } from "./list.js";
 import { CHALLENGE_ORIGIN, CHALLENGE_SCRIPT, SITEKEY } from "./challenge.js";
 import { ACCOUNT_ORIGIN } from "./accounts.js";
 
-/* The site's colours, without its font: /fonts/ is on ranwhat.com, which
-   this host's policy does not reach. */
+/* ranwhat.com's colours, both themes, with system fonts in place of its
+   own: /fonts/ is on ranwhat.com, which this host's policy does not reach.
+   Dark when the device is. --line is for the edges of inputs and buttons,
+   which need 3:1 against what they sit on; --rule only separates. */
 const CSS = `
-:root{--ground:#edeff1;--surface:#fff;--ink:#12171c;--muted:#5a6672;--rule:#d5dae0;--brand:#b8482d;--bad:#a3261b}
-@media(prefers-color-scheme:dark){:root{--ground:#0E1318;--surface:#151C23;--ink:#e9edf0;--muted:#8e99a4;--rule:#242C34;--brand:#d0603f;--bad:#f08070}}
+:root{color-scheme:light;--ground:#edeff1;--surface:#fff;--raise:#f7f8f9;--ink:#12171c;--ink-2:#39434e;--muted:#5a6672;--line:#8b95a1;--rule:#d5dae0;--rule-2:#e4e8ec;--brand:#b8482d;--on-brand:#fff;--brand-bg:#fbeeea;--crit:#b02a1e;--crit-bg:#f7e9e7;--warn:#8a5a00;--warn-bg:#f8f0df;--ok:#1b6b4a;--ok-bg:#e6f0eb;--info:#2a4f7c;--info-bg:#e8eef5;--focus:#2a4f7c;--sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--ground:#0E1318;--surface:#151B21;--raise:#1C242C;--ink:#e9edf0;--ink-2:#c2cad2;--muted:#8e99a4;--line:#66717c;--rule:#242C34;--rule-2:#1A2127;--brand:#ea8471;--on-brand:#0E1318;--brand-bg:#2a1714;--crit:#ea8471;--crit-bg:#2a1714;--warn:#d7a44f;--warn-bg:#271e10;--ok:#72c69d;--ok-bg:#12241c;--info:#8db4dd;--info-bg:#141e29;--focus:#8db4dd}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.6 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
-main{max-width:560px;margin:8vh auto 40px;padding:32px 28px;background:var(--surface);border:1px solid var(--rule)}
-@media(max-width:600px){main{margin:0;border:0;padding:24px 16px}}
-.wm{font:700 16px Menlo,Consolas,monospace;color:var(--ink);text-decoration:none}.wm i{font-style:normal;color:var(--brand)}
-h1{font-size:28px;line-height:1.15;letter-spacing:-.02em;margin:26px 0 10px}
-h2{font-size:15px;margin:26px 0 8px}
-p{color:var(--muted);margin:0 0 14px}a{color:var(--ink)}
-.bad{color:var(--bad)}
-label{display:block;font-size:14px;margin:14px 0 6px}
-input[type=email],input[type=text],input[type=password],select{width:100%;font:16px Menlo,Consolas,monospace;padding:10px 12px;background:var(--ground);color:var(--ink);border:1px solid var(--rule)}
-button{margin-top:12px;font:13px Menlo,Consolas,monospace;padding:11px 16px;background:transparent;color:var(--ink);border:1px solid var(--ink);cursor:pointer}
-button:hover{background:var(--ink);color:var(--surface)}
-a.button{display:inline-block;margin:12px 8px 0 0;font:13px Menlo,Consolas,monospace;padding:11px 16px;color:var(--ink);border:1px solid var(--ink);text-decoration:none}
-a.button:hover{background:var(--ink);color:var(--surface)}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;background:var(--ground);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+[hidden]{display:none!important}
+a{color:inherit;text-underline-offset:.2em;text-decoration-thickness:1px}
+a:hover{color:var(--brand)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+h1,h2,h3{color:var(--ink);text-wrap:balance}
+p{margin:0 0 14px;color:var(--ink-2)}
+p,li,dd{text-wrap:pretty}
+small{font-size:13px;color:var(--muted)}
+strong{font-weight:600;color:var(--ink)}
+code{font:.92em var(--mono)}
+ul{padding-left:18px;color:var(--ink-2)}li{margin:4px 0}
+dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 20px;margin:0 0 14px}
+dt{color:var(--muted);font-size:14px}dd{margin:0;overflow-wrap:anywhere}
+details{margin:8px 0}summary{cursor:pointer;font-size:14px;color:var(--ink)}
+.i{width:18px;height:18px;flex:none}
+.skip{position:absolute;left:12px;top:-80px;z-index:20;padding:8px 14px;border-radius:6px;background:var(--ink);color:var(--surface);font-weight:500;text-decoration:none}
+.skip:focus{top:12px;color:var(--surface)}
+.label{display:block;font:500 11px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.wm{font:600 17px/1 var(--mono);letter-spacing:-.03em;color:var(--ink);text-decoration:none}
+.wm i{font-style:normal;color:var(--brand)}
+.wm:hover{color:var(--ink)}
+.mark{display:flex;align-items:baseline;gap:9px}
+.mark .label{font-size:10.5px}
+label{display:block;margin:14px 0 6px;font-size:14px;font-weight:500;color:var(--ink)}
+label:has(input[type=checkbox]){display:flex;gap:9px;align-items:flex-start;font-weight:400;color:var(--ink-2)}
+input[type=checkbox]{width:16px;height:16px;margin:3px 0 0;flex:none;accent-color:var(--brand)}
+input[type=email],input[type=text],input[type=password],select{display:block;width:100%;margin:0;padding:9px 11px;font:15px/1.35 var(--sans);color:var(--ink);background:var(--raise);border:1px solid var(--line);border-radius:6px}
+input[name=code]{font-family:var(--mono);letter-spacing:.08em}
+input::placeholder{color:var(--muted);opacity:1}
+input:focus-visible,select:focus-visible{outline:2px solid var(--focus);outline-offset:1px;border-color:var(--focus)}
+button,.button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;max-width:100%;margin:14px 0 0;padding:9px 15px;font:500 14px/1.25 var(--sans);text-align:center;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;text-decoration:none;cursor:pointer}
+button:hover,.button:hover,.btn:hover{color:var(--ink);border-color:var(--ink)}
+button.primary,a.primary{color:var(--on-brand);background:var(--brand);border-color:var(--brand)}
+button.primary:hover,a.primary:hover{color:var(--on-brand);border-color:var(--brand);filter:brightness(1.08)}
+button.danger,a.danger{color:var(--crit);background:transparent;border-color:var(--crit)}
+button.danger:hover,a.danger:hover{color:var(--crit);background:var(--crit-bg);border-color:var(--crit)}
+button.compact,a.compact{margin:0;padding:6px 11px;font-size:13px}
+a.button{margin-right:8px}
 form.row{display:inline-block;margin-right:8px}
-details{margin:6px 0}summary{cursor:pointer;font-size:14px;color:var(--ink)}
-dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0 0 8px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
-ul{padding-left:18px;color:var(--muted)}li{margin:2px 0}
-small{color:var(--muted)}
-.panel{border:1px solid var(--rule);padding:2px 18px 6px;margin:18px 0}.panel h2{margin-top:16px}
-.locked{border-style:dashed}.locked strong{color:var(--muted)}
-.tag{font:12px Menlo,Consolas,monospace;color:var(--muted)}
-.secret{display:block;margin:0 0 14px;padding:10px 12px;font:15px/1.5 Menlo,Consolas,monospace;color:var(--ink);background:var(--ground);border:1px solid var(--rule);overflow-wrap:anywhere;user-select:all}
-.cf-turnstile{min-height:65px;margin-top:14px}`;
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:16px}
+.actions>*{margin:0}.actions form button{margin:0}
+.bad{color:var(--crit)}
+p.bad{padding:10px 12px;background:var(--crit-bg);border-radius:6px;font-size:14px}
+.cf-turnstile{min-height:65px;margin-top:14px}
+.secret{display:block;margin:0 0 16px;padding:12px 14px;font:15px/1.5 var(--mono);color:var(--ink);background:var(--raise);border:1px solid var(--rule);border-radius:6px;overflow-wrap:anywhere;user-select:all;-webkit-user-select:all}
+.pill,.tag{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;font:500 11px/1.3 var(--mono);letter-spacing:.03em;color:var(--muted);background:var(--raise);border:1px solid var(--rule);border-radius:4px;white-space:nowrap;vertical-align:1px}
+.pill .i{width:12px;height:12px}
+.pill.brand{color:var(--brand);background:var(--brand-bg);border-color:transparent}
+.pill.ok{color:var(--ok);background:var(--ok-bg);border-color:transparent}
+.pill.warn{color:var(--warn);background:var(--warn-bg);border-color:transparent}
+.pill.crit{color:var(--crit);background:var(--crit-bg);border-color:transparent}
+.pill.info{color:var(--info);background:var(--info-bg);border-color:transparent}
+.lock{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:6px;color:var(--brand);background:var(--brand-bg);flex:none}
+.lock .i{width:14px;height:14px}
+.cmd{display:flex;gap:10px;align-items:center;margin:10px 0 0;padding:10px 12px;font:13.5px/1.4 var(--mono);color:var(--ink);background:var(--raise);border:1px solid var(--rule);border-radius:6px;overflow-x:auto}
+.cmd::before{content:"$";color:var(--muted)}
+.cmd code{font:inherit;white-space:nowrap;user-select:all;-webkit-user-select:all}
+.callout{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-start;padding:14px 16px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+.callout>.i{margin-top:2px;color:var(--muted)}
+.callout-text{flex:1 1 280px;min-width:0}
+.callout-text p{margin:0}.callout-text strong{display:block;margin-bottom:2px}
+.callout form button{margin:0}
+.callout.info{background:var(--info-bg);border-color:transparent}.callout.info>.i{color:var(--info)}
+.callout.ok{background:var(--ok-bg);border-color:transparent}.callout.ok>.i{color:var(--ok)}
+.callout.warn{background:var(--warn-bg);border-color:transparent}.callout.warn>.i{color:var(--warn)}
+.empty{padding:22px;text-align:center;border:1px dashed var(--rule);border-radius:8px;color:var(--muted)}
+.empty p{color:var(--muted)}
+.solo{display:flex;flex-direction:column;align-items:center;padding:7vh 16px 48px}
+.solo-top,.solo-card{width:100%;max-width:520px}
+.solo-top{margin:0 0 16px;padding:0 2px}
+.solo-card{padding:30px 30px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:8px}
+.solo-card h1{margin:0 0 12px;font-size:25px;line-height:1.2;letter-spacing:-.022em;font-weight:650}
+.solo-card h2{margin:24px 0 8px;font-size:15px}
+.solo-card>:last-child{margin-bottom:0}
+@media(max-width:560px){.solo{padding:16px 12px 32px}.solo-card{padding:22px 18px 18px}}
+.app{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+.side{background:var(--surface);border-right:1px solid var(--rule)}
+.side-in{position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column;gap:22px;padding:22px 16px 18px}
+.side .mark{padding:2px 8px 0}
+.org{padding:12px;background:var(--raise);border:1px solid var(--rule);border-radius:8px}
+.org-name{display:block;margin:5px 0 8px;font-size:14.5px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.org-meta{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;font-size:13px;color:var(--muted)}
+.switch{margin-top:12px;padding-top:10px;border-top:1px solid var(--rule)}
+.switch label{margin:0 0 6px;font:500 11px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.switch-row{display:flex;gap:6px}
+.switch select{min-width:0;padding:5px 8px;font-size:13px;background:var(--surface)}
+.switch button{margin:0;padding:5px 10px;font-size:13px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;font-size:14.5px;color:var(--ink-2);text-decoration:none}
+.nav a .i{color:var(--muted)}
+.nav a:hover{color:var(--ink);background:var(--raise)}
+.nav a[aria-current=page]{color:var(--ink);font-weight:600;background:var(--brand-bg)}
+.nav a[aria-current=page] .i{color:var(--brand)}
+.side-foot{margin-top:auto;padding:14px 8px 0;border-top:1px solid var(--rule)}
+.side-foot .who{margin:4px 0 10px;font-size:13.5px;overflow-wrap:anywhere}
+.side-foot form button{margin:0}
+.main{min-width:0;padding:30px 40px 56px}
+.page{max-width:1120px;margin:0 auto}
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px 24px;margin:0 0 24px}
+.head h1{margin:0;font-size:27px;line-height:1.15;letter-spacing:-.025em;font-weight:650}
+.head p{margin:6px 0 0;max-width:72ch;color:var(--muted)}
+.head-act{display:flex;flex-wrap:wrap;gap:10px}.head-act>*,.head-act button{margin:0}
+.foot{margin-top:40px;font-size:13px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
+.grid>*{grid-column:1/-1;min-width:0}
+.grid>.c7{grid-column:span 7}.grid>.c5{grid-column:span 5}.grid>.c8{grid-column:span 8}.grid>.c4{grid-column:span 4}.grid>.c6{grid-column:span 6}
+.stack{display:flex;flex-direction:column;gap:16px;min-width:0}
+.section-label{margin:10px 0 -4px}
+.card,.panel{min-width:0;padding:20px;background:var(--surface);border:1px solid var(--rule);border-radius:8px}
+.card>:last-child,.panel>:last-child{margin-bottom:0}
+.card-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;margin:0 0 14px}
+.card-head h2,.card-head h3{display:flex;align-items:center;gap:9px;margin:0;font-size:15.5px;line-height:1.3;font-weight:600;letter-spacing:-.01em}
+.card-head .i{color:var(--muted)}
+.card-head a{font-size:13.5px}
+.card p{font-size:14.5px}
+.panel{padding:2px 20px 18px}
+.panel h2{margin:16px 0 10px;font-size:15.5px}
+.panel .panel{margin-top:16px;background:var(--raise)}
+.locked{border-style:dashed}
+.danger-zone{border-color:color-mix(in srgb,var(--crit) 40%,var(--rule))}
+.danger-zone .card-head h2 .i{color:var(--crit)}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.stat{display:flex;flex-direction:column;min-width:0;padding:16px 18px;color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:8px;text-decoration:none}
+.stat:hover{color:var(--ink);border-color:var(--line)}
+.stat .label{display:flex;align-items:center;gap:7px}
+.stat .label .i{width:15px;height:15px}
+.stat-v{margin:10px 0 2px;font:600 26px/1.15 var(--mono);letter-spacing:-.03em}
+.stat-s{font-size:13px;color:var(--muted)}
+.steps{margin:0;padding:0;list-style:none}
+.step{display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;margin:0;padding:14px 0;border-top:1px solid var(--rule-2)}
+.step:first-child{padding-top:2px;border-top:0}.step:last-child{padding-bottom:0}
+.step-mark{display:grid;place-items:center;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;font:500 12px var(--mono);color:var(--muted)}
+.step-mark .i{width:15px;height:15px}
+.step.done .step-mark{color:var(--ok);background:var(--ok-bg);border-color:transparent}
+.step-title{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-weight:600;color:var(--ink)}
+.step p{margin:4px 0 0;font-size:14px;color:var(--muted)}
+.events{margin:0;padding:0;list-style:none}
+.events li{display:flex;justify-content:space-between;gap:14px;margin:0;padding:10px 0;font-size:14px;color:var(--ink-2);border-top:1px solid var(--rule-2)}
+.events li:first-child{padding-top:0;border-top:0}
+.events time,.when{flex:none;font:12px/1.6 var(--mono);color:var(--muted);white-space:nowrap}
+.upsell{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);padding:0;overflow:hidden;border-style:solid}
+.upsell-intro{padding:24px;background:linear-gradient(165deg,var(--brand-bg) 0%,var(--surface) 85%);border-right:1px solid var(--rule)}
+.upsell-intro .lock{background:var(--surface);border:1px solid var(--rule)}
+.upsell-intro h2{display:flex;align-items:center;gap:10px;margin:0 0 4px;font-size:21px;letter-spacing:-.02em}
+.upsell-intro .lead{margin:12px 0;font-size:15px;color:var(--ink)}
+.price{margin:16px 0 0;font:500 14px var(--mono);color:var(--ink)}
+.upsell-intro .actions{margin-top:18px}
+.feats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0;padding:20px;list-style:none}
+.feat{margin:0;padding:12px 14px;background:var(--raise);border:1px solid var(--rule);border-radius:6px}
+.feat-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.feat-top strong{flex:1 1 auto;font-size:14px}
+.feat-top .i{width:15px;height:15px;color:var(--brand)}
+.feat.on .feat-top .i{color:var(--ok)}
+.feat p{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.team .feats{padding:0;margin-top:12px}
+.table{width:100%;border-collapse:collapse;font-size:14px}
+.table th{padding:0 14px 10px 0;font:500 11px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;text-align:left;color:var(--muted);border-bottom:1px solid var(--rule)}
+.table td{padding:11px 14px 11px 0;vertical-align:top;color:var(--ink-2);border-bottom:1px solid var(--rule-2)}
+.table tr:last-child td{border-bottom:0}
+.method-items{margin:12px 0 10px;padding:0;list-style:none;border:1px solid var(--rule);border-radius:6px}
+.method-items li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;margin:0;padding:10px 12px;border-top:1px solid var(--rule-2)}
+.method-items li:first-child{border-top:0}
+.method-items form button{margin:0}
+.method-form{max-width:440px}
+.hint{font-size:13.5px;color:var(--muted)}
+form+.hint{margin-top:8px}
+.method-form.split{margin-top:18px;padding-top:4px;border-top:1px solid var(--rule-2)}
+.feat.on .feat-top .soon .i{color:var(--muted)}
+@media(max-width:1179px){.grid>.c7,.grid>.c5,.grid>.c8,.grid>.c4{grid-column:1/-1}.upsell{grid-template-columns:minmax(0,1fr)}.upsell-intro{border-right:0;border-bottom:1px solid var(--rule)}}
+@media(max-width:1099px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:899px){
+.app{display:block}
+.side{border-right:0;border-bottom:1px solid var(--rule)}
+.side-in{position:static;height:auto;overflow:visible;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"mark foot" "org org" "nav nav";gap:12px;padding:14px 16px 12px}
+.side .mark{grid-area:mark;padding:0;align-self:center}
+.side-foot{grid-area:foot;margin:0;padding:0;border:0;align-self:center}
+.side-foot .label,.side-foot .who{display:none}
+.org{grid-area:org;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:0;background:none;border:0}
+.org>.label{display:none}
+.org-name{margin:0}
+.switch{flex:1 1 100%;margin:4px 0 0;padding:0;border:0}
+.nav{grid-area:nav;flex-direction:row;gap:6px;margin:0 -16px;padding:0 16px 2px;overflow-x:auto;scrollbar-width:none}
+.nav a{flex:none;padding:6px 12px 6px 10px;font-size:13.5px;border:1px solid var(--rule);border-radius:999px}
+.nav a .i{width:15px;height:15px}
+.nav a[aria-current=page]{border-color:transparent}
+.main{padding:22px 16px 40px}
+.head h1{font-size:23px}
+}
+@media(max-width:639px){
+.feats{grid-template-columns:minmax(0,1fr)}
+.upsell-intro,.feats{padding:18px}
+.card:not(.upsell),.panel{padding-left:16px;padding-right:16px}
+.stat{padding:14px}.stat .label{min-height:31px;align-items:flex-start}
+.table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.table,.table tbody,.table tr,.table td{display:block}
+.table tr{padding:10px 0;border-bottom:1px solid var(--rule-2)}
+.table tr:last-child{border-bottom:0}
+.table td{padding:2px 0;border:0}
+.events li{flex-direction:column;gap:2px}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}`;
 
 let styleHash = null;
 
@@ -103,20 +294,155 @@ async function secured(headers, { challenge = false, away = [], passkeys = false
   return headers;
 }
 
-/* An HTML page. body is markup already escaped by the caller. challenge:
-   the page holds a widget() and may load Turnstile's script. passkeys:
-   the page holds a passkey form and loads /passkeys.js. away: see csp(). */
-export async function page(title, body, { status = 200, cookies = [], challenge = false, away = [], passkeys = false } = {}) {
-  const script = challenge ? `\n<script src="${CHALLENGE_SCRIPT}" async defer></script>`
-    : passkeys ? `\n<script src="/passkeys.js" defer></script>` : "";
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+/* ---------- icons ---------- */
+
+/* Hand-drawn on a 24-unit grid, stroked in the text's colour, and hidden
+   from screen readers: every one sits beside words that say the same. */
+const PATHS = Object.freeze({
+  overview: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+  machines: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/>',
+  members: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><path d="M15.5 5.3a3.5 3.5 0 0 1 0 6.4M17.8 14.9c1.9.7 3.2 2.3 3.7 4.6"/>',
+  billing: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6.5 15h4"/>',
+  security: '<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6L12 3z"/><path d="M9 12.2l2.2 2.2 4.3-4.4"/>',
+  activity: '<path d="M3 12h4l2.5-6.5 5 13 2.5-6.5h4"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  mail: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/>',
+  password: '<rect x="2.5" y="6.5" width="19" height="11" rx="2"/><path d="M7 12h.01M12 12h.01M17 12h.01" stroke-width="2.6"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L19.5 3.5M16 7l2.5 2.5M13.5 9.5l2 2"/>',
+  exit: '<path d="M14 4.5h3.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H14M10 16l-4-4 4-4M6 12h9.5"/>',
+  alert: '<path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4.5M12 17.2h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/>',
+  team: '<path d="M4 20.5V7l8-3.5L20 7v13.5M2.5 20.5h19M9.5 20.5v-4h5v4M8.5 9.5h1M14.5 9.5h1M8.5 13h1M14.5 13h1"/>',
+  spark: '<path d="M12 3.5l1.9 5.4 5.6 1.6-5.6 1.6L12 17.5l-1.9-5.4-5.6-1.6 5.6-1.6L12 3.5zM18.5 16l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"/>',
+});
+
+export const icon = (name) => (Object.hasOwn(PATHS, name)
+  ? `<svg class="i" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" ` +
+    `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${PATHS[name]}</svg>`
+  : "");
+
+/* ---------- components ---------- */
+
+const TONES = new Set(["brand", "ok", "warn", "crit", "info"]);
+
+/* A short state, in words: text is escaped here. tone: one of TONES, or
+   neutral. */
+export const pill = (text, tone = "", attributes = "") =>
+  `<span class="pill${TONES.has(tone) ? ` ${tone}` : ""}"${attributes ? ` ${attributes}` : ""}>${escape(text)}</span>`;
+
+/* The badge beside something a plan unlocks. */
+export const lockBadge = () => `<span class="lock">${icon("lock")}</span>`;
+
+/* A command to type, selected whole on one click. text is escaped here. */
+export const command = (text) => `<div class="cmd"><code>${escape(text)}</code></div>`;
+
+/* A titled card. title is escaped here; aside, body and attributes are
+   markup already escaped by the caller. */
+export const card = ({ title, icon: name = "", aside = "", body, cls = "", attributes = "", tag = "section", level = 2 }) =>
+  `<${tag} class="card${cls ? ` ${cls}` : ""}"${attributes ? ` ${attributes}` : ""}>
+    <header class="card-head"><h${level}>${icon(name)}${escape(title)}</h${level}>${aside}</header>
+    ${body}</${tag}>`;
+
+/* A number with its caption, linking to where it comes from. label, value
+   and sub are escaped here. */
+export const stat = ({ label, value, sub = "", href, icon: name = "", id = "" }) =>
+  `<a class="stat" href="${escape(href)}"><span class="label">${icon(name)}${escape(label)}</span>` +
+  `<span class="stat-v"${id ? ` id="${escape(id)}"` : ""}>${escape(value)}</span>` +
+  `<span class="stat-s">${escape(sub)}</span></a>`;
+
+/* A notice across the page. tone: info, ok or warn. title is escaped here;
+   text and act are markup. */
+export const callout = ({ tone = "info", icon: name = "info", title = "", text, act = "", attributes = "" }) =>
+  `<div class="callout ${TONES.has(tone) ? tone : "info"}"${attributes ? ` ${attributes}` : ""}>${icon(name)}` +
+  `<div class="callout-text">${title ? `<strong>${escape(title)}</strong>` : ""}${text}</div>${act}</div>`;
+
+/* An empty list, said so. text is markup. */
+export const empty = (text) => `<div class="empty">${text}</div>`;
+
+/* ---------- pages ---------- */
+
+const doc = (title, script, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex"><title>${escape(title)} | ranwhat account</title>
+<meta name="robots" content="noindex"><meta name="color-scheme" content="light dark">
+<title>${escape(title)} | ranwhat account</title>
 <style>${CSS}</style>${script}</head>
-<body><main><a class="wm" href="/">ran<i>what</i></a>${body}</main></body></html>`;
+${body}</html>`;
+
+const wordmark = `<span class="mark"><a class="wm" href="/">ran<i>what</i></a><span class="label">Account</span></span>`;
+
+async function respond(html, { status, cookies, challenge = false, away = [], passkeys = false }) {
   const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
   for (const c of cookies) headers.append("set-cookie", c);
   return new Response(html, { status, headers: await secured(headers, { challenge, away, passkeys }) });
+}
+
+/* An HTML page in the narrow layout. body is markup already escaped by
+   the caller. challenge: the page holds a widget() and may load
+   Turnstile's script. passkeys: the page holds a passkey form and loads
+   /passkeys.js. away: see csp(). */
+export async function page(title, body, { status = 200, cookies = [], challenge = false, away = [], passkeys = false } = {}) {
+  const script = challenge ? `\n<script src="${CHALLENGE_SCRIPT}" async defer></script>`
+    : passkeys ? `\n<script src="/passkeys.js" defer></script>` : "";
+  const html = doc(title, script, `<body class="solo"><a class="skip" href="#main">Skip to content</a>
+<header class="solo-top">${wordmark}</header>
+<main id="main" class="solo-card">${body}</main>
+</body>`);
+  return respond(html, { status, cookies, challenge, away, passkeys });
+}
+
+/* The signed-in pages, in the order the nav lists them. */
+export const APP_PAGES = Object.freeze([
+  ["overview", "/", "Overview"],
+  ["machines", "/machines", "Machines"],
+  ["members", "/members", "Members"],
+  ["billing", "/billing", "Billing"],
+  ["security", "/security", "Security"],
+  ["activity", "/activity", "Activity"],
+]);
+
+/* A signed-in page: the sidebar, then the page's header and body. Never
+   with a script: no account page has one.
+     current  which of APP_PAGES this is
+     side     { email, org, plan, planTone, role }, text escaped here, and
+              { switcher, signout }, forms already made
+     head     { title, sub, action }: title escaped here, sub and action
+              markup
+     body     markup already escaped by the caller */
+export async function shell({ current, side, head, body, status = 200, cookies = [], away = [] }) {
+  const nav = APP_PAGES.map(([key, path, name]) =>
+    `<a href="${path}"${key === current ? ' aria-current="page"' : ""}>${icon(key)}${name}</a>`).join("\n      ");
+  const html = doc(head.title, "", `<body><a class="skip" href="#main">Skip to content</a>
+<div class="app">
+  <aside class="side" aria-label="Your account"><div class="side-in">
+    ${wordmark}
+    <div class="org">
+      <span class="label">Organisation</span>
+      <span class="org-name">${escape(side.org)}</span>
+      <span class="org-meta">${pill(side.plan, side.planTone)}<span>${escape(side.role)}</span></span>
+      ${side.switcher}
+    </div>
+    <nav class="nav" aria-label="Account pages">
+      ${nav}
+    </nav>
+    <div class="side-foot">
+      <span class="label">Signed in as</span>
+      <span class="who">${escape(side.email)}</span>
+      ${side.signout}
+    </div>
+  </div></aside>
+  <main id="main" class="main"><div class="page">
+    <header class="head"><div><h1>${escape(head.title)}</h1>${head.sub ? `<p>${head.sub}</p>` : ""}</div>${head.action
+      ? `<div class="head-act">${head.action}</div>` : ""}</header>
+    ${body}
+    <footer class="foot"><a href="https://ranwhat.com/">ranwhat.com</a> &middot; <a href="https://ranwhat.com/privacy">Privacy</a></footer>
+  </div></main>
+</div>
+</body>`);
+  return respond(html, { status, cookies, away });
 }
 
 /* JSON for /passkeys.js, with the same headers as a page. */

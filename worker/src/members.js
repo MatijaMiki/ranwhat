@@ -145,6 +145,7 @@ const day = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 const when = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 const problem = (text) => (text ? `<p class="bad">${escape(text)}</p>` : "");
 const back = `<p><a href="/">Your account</a></p>`;
+const backToMembers = `<p><a href="/members">Back to Members</a></p>`;
 const codeAge = `${FRESH_FOR / 60} minutes`;
 
 /* Whom someone in `role` may remove: the owner anyone but themselves, an
@@ -221,18 +222,20 @@ async function orgActivity(env, orgId, since) {
 /* ---------- the panel on the account page ---------- */
 
 /* The organisation switcher, for someone in more than one: nothing for
-   anyone else. next: where to go once switched (the account page, or the
-   page that approves a terminal, device.js). */
-export async function switcher(env, who, next = "/") {
+   anyone else. next: where to go once switched (the account page it is
+   on, or the page that approves a terminal, device.js). compact: the
+   sidebar's, a select and a small button on one line. */
+export async function switcher(env, who, next = "/", { compact = false } = {}) {
   const orgs = await orgsOf(env, who.user);
   if (orgs.length < 2) return "";
   const options = orgs.map((o) => `<option value="${escape(o.id)}"${o.id === who.org.id ? " selected" : ""}>` +
     `${escape(o.name)} (${ROLES[o.role].toLowerCase()})</option>`).join("");
+  const choose = `<select id="org-switch" name="org">${options}</select>
+      <button type="submit"${compact ? ' class="compact"' : ""}>Switch</button>`;
   return form("/org/switch", await formToken(env, who.id, "org-switch"), `
       <input type="hidden" name="next" value="${escape(nextPath(next))}">
       <label for="org-switch">Your organisations</label>
-      <select id="org-switch" name="org">${options}</select>
-      <button type="submit">Switch</button>`);
+      ${compact ? `<span class="switch-row">${choose}</span>` : choose}`, compact ? "switch" : "");
 }
 
 /* Members: locked, with the way up, for a Free organisation that has only
@@ -305,7 +308,7 @@ export async function membersPanel(env, who, onPlan, error = "") {
     ? `<p>${open ? "Inviting someone, changing a role" : "Changing a role"} or removing someone needs an emailed
        code typed in the last ${codeAge}.</p>
     ${form("/stepup", await formToken(env, who.id, "stepup"),
-      `<input type="hidden" name="next" value="/"><button type="submit">Email me a code</button>`)}`
+      `<input type="hidden" name="next" value="/members"><button type="submit">Email me a code</button>`)}`
     : "";
 
   let invite = "";
@@ -367,9 +370,9 @@ async function trouble(env, who, status, text, { stepup = false } = {}) {
   return page("Members", `<h1>Members</h1>
     ${problem(text)}
     ${stepup ? form("/stepup", await formToken(env, who.id, "stepup"), `
-      <input type="hidden" name="next" value="/">
+      <input type="hidden" name="next" value="/members">
       <button type="submit">Email me a code</button>`) : ""}
-    ${back}`, { status });
+    ${backToMembers}`, { status });
 }
 
 const needsCode = (env, who, what) =>
@@ -534,7 +537,7 @@ export async function invitePost(request, env, ctx) {
   ctx.waitUntil(mailInvite(env, { to: email, by: who.email, orgName: org.name, token }).catch((err) => {
     console.log(`invite mail: ${err.code || err.name || "error"}`);
   }));
-  return redirect("/");
+  return redirect("/members");
 }
 
 /* The link is the only way in, so it is in the email, and nothing else
@@ -723,7 +726,7 @@ export async function revokeInvitePost(request, env) {
     db.prepare(`UPDATE invites SET revoked_at = ?, email = NULL WHERE ${where}`).bind(t, ...w),
   ]);
   if (done[1].meta.changes !== 1) return notOurs();
-  return redirect("/");
+  return redirect("/members");
 }
 
 /* ---------- roles, removing, leaving, ownership ---------- */
@@ -754,7 +757,7 @@ export async function rolePost(request, env, ctx) {
   if (role !== "admin" && role !== "member") {
     return trouble(env, who, 400, "Choose admin or member, so nothing was done.");
   }
-  if (target.role === role) return redirect("/");
+  if (target.role === role) return redirect("/members");
   const db = env.LIST;
   const where = `${IS} AND ${IS}`;
   const w = [org.id, who.user, "owner", org.id, target.user_id, target.role];
@@ -772,7 +775,7 @@ export async function rolePost(request, env, ctx) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
   if (role === "member") billingFollows(env, ctx, org.id);
-  return redirect("/");
+  return redirect("/members");
 }
 
 /* POST /members/remove: the owner removes an admin or a member, an admin
@@ -815,7 +818,7 @@ export async function removePost(request, env, ctx) {
     return trouble(env, who, 409, "They left, or their role changed, a moment ago, so nothing was done. Reload your account page.");
   }
   if (target.role === "admin") billingFollows(env, ctx, org.id);
-  return redirect("/");
+  return redirect("/members");
 }
 
 /* POST /members/leave: anyone but the owner leaves the organisation this
@@ -874,7 +877,7 @@ export async function transferPost(request, env, ctx) {
       <input type="hidden" name="org" value="${escape(org.id)}">
       <input type="hidden" name="confirm" value="yes">
       <button type="submit">Make them the owner</button>`)}
-    <p><a href="/">Keep it as it is</a></p>`);
+    <p><a href="/members">Keep it as it is</a></p>`);
   }
   const db = env.LIST;
   const where = `${IS} AND ${IS}`;
@@ -893,7 +896,7 @@ export async function transferPost(request, env, ctx) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
   billingFollows(env, ctx, org.id);
-  return redirect("/");
+  return redirect("/members");
 }
 
 /* ---------- switching ---------- */
