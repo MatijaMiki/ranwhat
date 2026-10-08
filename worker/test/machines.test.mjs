@@ -232,14 +232,23 @@ async function linkTerminal(e, b, label = "Work laptop") {
 
 /* ---------- the account page ---------- */
 
+/* The Machines page's own content: everything but the sidebar. */
 const section = (html) => {
-  const m = html.match(/<section class="panel" id="machines">([\s\S]*?)<\/section>/);
-  assert.ok(m, "no machines section");
+  const m = html.match(/<main id="main" class="main" data-page="machines">([\s\S]*?)<\/main>/);
+  assert.ok(m, "no machines page");
   return m[1];
 };
 
-const listed = (html) => Object.fromEntries([...section(html).matchAll(/<li data-machine="([^"]+)">([\s\S]*?)<\/li>/g)]
+/* Each machine's row in the table, by id. */
+const listed = (html) => Object.fromEntries([...section(html).matchAll(/<tr data-machine="([^"]+)">([\s\S]*?)<\/tr>/g)]
   .map((m) => [m[1], m[2]]));
+
+/* One cell of a machine's row, by its column. */
+const column = (row, name) => {
+  const m = row.match(new RegExp(`<td(?: class="opt")? data-label="${name}">([\\s\\S]*?)</td>`));
+  assert.ok(m, `no ${name} cell`);
+  return m[1];
+};
 
 /* Makes a CI token with the form on the account page. */
 async function makeCi(b, { label = "deploy", expires = "never" } = {}) {
@@ -305,7 +314,7 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   await signIn(ana, s);
   const org = orgOf(e, "ana@example.com");
   let html = (await ana.get("/machines")).text;
-  assert.match(section(html), /None yet\. Run <strong>ranwhat login<\/strong>/);
+  assert.match(section(html), /No machines linked yet\.[\s\S]*?<div class="cmd"><code>uvx ranwhat login<\/code><\/div>/);
 
   const terminal = await linkTerminal(e, ana, "Ana's <laptop>");
   grant(e, org, "plus");
@@ -326,16 +335,19 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   assert.ok(!html.includes(theirs.id), "another organisation's machine is not listed");
   const today = isoDay(unix());
 
-  assert.match(items[terminal.id], /^<strong>Ana's &lt;laptop&gt;<\/strong> <span class="tag">terminal<\/span>/,
+  assert.match(items[terminal.id], /^<td class="cell-main"><strong>Ana's &lt;laptop&gt;<\/strong><\/td><td data-label="Kind"><span class="pill">terminal<\/span><\/td>/,
                "named as it was on the page that approved it, escaped");
-  assert.ok(items[terminal.id].includes(`Linked by ana@example.com on ${today}.`));
-  assert.ok(items[terminal.id].includes(`Last used ${today}.`));
-  assert.match(items[ciId], /^<strong>GitHub Actions<\/strong> <span class="tag">CI<\/span>/);
-  assert.ok(items[ciId].includes(`Made by ana@example.com on ${today}.`));
-  assert.ok(items[ciId].includes("Not used yet."));
-  assert.ok(items[ciId].includes(`Expires ${isoDay(unix() + 90 * DAY)}.`));
-  assert.match(items[old.id], /^<strong>Subscription token<\/strong> <span class="tag">old subscription token<\/span>/);
-  assert.ok(items[old.id].includes("Its use is not recorded."));
+  assert.equal(column(items[terminal.id], "Added by"), "ana@example.com");
+  assert.match(column(items[terminal.id], "Added"), new RegExp(`^<time datetime="${today}" [^>]*>${today}</time>$`));
+  assert.match(column(items[terminal.id], "Last used"), new RegExp(`^<time datetime="${today}" title="${today}">today</time>$`));
+  assert.match(items[ciId], /^<td class="cell-main"><strong>GitHub Actions<\/strong><span class="sub">Expires [0-9-]+<\/span><\/td><td data-label="Kind"><span class="pill info">CI<\/span><\/td>/);
+  assert.equal(column(items[ciId], "Added by"), "ana@example.com");
+  assert.match(column(items[ciId], "Added"), new RegExp(`^<time datetime="${today}" [^>]*>${today}</time>$`));
+  assert.equal(column(items[ciId], "Last used"), '<span class="none">Not used yet</span>');
+  assert.ok(items[ciId].includes(`<span class="sub">Expires ${isoDay(unix() + 90 * DAY)}</span>`));
+  assert.match(items[old.id], /^<td class="cell-main"><strong>Subscription token<\/strong><\/td><td data-label="Kind"><span class="pill warn">old subscription token<\/span><\/td>/);
+  assert.equal(column(items[old.id], "Added by"), '<span class="none">Emailed with a subscription</span>');
+  assert.equal(column(items[old.id], "Last used"), '<span class="none">Not recorded</span>');
 
   /* The page names machines by id, never by token or hash. */
   for (const secret of [terminal.token, ci.token, old.token]) {
@@ -345,7 +357,7 @@ test("the Machines section lists each machine of the organisation: name, kind, w
 
   /* A CI token in use shows its day; a revoked one leaves the list. */
   assert.equal((await feed(e, ci.token)).status, 200);
-  assert.ok(listed((await ana.get("/machines")).text)[ciId].includes(`Last used ${today}.`));
+  assert.match(column(listed((await ana.get("/machines")).text)[ciId], "Last used"), new RegExp(`^<time datetime="${today}"[^>]*>today</time>$`));
   run(e, "UPDATE tokens SET revoked_at = ? WHERE hash = ?", unix(), sha(ci.token));
   assert.equal(listed((await ana.get("/machines")).text)[ciId], undefined);
 });
@@ -377,7 +389,7 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   assert.equal(r.location, "/machines", r.text);
   assert.equal(labelOf(bos.id), "Bo's <b>laptop</b> & co");
   const page = (await ana.get("/machines")).text;
-  assert.ok(listed(page)[bos.id].startsWith("<strong>Bo's &lt;b&gt;laptop&lt;/b&gt; &amp; co</strong>"));
+  assert.ok(listed(page)[bos.id].startsWith('<td class="cell-main"><strong>Bo\'s &lt;b&gt;laptop&lt;/b&gt; &amp; co</strong>'));
   assert.ok(page.includes('value="Bo\'s &lt;b&gt;laptop&lt;/b&gt; &amp; co"'));
   assert.ok(!page.includes("<b>laptop"));
 
@@ -507,8 +519,10 @@ test("revoking needs a fresh code and the right to it, is checked against the or
   later(16 * MINUTE);
   const stale = await ana.get("/machines");
   assert.doesNotMatch(section(stale.text), /action="\/machines\/revoke"/);
-  assert.match(section(stale.text), /Revoking a machine needs an emailed code typed in the last 15 minutes/);
-  assert.match(section(stale.text), /action="\/stepup"/);
+  assert.match(section(stale.text), /Revoking a machine needs an emailed code typed in the last 15 minutes, and so does making a CI token\./);
+  /* Asked for once, at the top of the page, for revoking and for making a CI token alike. */
+  assert.equal([...section(stale.text).matchAll(/action="\/stepup"/g)].length, 1);
+  assert.match(section(stale.text), /<div class="callout warn" id="confirm">[\s\S]*?<input type="hidden" name="next" value="\/machines">/);
   const revokeForm = await formToken(e, ana.session, "machine-revoke");
   let r = await ana.post("/machines/revoke", { form: revokeForm, id: anas.id });
   assert.equal(r.status, 403);
@@ -567,10 +581,10 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
 
   /* Free: the panel is locked, from the map, with the way up, and the form is refused. */
   let html = (await ana.get("/machines")).text;
-  const locked = section(html).match(/<div class="panel locked" id="ci-tokens" data-feature="ci_tokens">([\s\S]*?)<\/div>/);
+  const locked = section(html).match(/<section class="card locked[^"]*" id="ci-tokens" data-feature="ci_tokens">([\s\S]*?)<\/section>/);
   assert.ok(locked, "a locked CI tokens panel");
-  assert.match(locked[1], /CI tokens <span class="tag">locked, needs Plus<\/span>/);
-  assert.match(locked[1], /<a href="\/upgrade">Upgrade to Plus<\/a>/);
+  assert.match(locked[1], /<span class="lock">[\s\S]*?<\/span>CI tokens<\/h2><span class="pill brand">Needs Plus<\/span>/);
+  assert.match(locked[1], /<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
   let r = await forgedCi(e, ana);
   assert.equal(r.status, 403);
@@ -580,7 +594,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   /* Plus opens it, for the owner. */
   grant(e, acme, "plus");
   html = (await ana.get("/machines")).text;
-  assert.doesNotMatch(section(html), /class="panel locked"|Upgrade to Plus/);
+  assert.doesNotMatch(section(html), /class="card locked|Upgrade to Plus/);
   assert.match(section(html), /<select id="ci-expires" name="expires"><option value="never">Never<\/option>/);
 
   /* A member sees no form and is refused one. */
@@ -616,7 +630,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   assert.equal((await makeCi(ana, { label: "on team" })).r.status, 200);
   run(e, "DELETE FROM grants");
   html = (await ana.get("/machines")).text;
-  assert.match(section(html), /class="panel locked" id="ci-tokens"/);
+  assert.match(section(html), /class="card locked[^"]*" id="ci-tokens"/);
   r = await forgedCi(e, ana);
   assert.equal(r.status, 403);
   assert.equal(count(e, "machines"), 2);
@@ -708,9 +722,9 @@ test("a CI token is shown once, right after it is made, and kept only as a hash;
   const b = new Browser(e, { ip: "198.51.100.8" });
   await signIn(b, s);
   const item = listed((await b.get("/machines")).text)[machine.id];
-  assert.match(item, /<span class="tag">CI, expired<\/span>/);
-  assert.ok(item.includes(`Expired ${isoDay(row.created_at + 30 * DAY)}.`));
-  assert.match(item, /<button type="submit">Remove<\/button>/);
+  assert.match(item, /<td data-label="Kind"><span class="pill crit">CI, expired<\/span><\/td>/);
+  assert.ok(item.includes(`<span class="sub">Expired ${isoDay(row.created_at + 30 * DAY)}</span>`));
+  assert.match(item, /<button type="submit" class="danger compact">Remove<\/button>/);
 });
 
 test("an organisation holds at most fifty CI tokens at once; revoked and expired ones make room", async () => {

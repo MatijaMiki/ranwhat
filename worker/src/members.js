@@ -89,7 +89,10 @@ import {
   ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, countWithin, current, formOk, formToken, fresh,
   nextPath, orgFormOk, randomToken, readCookie, setCookie, unbump,
 } from "./session.js";
-import { fields, form, page, redirect, refused } from "./ui.js";
+import {
+  actions, back as backTo, card, cell, confirmCallout, dayStamp, fields, form, icon, lockBadge, page, pill, redirect,
+  refused, shownAddress, stamp, stepupForm, table,
+} from "./ui.js";
 import { billingEmailDue, billingEmailFollows } from "./billing.js";
 
 export const INVITE_COOKIE = "__Host-rw_invite";
@@ -104,6 +107,8 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;        // 32 random bytes, base64url
 
 const ROLES = Object.freeze({ owner: "Owner", admin: "Admin", member: "Member" });
+const ROLE_TONE = Object.freeze({ owner: "brand", admin: "info", member: "" });
+const plural = (count, one) => `${count} ${one}${count === 1 ? "" : "s"}`;
 const BY_ROLE = "CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END";
 
 /* For dashboard.js's list of what happened, in one person's own words. */
@@ -141,11 +146,9 @@ const ORG_ACTIVITY = Object.freeze({
   ownership_transferred: (a, t) => `${a} made ${t} the owner`,
 });
 
-const day = (t) => new Date(t * 1000).toISOString().slice(0, 10);
-const when = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 const problem = (text) => (text ? `<p class="bad">${escape(text)}</p>` : "");
-const back = `<p><a href="/">Your account</a></p>`;
-const backToMembers = `<p><a href="/members">Back to Members</a></p>`;
+const back = backTo("/", "Your account");
+const backToMembers = backTo("/members", "Back to Members");
 const codeAge = `${FRESH_FOR / 60} minutes`;
 
 /* Whom someone in `role` may remove: the owner anyone but themselves, an
@@ -238,13 +241,17 @@ export async function switcher(env, who, next = "/", { compact = false } = {}) {
       ${compact ? `<span class="switch-row">${choose}</span>` : choose}`, compact ? "switch" : "");
 }
 
-/* Members: locked, with the way up, for a Free organisation that has only
-   its owner in it; otherwise everyone in it with their role and the day
-   they joined, the forms whoever is looking may use, the invites waiting
-   and the invite form for an owner or an admin (the step-up for one
-   without a fresh code), Leave for anyone but the owner, and the
-   organisation's own record for its owner and admins. */
-export async function membersPanel(env, who, onPlan, error = "") {
+/* Members, for dashboard.js's Members page, as { top, main, side, action }:
+   the step-up at the top, the wide column, the narrow one and the header's
+   button. Locked, with the way up, for a Free organisation that has only
+   its owner in it. Otherwise everyone in it with their role and the day
+   they joined, and the forms whoever is looking may use; the invites
+   waiting and the invite form for an owner or an admin (the step-up once
+   at the top for one without a fresh code, as removing and roles need it
+   on any plan); the organisation's own record for its owner and admins;
+   and, apart, Leave for anyone but the owner, and for the owner the way to
+   hand the organisation on. */
+export async function membersPanel(env, who, onPlan) {
   const org = who.org;
   const name = escape(org.name);
   const feature = FEATURES.members;
@@ -255,21 +262,32 @@ export async function membersPanel(env, who, onPlan, error = "") {
   const confirmed = fresh(who);
   const people = await membersOf(env, org.id);
   const invites = manager ? await waitingInvites(env, org.id) : [];
-  const upgrade = manager ? `<p><a href="/upgrade">Upgrade to ${needs}</a></p>`
-    : `<p>An owner or an admin of ${name} can upgrade it.</p>`;
+  const upgrade = manager ? `<div class="actions"><a class="btn primary" href="/upgrade">Upgrade to ${needs}</a></div>`
+    : `<p class="hint">An owner or an admin of ${name} can upgrade it.</p>`;
   if (!open && people.length <= 1 && !invites.length) {
-    return `<section class="panel locked" id="members" data-feature="members">
-    <h2>${escape(feature.name)} <span class="tag">locked, needs ${needs}</span></h2>
-    <p>Invite your team: in ${needs}, one price however many people.</p>
-    ${upgrade}
-    ${problem(error)}</section>`;
+    return {
+      top: "", side: "", action: "",
+      main: card({
+        title: feature.name, mark: lockBadge(), cls: "locked", attributes: 'id="members" data-feature="members"',
+        aside: pill(`Needs ${needs}`, "brand"),
+        body: `<p>Invite your team: in ${needs}, one price however many people.</p>
+      <ul class="checks">
+        <li>${icon("mail")}<div><strong>Invites by email</strong><p>Each person joins as a member, signed in as the address
+          invited.</p></div></li>
+        <li>${icon("members")}<div><strong>Admins</strong><p>Make members admins, to invite and remove people with you.</p></div></li>
+        <li>${icon("billing")}<div><strong>One plan for everyone</strong><p>Everyone in ${name} shares its plan, at one price
+          however many people are in it.</p></div></li>
+      </ul>
+      ${upgrade}`,
+      }),
+    };
   }
 
   const orgField = `<input type="hidden" name="org" value="${escape(org.id)}">`;
   const roleToken = owner && confirmed ? await formToken(env, who.id, `member-role:${org.id}`) : null;
   const transferToken = owner && confirmed ? await formToken(env, who.id, `member-transfer:${org.id}`) : null;
   const removeToken = manager && confirmed ? await formToken(env, who.id, `member-remove:${org.id}`) : null;
-  const items = people.map((p) => {
+  const rows = people.map((p) => {
     const me = p.user_id === who.user;
     const uid = escape(p.user_id);
     const target = `<input type="hidden" name="user" value="${uid}">${orgField}`;
@@ -278,61 +296,94 @@ export async function membersPanel(env, who, onPlan, error = "") {
       const other = p.role === "admin" ? "member" : "admin";
       forms.push(form("/members/role", roleToken, `${target}
           <input type="hidden" name="role" value="${other}">
-          <button type="submit">Make ${other === "admin" ? "an admin" : "a member"}</button>`, "row"));
-      if (p.role === "admin") {
-        forms.push(form("/members/transfer", transferToken, `${target}
-          <button type="submit">Make the owner</button>`, "row"));
-      }
+          <button type="submit" class="compact">Make ${other === "admin" ? "an admin" : "a member"}</button>`));
     }
     if (!me && removeToken && mayRemove(org.role, p.role)) {
       forms.push(form("/members/remove", removeToken, `${target}
-          <button type="submit">Remove</button>`, "row"));
+          <button type="submit" class="danger compact">Remove</button>`));
     }
-    return `<li data-member="${uid}"><strong>${escape(p.email)}</strong> <span class="tag">${ROLES[p.role]}${me ? ", you" : ""}</span>
-        <br>Joined ${day(p.created_at)}.${forms.length ? `<br>${forms.join("")}` : ""}</li>`;
-  }).join("");
+    return `<tr data-member="${uid}">${cell("", `<strong>${escape(p.email)}</strong>${me ? ` ${pill("you")}` : ""}`, "cell-main")}` +
+      `${cell("Role", pill(ROLES[p.role], ROLE_TONE[p.role]))}${cell("Joined", dayStamp(p.created_at))}${cell("", actions(forms), "act")}</tr>`;
+  });
+  const count = (role) => people.filter((p) => p.role === role).length;
+  const roles = [["owner", "owner"], ["admin", "admin"], ["member", "member"]]
+    .map(([role, one]) => count(role) && pill(plural(count(role), one), ROLE_TONE[role])).filter(Boolean).join("");
+  const everyone = card({
+    title: `Everyone in ${org.name}`, icon: "members", attributes: 'id="members" data-feature="members"',
+    aside: `<span class="counts">${roles}</span>`,
+    body: `${table([["Member"], ["Role"], ["Joined"], ["Actions", "act"]], rows, { label: `Everyone in ${org.name}` })}
+      ${manager && people.length > 1 ? `<p class="hint">Removing someone revokes the terminals they linked to ${name}.
+         CI tokens they made stay, under Machines, until revoked there.</p>` : ""}`,
+  });
 
   let pending = "";
   if (invites.length) {
     const revokeToken = await formToken(env, who.id, `invite-revoke:${org.id}`);
-    pending = `<p><strong>Invites waiting</strong></p>
-    <ul>${invites.map((i) => `<li data-invite="${escape(i.id)}">${escape(i.email)}, sent ${day(i.created_at)}, works until ${day(i.expires_at)}
-        ${form("/invites/revoke", revokeToken, `
+    pending = card({
+      title: "Invites waiting", icon: "mail", attributes: 'id="invites"', aside: pill(String(invites.length)),
+      body: table([["Email"], ["Sent"], ["Works until"], ["Actions", "act"]], invites.map((i) =>
+        `<tr data-invite="${escape(i.id)}">${cell("", `<strong>${escape(i.email)}</strong>`, "cell-main")}` +
+        `${cell("Sent", dayStamp(i.created_at))}${cell("Works until", dayStamp(i.expires_at))}` +
+        `${cell("", actions([form("/invites/revoke", revokeToken, `
           <input type="hidden" name="invite" value="${escape(i.id)}">${orgField}
-          <button type="submit">Take back</button>`, "row")}</li>`).join("")}</ul>`;
+          <button type="submit" class="compact">Take back</button>`)]), "act")}</tr>`), { label: "Invites waiting" }),
+    });
   }
 
-  /* What needs a fresh code, and the way to one, for an owner or an admin
-     without: on any plan, as removing and roles work on any. */
-  const stepup = manager && !confirmed && (open || people.length > 1)
-    ? `<p>${open ? "Inviting someone, changing a role" : "Changing a role"} or removing someone needs an emailed
-       code typed in the last ${codeAge}.</p>
-    ${form("/stepup", await formToken(env, who.id, "stepup"),
-      `<input type="hidden" name="next" value="/members"><button type="submit">Email me a code</button>`)}`
+  /* What needs a fresh code, and the way to one, once at the top, for an
+     owner or an admin without: on any plan, as removing and roles work on
+     any. */
+  const top = manager && !confirmed && (open || people.length > 1)
+    ? confirmCallout(`${open ? "Inviting someone, changing a role" : "Changing a role"} or removing someone needs an emailed
+       code typed in the last ${codeAge}${owner ? ", and so does making someone else the owner" : ""}.`,
+    who.email, stepupForm(await formToken(env, who.id, "stepup"), "/members"))
     : "";
 
-  let invite = "";
+  let invite;
   if (!manager) {
     invite = `<p>An owner or an admin of ${name} can invite people.</p>`;
   } else if (!open) {
     invite = `<p>Inviting people needs ${needs}: one price however many people.</p>${upgrade}`;
-  } else if (confirmed) {
+  } else if (!confirmed) {
+    invite = `<p>Inviting someone needs an emailed code typed in the last ${codeAge}: <a href="#confirm">Email me a code</a>.</p>`;
+  } else {
     invite = form("/members/invite", await formToken(env, who.id, `member-invite:${org.id}`), `${orgField}
-      <label for="invite-email">Invite someone by email</label>
-      <input id="invite-email" name="email" type="email" maxlength="200" required autocomplete="off">
-      <button type="submit">Send invite</button>`) +
-      `<p><small>They join as a member, signed in as that address. The link works once, for
-       ${INVITE_FOR / DAY} days.</small></p>`;
+      <label for="invite-email">Email address</label>
+      <div class="inline"><input id="invite-email" name="email" type="email" maxlength="200" required autocomplete="off"
+             placeholder="name@example.com">
+      <button type="submit" class="primary">Send invite</button></div>`) +
+      `<p class="hint">They join as a member, signed in as that address. The link works once, for
+       ${INVITE_FOR / DAY} days.</p>`;
   }
+  const inviteCard = card({
+    title: "Invite someone", icon: "mail", attributes: 'id="invite"',
+    aside: !open ? pill(`Needs ${needs}`, "brand") : "", body: invite,
+  });
 
   let leave = "";
   if (!owner) {
-    leave = form("/members/leave", await formToken(env, who.id, `member-leave:${org.id}`), `${orgField}
-      <button type="submit">Leave ${name}</button>`) +
-      `<p><small>Leaving revokes the terminals you linked to ${name}.${org.role === "admin"
-        ? ` CI tokens you made are ${name}'s, and keep working until an owner or an admin revokes them.` : ""}</small></p>`;
+    leave = card({
+      title: "Leave", icon: "exit", cls: "danger-zone", attributes: 'id="leave"',
+      body: `<p>Leaving revokes the terminals you linked to ${name}.${org.role === "admin"
+        ? ` CI tokens you made are ${name}'s, and keep working until an owner or an admin revokes them.` : ""}</p>
+      ${form("/members/leave", await formToken(env, who.id, `member-leave:${org.id}`), `${orgField}
+      <button type="submit" class="danger">Leave ${name}</button>`)}`,
+    });
   } else if (people.length > 1) {
-    leave = `<p><small>As its owner you cannot leave ${name}: make one of its admins the owner first.</small></p>`;
+    const admins = people.filter((p) => p.role === "admin");
+    const hand = !transferToken
+      ? `<p class="hint">Making someone else the owner needs an emailed code typed in the last ${codeAge}:
+         <a href="#confirm">Email me a code</a>.</p>`
+      : !admins.length ? `<p class="hint">Only an admin can be made the owner: make someone an admin first.</p>`
+        : `<ul>${admins.map((p) => `<li class="danger-row"><span>${shownAddress(p.email)}</span>${form("/members/transfer", transferToken, `
+          <input type="hidden" name="user" value="${escape(p.user_id)}">${orgField}
+          <button type="submit" class="danger compact">Make the owner</button>`)}</li>`).join("")}</ul>`;
+    leave = card({
+      title: "Hand on ownership", icon: "alert", cls: "danger-zone", attributes: 'id="ownership"',
+      body: `<p>As its owner you cannot leave ${name}: make one of its admins the owner first. You stay in it as an
+         admin, and the next page asks before anything changes.</p>
+      ${hand}`,
+    });
   }
 
   let record = "";
@@ -340,23 +391,20 @@ export async function membersPanel(env, who, onPlan, error = "") {
     const someone = "a former member";
     const done = await orgActivity(env, org.id, await joinedAt(env, org.id, who.user));
     if (done.length) {
-      record = `<p><strong>Who came, went and changed role</strong></p>
-    <ul>${done.map((e) => `<li>${escape(when(e.at))}: ${ORG_ACTIVITY[e.event](escape(e.actor || someone),
-        escape(e.subject || someone))}</li>`).join("")}</ul>`;
+      record = card({
+        title: "Who came, went and changed role", icon: "activity", attributes: 'id="record"',
+        body: `<ol class="events">${done.map((e) => `<li><span>${ORG_ACTIVITY[e.event](escape(e.actor || someone),
+          escape(e.subject || someone))}</span>${stamp(e.at)}</li>`).join("")}</ol>`,
+      });
     }
   }
 
-  return `<section class="panel" id="members" data-feature="members">
-    <h2>${escape(feature.name)}</h2>
-    <ul>${items}</ul>
-    ${manager && people.length > 1 ? `<p><small>Removing someone revokes the terminals they linked to ${name}.
-       CI tokens they made stay, under Machines, until revoked there.</small></p>` : ""}
-    ${problem(error)}
-    ${pending}
-    ${stepup}
-    ${invite}
-    ${leave}
-    ${record}</section>`;
+  return {
+    top,
+    main: `${everyone}${pending}${record}`,
+    side: `${inviteCard}${leave}`,
+    action: manager && open ? `<a class="btn primary" href="#invite">${icon("plus")}Invite someone</a>` : "",
+  };
 }
 
 /* ---------- answering the forms ---------- */
@@ -367,12 +415,10 @@ const signedOut = (request) =>
 /* Why a members form did nothing, with the way to a fresh code when that
    is what it needed. */
 async function trouble(env, who, status, text, { stepup = false } = {}) {
-  return page("Members", `<h1>Members</h1>
+  return page("Members", `<h1>Nothing was done.</h1>
     ${problem(text)}
-    ${stepup ? form("/stepup", await formToken(env, who.id, "stepup"), `
-      <input type="hidden" name="next" value="/members">
-      <button type="submit">Email me a code</button>`) : ""}
-    ${backToMembers}`, { status });
+    ${stepup ? `<div class="actions">${stepupForm(await formToken(env, who.id, "stepup"), "/members")}</div>` : ""}
+    ${backToMembers}`, { status, icon: "alert", tone: "warn" });
 }
 
 const needsCode = (env, who, what) =>
@@ -590,11 +636,11 @@ function unusable(inv, t = now()) {
 }
 
 const gone = ([status, text]) => page("Invite", `<h1>This invite cannot be used.</h1>
-  ${problem(text)}${back}`, { status, cookies: [clearCookie(INVITE_COOKIE)] });
+  ${problem(text)}${back}`, { status, cookies: [clearCookie(INVITE_COOKIE)], icon: "mail", tone: "warn" });
 
 const lapsed = (inv) => page("Invite", `<h1>This invite cannot be used just now.</h1>
   ${problem(`${inv.org_name} is not on ${PLAN_NAMES[FEATURES.members.plan]} at the moment, so it cannot take new members. Ask whoever invited you.`)}
-  ${back}`, { status: 403 });
+  ${back}`, { status: 403, icon: "mail", tone: "warn" });
 
 const forThem = (who, inv) => who.email.toLowerCase() === String(inv.email || "").toLowerCase();
 
@@ -612,24 +658,26 @@ async function invitation(request, env, token) {
   const name = escape(inv.org_name);
   const keep = [setCookie(INVITE_COOKIE, token, INVITE_COOKIE_FOR)];
   const head = `<h1>Join ${name}</h1>
-    <p>${inv.by_email ? `<strong>${escape(inv.by_email)}</strong> invited you` : "You were invited"} to join
+    <p class="lead">${inv.by_email ? `<strong>${escape(inv.by_email)}</strong> invited you` : "You were invited"} to join
        <strong>${name}</strong> on ranwhat, as a member.</p>`;
+  const icon = { icon: "members" };
   if (!who) {
     return page("Join an organisation", `${head}
     <p>Sign in with the address this invite was sent to, and you come back here to join. If you have no
        account yet, signing in with a code mailed to that address makes one.</p>
-    <p><a class="button" href="/signin?next=/invite">Sign in</a></p>`, { cookies: keep });
+    <div class="actions"><a class="btn primary wide" href="/signin?next=/invite">Sign in</a></div>`, { cookies: keep, ...icon });
   }
   if (!forThem(who, inv)) {
     return page("Join an organisation", `${head}
     ${problem(`This invite was sent to another address than ${who.email}, the one you are signed in with, so it cannot be used here.`)}
     <p>Sign out, sign in with the address it was sent to, then open the link from the email again.</p>
     ${form("/signout", await formToken(env, who.id, "signout"), `<button type="submit">Sign out</button>`)}
-    ${back}`, { status: 403, cookies: keep });
+    <div class="alt">${back}</div>`, { status: 403, cookies: keep, ...icon });
   }
   if (await memberIn(env, inv.org_id, who.user)) {
     return page("Join an organisation", `<h1>You are in ${name} already.</h1>
-    <p>Switch to it on your account page.</p>${back}`, { cookies: [clearCookie(INVITE_COOKIE)] });
+    <p class="lead">Switch to it on your account page.</p>${back}`,
+    { cookies: [clearCookie(INVITE_COOKIE)], icon: "check", tone: "ok" });
   }
   return page("Join an organisation", `${head}
     <p>Joining shares ${name}'s plan with you. Everyone in ${name} sees your email address and the
@@ -637,8 +685,8 @@ async function invitation(request, env, token) {
        leave or change role; and anyone who joins after you leave sees you only as a former member.</p>
     ${form("/invite", await formToken(env, who.id, acceptAction(inv)), `
       <input type="hidden" name="token" value="${escape(token)}">
-      <button type="submit">Join ${name}</button>`)}
-    <p><a href="/">Not now</a></p>`);
+      <button type="submit" class="primary wide">Join ${name}</button>`)}
+    <div class="alt"><p><a href="/">Not now</a></p></div>`, icon);
 }
 
 /* GET /invite/<token>, from the email. */
@@ -649,7 +697,8 @@ export async function inviteAgain(request, env) {
   const token = readCookie(request, INVITE_COOKIE);
   if (!token) {
     return page("Invite", `<h1>Open the link from your invite again.</h1>
-      <p>This page shows an invite only when you come to it from the link in the email.</p>${back}`, { status: 404 });
+      <p class="lead">This page shows an invite only when you come to it from the link in the email.</p>${back}`,
+    { status: 404, icon: "mail", tone: "info" });
   }
   return invitation(request, env, token);
 }
@@ -679,7 +728,7 @@ export async function acceptPost(request, env) {
   if (!forThem(who, inv)) {
     return page("Join an organisation", `<h1>Not joined.</h1>
     ${problem(`This invite was sent to another address than ${who.email}, the one you are signed in with, so nobody joined.`)}
-    ${back}`, { status: 403 });
+    ${back}`, { status: 403, icon: "alert", tone: "warn" });
   }
   if (!allows(await plan(env, inv.org_id), "members")) return lapsed(inv);
   const db = env.LIST;
@@ -868,16 +917,16 @@ export async function transferPost(request, env, ctx) {
       `Only an admin of ${org.name} can be made its owner. Make them an admin first; nothing was done.`);
   }
   if (f.get("confirm") !== "yes") {
-    return page("Make them the owner?", `<h1>Make ${escape(target.email)} the owner of ${name}?</h1>
-    <p>${escape(target.email)} becomes the owner of ${name}, and you stay in it as an admin. Only the owner
+    return page("Make them the owner?", `<h1>Make ${shownAddress(target.email)} the owner of ${name}?</h1>
+    <p class="lead">${escape(target.email)} becomes the owner of ${name}, and you stay in it as an admin. Only the owner
        changes roles and makes someone else the owner, so you cannot undo this yourself. Its plan and
        billing stay with ${name}.</p>
     ${form("/members/transfer", await formToken(env, who.id, `member-transfer:${org.id}`), `
       <input type="hidden" name="user" value="${escape(target.user_id)}">
       <input type="hidden" name="org" value="${escape(org.id)}">
       <input type="hidden" name="confirm" value="yes">
-      <button type="submit">Make them the owner</button>`)}
-    <p><a href="/members">Keep it as it is</a></p>`);
+      <button type="submit" class="danger wide">Make them the owner</button>`)}
+    <div class="alt">${backTo("/members", "Keep it as it is")}</div>`, { icon: "alert", tone: "warn" });
   }
   const db = env.LIST;
   const where = `${IS} AND ${IS}`;

@@ -230,6 +230,13 @@ function formsOf(html, action) {
     [...m[1].matchAll(/<input type="hidden" name="([a-z_-]+)" value="([^"]*)">/g)].map((x) => [x[1], x[2]])));
 }
 
+/* The Billing page's own content: everything but the sidebar. */
+function billingOf(html) {
+  const m = html.match(/<main id="main" class="main" data-page="billing">([\s\S]*?)<\/main>/);
+  assert.ok(m, "no billing page");
+  return m[1];
+}
+
 /* The first of them. */
 function hidden(html, action) {
   const [first] = formsOf(html, action);
@@ -355,11 +362,14 @@ test("the locked panels lead to the upgrade, which signs in first and comes back
   const home = await everyPage(ana);
   const plus = home.match(/<section class="card upsell locked" id="plus">([\s\S]*?)<\/section>/)[1];
   assert.match(plus, /<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
-  assert.match(home, /<div class="panel locked" id="ci-tokens"[\s\S]*?<a href="\/upgrade">Upgrade to Plus<\/a>/);
+  assert.match(home, /<section class="card locked[^"]*" id="ci-tokens"[\s\S]*?<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.doesNotMatch(home, /ranwhat\.com\/pricing">Upgrade/);
-  const billing = home.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  const billing = billingOf(home);
   assert.match(billing, /Personal is on Free\. Plus is €12 a month or €120 a year, one price for the organisation\./);
-  assert.match(billing, /<a class="button" href="\/upgrade">Upgrade to Plus<\/a>/);
+  /* Billing offers both ways to pay, each a form that opens the same Checkout as the upgrade page's. */
+  assert.deepEqual(formsOf(billing, "/upgrade").map((f) => [f.plan, f.org]), [["monthly", orgOf(e, "ana@example.com")],
+    ["yearly", orgOf(e, "ana@example.com")]]);
+  assert.match(billing, /href="\/upgrade">the upgrade page<\/a>/);
   /* A subscription bought without an account is moved by hand, on request: no page does it. */
   assert.match(billing, /To move a Plus subscription bought without an account to Personal, write to\s+<a href="mailto:hello@ranwhat\.com\?subject=Move%20a%20ranwhat%20Plus%20subscription">hello@ranwhat\.com<\/a>\./);
   assert.doesNotMatch(home, /\/claim/);
@@ -372,6 +382,46 @@ test("the locked panels lead to the upgrade, which signs in first and comes back
   assert.equal((await off.post("/billing", {})).status, 404);
 });
 
+test("Billing offers a Free organisation's owner or admin monthly and yearly, on the upgrade page's terms", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const org = orgOf(e, "ana@example.com");
+
+  /* Each choice opens Checkout for the organisation, as the upgrade page's does, and the page lets it go there. */
+  let page = await ana.get("/billing");
+  assert.match(page.headers.get("content-security-policy"), /form-action 'self' https:\/\/checkout\.stripe\.com; /);
+  assert.doesNotMatch(page.headers.get("content-security-policy"), /billing\.stripe\.com/);
+  assert.doesNotMatch(page.text, /<script/);
+  assert.equal(s.calls.length, 0, "drawing it asks Stripe nothing");
+  const [monthly] = formsOf(page.text, "/upgrade");
+  assert.equal(monthly.plan, "monthly");
+  const opened = await ana.post("/upgrade", monthly);
+  assert.equal(opened.status, 303, opened.text);
+  assert.match(opened.location, /^https:\/\/checkout\.stripe\.com\//);
+  assert.equal(checkouts(s).at(-1).form["metadata[org]"], org);
+
+  /* Once the organisation has a Stripe customer, a session without a fresh code gets the step-up instead,
+     once at the top, and the page no longer lets a form go to Checkout. */
+  later(FRESH_FOR + 1);
+  page = await ana.get("/billing");
+  assert.equal(formsOf(page.text, "/upgrade").length, 0);
+  assert.equal(formsOf(billingOf(page.text), "/stepup").length, 1);
+  assert.match(page.text, /<input type="hidden" name="next" value="\/billing">/);
+  assert.match(page.text, /Opening checkout needs an emailed code typed in the last 15 minutes, as Stripe holds billing details for Personal already/);
+  assert.doesNotMatch(page.headers.get("content-security-policy"), /stripe/);
+
+  /* A member is offered neither, and their page goes nowhere else. */
+  const bo = new Browser(e, { ip: "203.0.113.32" });
+  await signIn(bo, s, "bo@example.com");
+  join(e, "bo@example.com", org, "member");
+  page = await bo.get("/billing");
+  assert.equal(formsOf(page.text, "/upgrade").length, 0);
+  assert.equal(formsOf(page.text, "/stepup").length, 0);
+  assert.doesNotMatch(page.headers.get("content-security-policy"), /stripe/);
+});
+
 test("an owner's upgrade is a Checkout bound to the organisation, at the pricing page's prices and tax", async () => {
   const s = services();
   const e = env();
@@ -381,8 +431,8 @@ test("an owner's upgrade is a Checkout bound to the organisation, at the pricing
 
   const page = await ana.get("/upgrade");
   assert.match(page.text, /Catalogue feed and CI tokens now/);
-  assert.match(page.text, /<button type="submit">Monthly, €12 a month<\/button>/);
-  assert.match(page.text, /<button type="submit">Yearly, €120 a year<\/button>/);
+  assert.match(page.text, /<input type="hidden" name="plan" value="monthly">[^]*?<span class="choice-price">€12 a month<\/span>[^]*?<button type="submit">Choose monthly<\/button><\/form>/);
+  assert.match(page.text, /<input type="hidden" name="plan" value="yearly">[^]*?<span class="choice-price">€120 a year<\/span>[^]*?<button type="submit" class="primary">Choose yearly<\/button><\/form>/);
   assert.match(page.headers.get("content-security-policy"), /form-action 'self' https:\/\/checkout\.stripe\.com; /);
   assert.doesNotMatch(page.text, /<script/);
 
@@ -614,7 +664,7 @@ test("the webhook links the subscription once, in any order and however often St
   /* The account page: Plus, yearly, active, and the day it renews. */
   const home = await ana.get("/?upgraded=1");
   assert.match(home.text, /id="plan">Plus</);
-  const billing = (await ana.get("/billing")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  const billing = billingOf((await ana.get("/billing")).text);
   assert.match(billing, new RegExp(`<div data-subscription="${sub.id}">`));
   assert.match(billing, /<dt>Plan<\/dt><dd>Plus, yearly<\/dd>/);
   assert.match(billing, /<dd data-status="active">Active<\/dd>/);
@@ -833,7 +883,7 @@ test("the billing panel is drawn from what the webhook kept, asking Stripe nothi
   const eve = new Browser(e, { ip: "203.0.113.70" });
   await signIn(eve, s, "eve@example.com");
   grant(e, orgOf(e, "eve@example.com"), "plus");
-  const given = (await eve.get("/billing")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
+  const given = billingOf((await eve.get("/billing")).text);
   assert.match(given, /Personal has Plus from ranwhat directly, with nothing to pay here\./);
   assert.doesNotMatch(given, /action="\/billing"|Upgrade to Plus/);
 });
@@ -1075,7 +1125,7 @@ test("a subscription bought before the switch and linked by hand gives its organ
   let home = await ana.get("/machines");
   assert.match((await ana.get("/")).text, /id="plan">Plus</);
   assert.match((await ana.get("/billing")).text, new RegExp(`<div data-subscription="${sub.id}">`));
-  const mid = home.text.match(/<li data-machine="([^"]+)"><strong>Subscription token<\/strong>/)[1];
+  const mid = home.text.match(/<tr data-machine="([^"]+)"><td class="cell-main"><strong>Subscription token<\/strong>/)[1];
   const r = await ana.post("/machines/revoke", { form: tokenFor(home.text, "/machines/revoke"), id: mid });
   assert.equal(r.status, 303, r.text);
   assert.equal(await feed(e, token), 403);
@@ -1433,7 +1483,7 @@ test("a new checkout expires the organisation's open one, and two paid at once a
   assert.match(sent[1].html, /two Plus subscriptions/);
 
   /* The billing panel says so too, with Manage billing for each. */
-  const billing = (await ana.get("/billing")).text.match(/<section class="panel" id="billing">([\s\S]*?)<\/section>/)[1];
-  assert.match(billing, /<p class="bad" data-twice="2">Personal has 2 live Plus\s+subscriptions, and needs one\./);
+  const billing = billingOf((await ana.get("/billing")).text);
+  assert.match(billing, /<div class="callout crit" data-twice="2">[^]*?<p>Personal has 2 live Plus\s+subscriptions, and needs one\./);
   assert.equal(formsOf(billing, "/billing").length, 2);
 });

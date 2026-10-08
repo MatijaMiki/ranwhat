@@ -161,8 +161,9 @@ import {
   mayChange, mintCi, renameMachine, revokeMachine,
 } from "./machines.js";
 import {
-  APP_PAGES, away, callout, card, command, data, elsewhere, empty, fields, form, icon, lockBadge, notFound, page, pill,
-  redirect, refused, script, shell, stat, widget, wrongMethod,
+  APP_PAGES, actions, away, back, callout, card, cell, command, confirmCallout, data, dayStamp, elsewhere, empty, fields,
+  form, icon, lockBadge, notFound, page, pill, redirect, refused, script, shell, shownAddress, stamp, stat, stepupForm,
+  table, widget, wrongMethod,
 } from "./ui.js";
 
 const PRIVACY = "https://ranwhat.com/privacy";
@@ -177,17 +178,17 @@ const problem = (text) => (text ? `<p class="bad">${escape(text)}</p>` : "");
 
 /* PBKDF2_ITERATIONS above what the runtime allows (password.js). */
 const unavailable = () => page("Not available", `<h1>Passwords are not available just now.</h1>
-  <p>You can still <a href="/signin">sign in with an emailed code</a>, which
-     makes the account too.</p>`, { status: 503 });
+  <p class="lead">You can still <a href="/signin">sign in with an emailed code</a>, which
+     makes the account too.</p>`, { status: 503, icon: "password", tone: "warn" });
 
 /* password.js's limit on hashes from one network. */
 const tooManyHashes = () => page("Too many tries", `<h1>Too many tries.</h1>
-  <p>More passwords were tried from your network in the last hour than we
+  <p class="lead">More passwords were tried from your network in the last hour than we
      check. Try again in an hour, or <a href="/signin">sign in with an emailed
-     code</a>.</p>`, { status: 429 });
+     code</a>.</p>`, { status: 429, icon: "clock", tone: "warn" });
 
-const NEW_PASSWORD = `<p><small>At least ${MIN_LENGTH} characters, of any kind, spaces too: a few unrelated
-   words work well. Passwords known from data breaches are refused.</small></p>`;
+const NEW_PASSWORD = `<p class="hint">At least ${MIN_LENGTH} characters, of any kind, spaces too: a few unrelated
+   words work well. Passwords known from data breaches are refused.</p>`;
 
 /* A Turnstile token solved anywhere but this host does not count here. */
 const CHALLENGE_HOSTS = new Set([ACCOUNT_HOST]);
@@ -225,7 +226,7 @@ function bound(binding) {
 async function signinForm(env, browser, { next = "/", email = "", error = "", status = 200 } = {}) {
   const { binding, cookies } = bound(browser);
   return page("Sign in", `<h1>Sign in</h1>
-    <p>Type your email, and we send you a code to type on the next page. The
+    <p class="lead">Type your email, and we send you a code to type on the next page. The
        same code makes your account if you do not have one yet.</p>
     ${form("/signin", await formToken(env, binding, "signin"), `
       <input type="hidden" name="next" value="${escape(next)}">
@@ -234,17 +235,19 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
              value="${escape(email)}">
       ${widget("signin")}
       ${problem(error)}
-      <button type="submit" class="primary">Email me a code</button>`)}
+      <button type="submit" class="primary wide">Email me a code</button>`)}
     ${providerButtons(env)}
-    <p>Have a passkey? <a href="/signin/passkey">Sign in with it</a>.
-       Have a password? <a href="/signin/password">Sign in with it</a>.
-       Want one? <a href="/signup">Make an account with a password</a></p>
-    <p><small>The address is used to send the code, and kept only once the code
+    <div class="alt">
+      <p>Have a passkey? <a href="/signin/passkey">Sign in with it</a>.</p>
+      <p>Have a password? <a href="/signin/password">Sign in with it</a>.</p>
+      <p>Want one? <a href="/signup">Make an account with a password</a>.</p>
+    </div>
+    <p class="fine">The address is used to send the code, and kept only once the code
        is typed, as your account. This page sets two cookies, both only to sign
        you in, and nothing on it tracks you. Cloudflare Turnstile checks that a
        person is asking.${offered(env).length ? ` Continuing with ${offered(env).map((p) => PROVIDERS[p].name).join(" or ")}
        keeps only that account's id and the address it has verified.` : ""}
-       <a href="${PRIVACY}">Privacy</a></small></p>`,
+       <a href="${PRIVACY}">Privacy</a></p>`,
   { status, cookies, challenge: true });
 }
 
@@ -253,7 +256,8 @@ async function signinForm(env, browser, { next = "/", email = "", error = "", st
 function providerButtons(env) {
   const via = offered(env);
   if (!via.length) return "";
-  return `<p>${via.map((p) => `<a class="button" href="/auth/${p}">Continue with ${PROVIDERS[p].name}</a>`).join("\n       ")}</p>`;
+  return `<div class="or">or</div>
+    <div class="ways-in">${via.map((p) => `<a class="button" href="/auth/${p}">Continue with ${PROVIDERS[p].name}</a>`).join("\n       ")}</div>`;
 }
 
 async function signinPost(request, env, ctx) {
@@ -277,26 +281,28 @@ async function sendCode(request, env, ctx, wanted) {
   const result = await requestCode(request, env, ctx, wanted);
   if (result.refused === "network") {
     return page("Too many codes", `<h1>Too many codes asked for.</h1>
-      <p>More sign-in codes were asked for from your network in the last hour
-         than we send. Try again in an hour.</p>`, { status: 429 });
+      <p class="lead">More sign-in codes were asked for from your network in the last hour
+         than we send. Try again in an hour.</p>`, { status: 429, icon: "clock", tone: "warn" });
   }
   if (result.refused === "network-day") {
     return page("Too many codes", `<h1>Too many codes asked for.</h1>
-      <p>More sign-in codes were sent for your network today than we send to
+      <p class="lead">More sign-in codes were sent for your network today than we send to
          one network in a day. Try again tomorrow, from another network${wanted.purpose === "stepup" ? "."
-           : `, or <a href="/signin/password">with your password</a> if you have one.`}</p>`, { status: 429 });
+           : `, or <a href="/signin/password">with your password</a> if you have one.`}</p>`,
+    { status: 429, icon: "clock", tone: "warn" });
   }
   if (result.refused === "account-day") {
     return page("No more codes for this account today", `<h1>No more codes for this account today.</h1>
-      <p>This account has asked for ${STEPUPS_PER_USER_DAY} confirmation codes today, the most one account
+      <p class="lead">This account has asked for ${STEPUPS_PER_USER_DAY} confirmation codes today, the most one account
          can in a day. To confirm now, sign out and sign in again with an emailed code, which counts as
          confirming; or try again tomorrow.</p>
-      <p><a href="/">Your account</a></p>`, { status: 429 });
+      ${back("/", "Your account")}`, { status: 429, icon: "clock", tone: "warn" });
   }
   if (result.refused === "budget") {
     return page("No more codes today", `<h1>No more codes today.</h1>
-      <p>We send a limited number of sign-in emails each day, and today's are
-         used up. Try again after midnight UTC, or write to hello@ranwhat.com.</p>`, { status: 503 });
+      <p class="lead">We send a limited number of sign-in emails each day, and today's are
+         used up. Try again after midnight UTC, or write to hello@ranwhat.com.</p>`,
+    { status: 503, icon: "clock", tone: "warn" });
   }
   return redirect("/signin/code", [setCookie(SIGNIN_COOKIE, result.token, SIGNIN_FOR)]);
 }
@@ -321,7 +327,8 @@ const askedFrom = (row) => {
 /* Where a code page sends someone for a new code: a step-up asks again
    from the account page it was asked from, so that Turnstile's script
    never loads for someone signed in. */
-const anew = (row, text) => `<a href="${row.purpose === "stepup" ? askedFrom(row) : "/signin/again"}">${text}</a>`;
+const anew = (row, text, cls = "") =>
+  `<a${cls ? ` class="${cls}"` : ""} href="${row.purpose === "stepup" ? askedFrom(row) : "/signin/again"}">${text}</a>`;
 
 /* Where a code page sends someone who wants to start again. */
 const startOver = (row) => ({
@@ -337,7 +344,7 @@ async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
   const verify = row.purpose === "verify";
   const reset = row.purpose === "reset";
   return page(stepup ? "Confirm it is you" : reset ? "Reset your password" : "Check your email", `<h1>Check your email.</h1>
-    <p>A code is on its way to <strong>${escape(row.email)}</strong>. Type it here:
+    <p class="lead">A code is on its way to <strong>${escape(row.email)}</strong>. Type it here:
        it works for ${CODE_FOR / 60} minutes, in this browser only.</p>
     ${verify ? `<p>Your password is set when the code is typed, and not before. If this address
        already has an account, it replaces that account's password and signs it out everywhere
@@ -353,10 +360,12 @@ async function codeForm(env, token, row, { error = "", status = 200 } = {}) {
       <label><input type="checkbox" name="ways" value="remove"> Also unlink every Google and GitHub account
         and remove every passkey, in case one is in someone else's hands</label>` : ""}
       ${problem(error)}
-      <button type="submit" class="primary">${stepup ? "Confirm" : verify ? "Confirm and sign in" : reset ? "Set password and sign in" : "Sign in"}</button>`)}
-    <p>Nothing after a minute? Look in spam, then ${anew(row, "ask for a new code")}.</p>
-    <p>${startOver(row)}</p>`,
-  { status });
+      <button type="submit" class="primary wide">${stepup ? "Confirm" : verify ? "Confirm and sign in" : reset ? "Set password and sign in" : "Sign in"}</button>`)}
+    <div class="alt">
+      <p>Nothing after a minute? Look in spam, then ${anew(row, "ask for a new code")}.</p>
+      <p>${startOver(row)}</p>
+    </div>`,
+  { status, icon: stepup ? "security" : "mail" });
 }
 
 /* A code that can no longer be used, with the way to a new one: 400 as the
@@ -367,9 +376,9 @@ async function spent(env, token, row, why, status = 400) {
     : "That code has expired or was already used. Ask for a new one.";
   return page("Ask for a new code", `<h1>Ask for a new code.</h1>
     <p class="bad">${text}</p>
-    <p>${anew(row, "Send a new code")}</p>
-    <p>${startOver(row)}</p>`,
-  { status });
+    <div class="actions">${anew(row, "Send a new code", "btn primary")}</div>
+    <div class="alt"><p>${startOver(row)}</p></div>`,
+  { status, icon: "clock", tone: "warn" });
 }
 
 async function codePost(request, env) {
@@ -510,14 +519,14 @@ async function againPage(request, env) {
 
 async function againForm(env, token, row, { error = "", status = 200 } = {}) {
   return page("Send a new code", `<h1>Send a new code</h1>
-    <p>To <strong>${escape(row.email)}</strong>, in place of the last one, which then stops
+    <p class="lead">To <strong>${escape(row.email)}</strong>, in place of the last one, which then stops
        working.</p>
     ${form("/signin/again", await formToken(env, token, "again"), `
       ${widget("again")}
       ${problem(error)}
-      <button type="submit" class="primary">Send a new code</button>`)}
-    <p>${startOver(row)}</p>`,
-  { status, challenge: true });
+      <button type="submit" class="primary wide">Send a new code</button>`)}
+    <div class="alt"><p>${startOver(row)}</p></div>`,
+  { status, challenge: true, icon: "mail" });
 }
 
 async function again(request, env, ctx) {
@@ -546,7 +555,7 @@ async function signupPage(request, env, ctx, url) {
 async function signupForm(env, browser, { next = "/", email = "", error = "", status = 200 } = {}) {
   const { binding, cookies } = bound(browser);
   return page("Make an account", `<h1>Make an account</h1>
-    <p>Choose a password, and we send you a code to type on the next page. The
+    <p class="lead">Choose a password, and we send you a code to type on the next page. The
        password is set only once that code is typed, in this browser.</p>
     ${form("/signup", await formToken(env, binding, "signup"), `
       <input type="hidden" name="next" value="${escape(next)}">
@@ -555,18 +564,20 @@ async function signupForm(env, browser, { next = "/", email = "", error = "", st
              value="${escape(email)}">
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required>
-      <p><small>At least 12 characters, of any kind, spaces too: a few unrelated words
-         work well. Passwords known from data breaches are refused.</small></p>
+      <p class="hint">At least 12 characters, of any kind, spaces too: a few unrelated words
+         work well. Passwords known from data breaches are refused.</p>
       ${widget("signup")}
       ${problem(error)}
-      <button type="submit" class="primary">Email me a code</button>`)}
-    <p>Rather not have a password? <a href="/signin">Sign in with an emailed code</a>; it makes
-       the account too.</p>
-    <p><small>The address is used to send the code, and kept only once the code is typed, as
+      <button type="submit" class="primary wide">Email me a code</button>`)}
+    <div class="alt">
+      <p>Rather not have a password? <a href="/signin">Sign in with an emailed code</a>; it makes
+         the account too.</p>
+    </div>
+    <p class="fine">The address is used to send the code, and kept only once the code is typed, as
        your account. The password is kept only as a salted hash. To check it against known
        breaches we send Have I Been Pwned the first 5 characters of its SHA-1 hash, never the
        password. Cloudflare Turnstile checks that a person is asking.
-       <a href="${PRIVACY}">Privacy</a></small></p>`,
+       <a href="${PRIVACY}">Privacy</a></p>`,
   { status, cookies, challenge: true });
 }
 
@@ -588,9 +599,9 @@ async function signupPost(request, env, ctx) {
   if (no) return signupForm(env, binding, { next, email, error: no[1], status: no[0] });
   if (!await hashAllowed(request, env)) {
     return page("Too many tries", `<h1>Too many tries.</h1>
-      <p>More accounts were asked for from your network in the last hour than
+      <p class="lead">More accounts were asked for from your network in the last hour than
          we take. Try again in an hour, or <a href="/signin">sign in with an
-         emailed code</a>.</p>`, { status: 429 });
+         emailed code</a>.</p>`, { status: 429, icon: "clock", tone: "warn" });
   }
   const password = f.get("password");
   const wrong = await passwordProblem(env, password);
@@ -626,11 +637,13 @@ async function passwordForm(env, browser, { next = "/", email = "", error = "", 
       <input id="password" name="password" type="password" autocomplete="current-password" maxlength="4096"
              required${email ? " autofocus" : ""}>
       ${problem(error)}
-      <button type="submit" class="primary">Sign in</button>`)}
-    <p>Forgot it? <a href="/reset">Reset it with an emailed code</a></p>
-    <p>No password? <a href="/signin">Sign in with an emailed code</a>; it makes the account too.</p>
-    <p><small>This page sets a cookie only to sign you in, and nothing on it tracks
-       you. <a href="${PRIVACY}">Privacy</a></small></p>`,
+      <button type="submit" class="primary wide">Sign in</button>`)}
+    <div class="alt">
+      <p>Forgot it? <a href="/reset">Reset it with an emailed code</a>.</p>
+      <p>No password? <a href="/signin">Sign in with an emailed code</a>; it makes the account too.</p>
+    </div>
+    <p class="fine">This page sets a cookie only to sign you in, and nothing on it tracks
+       you. <a href="${PRIVACY}">Privacy</a></p>`,
   { status, cookies });
 }
 
@@ -677,9 +690,9 @@ async function locked(env, binding, email, next) {
       <input type="hidden" name="next" value="${escape(next)}">
       <input type="hidden" name="email" value="${escape(email)}">
       ${widget("signin")}
-      <button type="submit" class="primary">Email a code to ${escape(email)}</button>`)}
-    <p><a href="/signin">Use a different email</a></p>`,
-  { status: 429, challenge: true });
+      <button type="submit" class="primary wide">Email a code to ${escape(email)}</button>`)}
+    <div class="alt"><p><a href="/signin">Use a different email</a></p></div>`,
+  { status: 429, challenge: true, icon: "lock", tone: "warn" });
 }
 
 /* ---------- a forgotten password ---------- */
@@ -692,7 +705,7 @@ async function resetPage(request, env) {
 async function resetForm(env, browser, { email = "", error = "", status = 200 } = {}) {
   const { binding, cookies } = bound(browser);
   return page("Reset your password", `<h1>Reset your password</h1>
-    <p>Type your email, and we send you a code. You type it on the next page with
+    <p class="lead">Type your email, and we send you a code. You type it on the next page with
        the password you want now, which replaces the old one and signs your
        account out everywhere else.</p>
     ${form("/reset", await formToken(env, binding, "reset"), `
@@ -701,8 +714,8 @@ async function resetForm(env, browser, { email = "", error = "", status = 200 } 
              value="${escape(email)}">
       ${widget("reset")}
       ${problem(error)}
-      <button type="submit" class="primary">Email me a code</button>`)}
-    <p><a href="/signin/password">Back to signing in</a></p>`,
+      <button type="submit" class="primary wide">Email me a code</button>`)}
+    <div class="alt">${back("/signin/password", "Back to signing in")}</div>`,
   { status, cookies, challenge: true });
 }
 
@@ -779,21 +792,6 @@ const when = (t) => `${new Date(t * 1000).toISOString().slice(0, 16).replace("T"
 
 /* Each signed-in page's path, by its name in ui.js's APP_PAGES. */
 const PATHS = Object.freeze(Object.fromEntries(APP_PAGES.map(([key, path]) => [key, path])));
-
-/* How long ago `t` was, for a list read at a glance; the time itself is
-   in the title, and in the datetime for anything that reads it. */
-function ago(t, at = now()) {
-  const s = Math.max(0, at - t);
-  const n = (count, unit) => `${count} ${unit}${count === 1 ? "" : "s"} ago`;
-  if (s < 60) return "just now";
-  if (s < 3600) return n(Math.floor(s / 60), "minute");
-  if (s < DAY) return n(Math.floor(s / 3600), "hour");
-  if (s < 7 * DAY) return n(Math.floor(s / DAY), "day");
-  return new Date(t * 1000).toISOString().slice(0, 10);
-}
-
-const stamp = (t) =>
-  `<time datetime="${new Date(t * 1000).toISOString()}" title="${escape(when(t))}">${escape(ago(t))}</time>`;
 
 const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
@@ -1205,70 +1203,120 @@ async function securityView(env, who, {
 
 /* ---------- the other pages ---------- */
 
-async function machinesView(env, who, { error = "", status = 200 } = {}) {
-  const onPlan = await plan(env, who.org.id);
-  return app(env, who, "machines", {
-    title: "Machines",
-    sub: `The terminals and CI tokens linked to ${escape(who.org.name)}, each with a token of its own.`,
-    onPlan, status,
-    body: `<div class="grid">${await machinesPanel(env, who, onPlan, error)}</div>`,
-  });
-}
-
+/* The organisation, who is in it and what each may do (members.js's
+   membersPanel()), with renaming it for an owner or an admin. */
 async function membersView(env, who, { error = "", status = 200 } = {}) {
   const org = who.org;
   const onPlan = await plan(env, org.id);
-  const rename = canManage(org) ? `<div class="method-form">${form("/org", await orgToken(env, who, "org"), `${orgInput(who)}
+  const rename = canManage(org) ? form("/org", await orgToken(env, who, "org"), `${orgInput(who)}
       <label for="name">Name</label>
-      <input id="name" name="name" type="text" maxlength="80" required value="${escape(org.name)}">
-      ${problem(error)}
-      <button type="submit">Rename</button>`)}</div>` : problem(error);
+      <div class="inline"><input id="name" name="name" type="text" maxlength="80" required value="${escape(org.name)}">
+      <button type="submit">Rename</button></div>`) : "";
   const about = card({
     title: "Organisation", icon: "team", attributes: 'id="organisation"',
     body: `<dl>
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
-      <dt>Owner</dt><dd>${org.role === "owner" ? "You" : escape(await ownerOf(env, org.id) || "nobody")}</dd>
+      <dt>Owner</dt><dd>${org.role === "owner" ? "You" : shownAddress(await ownerOf(env, org.id) || "nobody")}</dd>
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd>${PLAN_NAMES[onPlan]}</dd>
     </dl>
+    ${problem(error)}
     ${rename}`,
   });
+  const panel = await membersPanel(env, who, onPlan);
   return app(env, who, "members", {
     title: "Members",
-    sub: `Who is in ${escape(org.name)}, and their roles.`,
+    sub: `Who is in ${escape(org.name)}, and what each of them can do.`,
+    action: panel.action,
     onPlan, status,
-    body: `<div class="grid">${about}${await membersPanel(env, who, onPlan)}</div>`,
+    body: `<div class="grid">
+    ${panel.top}
+    <div class="c8 stack">${panel.main}</div>
+    <div class="c4 stack">${about}${panel.side}</div>
+    </div>`,
   });
 }
 
+/* A paid plan's features, from features.js, as a list: what is live, and
+   included when the organisation has the plan, and what is coming. For
+   Billing, beside the overview's tiles. */
+function featureList(tier, onPlan) {
+  const open = atLeast(onPlan, tier);
+  return `<ul class="checks">
+      ${featuresOf(tier).map((f) => {
+    const live = f.status === "live";
+    return `<li class="${live ? "on" : "soon"}">${icon(live ? "check" : "clock")}<div><strong>${escape(f.name)}</strong>` +
+      `<p>${escape(f.says)}</p></div>${live ? pill(open ? "Included" : "Live", open ? "ok" : "") : pill("Coming")}</li>`;
+  }).join("\n      ")}
+    </ul>`;
+}
+
+/* What the organisation is on and how it is paid for (billing.js's
+   billingPanel()), then what Plus and Team have. */
 async function billingView(env, who, { status = 200 } = {}) {
-  const onPlan = await plan(env, who.org.id);
+  const org = who.org;
+  const name = escape(org.name);
+  const onPlan = await plan(env, org.id);
   const billing = await billingPanel(env, who, onPlan);
+  const plusOn = atLeast(onPlan, "plus");
+  const teamOn = atLeast(onPlan, "team");
+  const plus = card({
+    title: "What Plus has", icon: "spark", cls: "c7", attributes: 'id="plus-features"',
+    aside: plusOn ? pill("In your plan", "ok") : pill(PRICES.monthly, "brand"),
+    body: `<p class="card-intro">${plusOn ? `Everyone in ${name} has these.` : `What needs a server, for everyone in ${name}.
+         Everything on your machines stays free.`}</p>
+      ${featureList("plus", onPlan)}`,
+  });
+  const team = card({
+    title: "What Team has", icon: "team", cls: "c5", attributes: 'id="team-features"',
+    aside: teamOn ? pill("In your plan", "ok") : pill("By arrangement"),
+    body: `<p class="card-intro">${teamOn ? `${name} is on Team, with everything in Plus.`
+      : `Team is arranged with each organisation: everything in Plus, and these as they come.
+         <a href="${TALK}">Talk to us</a>`}</p>
+      ${featureList("team", onPlan)}`,
+  });
   return app(env, who, "billing", {
     title: "Billing",
-    sub: `What ${escape(who.org.name)} is on, and how it is paid for.`,
+    sub: `What ${name} is on, and how it is paid for.`,
     onPlan, status,
-    body: `<div class="grid">${billing.html}</div>`,
+    body: `<div class="grid">
+    ${billing.top}
+    ${billing.current}
+    ${billing.side}
+    ${plus}
+    ${team}
+    ${billing.notes}
+    </div>`,
     away: billing.away,
   });
 }
 
+/* What part of the account an event is about, for Activity's last
+   column: the first whose pattern its name matches. */
+const AREAS = [
+  [/^(signup|signin|signout)/, "Sign-in"],
+  [/^(stepup|password_|passkey_|linked_|unlinked_|ways_)/, "Security"],
+  [/^(device_|machine_|ci_token_)/, "Machines"],
+  [/^(upgrade_|billing_|plus_)/, "Billing"],
+  [/^(member_|invite_|role_|removed_|org_|ownership_)/, "Organisation"],
+];
+const area = (what) => (AREAS.find(([pattern]) => pattern.test(what)) || [null, "Account"])[1];
+
+const SHOWN_EVENTS = 100;
+
 /* The account's own record, newest first. */
 async function activityView(env, who) {
-  const events = await history(env, who.user, 100);
-  const rows = events.map((e) => `<tr><td class="when">${stamp(e.at)}</td>` +
-    `<td>${escape(EVENTS[e.event] || e.event)}</td></tr>`).join("\n        ");
+  const events = await history(env, who.user, SHOWN_EVENTS);
+  const rows = events.map((e) => `<tr>${cell("", stamp(e.at), "when")}` +
+    `${cell("", escape(EVENTS[e.event] || e.event), "cell-main")}${cell("", pill(area(e.event)))}</tr>`);
   return app(env, who, "activity", {
     title: "Activity",
     sub: "What happened on your account, newest first.",
     body: `<div class="grid">${card({
       title: "Your account's history", icon: "activity",
-      aside: events.length ? pill(plural(events.length, "event")) : "",
-      body: events.length ? `<table class="table">
-      <thead><tr><th scope="col">When</th><th scope="col">What</th></tr></thead>
-      <tbody>
-        ${rows}
-      </tbody></table>` : empty("<p>Nothing yet.</p>"),
+      aside: events.length ? pill(events.length === SHOWN_EVENTS ? `Newest ${SHOWN_EVENTS}` : plural(events.length, "event")) : "",
+      body: events.length ? table([["When"], ["What"], ["Area"]], rows, { label: "Your account's history", cols: ["when", "", "area"] })
+        : empty("<p>Nothing yet.</p>"),
     })}</div>`,
   });
 }
@@ -1319,7 +1367,7 @@ async function rename(request, env) {
   if (bound === "elsewhere") return elsewhere();
   if (!canManage(who.org)) {
     return page("Not allowed", `<h1>Only an owner or an admin can rename it.</h1>
-      <p><a href="/">Your account</a></p>`, { status: 403 });
+      ${back(PATHS.members, "Back to Members")}`, { status: 403, icon: "alert", tone: "warn" });
   }
   const name = orgName(f.get("name"));
   if (!name) {
@@ -1432,9 +1480,9 @@ function othersOut(env, who) {
 
 /* oauth.js's limit on sign-ins started from one network. */
 const tooManyStarts = () => page("Too many tries", `<h1>Too many tries.</h1>
-  <p>More sign-ins were started from your network in the last hour than we
+  <p class="lead">More sign-ins were started from your network in the last hour than we
      take. Try again in an hour, or <a href="/signin">sign in with an emailed
-     code</a>.</p>`, { status: 429 });
+     code</a>.</p>`, { status: 429, icon: "clock", tone: "warn" });
 
 /* Off to the provider to sign in. Someone signed in already goes home. */
 async function providerStart(request, env, ctx, url, provider) {
@@ -1479,7 +1527,7 @@ async function providerBack(request, env, ctx, url, provider) {
       return page("Sign in again", `<h1>Sign in again.</h1>
         <p class="bad">This browser is no longer signed in as it was when linking ${name} began,
            so nothing was linked.</p>
-        <p><a href="/">Your account</a></p>`, { status: 403, cookies });
+        ${back("/", "Your account")}`, { status: 403, cookies, icon: "alert", tone: "warn" });
     }
     /* The email that tells the account's address is taken first: without
        it, nothing is linked (session.js's holdNotice()). */
@@ -1523,8 +1571,8 @@ function noNotice(name, why, linking, cookies) {
   <p class="bad">Linking ${name} to a ranwhat account sends that account's address an email to say so,
      and ${reason}, so nothing was linked${linking ? "" : " and nobody was signed in"}.</p>
   <p>${advice}</p>
-  <p>${linking ? `<a href="/security">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
-  { status: why === "network-day" ? 429 : 503, cookies });
+  ${linking ? back(PATHS.security, "Back to Security") : back("/signin", "Back to signing in")}`,
+  { status: why === "network-day" ? 429 : 503, cookies, icon: "alert", tone: "warn" });
 }
 
 /* A flow that came back without an account to open (oauth.js's finish()). */
@@ -1538,8 +1586,8 @@ function providerProblem(name, why, flow, cookies) {
   }[why] || [400, "Start again", `${name}'s answer did not check out, so ${none}. Start it again from this site.`];
   return page(title, `<h1>${title}.</h1>
     <p class="bad">${text}</p>
-    <p>${linking ? `<a href="/security">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
-  { status, cookies });
+    ${linking ? back(PATHS.security, "Back to Security") : back("/signin", "Back to signing in")}`,
+  { status, cookies, icon: why === "cancelled" ? "info" : "alert", tone: why === "cancelled" ? "info" : "warn" });
 }
 
 /* The provider vouched for no address: it can neither make an account nor
@@ -1550,7 +1598,7 @@ const unverified = (name, cookies) => page("Use an emailed code", `<h1>Use an em
     ? " (we take only its primary address, and only once GitHub has verified it)" : ""}, so it
      cannot make or open a ranwhat account.</p>
   <p><a href="/signin">Sign in with an emailed code</a> instead: typing it proves the address.</p>`,
-{ status: 403, cookies });
+{ status: 403, cookies, icon: "mail", tone: "warn" });
 
 /* The provider vouched for an address it is not the authority for
    (oauth.js): GitHub always, Google for an address that is not Gmail or
@@ -1562,7 +1610,7 @@ const unproven = (name, cookies) => page("Use an emailed code", `<h1>Use an emai
      so ${name} cannot make or open a ranwhat account by itself.</p>
   <p><a href="/signin">Sign in with an emailed code</a>, which makes the account if there is none yet.
      Then link ${name} from your account page, and it signs you in from then on.</p>`,
-{ status: 403, cookies });
+{ status: 403, cookies, icon: "mail", tone: "warn" });
 
 /* A way in the account at this address unlinked: only linking it again
    from the account page brings it back. */
@@ -1571,7 +1619,7 @@ const wasUnlinked = (name, cookies) => page("Use an emailed code", `<h1>Use an e
      does not sign in there any more.</p>
   <p><a href="/signin">Sign in with an emailed code</a>. To use ${name} again, link it from your
      account page.</p>`,
-{ status: 403, cookies });
+{ status: 403, cookies, icon: "mail", tone: "warn" });
 
 function notLinked(name, why, cookies) {
   const text = {
@@ -1581,7 +1629,7 @@ function notLinked(name, why, cookies) {
   }[why];
   return page("Not linked", `<h1>Not linked.</h1>
     <p class="bad">${text}</p>
-    <p><a href="/security">Back to your account</a></p>`, { status: why === "unverified" ? 403 : 409, cookies });
+    ${back(PATHS.security, "Back to Security")}`, { status: why === "unverified" ? 403 : 409, cookies, icon: "link", tone: "warn" });
 }
 
 /* Takes a Google or GitHub account away, with a fresh code, while another
@@ -1625,7 +1673,7 @@ const NO_SCRIPT = `<noscript><p class="bad">Passkeys need JavaScript, which is o
 
 async function addPasskeyForm(env, who, { error = "", status = 200 } = {}) {
   return page("Add a passkey", `<h1>Add a passkey</h1>
-    <p>Your device asks for its screen lock (a fingerprint, your face or its PIN) or for
+    <p class="lead">Your device asks for its screen lock (a fingerprint, your face or its PIN) or for
        a security key, and makes a passkey that signs in to this account, on this site
        only.</p>
     ${form("/passkeys", await formToken(env, who.id, "passkey-add"), `
@@ -1635,10 +1683,10 @@ async function addPasskeyForm(env, who, { error = "", status = 200 } = {}) {
       <input id="label" name="label" type="text" maxlength="${MAX_LABEL}" placeholder="Work laptop" autofocus>
       <p class="bad passkey-problem" hidden></p>
       ${problem(error)}
-      <button type="submit" class="primary">Add passkey</button>`, "", `data-passkey="/passkeys/new" data-ceremony="create"`)}
+      <button type="submit" class="primary wide">Add passkey</button>`, "", `data-passkey="/passkeys/new" data-ceremony="create"`)}
     ${NO_SCRIPT}
-    <p><a href="/security">Back to your account</a></p>`,
-  { status, passkeys: true });
+    <div class="alt">${back(PATHS.security, "Back to Security")}</div>`,
+  { status, passkeys: true, icon: "key" });
 }
 
 /* JSON for the script: { error } with the status, or the options. */
@@ -1717,7 +1765,7 @@ async function passkeySigninPage(request, env, ctx, url) {
 async function passkeySigninForm(env, browser, { next = "/", error = "", status = 200 } = {}) {
   const { binding, cookies } = bound(browser);
   return page("Sign in with a passkey", `<h1>Sign in with a passkey</h1>
-    <p>Your device shows the passkeys it has for this site, and asks for its screen lock
+    <p class="lead">Your device shows the passkeys it has for this site, and asks for its screen lock
        or your security key.</p>
     ${form("/signin/passkey", await formToken(env, binding, "passkey"), `
       <input type="hidden" name="next" value="${escape(next)}">
@@ -1728,14 +1776,16 @@ async function passkeySigninForm(env, browser, { next = "/", error = "", status 
       <input type="hidden" name="userHandle" value="">
       <p class="bad passkey-problem" hidden></p>
       ${problem(error)}
-      <button type="submit" class="primary">Sign in with a passkey</button>`, "", `data-passkey="/passkeys/challenge" data-ceremony="get"`)}
+      <button type="submit" class="primary wide">Sign in with a passkey</button>`, "", `data-passkey="/passkeys/challenge" data-ceremony="get"`)}
     ${NO_SCRIPT}
-    <p>No passkey here? <a href="/signin">Sign in with an emailed code</a>, or
-       <a href="/signin/password">with your password</a>. Passkeys are added from your
-       account page.</p>
-    <p><small>This page sets a cookie only to sign you in, and nothing on it tracks you.
-       <a href="${PRIVACY}">Privacy</a></small></p>`,
-  { status, cookies, passkeys: true });
+    <div class="alt">
+      <p>No passkey here? <a href="/signin">Sign in with an emailed code</a>, or
+         <a href="/signin/password">with your password</a>. Passkeys are added from your
+         account page.</p>
+    </div>
+    <p class="fine">This page sets a cookie only to sign you in, and nothing on it tracks you.
+       <a href="${PRIVACY}">Privacy</a></p>`,
+  { status, cookies, passkeys: true, icon: "key" });
 }
 
 async function passkeyChallenge(request, env) {
@@ -1788,92 +1838,154 @@ const ciAction = (nonce) => `ci-token:${nonce}`;
 
 const day = (t) => escape(when(t).slice(0, 10));
 
-/* Every machine of the organisation being looked at: what it is called,
-   what kind it is, who linked or made it and when, and the day it was last
-   used, with a form to rename it and one to revoke it for whoever may
-   (machines.js's mayChange()); revoking needs a fresh code. Then CI tokens:
-   locked below the plan features.js names for them, and made by an owner
-   or admin with a fresh code. */
-async function machinesPanel(env, who, onPlan, error) {
+/* What kind of machine it is, in a pill: a terminal plain, a CI token in
+   blue, a subscription's old token in amber, anything expired in red. */
+const KIND_TONE = { device: "", ci: "info", legacy: "warn" };
+
+/* The day a machine was last used, in words for the last week and as the
+   day before that, the day itself in the title. A subscription's old
+   token's use is not recorded. */
+function lastUsed(m, today) {
+  if (m.kind === "legacy") return `<span class="none">Not recorded</span>`;
+  if (m.last_used_day === null) return `<span class="none">Not used yet</span>`;
+  const days = Math.round((today - m.last_used_day) / DAY);
+  const iso = new Date(m.last_used_day * 1000).toISOString().slice(0, 10);
+  const words = days <= 0 ? "today" : days === 1 ? "yesterday" : days < 7 ? `${days} days ago` : iso;
+  return `<time datetime="${iso}" title="${iso}">${words}</time>`;
+}
+
+/* The step-up, once at the top of an account page, for what on it needs
+   a fresh code (`what`, a sentence already escaped), back to `next`. */
+const confirmFirst = async (env, who, next, what) =>
+  confirmCallout(what, who.email, stepupForm(await formToken(env, who.id, "stepup"), next));
+
+/* Every machine of the organisation being looked at, in a table: what it
+   is called, what kind it is, who linked or made it and when, and the day
+   it was last used, with Rename and Revoke for whoever may (machines.js's
+   mayChange()); revoking needs a fresh code, asked for once at the top of
+   the page. Then CI tokens: locked below the plan features.js names for
+   them, and made by an owner or admin with a fresh code. */
+async function machinesView(env, who, { error = "", status = 200 } = {}) {
   const org = who.org;
+  const name = escape(org.name);
+  const onPlan = await plan(env, org.id);
   const confirmed = fresh(who);
   const t = now();
+  const today = Math.floor(t / DAY) * DAY;
   const list = await machinesOf(env, org.id, await joinedAt(env, org.id, who.user));
   const renameToken = await formToken(env, who.id, "machine-rename");
   const revokeToken = await formToken(env, who.id, "machine-revoke");
-  const items = list.map((m) => {
-    const may = mayChange(who, m);
+  const rows = list.map((m) => {
     const id = escape(m.id);
-    const name = m.label ? escape(m.label) : UNNAMED[m.kind];
-    const by = m.kind === "legacy"
-      ? `The token emailed with a subscription, attached here on ${day(m.created_at)}.`
-      : `${m.kind === "ci" ? "Made" : "Linked"} by ${m.email ? escape(m.email) : "a former member"} on ${day(m.created_at)}.`;
-    const used = m.kind === "legacy" ? "Its use is not recorded."
-      : m.last_used_day === null ? "Not used yet." : `Last used ${day(m.last_used_day)}.`;
+    const label = m.label ? escape(m.label) : UNNAMED[m.kind];
     const expired = m.expires_at !== null && m.expires_at <= t;
-    const expiry = m.expires_at === null ? "" : expired ? ` Expired ${day(m.expires_at)}.` : ` Expires ${day(m.expires_at)}.`;
-    const forms = may ? `
-        <details><summary>${m.label ? "Rename" : "Name it"}</summary>
-        ${form("/machines/rename", renameToken, `
+    const expiry = m.expires_at === null ? "" : `<span class="sub">${expired ? "Expired" : "Expires"} ${day(m.expires_at)}</span>`;
+    const by = m.kind === "legacy" ? `<span class="none">Emailed with a subscription</span>`
+      : m.email ? escape(m.email) : `<span class="none">A former member</span>`;
+    const forms = mayChange(who, m) ? actions([
+      `<details class="pop"><summary class="btn compact">${m.label ? "Rename" : "Name it"}</summary><div class="pop-body">${form("/machines/rename", renameToken, `
           <input type="hidden" name="id" value="${id}">
           <label for="label-${id}">Name</label>
-          <input id="label-${id}" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required value="${escape(m.label)}">
-          <button type="submit">Rename</button>`)}</details>
-        ${confirmed ? form("/machines/revoke", revokeToken, `
+          <div class="inline"><input id="label-${id}" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required value="${escape(m.label)}">
+          <button type="submit" class="primary compact">Save</button></div>`)}</div></details>`,
+      ...(confirmed ? [form("/machines/revoke", revokeToken, `
           <input type="hidden" name="id" value="${id}">
-          <button type="submit">${expired ? "Remove" : "Revoke"}</button>`) : ""}` : "";
-    return `<li data-machine="${id}"><strong>${name}</strong> <span class="tag">${KINDS[m.kind]}${expired ? ", expired" : ""}</span>
-        <br>${by} ${used}${expiry}${forms}</li>`;
-  }).join("");
-  const anyMine = list.some((m) => mayChange(who, m));
+          <button type="submit" class="danger compact">${expired ? "Remove" : "Revoke"}</button>`)] : []),
+    ]) : "";
+    return `<tr data-machine="${id}">${cell("", `<strong>${label}</strong>${expiry}`, "cell-main")}` +
+      `${cell("Kind", pill(`${KINDS[m.kind]}${expired ? ", expired" : ""}`, expired ? "crit" : KIND_TONE[m.kind]))}` +
+      `${cell("Added by", by)}${cell("Added", dayStamp(m.created_at), "opt")}${cell("Last used", lastUsed(m, today))}` +
+      `${cell("", forms, "act")}</tr>`;
+  });
+  const counts = [["device", "terminal"], ["ci", "CI token"], ["legacy", "old token"]]
+    .map(([kind, one]) => list.filter((m) => m.kind === kind).length && pill(plural(list.filter((m) => m.kind === kind).length, one)))
+    .filter(Boolean).join("");
+  const machines = card({
+    title: "Linked machines", icon: "machines", attributes: 'id="machines"',
+    aside: counts ? `<span class="counts">${counts}</span>` : "",
+    body: list.length ? `<p class="card-intro">Each has a token of its own, and revoking one stops it at once. A terminal
+         unused for ${IDLE_DAYS} days is revoked by itself; ranwhat login links it again.</p>
+      ${problem(error)}
+      ${table([["Name"], ["Kind"], ["Added by"], ["Added", "opt"], ["Last used"], ["Actions", "act"]], rows, { label: "Machines" })}`
+      : `${problem(error)}
+      ${empty(`<p><strong>No machines linked yet.</strong></p>
+        <p>Run this in the terminal you want to link to ${name}, then approve the code it prints.</p>
+        ${command("uvx ranwhat login")}`)}`,
+  });
 
-  const revokeStep = anyMine && !confirmed
-    ? `<p>Revoking a machine needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
-      ${form("/stepup", await formToken(env, who.id, "stepup"),
-        `<input type="hidden" name="next" value="/machines"><button type="submit">Email me a code</button>`)}`
-    : "";
-
-  let ci;
+  /* CI tokens, by what the plan, the role, the count and the code allow. */
   const feature = FEATURES.ci_tokens;
-  if (!allows(onPlan, "ci_tokens")) {
-    ci = `<div class="panel locked" id="ci-tokens" data-feature="ci_tokens">
-      <h2>${escape(feature.name)} <span class="tag">locked, needs ${PLAN_NAMES[feature.plan]}</span></h2>
-      <p>${escape(feature.says)} Each pipeline gets a token of its own, named, with an expiry if you
-         like.</p>
-      <p><a href="${UPGRADE}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></p></div>`;
-  } else if (!canManage(org)) {
-    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
-      <p>An owner or an admin of ${escape(org.name)} can make a CI token here.</p></div>`;
-  } else if (await liveCi(env, org.id) >= MAX_CI) {
-    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
-      <p>${escape(org.name)} holds ${MAX_CI} CI tokens, the most it can. Revoke one to make another.</p></div>`;
+  const ciId = 'id="ci-tokens" data-feature="ci_tokens"';
+  const side = list.length > 0;
+  const width = side ? "c7" : "";
+  const manager = canManage(org);
+  const open = allows(onPlan, "ci_tokens");
+  const full = open && manager && await liveCi(env, org.id) >= MAX_CI;
+  const ciNeedsCode = open && manager && !full && !confirmed;
+  const mine = list.filter((m) => m.kind === "ci");
+  const inUse = mine.length ? `<h3 class="subhead">In use</h3>
+      <ul class="events">${mine.map((m) => `<li><span>${m.label ? escape(m.label) : UNNAMED.ci}</span><span class="when">${
+        m.expires_at === null ? "no expiry" : m.expires_at <= t ? `expired ${day(m.expires_at)}` : `expires ${day(m.expires_at)}`}</span></li>`).join("")}</ul>` : "";
+  let ci;
+  if (!open) {
+    ci = card({
+      title: feature.name, mark: lockBadge(), cls: `locked${width ? ` ${width}` : ""}`, attributes: ciId,
+      aside: pill(`Needs ${PLAN_NAMES[feature.plan]}`, "brand"),
+      body: `<p>${escape(feature.says)} Each pipeline gets a token of its own, named, with an expiry if you like.</p>
+      ${manager ? `<div class="actions"><a class="btn primary" href="${UPGRADE}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></div>`
+        : `<p class="hint">An owner or an admin of ${name} can upgrade it to ${PLAN_NAMES[feature.plan]}.</p>`}`,
+    });
+  } else if (!manager) {
+    ci = card({ title: feature.name, icon: "ci", cls: width, attributes: ciId,
+      body: `<p>An owner or an admin of ${name} can make a CI token here.</p>${inUse}` });
+  } else if (full) {
+    ci = card({ title: feature.name, icon: "ci", cls: width, attributes: ciId, aside: pill(`${MAX_CI} of ${MAX_CI}`, "warn"),
+      body: `<p>${name} holds ${MAX_CI} CI tokens, the most it can. Revoke one to make another.</p>` });
   } else if (!confirmed) {
-    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
-      <p>${escape(feature.says)} Making one needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
-      ${form("/stepup", await formToken(env, who.id, "stepup"),
-        `<input type="hidden" name="next" value="/machines"><button type="submit">Email me a code</button>`)}</div>`;
+    ci = card({ title: feature.name, icon: "ci", cls: width, attributes: ciId,
+      body: `<p>${escape(feature.says)} Making one needs an emailed code typed in the last ${FRESH_FOR / 60} minutes:
+         <a href="#confirm">Email me a code</a>.</p>${inUse}` });
   } else {
     const nonce = randomToken();
     const options = EXPIRY_CHOICES.map(([value, text]) => `<option value="${value}">${text}</option>`).join("");
-    ci = `<div class="panel" id="ci-tokens" data-feature="ci_tokens"><h2>${escape(feature.name)}</h2>
-      <p>${escape(feature.says)} The token is shown once, on the next page, and never again.</p>
+    ci = card({
+      title: feature.name, icon: "ci", cls: width, attributes: ciId,
+      body: `<p class="card-intro">${escape(feature.says)} The token is shown once, on the next page, and never again.</p>
       ${form("/tokens/ci", await orgToken(env, who, ciAction(nonce)), `${orgInput(who)}
         <input type="hidden" name="nonce" value="${nonce}">
-        <label for="ci-label">Name</label>
-        <input id="ci-label" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required placeholder="GitHub Actions">
-        <label for="ci-expires">Expires</label>
-        <select id="ci-expires" name="expires">${options}</select>
-        <button type="submit">Make a CI token</button>`)}</div>`;
+        <div class="fields"><div><label for="ci-label">Name</label>
+        <input id="ci-label" name="label" type="text" maxlength="${MAX_MACHINE_LABEL}" required placeholder="GitHub Actions"></div>
+        <div><label for="ci-expires">Expires</label>
+        <select id="ci-expires" name="expires">${options}</select></div></div>
+        <button type="submit" class="primary">${icon("plus")}Make a CI token</button>`)}
+      ${inUse}`,
+    });
   }
-  return `<section class="panel" id="machines">
-    <h2>Machines</h2>
-    <p>Terminals linked with ranwhat login, CI tokens, and a subscription's emailed token once it is
-       attached here, each with a token of its own. Revoking one stops it at once. A terminal unused for
-       ${IDLE_DAYS} days is revoked by itself; ranwhat login links it again.</p>
-    ${items ? `<ul>${items}</ul>` : "<p>None yet. Run <strong>ranwhat login</strong> in a terminal to link it.</p>"}
-    ${problem(error)}
-    ${revokeStep}
-    ${ci}</section>`;
+  const link = side ? card({
+    title: "Link another terminal", icon: "code", cls: "c5",
+    body: `<p>Run this in the terminal you want to link. It prints a code to type on the approval page, and opens
+         that page where it can.</p>
+      ${command("uvx ranwhat login")}
+      <p class="hint">Have a code already? <a href="/device">Type it here</a>. Running ranwhat logout on a terminal
+         revokes its token too.</p>`,
+  }) : "";
+
+  const anyMine = list.some((m) => mayChange(who, m));
+  const needs = anyMine && !confirmed
+    ? `Revoking a machine needs an emailed code typed in the last ${FRESH_FOR / 60} minutes${ciNeedsCode ? ", and so does making a CI token" : ""}.`
+    : ciNeedsCode ? `Making a CI token needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.` : "";
+  return app(env, who, "machines", {
+    title: "Machines",
+    sub: `The terminals and CI tokens linked to ${name}, each with a token of its own.`,
+    action: `<a class="btn primary" href="/device">${icon("code")}Approve a terminal</a>`,
+    onPlan, status,
+    body: `<div class="grid">
+    ${needs ? await confirmFirst(env, who, PATHS.machines, needs) : ""}
+    ${machines}
+    ${ci}
+    ${link}
+    </div>`,
+  });
 }
 
 const notInOrg = (env, who) => machinesView(env, who, { status: 404,
@@ -1966,18 +2078,19 @@ async function ciTokenPost(request, env) {
       error: `${who.org.name} holds ${MAX_CI} CI tokens, the most it can. Revoke one to make another.` });
   }
   return page("Your CI token", `<h1>Your CI token</h1>
-    <p class="bad"><strong>Copy it now: this is the only time it is shown.</strong> We keep only a hash
-       of it, so nobody, us included, can show it again. A lost one is revoked and replaced, never
-       recovered.</p>
+    ${callout({ tone: "warn", icon: "alert", title: "Copy it now: this is the only time it is shown.",
+    text: `<p>We keep only a hash of it, so nobody, us included, can show it again. A lost one is revoked and
+       replaced, never recovered.</p>` })}
+    <span class="label secret-label">Your token</span>
     <code class="secret">${escape(made.token)}</code>
     <dl>
       <dt>Name</dt><dd>${escape(label)}</dd>
       <dt>Organisation</dt><dd>${escape(who.org.name)}</dd>
-      <dt>Expires</dt><dd>${made.expires_at === null ? "Never; revoke it on your account page" : day(made.expires_at)}</dd>
+      <dt>Expires</dt><dd>${made.expires_at === null ? "Never; revoke it under Machines" : day(made.expires_at)}</dd>
     </dl>
     <p>Keep it in your CI's secrets as <strong>RANWHAT_TOKEN</strong>, where <strong>ranwhat update</strong>
        reads it. Never put it in a repository, a command line or a log.</p>
-    <p><a href="/machines">Back to Machines</a></p>`);
+    ${back(PATHS.machines, "Back to Machines")}`, { icon: "ci" });
 }
 
 /* ---------- the host ---------- */
@@ -2037,8 +2150,8 @@ export async function account(request, env, ctx) {
      rather than sign anyone in with a missing key. */
   if (!ready(env)) {
     return page("Not available", `<h1>Accounts are not available just now.</h1>
-      <p>Everything ranwhat does on your machine works without one.
-         <a href="https://ranwhat.com/">ranwhat.com</a></p>`, { status: 503 });
+      <p class="lead">Everything ranwhat does on your machine works without one.
+         <a href="https://ranwhat.com/">ranwhat.com</a></p>`, { status: 503, icon: "info", tone: "info" });
   }
   const url = new URL(request.url);
   /* A provider without its client id and secret is not there, but for

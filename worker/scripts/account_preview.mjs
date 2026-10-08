@@ -9,11 +9,15 @@
  *   node worker/scripts/account_preview.mjs serve [port]
  *       Serves every scenario until stopped: http://127.0.0.1:<port>/
  *       lists them (default port 8789).
- *   node worker/scripts/account_preview.mjs shots <dir> [--only a,b] [--browser path]
+ *   node worker/scripts/account_preview.mjs shots <dir> [--only a,b] [--widths 1440,390] [--browser path]
  *       Writes <dir>/<scenario>--<page>--<width>-<theme>.png for every
- *       scenario's pages, at 1440 and 390 pixels wide, light and dark,
+ *       scenario's pages, at 1440 and 390 pixels wide (or --widths), light and dark,
  *       and reports anything the browser's console says (a CSP refusal,
- *       say). --only: scenarios whose names start with these.
+ *       say) and any page wider than the window. --only: scenarios whose
+ *       names start with these. The pages only a form's answer draws (a
+ *       code to type, a terminal to approve, a CI token, an error) are the
+ *       scenario "posted", each made afresh by the requests that lead to
+ *       it.
  *   node worker/scripts/account_preview.mjs html <dir>
  *       Writes each page's HTML.
  *
@@ -22,6 +26,9 @@
  * that refuses), and the browser runs headless with a profile of its own
  * in a temporary directory, removed afterwards, with every https request
  * blocked, so Turnstile's script is not loaded on the pages that would.
+ * Stripe's keys are made up, so the upgrade's forms are drawn, and no page
+ * drawn here asks Stripe anything (the subscription below has its terms
+ * kept already).
  * The passkey pages' script is refused too, by their own CSP, since the
  * preview is not served from account.ranwhat.com. Run from the
  * repository root.
@@ -37,7 +44,8 @@ import { d1 } from "../test/stand-ins.mjs";
 const worker = (await import("../src/index.js")).default;
 const accounts = await import("../src/accounts.js");
 const { schema: feedSchema } = await import("../src/auth.js");
-const { openSession } = await import("../src/session.js");
+const { openSession, formToken, orgInput } = await import("../src/session.js");
+const ui = await import("../src/ui.js");
 const { attachPassword, hashPassword } = await import("../src/password.js");
 
 const ORIGIN = "https://account.ranwhat.com";
@@ -52,7 +60,8 @@ globalThis.fetch = async (url) => new Response(`preview: ${url} is not reached`,
 
 const env = {
   LIST: d1(), RESEND_API_KEY: "re_preview", ACCOUNT_SECRET: "preview-secret-that-is-long-enough-0123456789",
-  TURNSTILE_SECRET: "preview", ACCOUNTS_ON: "1",
+  LIST_SECRET: "preview-list-secret-that-is-long-enough-0123", TURNSTILE_SECRET: "preview", ACCOUNTS_ON: "1",
+  STRIPE_SECRET_KEY: "sk_preview", STRIPE_WEBHOOK_SECRET: "whsec_preview",
   GOOGLE_CLIENT_ID: "preview.apps.googleusercontent.com", GOOGLE_CLIENT_SECRET: "preview",
   GITHUB_CLIENT_ID: "Iv1.preview", GITHUB_CLIENT_SECRET: "preview",
 };
@@ -129,18 +138,159 @@ events(owner.org, cy.user, [["signin_google", 6 * DAY], ["passkey_added", 8 * DA
 
 /* Eve: a member of Northwind, not fresh. */
 const eve = (await env.LIST.prepare("SELECT id FROM users WHERE email = 'eve@northwind.example'").first()).id;
+events(owner.org, owner.user, [["member_invited", 9 * DAY + 600], ["role_now_admin", 29 * DAY]]);
+events(owner.org, cy.user, [["invite_accepted", 30 * DAY]]);
+
+/* An invite waiting for Northwind, and its link. */
+const inviteToken = randomBytes(32).toString("base64url");
+run(`INSERT INTO invites (id, org_id, email, role, token_hash, invited_by, created_at, expires_at)
+     VALUES (?, ?, 'gus@example.com', 'member', ?, ?, ?, ?)`, randomUUID(), owner.org, sha(inviteToken), owner.user,
+now() - 2 * DAY, now() + 5 * DAY);
+const gus = await person("gus@example.com");
+
+/* Lia: owner of Lumen Studio, on Plus bought with Stripe (yearly, its terms
+   kept), with one member, an invite waiting and two terminals; fresh. */
+const lia = await person("lia@lumen.example");
+run("UPDATE orgs SET name = 'Lumen Studio', personal = 0, customer = 'cus_preview' WHERE id = ?", lia.org);
+run("INSERT INTO subscriptions (id, customer, status, updated_at) VALUES ('sub_preview', 'cus_preview', 'active', ?)", now());
+run("INSERT INTO org_subscriptions (subscription, org_id, how, linked_at) VALUES ('sub_preview', ?, 'checkout', ?)",
+  lia.org, now() - 50 * DAY);
+run(`INSERT INTO subscription_terms (subscription, interval, renews_at, ends_at, fetched_at)
+     VALUES ('sub_preview', 'yearly', ?, NULL, ?)`, now() + 315 * DAY, now() - DAY);
+const max = await person("max@lumen.example");
+run("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)", lia.org, max.user, now() - 20 * DAY);
+run(`INSERT INTO invites (id, org_id, email, role, token_hash, invited_by, created_at, expires_at)
+     VALUES (?, ?, 'noor@lumen.example', 'member', ?, ?, ?, ?)`, randomUUID(), lia.org, sha(randomBytes(32).toString("base64url")),
+lia.user, now() - DAY, now() + 6 * DAY);
+machine(lia.org, lia.user, "device", "lia-studio-mac", { days: 45, used: 0 });
+machine(lia.org, max.user, "device", "", { days: 3, used: null });
+events(lia.org, lia.user, [["signup", 60 * DAY], ["upgrade_started", 50 * DAY + 300], ["plus_linked", 50 * DAY],
+  ["member_invited", 21 * DAY], ["machine_linked", 45 * DAY], ["billing_opened", 2 * DAY], ["signin", 600]]);
 
 const SCENARIOS = {
-  "free-owner": { cookie: await session(ana.user, ana.org), paths: [...SIGNED_IN, "/upgrade"] },
-  "new-account": { cookie: await session(bo.user, bo.org, { fresh: true }), paths: ["/", "/security", "/machines"] },
-  "plus-admin": { cookie: await session(cy.user, owner.org, { fresh: true }), paths: SIGNED_IN },
-  "plus-member": { cookie: await session(eve, owner.org), paths: ["/", "/security"] },
-  "signed-out": { cookie: "", paths: ["/signin", "/signup", "/signin/password", "/reset", "/signin/passkey", "/nowhere"] },
+  "free-owner": { cookie: await session(ana.user, ana.org), paths: [...SIGNED_IN, "/upgrade", "/device"] },
+  "new-account": { cookie: await session(bo.user, bo.org, { fresh: true }), paths: ["/", "/security", "/machines", "/members", "/billing", "/activity"] },
+  "plus-admin": { cookie: await session(cy.user, owner.org, { fresh: true }), paths: [...SIGNED_IN, "/upgrade", "/device", "/passkeys/add"] },
+  "plus-admin-stale": { cookie: await session(cy.user, owner.org), paths: ["/machines", "/members", "/billing", "/security"] },
+  "plus-owner": { cookie: await session(owner.user, owner.org, { fresh: true }), paths: ["/members", "/billing"] },
+  "plus-member": { cookie: await session(eve, owner.org), paths: SIGNED_IN },
+  "paid-owner": { cookie: await session(lia.user, lia.org, { fresh: true }), paths: SIGNED_IN },
+  "invitee": { cookie: await session(gus.user, gus.org, { fresh: true }), paths: [`/invite/${inviteToken}`] },
+  "signed-out": { cookie: "", paths: ["/signin", "/signup", "/signin/password", "/reset", "/signin/passkey", "/nowhere",
+    `/invite/${inviteToken}`, "/invite"] },
 };
+
+/* ---------- pages a form's answer draws ---------- */
+
+const cookieOf = (name, value) => (value ? `${name}=${value}` : "");
+
+async function request(cookie, path, { form, host = "account.ranwhat.com", ip = "192.0.2.10" } = {}) {
+  const headers = new Headers({ "cf-connecting-ip": ip });
+  if (cookie) headers.set("cookie", cookie);
+  let body;
+  if (form) {
+    headers.set("content-type", "application/x-www-form-urlencoded");
+    /* As a browser sends a form here; the feed host takes a terminal's, which says neither. */
+    if (host === "account.ranwhat.com") {
+      headers.set("origin", ORIGIN);
+      headers.set("sec-fetch-site", "same-origin");
+    }
+    body = new URLSearchParams(form).toString();
+  }
+  return worker.fetch(new Request(`https://${host}${path}`, { method: form ? "POST" : "GET", headers, body }), env,
+    { waitUntil() {} });
+}
+
+/* The hidden fields of the first form on `html` that posts to `action`. */
+function hidden(html, action, pick = () => true) {
+  const found = [...html.matchAll(new RegExp(`<form method="post" action="${action}"[^>]*>([\\s\\S]*?)</form>`, "g"))]
+    .map((m) => Object.fromEntries([...m[1].matchAll(/<input type="hidden" name="([a-z_-]+)" value="([^"]*)">/g)]
+      .map((x) => [x[1], x[2]])))
+    .find(pick);
+  if (!found) throw new Error(`no ${action} form`);
+  return found;
+}
+
+/* A sign-in attempt for `purpose`, as the code page finds it: the cookie. */
+function attempt(email, purpose, { user = null, next = "/" } = {}) {
+  const token = randomBytes(32).toString("base64url");
+  run(`INSERT INTO signins (id, email, email_mac, purpose, user_id, code_mac, next, created_at, expires_at, mailed)
+       VALUES (?, ?, 'preview', ?, ?, 'preview', ?, ?, ?, 1)`, sha(token), email, purpose, user, next, now(), now() + 900);
+  return cookieOf("__Host-rw_signin", token);
+}
+
+const SESSION = (name) => cookieOf("__Host-rw_session", SCENARIOS[name].cookie);
+
+/* A terminal's code, asked for on the feed host, typed on /device. */
+async function typedCode(name) {
+  const asked = await (await request("", "/v1/device/code", { host: "feed.ranwhat.com", form: { client_id: "ranwhat-cli" },
+    ip: `198.51.100.${1 + Math.floor(Math.random() * 250)}` })).json();
+  const box = await (await request(SESSION(name), "/device")).text();
+  return request(SESSION(name), "/device", { form: { ...hidden(box, "/device"), user_code: asked.user_code } });
+}
+
+const POSTED = {
+  "signin-code": () => request(attempt("ana@example.com", "signin"), "/signin/code"),
+  "signup-code": () => request(attempt("new@example.com", "verify"), "/signin/code"),
+  "reset-code": () => request(attempt("ana@example.com", "reset"), "/signin/code"),
+  "stepup-code": () => request(attempt("cy.admin@northwind.example", "stepup", { user: cy.user, next: "/machines" }), "/signin/code"),
+  "new-code": () => request(attempt("ana@example.com", "signin"), "/signin/again"),
+  "device-confirm": () => typedCode("plus-admin"),
+  "device-approved": async () => {
+    const shown = await (await typedCode("plus-admin")).text();
+    return request(SESSION("plus-admin"), "/device/approve", { form: { ...hidden(shown, "/device/approve"), label: "Cy's desktop" } });
+  },
+  "device-denied": async () => {
+    const shown = await (await typedCode("plus-admin")).text();
+    return request(SESSION("plus-admin"), "/device/deny", { form: hidden(shown, "/device/deny") });
+  },
+  "ci-token": async () => {
+    const page = await (await request(SESSION("plus-admin"), "/machines")).text();
+    return request(SESSION("plus-admin"), "/tokens/ci", { form: { ...hidden(page, "/tokens/ci"), label: "Deploy <prod>", expires: "90" } });
+  },
+  "transfer-confirm": async () => {
+    const page = await (await request(SESSION("plus-owner"), "/members")).text();
+    return request(SESSION("plus-owner"), "/members/transfer", { form: hidden(page, "/members/transfer") });
+  },
+  "members-refused": async () => {
+    const page = await (await request(SESSION("plus-owner"), "/members")).text();
+    return request(SESSION("plus-owner"), "/members/invite", { form: { ...hidden(page, "/members/invite"), email: "eve@northwind.example" } });
+  },
+  "members-stepup": async () => {
+    const page = await (await request(SESSION("plus-owner"), "/members")).text();
+    const form = hidden(page, "/members/remove");
+    run("UPDATE sessions SET authed_at = ? WHERE id = ?", now() - 3 * 3600, sha(SCENARIOS["plus-owner"].cookie));
+    const r = await request(SESSION("plus-owner"), "/members/remove", { form });
+    run("UPDATE sessions SET authed_at = ? WHERE id = ?", now(), sha(SCENARIOS["plus-owner"].cookie));
+    return r;
+  },
+  "billing-refused": async () => request(SESSION("plus-member"), "/billing", { form: {
+    form: await formToken(env, sha(SCENARIOS["plus-member"].cookie), `billing:${owner.org}`), org: owner.org, subscription: "sub_preview",
+  } }),
+  "rename-error": async () => {
+    const page = await (await request(SESSION("plus-admin"), "/members")).text();
+    return request(SESSION("plus-admin"), "/org", { form: { ...hidden(page, "/org"), name: "" } });
+  },
+  "machine-error": async () => {
+    const page = await (await request(SESSION("plus-admin"), "/machines")).text();
+    return request(SESSION("plus-admin"), "/machines/rename", { form: { ...hidden(page, "/machines/rename"), label: "" } });
+  },
+  /* Machines with the first Rename open, as a click on it leaves it. */
+  "rename-open": async () => {
+    const r = await request(SESSION("paid-owner"), "/machines");
+    return new Response((await r.text()).replace('<details class="pop">', '<details class="pop" open>'), r);
+  },
+  "refused": () => ui.refused(),
+  "elsewhere": () => ui.elsewhere(),
+};
+
+/* Every scenario, and the posted pages as one more. */
+const ALL = { ...SCENARIOS, posted: { paths: Object.keys(POSTED).map((k) => `/${k}`) } };
 
 /* ---------- serving ---------- */
 
 async function fetchPage(name, path) {
+  if (name === "posted") return POSTED[path.slice(1)]();
   const s = SCENARIOS[name];
   const headers = new Headers({ "cf-connecting-ip": "192.0.2.10" });
   if (s.cookie) headers.set("cookie", `__Host-rw_session=${s.cookie}`);
@@ -153,15 +303,15 @@ function serve(port) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     const [, name, ...rest] = url.pathname.split("/");
-    if (!name || !Object.hasOwn(SCENARIOS, name)) {
+    if (!name || !Object.hasOwn(ALL, name)) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(`<!doctype html><title>Previews</title><ul>${Object.entries(SCENARIOS).map(([n, s]) =>
+      res.end(`<!doctype html><title>Previews</title><ul>${Object.entries(ALL).map(([n, s]) =>
         `<li>${n}: ${s.paths.map((p) => `<a href="/${n}${p}">${p}</a>`).join(" ")}</li>`).join("")}</ul>`);
       return;
     }
     let path = `/${rest.join("/")}${url.search}`;
     let r = await fetchPage(name, path);
-    for (let hops = 0; r.status === 303 && hops < 3; hops++) {
+    for (let hops = 0; r.status === 303 && hops < 3 && name !== "posted"; hops++) {
       path = r.headers.get("location");
       if (!path.startsWith("/")) break;
       r = await fetchPage(name, path);
@@ -235,7 +385,7 @@ async function devtools(browserPath) {
   return { send, on: (l) => listeners.push(l), once, close };
 }
 
-async function shots(dir, { only = [], browser } = {}) {
+async function shots(dir, { only = [], browser, widths = [1440, 390] } = {}) {
   const path = browser || BROWSERS.find((b) => existsSync(b));
   if (!path) throw new Error("no Chromium-based browser found: pass --browser <path>");
   mkdirSync(dir, { recursive: true });
@@ -256,10 +406,10 @@ async function shots(dir, { only = [], browser } = {}) {
   await b.send("Runtime.enable");
   const written = [];
   try {
-    for (const [name, s] of Object.entries(SCENARIOS)) {
+    for (const [name, s] of Object.entries(ALL)) {
       if (only.length && !only.some((o) => name.startsWith(o))) continue;
       for (const p of s.paths) {
-        for (const [width, height, mobile] of [[1440, 900, false], [390, 844, true]]) {
+        for (const [width, height, mobile] of widths.map((w) => [w, w < 900 ? 844 : 900, w < 900])) {
           for (const theme of ["light", "dark"]) {
             await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
             await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
@@ -277,11 +427,14 @@ async function shots(dir, { only = [], browser } = {}) {
               format: "png", captureBeyondViewport: true,
               clip: { x: 0, y: 0, width, height: Math.min(scrollH, 6000), scale: 1 },
             });
-            const file = join(dir, `${name}--${p === "/" ? "overview" : p.slice(1).replace(/\//g, "-")}--${width}-${theme}.png`);
+            const file = join(dir, `${name}--${slug(p)}--${width}-${theme}.png`);
             writeFileSync(file, Buffer.from(shot.data, "base64"));
             written.push(file);
             if (scrollW > width) console.log(`WIDE ${file}: ${scrollW}px wide at ${width}`);
-            for (const text of said) console.log(`CONSOLE ${file}: ${text}`);
+            /* A page drawn with its error status says so in the console; nothing else needs saying. */
+            for (const text of said.filter((t) => !/^Failed to load resource: the server responded with a status of/.test(t))) {
+              console.log(`CONSOLE ${file}: ${text}`);
+            }
           }
         }
       }
@@ -293,12 +446,15 @@ async function shots(dir, { only = [], browser } = {}) {
   console.log(`${written.length} screenshots in ${dir}`);
 }
 
+/* A page's path as a file name: an invite's token is left out. */
+const slug = (p) => (p === "/" ? "overview" : p.slice(1).replace(/^invite\/.+$/, "invite-link").replace(/\//g, "-"));
+
 async function html(dir) {
   mkdirSync(dir, { recursive: true });
-  for (const [name, s] of Object.entries(SCENARIOS)) {
+  for (const [name, s] of Object.entries(ALL)) {
     for (const p of s.paths) {
       const r = await fetchPage(name, p);
-      const file = join(dir, `${name}--${p === "/" ? "overview" : p.slice(1).replace(/\//g, "-")}.html`);
+      const file = join(dir, `${name}--${slug(p)}.html`);
       writeFileSync(file, await r.text());
       console.log(`${r.status} ${file}`);
     }
@@ -312,11 +468,12 @@ if (command === "serve") {
   console.log(`http://127.0.0.1:${server.address().port}/`);
 } else if (command === "shots") {
   if (!arg) throw new Error("shots <dir>");
-  await shots(arg, { only: (flag("--only") || "").split(",").filter(Boolean), browser: flag("--browser") });
+  await shots(arg, { only: (flag("--only") || "").split(",").filter(Boolean), browser: flag("--browser"),
+    ...(flag("--widths") ? { widths: flag("--widths").split(",").map(Number) } : {}) });
   process.exit(0);
 } else if (command === "html") {
   if (!arg) throw new Error("html <dir>");
   await html(arg);
 } else {
-  console.log("serve [port] | shots <dir> [--only a,b] [--browser path] | html <dir>");
+  console.log("serve [port] | shots <dir> [--only a,b] [--widths 1440,390] [--browser path] | html <dir>");
 }

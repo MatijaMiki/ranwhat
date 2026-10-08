@@ -204,11 +204,11 @@ function method(html, key) {
   return [m[1], m[2]];
 }
 
-/* Whom an account page says is signed in. */
+/* Whom an account page says is signed in (the address may break after its @). */
 function signedInAs(html) {
-  const m = html.match(/<span class="label">Signed in as<\/span>\s*<span class="who">([^<]*)<\/span>/);
+  const m = html.match(/<span class="label">Signed in as<\/span>\s*<span class="who">([^<]*)(?:<wbr>([^<]*))?<\/span>/);
   assert.ok(m, "no signed-in address");
-  return m[1];
+  return m[1] + (m[2] ?? "");
 }
 
 const codeIn = (mail) => mail.text.match(/^ {4}([0-9A-Z]{4}-[0-9A-Z]{4})$/m)[1];

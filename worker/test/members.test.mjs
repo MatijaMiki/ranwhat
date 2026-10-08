@@ -228,11 +228,19 @@ async function everyPage(b) {
   return html;
 }
 
+/* The Members page's own content, everything but the sidebar, and whether
+   its members card is drawn locked. */
 const panel = (html) => {
-  const m = html.match(/<section class="panel( locked)?" id="members" data-feature="members">([\s\S]*?)<\/section>/);
-  assert.ok(m, "no members panel");
-  return { locked: Boolean(m[1]), html: m[2] };
+  const m = html.match(/<main id="main" class="main" data-page="members">([\s\S]*?)<\/main>/);
+  assert.ok(m, "no members page");
+  const card = m[1].match(/<section class="card( locked)?" id="members" data-feature="members">/);
+  assert.ok(card, "no members panel");
+  return { locked: Boolean(card[1]), html: m[1] };
 };
+
+/* A person's row in the members table: their address, then their role. */
+const memberRow = (email, role, you = false) => new RegExp(`<tr data-member="[^"]+"><td class="cell-main"><strong>${
+  email.replace(/[.]/g, "\\.")}</strong>${you ? ' <span class="pill">you</span>' : ""}</td><td data-label="Role"><span class="pill[^"]*">${role}</span></td>`);
 
 /* ---------- the feed host and terminals ---------- */
 
@@ -320,9 +328,9 @@ test("Free: the members panel is locked with the way up, and an invite is refuse
   const home = await everyPage(ana);
   const p = panel(home);
   assert.ok(p.locked);
-  assert.match(p.html, /locked, needs Plus/);
+  assert.match(p.html, /<span class="lock">[\s\S]*?<\/span>Members<\/h2><span class="pill brand">Needs Plus<\/span>/);
   assert.match(p.html, /Invite your team: in Plus, one price however many people\./);
-  assert.match(p.html, /<a href="\/upgrade">Upgrade to Plus<\/a>/);
+  assert.match(p.html, /<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.equal(forms(home, "/members/invite").length, 0);
   assert.match(home, /<li class="feat" data-feature="members"><div class="feat-top"><svg[\s\S]*?<\/svg><strong>Members<\/strong><span class="pill brand">Needs Plus<\/span>/);
 
@@ -355,7 +363,7 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     const { ana, acme } = await acmeOwner(e, s);
     let home = (await ana.get("/members")).text;
     assert.ok(!panel(home).locked);
-    assert.match(panel(home).html, /<strong>ana@example\.com<\/strong> <span class="tag">Owner, you<\/span>/);
+    assert.match(panel(home).html, memberRow("ana@example.com", "Owner", true));
 
     let r = await invite(ana, "Bo@Example.com ");
     assert.equal(r.location, "/members", r.text);
@@ -378,7 +386,8 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.ok(!dump(e).includes(token), "the link's token is nowhere in the database");
     assert.deepEqual(eventsOf(e, "member_invited"), [{ org_id: acme, user_id: userId(e, "ana@example.com"), subject: row.id }]);
     home = (await ana.get("/members")).text;
-    assert.match(panel(home).html, new RegExp(`<li data-invite="${row.id}">bo@example\\.com, sent ${isoDay(unix())}, works until ${isoDay(unix() + 7 * DAY)}`));
+    assert.match(panel(home).html, new RegExp(`<tr data-invite="${row.id}"><td class="cell-main"><strong>bo@example\\.com</strong></td>` +
+      `<td data-label="Sent"><time [^>]*>${isoDay(unix())}</time></td><td data-label="Works until"><time [^>]*>${isoDay(unix() + 7 * DAY)}</time></td>`));
 
     /* Bo, signed out, opens the link: the organisation, who sent it, and the way to sign in. */
     const bo = new Browser(e);
@@ -400,7 +409,7 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     const join = forms(r.text, "/invite");
     assert.equal(join.length, 1);
     assert.equal(join[0].token, token);
-    assert.match(r.text, /<button type="submit">Join Acme<\/button>/);
+    assert.match(r.text, /<button type="submit" class="primary wide">Join Acme<\/button>/);
     /* What joining shares, said as it is: every member sees every other's address and terminals. */
     assert.match(r.text, /Everyone in Acme sees your email address and the\s+terminals you link to it/);
     /* GETs, as many as you like, join nobody. */
@@ -422,12 +431,13 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.match(boHome, /<dt>Plan<\/dt><dd>Plus<\/dd>/);
     assert.match(boHome, /Joined an organisation from an invite/);
     /* As the Join page said: a plain member sees the others' addresses, and the terminals they link. */
-    assert.match(panel(boHome).html, /<strong>ana@example\.com<\/strong> <span class="tag">Owner<\/span>/);
+    assert.match(panel(boHome).html, memberRow("ana@example.com", "Owner"));
     await linkTerminal(e, ana, "Ana laptop");
-    assert.match((await bo.get("/machines")).text, /Ana laptop[\s\S]*?Linked by ana@example\.com on/);
+    assert.match((await bo.get("/machines")).text,
+      /<strong>Ana laptop<\/strong><\/td><td data-label="Kind"><span class="pill">terminal<\/span><\/td><td data-label="Added by">ana@example\.com<\/td>/);
 
     home = (await ana.get("/members")).text;
-    assert.match(panel(home).html, /<strong>bo@example\.com<\/strong> <span class="tag">Member<\/span>/);
+    assert.match(panel(home).html, memberRow("bo@example.com", "Member"));
     assert.match(panel(home).html, /bo@example\.com joined/);
     assert.match(panel(home).html, /ana@example\.com invited someone/);
     assert.doesNotMatch(panel(home).html, /data-invite=/);
@@ -806,7 +816,7 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   /* The first post says what it does and does nothing; the second does it. */
   r = await submit(ana, "/members/transfer", (f) => f.user === boId);
   assert.equal(r.status, 200);
-  assert.match(r.text, /Make bo@example\.com the owner of Acme\?/);
+  assert.match(r.text, /<h1>Make bo@<wbr>example\.com the owner of Acme\?<\/h1>/);
   assert.equal(roleIn(e, acme, "ana@example.com"), "owner");
   const confirmForm = forms(r.text, "/members/transfer")[0];
   assert.equal(confirmForm.confirm, "yes");
@@ -1033,14 +1043,15 @@ test("someone who left is a former member to whoever joined after, on Machines a
 
   /* Ana was there when Bob left: she still sees his address. */
   const anas = await everyPage(ana);
-  assert.match(anas, /Made by bob@example\.com on/);
+  const madeBy = (who) => new RegExp(`<span class="pill info">CI</span></td><td data-label="Added by">${who}</td>`);
+  assert.match(anas, madeBy("bob@example\\.com"));
   assert.match(panel(anas).html, /bob@example\.com left/);
 
   /* Zoe joins after: she never shared Acme with Bob, and sees a former member. */
   const zoe = await inOrg(e, s, acme, "zoe@example.com", "admin");
   const zoes = await everyPage(zoe);
   assert.ok(!zoes.includes("bob@example.com"), "Bob's address is nowhere on Zoe's page");
-  assert.match(zoes, /Made by a former member on/);
+  assert.match(zoes, madeBy('<span class="none">A former member</span>'));
   assert.match(panel(zoes).html, /a former member left/);
   assert.match(panel(zoes).html, /zoe@example\.com/);
 
@@ -1050,7 +1061,7 @@ test("someone who left is a former member to whoever joined after, on Machines a
   /* Should Bob come back, he is a member again, and named. */
   run(e, "INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)",
     acme, userId(e, "bob@example.com"), unix());
-  assert.match((await zoe.get("/machines")).text, /Made by bob@example\.com on/);
+  assert.match((await zoe.get("/machines")).text, madeBy("bob@example\\.com"));
 
   /* The Join page says what the organisation keeps of whoever joins. */
   assert.equal((await invite(ana, "carl@example.com")).location, "/members");
@@ -1073,7 +1084,7 @@ test("approving a terminal shows whose organisation it joins and your role there
   const mine = ownOrg(e, "ana@example.com");
   assert.equal(one(e, "SELECT name FROM orgs WHERE id = ?", mine).name, one(e, "SELECT name FROM orgs WHERE id = ?", theirs).name);
   const home = (await ana.get("/members")).text;
-  assert.match(home, /<dt>Owner<\/dt><dd>mal@example\.com<\/dd>/);
+  assert.match(home, /<dt>Owner<\/dt><dd>mal@<wbr>example\.com<\/dd>/, "the owner's address, which may break after its @");
 
   const cli = (await call(e, "/v1/device/code", { form: { client_id: "ranwhat-cli" } })).json;
   const box = await ana.get("/device");

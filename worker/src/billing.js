@@ -6,6 +6,9 @@
  *
  *   GET  /upgrade   Monthly or yearly, for the organisation being looked
  *                   at. Without a session: sign in first, and back here.
+ *                   The account's Billing page offers the same two forms
+ *                   to an owner or an admin of a Free organisation, on the
+ *                   same terms (billingPanel()).
  *   POST /upgrade   An owner or an admin, of an organisation on neither
  *                   Plus nor Team: makes the Checkout (stripe.js's
  *                   orgCheckout()), on the organisation's own Stripe
@@ -58,7 +61,9 @@ import { HOUR, canManage, event, now } from "./accounts.js";
 import {
   FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formToken, fresh, orgFormOk, orgInput, orgToken, readCookie,
 } from "./session.js";
-import { away, elsewhere, fields, form, page, redirect, refused } from "./ui.js";
+import {
+  away, back as backTo, callout, confirmCallout, elsewhere, fields, form, icon, page, pill, redirect, refused, stepupForm,
+} from "./ui.js";
 import {
   CUSTOMER, INTERVALS, SUBSCRIPTION, customerEmail, orgCheckout, orgCustomer, portalSession, refreshTerms, sellable,
   setCustomerEmail,
@@ -96,8 +101,8 @@ const STATUS = Object.freeze({
 
 const day = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 const problem = (text) => (text ? `<p class="bad">${escape(text)}</p>` : "");
-const back = `<p><a href="/">Your account</a></p>`;
-const backToBilling = `<p><a href="/billing">Back to Billing</a></p>`;
+const back = backTo("/", "Your account");
+const backToBilling = backTo("/billing", "Back to Billing");
 
 /* No session: sign in first, and come back to the upgrade. */
 const toSignin = (request) =>
@@ -143,12 +148,14 @@ async function grantOf(env, orgId) {
 
 /* ---------- the panel on the account page ---------- */
 
-/* The organisation's billing, for dashboard.js: each live subscription
-   (or, with none, the last one) with its plan, status and the day it
-   renews or ends, as the webhook last kept them (stripe.js's keep()); a
-   grant's plan; or, on Free, the way to upgrade. Manage billing is
-   offered to an owner or an admin with a fresh code, and the step-up to
-   one without.
+/* The organisation's billing, for dashboard.js's Billing page: each live
+   subscription (or, with none, the last one) with its plan, status and
+   the day it renews or ends, as the webhook last kept them (stripe.js's
+   keep()); a grant's plan; or, on Free, monthly and yearly to choose from
+   for an owner or an admin. Manage billing is offered to an owner or an
+   admin with a fresh code, and so is checkout once the organisation has a
+   Stripe customer (upgradeForm() says why); the way to that code is once,
+   at the top of the page.
 
    Drawing the page asks Stripe nothing, whoever draws it and however
    often. The one exception is a subscription whose terms no event has
@@ -157,9 +164,11 @@ async function grantOf(env, orgId) {
    and an organisation asks at most TERMS_READS_PER_HOUR times an hour
    even while Stripe fails. Anyone else sees it as not known yet.
 
-   { html, away }: away is the origin its form goes on to, for the page's
-   form-action, and only when the form is there. */
-export async function billingPanel(env, who, onPlan, { error = "" } = {}) {
+   { top, current, side, notes, away }: the notices for the top of the
+   page, the plan's card and the one beside it, the note on subscriptions
+   bought without an account, and the origins its forms go on to, for the
+   page's form-action, each only when its form is there. */
+export async function billingPanel(env, who, onPlan) {
   const org = who.org;
   const name = escape(org.name);
   const manager = canManage(org);
@@ -170,6 +179,7 @@ export async function billingPanel(env, who, onPlan, { error = "" } = {}) {
   const shown = live.length ? live : linked.slice(0, 1);
   const canOpen = manager && confirmed && Boolean(env.STRIPE_SECRET_KEY);
   const billingToken = canOpen ? await orgToken(env, who, "billing") : null;
+  const codeAge = `${FRESH_FOR / 60} minutes`;
 
   const items = [];
   for (let sub of shown) {
@@ -190,7 +200,7 @@ export async function billingPanel(env, who, onPlan, { error = "" } = {}) {
         : known.ends_at ? `<dt>${known.ends_at > t ? "Ends" : "Ended"}</dt><dd data-ends>${day(known.ends_at)}</dd>` : "";
     const manage = canOpen ? form("/billing", billingToken, `${orgInput(who)}
         <input type="hidden" name="subscription" value="${escape(sub.id)}">
-        <button type="submit">Manage billing</button>`) : "";
+        <button type="submit" class="primary">Manage billing</button>`) : "";
     items.push(`<div data-subscription="${escape(sub.id)}"><dl>
         <dt>Plan</dt><dd>Plus${known && known.interval ? `, ${known.interval}` : ""}</dd>
         <dt>Status</dt><dd data-status="${escape(status)}">${escape(words)}</dd>
@@ -199,18 +209,14 @@ export async function billingPanel(env, who, onPlan, { error = "" } = {}) {
   }
 
   let how = "";
+  const manageNeedsCode = shown.length > 0 && manager && !confirmed && Boolean(env.STRIPE_SECRET_KEY);
   if (shown.length) {
     how = !manager ? `<p>An owner or an admin of ${name} manages its billing.</p>`
       : !env.STRIPE_SECRET_KEY ? "<p>Billing cannot be opened from here just now.</p>"
-        : confirmed ? `<p><small>Manage billing opens Stripe's billing page, to change the plan or the card, get invoices, or cancel.</small></p>
-      <p><small>Stripe's billing page also opens, from ranwhat.com/api/billing, for whoever reads ${name}'s
-         billing email, to which Stripe mails a link. That is the owner's address unless an owner or an admin
-         changes it on that page, and whenever an owner or an admin leaves, is removed, is made a member or
-         hands on ownership, it goes back to the owner's address, unless it is the address of someone who is
-         still an owner or an admin here and did not just hand ownership on.</small></p>`
-          : `<p>Manage billing needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
-      ${form("/stepup", await formToken(env, who.id, "stepup"),
-        `<input type="hidden" name="next" value="/billing"><button type="submit">Email me a code</button>`)}`;
+        : confirmed ? `<p class="hint">Manage billing opens Stripe's billing page, to change the plan or the card, get
+         invoices, or cancel.</p>`
+          : `<p class="hint">Manage billing needs an emailed code typed in the last ${codeAge}:
+         <a href="#confirm">Email me a code</a>.</p>`;
   }
 
   let standing = "";
@@ -222,31 +228,114 @@ export async function billingPanel(env, who, onPlan, { error = "" } = {}) {
     }
   } else if (onPlan === "free") {
     standing = manager
-      ? `<p>${name} is on Free. Plus is ${PRICES.monthly} or ${PRICES.yearly}, one price for the organisation.</p>
-      <p><a class="button" href="/upgrade">Upgrade to Plus</a></p>
-      <p><small>To move a Plus subscription bought without an account to ${name}, write to
-         <a href="${MOVE}">hello@ranwhat.com</a>.</small></p>`
+      ? `<p>${name} is on Free. Plus is ${PRICES.monthly} or ${PRICES.yearly}, one price for the organisation.</p>`
       : `<p>${name} is on Free. An owner or an admin of it can upgrade it to Plus.</p>`;
   }
 
+  const tagline = {
+    free: "Everything ranwhat does on your machines stays free.",
+    plus: `On for everyone in ${name}.`,
+    team: `With everything in Plus, on for everyone in ${name}.`,
+  }[onPlan];
+
+  /* What Free has, and what it leaves to Plus, for a Free organisation's
+     card: the same features.js the server refuses from. */
+  const onFree = onPlan === "free" ? `<ul class="checks plan-list">
+      <li class="on">${icon("check")}<div><strong>Everything on your machines</strong><p>Whatever ranwhat works out on a
+        machine is free, and stays free.</p></div></li>
+      <li class="on">${icon("check")}<div><strong>Linked terminals</strong><p>Link your terminals to ${name}, and rename
+        or revoke them under Machines.</p></div></li>
+      <li class="locked-item">${icon("lock")}<div><strong>With Plus</strong><p>${featuresOf("plus")
+        .filter((f) => f.status === "live").map((f) => escape(f.name)).join(", ").replace(/, ([^,]*)$/, " and $1")}, and
+        what comes next.</p></div></li>
+    </ul>` : "";
+
+  /* On Free, for an owner or an admin: monthly or yearly, straight to
+     Stripe Checkout, on the terms upgradeForm() sets. */
+  let side = "";
+  let checkoutNeedsCode = false;
+  let checkout = false;
+  if (onPlan === "free" && manager) {
+    let body;
+    if (!sellable(env)) {
+      body = `<p>Upgrading is not open yet. If you want Plus now,
+         <a href="mailto:hello@ranwhat.com?subject=ranwhat%20Plus">write to us</a>.</p>`;
+    } else if (!confirmed && await hasCustomer(env, org.id)) {
+      checkoutNeedsCode = true;
+      body = `<p>Opening checkout needs an emailed code typed in the last ${codeAge}, as Stripe holds billing
+         details for ${name} already: <a href="#confirm">Email me a code</a>.</p>`;
+    } else {
+      checkout = true;
+      body = `<p class="card-intro">One price for ${name}, however many people are in it. Stripe takes the payment and
+         shows the total, with any tax, before you pay.</p>
+      ${choices(who, await orgToken(env, who, "upgrade"))}
+      <p class="hint">What each plan adds is below, and on <a href="/upgrade">the upgrade page</a>.</p>`;
+    }
+    side = `<section class="card c5" id="upgrade">
+    <header class="card-head"><h2>${icon("spark")}Upgrade to Plus</h2></header>
+    ${body}</section>`;
+  } else if (shown.length && manager) {
+    side = `<section class="card c5" id="billing-email">
+    <header class="card-head"><h2>${icon("mail")}Billing email</h2></header>
+    <p>Stripe's billing page also opens, from ranwhat.com/api/billing, for whoever reads ${name}'s billing email,
+       to which Stripe mails a link.</p>
+    <p class="hint">That is the owner's address unless an owner or an admin changes it on that page, and whenever an
+       owner or an admin leaves, is removed, is made a member or hands on ownership,
+       it goes back to the owner's address, unless it is the address of someone who is still an owner or an admin
+       here and did not just hand ownership on.</p></section>`;
+  }
+
+  const current = `<section class="card${side ? " c7" : ""}" id="billing">
+    <header class="card-head"><h2>${icon("billing")}Current plan</h2>${pill(PLAN_NAMES[onPlan], onPlan === "free" ? "" : "brand")}</header>
+    <div class="plan-now"><b>${PLAN_NAMES[onPlan]}</b><span>${tagline}</span></div>
+    ${standing}
+    ${onFree}
+    ${items.length ? `<div class="subs">
+    ${items.join("\n    ")}
+    </div>` : ""}
+    ${how}</section>`;
+
   /* Two Checkouts paid, or one besides an attached purchase: the
      organisation pays twice until one is cancelled. */
-  const twice = live.length > 1 ? `<p class="bad" data-twice="${live.length}">${name} has ${live.length} live Plus
-       subscriptions, and needs one. ${manager ? "Cancel the one you do not want with its Manage billing, and"
-        : "An owner or an admin can cancel the one it does not want with Manage billing;"} write to
+  const twice = live.length > 1 ? callout({ tone: "crit", icon: "alert", title: "Paying twice",
+    attributes: `data-twice="${live.length}"`,
+    text: `<p>${name} has ${live.length} live Plus subscriptions, and needs one. ${manager
+      ? "Cancel the one you do not want with its Manage billing, and"
+      : "An owner or an admin can cancel the one it does not want with Manage billing;"} write to
        <a href="mailto:hello@ranwhat.com?subject=ranwhat%20Plus%20paid%20twice">hello@ranwhat.com</a> for a refund
-       of it.</p>` : "";
+       of it.</p>` }) : "";
+
+  const needs = [
+    manageNeedsCode && `Manage billing needs an emailed code typed in the last ${codeAge}`,
+    checkoutNeedsCode && `${manageNeedsCode ? "and so does opening checkout" : `Opening checkout needs an emailed code typed in the last ${codeAge}`}, as Stripe holds billing details for ${name} already`,
+  ].filter(Boolean).join(", ");
+  const top = `${twice}${needs ? confirmCallout(`${needs}.`, who.email,
+    stepupForm(await formToken(env, who.id, "stepup"), "/billing")) : ""}`;
+
+  const notes = onPlan === "free" && manager ? `<section class="card" id="moving">
+    <header class="card-head"><h2>${icon("info")}Bought Plus without an account?</h2></header>
+    <p>To move a Plus subscription bought without an account to ${name}, write to
+       <a href="${MOVE}">hello@ranwhat.com</a>.</p></section>` : "";
 
   return {
-    html: `<section class="panel" id="billing">
-    <h2>Billing</h2>
-    ${twice}
-    ${items.join("\n    ")}
-    ${standing}
-    ${problem(error)}
-    ${how}</section>`,
-    away: canOpen && shown.length ? [PORTAL_ORIGIN] : [],
+    top, current, side, notes,
+    away: [...(canOpen && shown.length ? [PORTAL_ORIGIN] : []), ...(checkout ? [CHECKOUT_ORIGIN] : [])],
   };
+}
+
+/* Monthly and yearly, each a form that opens Stripe Checkout for the
+   organisation the page was drawn for. token: orgToken() for "upgrade". */
+function choices(who, token) {
+  const choice = (interval, name, note, best) => form("/upgrade", token, `${orgInput(who)}
+      <input type="hidden" name="plan" value="${interval}">
+      <span class="label">${name}</span>
+      <span class="choice-price">${escape(PRICES[interval])}</span>
+      ${best ? pill(note, "brand") : `<span class="hint">${note}</span>`}
+      <button type="submit"${best ? ' class="primary"' : ""}>Choose ${name.toLowerCase()}</button>`, `choice${best ? " best" : ""}`);
+  return `<div class="choices">
+      ${choice("monthly", "Monthly", "Cancel any time.", false)}
+      ${choice("yearly", "Yearly", "Two months free", true)}
+    </div>`;
 }
 
 /* Back from a paid Checkout (stripe.js's success_url, the overview with
@@ -278,27 +367,29 @@ async function upgradeForm(env, who, { error = "", status = 200 } = {}) {
   const head = "<h1>Upgrade to Plus</h1>";
   if (atLeast(onPlan, "plus")) {
     return page("Upgrade to Plus", `${head}
-    <p>${name} is on ${PLAN_NAMES[onPlan]} already, so there is nothing to buy.${canManage(org)
+    <p class="lead">${name} is on ${PLAN_NAMES[onPlan]} already, so there is nothing to buy.${canManage(org)
       ? " Manage billing on your account page changes the plan or the card." : ""}</p>
-    ${problem(error)}${back}`, { status });
+    ${problem(error)}${backToBilling}`, { status, icon: "check", tone: "ok" });
   }
   /* Members are who "everyone" is, so they get a sentence of their own. */
-  const served = featuresOf("plus").filter((f) => f.status === "live" && f.key !== "members").map((f) => escape(f.name));
-  const about = `<p>Plus adds what needs a server, for everyone in <strong>${name}</strong>:
-       ${served.join(" and ")} now, and the rest of the <a href="/#plus">Plus panel</a> as it comes.
+  const live = featuresOf("plus").filter((f) => f.status === "live");
+  const served = live.filter((f) => f.key !== "members").map((f) => escape(f.name));
+  const about = `<p class="lead">Plus adds what needs a server, for everyone in <strong>${name}</strong>:
+       ${served.join(" and ")} now, and the rest of <a href="/#plus">what Plus has</a> as it comes.
        Invite as many of your team as you like. Everything ranwhat does on your machines stays free.</p>
-    <p>${PRICES.monthly}, or ${PRICES.yearly} (two months free), one price for the organisation.
-       Stripe takes the payment and shows the total, with any tax, before you pay. Cancel any time
-       with Manage billing on your account page; Plus stays on to the end of the period paid for.</p>`;
+    <ul class="checks">
+      ${live.map((f) => `<li class="on">${icon("check")}<div><strong>${escape(f.name)}</strong><p>${escape(f.says)}</p></div></li>`).join("\n      ")}
+    </ul>`;
   if (!sellable(env)) {
     return page("Upgrade to Plus", `${head}
-    <p>Upgrading is not open yet. If you want Plus now,
-       <a href="mailto:hello@ranwhat.com?subject=ranwhat%20Plus">write to us</a>.</p>${back}`, { status: 503 });
+    <p class="lead">Upgrading is not open yet. If you want Plus now,
+       <a href="mailto:hello@ranwhat.com?subject=ranwhat%20Plus">write to us</a>.</p>${back}`,
+    { status: 503, icon: "spark" });
   }
   if (!canManage(org)) {
     return page("Upgrade to Plus", `${head}${about}
     <p>Only an owner or an admin of ${name} can upgrade it. Ask one of them.</p>
-    ${problem(error)}${back}`, { status });
+    ${problem(error)}${back}`, { status, icon: "spark" });
   }
   if (!fresh(who) && await hasCustomer(env, org.id)) {
     return page("Upgrade to Plus", `${head}${about}
@@ -306,20 +397,16 @@ async function upgradeForm(env, who, { error = "", status = 200 } = {}) {
        billing details for ${name} already. We send one to
        <strong>${escape(who.email)}</strong>; once you type it you come back here.</p>
     ${problem(error)}
-    ${form("/stepup", await formToken(env, who.id, "stepup"), `
-      <input type="hidden" name="next" value="/upgrade">
-      <button type="submit">Email me a code</button>`)}
-    ${back}`, { status });
+    <div class="actions">${stepupForm(await formToken(env, who.id, "stepup"), "/upgrade")}</div>
+    ${back}`, { status, icon: "spark" });
   }
-  const token = await orgToken(env, who, "upgrade");
-  const choice = (interval, label) => form("/upgrade", token, `${orgInput(who)}
-      <input type="hidden" name="plan" value="${interval}">
-      <button type="submit">${label}, ${PRICES[interval]}</button>`, "row");
   return page("Upgrade to Plus", `${head}${about}
     ${problem(error)}
-    ${choice("monthly", "Monthly")}
-    ${choice("yearly", "Yearly")}
-    ${back}`, { status, away: [CHECKOUT_ORIGIN] });
+    ${choices(who, await orgToken(env, who, "upgrade"))}
+    <p class="fine">One price for the organisation, however many people are in it. Stripe takes the payment and shows
+       the total, with any tax, before you pay. Cancel any time with Manage billing on your account page; Plus stays
+       on to the end of the period paid for.</p>
+    ${back}`, { status, away: [CHECKOUT_ORIGIN], icon: "spark" });
 }
 
 /* GET /upgrade. */
@@ -474,14 +561,12 @@ export async function billingEmailsDue(env) {
 /* ---------- Manage billing ---------- */
 
 async function billingProblem(env, who, status, text, { stepup = false, fallback = false } = {}) {
-  return page("Billing", `<h1>Billing</h1>
+  return page("Billing", `<h1>Billing did not open.</h1>
     ${problem(text)}
     ${fallback ? `<p>Try again in a minute, or sign in to Stripe's billing page with your billing email at
        <a href="https://ranwhat.com/api/billing">ranwhat.com/api/billing</a>.</p>` : ""}
-    ${stepup ? form("/stepup", await formToken(env, who.id, "stepup"), `
-      <input type="hidden" name="next" value="/billing">
-      <button type="submit">Email me a code</button>`) : ""}
-    ${backToBilling}`, { status });
+    ${stepup ? `<div class="actions">${stepupForm(await formToken(env, who.id, "stepup"), "/billing")}</div>` : ""}
+    ${backToBilling}`, { status, icon: "alert", tone: "warn" });
 }
 
 /* POST /billing: Stripe's billing portal for the customer of a
