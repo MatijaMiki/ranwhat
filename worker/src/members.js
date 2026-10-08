@@ -240,7 +240,7 @@ export async function switcher(env, who, next = "/", { compact = false } = {}) {
       <label for="org-switch">Your organisations</label>
       <select id="org-switch" name="org">${options}</select>
       <button type="submit"${compact ? ' class="compact"' : ""}>Switch</button>`);
-  return compact ? `<details class="switch"><summary class="toggle">${icon("swap")}Switch organisation</summary>
+  return compact ? `<details class="switch"><summary class="toggle">${icon("swap")}Switch<span class="more"> organisation</span></summary>
       ${switching}</details>` : switching;
 }
 

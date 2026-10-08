@@ -45,7 +45,7 @@ import { ACCOUNT_ORIGIN, DAY, now } from "./accounts.js";
    window's, since the sidebar takes part of it. */
 const CSS = `
 :root{color-scheme:light;--ground:#edeff1;--surface:#fff;--raise:#f7f8f9;--ink:#12171c;--ink-2:#39434e;--muted:#5a6672;--line:#7d8794;--rule:#d5dae0;--rule-2:#e4e8ec;--brand:#b8482d;--on-brand:#fff;--brand-bg:#fbeeea;--crit:#b02a1e;--crit-bg:#f7e9e7;--warn:#8a5a00;--warn-bg:#f8f0df;--ok:#1b6b4a;--ok-bg:#e6f0eb;--info:#2a4f7c;--info-bg:#e8eef5;--focus:#2a4f7c;--sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
-@media(prefers-color-scheme:dark){:root{color-scheme:dark;--ground:#0E1318;--surface:#151B21;--raise:#1C242C;--ink:#e9edf0;--ink-2:#c2cad2;--muted:#8e99a4;--line:#66717c;--rule:#242C34;--rule-2:#222a32;--brand:#ea8471;--on-brand:#0E1318;--brand-bg:#2a1714;--crit:#ea8471;--crit-bg:#2a1714;--warn:#d7a44f;--warn-bg:#271e10;--ok:#72c69d;--ok-bg:#12241c;--info:#8db4dd;--info-bg:#141e29;--focus:#8db4dd}}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--ground:#0E1318;--surface:#151B21;--raise:#1C242C;--ink:#e9edf0;--ink-2:#c2cad2;--muted:#8e99a4;--line:#66717c;--rule:#242C34;--rule-2:#262f38;--brand:#ea8471;--on-brand:#0E1318;--brand-bg:#2a1714;--crit:#ea8471;--crit-bg:#2a1714;--warn:#d7a44f;--warn-bg:#271e10;--ok:#72c69d;--ok-bg:#12241c;--info:#8db4dd;--info-bg:#141e29;--focus:#8db4dd}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;background:var(--ground);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased;overflow-wrap:anywhere}
@@ -375,6 +375,7 @@ form+.hint{margin-top:8px}
 .org-name{margin:0;-webkit-line-clamp:1}
 .switch{margin:0;padding:0;border:0}
 .switch[open]{flex:1 1 100%}
+.switch .more{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .switch form{grid-template-columns:minmax(0,1fr) auto;align-items:end}
 .switch label{grid-column:1/-1}
 .switch button{width:auto}
