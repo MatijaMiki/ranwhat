@@ -78,7 +78,7 @@ import {
   FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formOk, formToken, fresh, mac, network, peek, randomToken,
   readCookie, unbump,
 } from "./session.js";
-import { back, callout, dangerButton, fields, form, page, redirect, refused } from "./ui.js";
+import { back, callout, dangerButton, fields, form, page, redirect, refused, shownAddress } from "./ui.js";
 import { switcher } from "./members.js";
 
 export const FEED_HOST = "feed.ranwhat.com";
@@ -698,7 +698,7 @@ async function confirmPage(env, who, code, row, { error = "", status = 200 } = {
       <dt>Code</dt><dd>${escape(shownCode(code))}</dd>
       <dt>Asked for</dt><dd>${escape(ago(now() - row.created_at))}${where ? `, from ${escape(where)}` : ""}</dd>
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
-      <dt>Owner</dt><dd>${owner ? escape(owner) : "You"}</dd>
+      <dt>Owner</dt><dd>${owner ? shownAddress(owner) : "You"}</dd>
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd>${PLAN_NAMES[onPlan]}</dd>
     </dl>

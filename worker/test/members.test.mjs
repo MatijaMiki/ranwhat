@@ -1160,7 +1160,7 @@ test("approving a terminal shows whose organisation it joins and your role there
   const shown = await ana.post("/device", { form: tokenFor(box.text, "/device"), user_code: cli.user_code });
   assert.equal(shown.status, 200, shown.text);
   assert.match(shown.text, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
-  assert.match(shown.text, /<dt>Owner<\/dt><dd>mal@example\.com<\/dd>/);
+  assert.match(shown.text, /<dt>Owner<\/dt><dd>mal@<wbr>example\.com<\/dd>/, "the owner's address, which may break after its @");
   assert.match(shown.text, /<dt>Your role<\/dt><dd>Member<\/dd>/);
   assert.match(shown.text, /not an organisation of your own/);
   const done = await ana.post("/device/approve", { form: tokenFor(shown.text, "/device/approve"),
