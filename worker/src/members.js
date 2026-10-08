@@ -52,9 +52,9 @@
  * userForVerifiedEmail()). A link in someone else's hands opens nothing.
  * The address is kept while the invite waits, and cleared once it is
  * used or taken back (the cron clears an expired one's). Invite emails
- * have a day of their own ('invite', INVITE_MAIL_PER_DAY in accounts.js),
- * apart from sign-in codes, and an organisation sends at most
- * INVITES_PER_ORG_DAY a day.
+ * have a day of their own ('invite', their part of RESEND_DAILY:
+ * INVITE_MAIL_PER_DAY in accounts.js), apart from sign-in codes, and an
+ * organisation sends at most INVITES_PER_ORG_DAY a day.
  *
  * An invite is only as good as its sender's role: it joins nobody once
  * whoever sent it is no longer an owner or an admin of the organisation
@@ -69,9 +69,12 @@
  * organisation's and stay, listed under Machines for an owner or an admin
  * to revoke. Someone left with no organisation at all gets a new personal
  * one in that batch, as at their first sign-in. Whoever stops being an
- * owner or an admin, by any of these or by handing on ownership, stops
- * being the organisation's billing email in Stripe if they were
- * (billing.js's billingEmailFollows()).
+ * owner or an admin, by any of these or by handing on ownership, leaves
+ * the organisation's billing email in Stripe to be checked in that batch
+ * too (billing.js's billingEmailDue()): it goes back to the owner's
+ * address unless it is the address of someone still an owner or an admin,
+ * after the response and, while Stripe fails, from the cron
+ * (billingEmailFollows()).
  *
  * Everything is written to the audit log in the batch that does it: for
  * whoever did it, and, when it was done to someone else, for them too.
@@ -79,13 +82,15 @@
 import { plan, schema as feedSchema, sha256 } from "./auth.js";
 import { REPLY_TO, escape, mail, resend } from "./list.js";
 import { FEATURES, PLAN_NAMES, allows } from "./features.js";
-import { ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, canManage, event, now, spendAuthMail } from "./accounts.js";
 import {
-  ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, current, formOk, formToken, fresh,
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, SWITCHES_PER_DAY, canManage, event, joinedAt, now, seenAddress, spendAuthMail,
+} from "./accounts.js";
+import {
+  ACCOUNT_FROM, FRESH_FOR, SESSION_COOKIE, address, bump, clearCookie, countWithin, current, formOk, formToken, fresh,
   nextPath, orgFormOk, randomToken, readCookie, setCookie, unbump,
 } from "./session.js";
 import { fields, form, page, redirect, refused } from "./ui.js";
-import { billingEmailFollows } from "./billing.js";
+import { billingEmailDue, billingEmailFollows } from "./billing.js";
 
 export const INVITE_COOKIE = "__Host-rw_invite";
 export const INVITE_FOR = 7 * DAY;          // an invite works this long
@@ -122,7 +127,9 @@ export const MEMBER_EVENTS = Object.freeze({
 
 /* The organisation's own record of who came, went and changed role, shown
    to its owner and admins: whoever did it first, whoever it was done to
-   second, both read from users as the page is drawn. */
+   second, both read from users as the page is drawn, and each shown as a
+   former member to a viewer who joined after they left
+   (accounts.js's seenAddress()). */
 const ORG_ACTIVITY = Object.freeze({
   member_invited: (a) => `${a} invited someone`,
   invite_revoked: (a) => `${a} took an invite back`,
@@ -199,13 +206,15 @@ async function inviteBy(env, token) {
      WHERE i.token_hash = ?`).bind(await sha256(token)).first();
 }
 
-async function orgActivity(env, orgId) {
+async function orgActivity(env, orgId, since) {
   const kinds = Object.keys(ORG_ACTIVITY);
   const { results } = await env.LIST.prepare(
-    `SELECT e.event, e.at, a.email AS actor, s.email AS subject FROM auth_events e
+    `SELECT e.event, e.at, ${seenAddress("e.user_id", "a.email")} AS actor,
+            ${seenAddress("e.subject", "s.email")} AS subject FROM auth_events e
      LEFT JOIN users a ON a.id = e.user_id LEFT JOIN users s ON s.id = e.subject
      WHERE e.org_id = ? AND e.event IN (${kinds.map(() => "?").join(", ")})
-     ORDER BY e.at DESC, e.id DESC LIMIT ?`).bind(orgId, ...kinds, SHOWN_ACTIVITY).all();
+     ORDER BY e.at DESC, e.id DESC LIMIT ?`)
+    .bind(orgId, orgId, since, orgId, orgId, since, orgId, ...kinds, SHOWN_ACTIVITY).all();
   return results;
 }
 
@@ -317,15 +326,16 @@ export async function membersPanel(env, who, onPlan, error = "") {
   if (!owner) {
     leave = form("/members/leave", await formToken(env, who.id, `member-leave:${org.id}`), `${orgField}
       <button type="submit">Leave ${name}</button>`) +
-      `<p><small>Leaving revokes the terminals you linked to ${name}.</small></p>`;
+      `<p><small>Leaving revokes the terminals you linked to ${name}.${org.role === "admin"
+        ? ` CI tokens you made are ${name}'s, and keep working until an owner or an admin revokes them.` : ""}</small></p>`;
   } else if (people.length > 1) {
     leave = `<p><small>As its owner you cannot leave ${name}: make one of its admins the owner first.</small></p>`;
   }
 
   let record = "";
   if (manager) {
-    const someone = "someone no longer here";
-    const done = await orgActivity(env, org.id);
+    const someone = "a former member";
+    const done = await orgActivity(env, org.id, await joinedAt(env, org.id, who.user));
     if (done.length) {
       record = `<p><strong>Who came, went and changed role</strong></p>
     <ul>${done.map((e) => `<li>${escape(when(e.at))}: ${ORG_ACTIVITY[e.event](escape(e.actor || someone),
@@ -453,10 +463,12 @@ function departure(db, { org, user, role, events, guard = "1", binds = [] }) {
   return { statements, deleted };
 }
 
-/* Stripe's billing email for the organisation, moved off `email` once
-   they are no longer an owner or an admin of it, after the response. */
-const billingFollows = (env, ctx, orgId, email) => {
-  ctx.waitUntil(billingEmailFollows(env, orgId, email).catch((err) => {
+/* Stripe's billing email for the organisation, checked after the
+   response once someone is no longer an owner or an admin of it: the
+   batch that changed it left it due (billingEmailDue()), so the cron
+   tries again should this fail. */
+const billingFollows = (env, ctx, orgId) => {
+  ctx.waitUntil(billingEmailFollows(env, orgId).catch((err) => {
     console.log(`billing email: ${err.code || err.name || "error"}`);
   }));
 };
@@ -527,10 +539,16 @@ export async function invitePost(request, env, ctx) {
 
 /* The link is the only way in, so it is in the email, and nothing else
    is: the email says who sent it and where it goes, and that it does
-   nothing for anyone not signed in as this address. */
+   nothing for anyone not signed in as this address. The organisation's
+   name is whatever its owner or an admin typed, so it is quoted, on a line
+   of its own that says so, and the email says ranwhat sends it on the
+   inviter's behalf and that the link to the account host is the only one
+   that is ours: it is never read as ranwhat's own words. */
 async function mailInvite(env, { to, by, orgName, token }) {
   const link = `${ACCOUNT_ORIGIN}/invite/${token}`;
-  const said = `${by} invited you to join ${orgName} on ranwhat, as a member.`;
+  const said = `${by} invited you to join an organisation on ranwhat, as a member.`;
+  const named = `Its name, as its owner or an admin typed it: "${orgName}"`;
+  const behalf = `ranwhat sends this on their behalf, and wrote none of that name. The only link from us is the one below, to ${ACCOUNT_HOST}.`;
   const terms = `The link works once, for ${INVITE_FOR / DAY} days, and only signed in to ${ACCOUNT_HOST} as ${to}. If you have no account yet, a code mailed to this address makes one.`;
   const ignore = `If you do not know ${by}, ignore this email: nothing happens unless you sign in and choose Join.`;
   await resend(env, "POST", "/emails", {
@@ -538,9 +556,12 @@ async function mailInvite(env, { to, by, orgName, token }) {
     to: [to],
     reply_to: REPLY_TO,
     subject: "An invite to an organisation on ranwhat",
-    text: [said, "", "See the invite, and join:", "", `    ${link}`, "", terms, "", ignore, "", "ranwhat.com"].join("\n"),
+    text: [said, "", named, behalf, "", "See the invite, and join:", "", `    ${link}`, "", terms, "", ignore, "", "ranwhat.com"]
+      .join("\n"),
     html: mail(`
       <p>${escape(said)}</p>
+      <p>${escape(named)}</p>
+      <p>${escape(behalf)}</p>
       <p><a href="${escape(link)}" style="color:#b8482d">See the invite, and join</a></p>
       <p>${escape(terms)}</p>
       <p style="color:#5a6672">${escape(ignore)}</p>`),
@@ -608,8 +629,9 @@ async function invitation(request, env, token) {
     <p>Switch to it on your account page.</p>${back}`, { cookies: [clearCookie(INVITE_COOKIE)] });
   }
   return page("Join an organisation", `${head}
-    <p>Joining shares ${name}'s plan with you. Everyone in ${name} sees your email address, and the
-       terminals you link to it.</p>
+    <p>Joining shares ${name}'s plan with you. Everyone in ${name} sees your email address and the
+       terminals you link to it, with the day each was last used; its owners and admins see when you join,
+       leave or change role; and anyone who joins after you leave sees you only as a former member.</p>
     ${form("/invite", await formToken(env, who.id, acceptAction(inv)), `
       <input type="hidden" name="token" value="${escape(token)}">
       <button type="submit">Join ${name}</button>`)}
@@ -744,11 +766,12 @@ export async function rolePost(request, env, ctx) {
   const changed = statements.length;
   statements.push(db.prepare(`UPDATE memberships SET role = ? WHERE org_id = ? AND user_id = ? AND role = ? AND ${IS}`)
     .bind(role, org.id, target.user_id, target.role, org.id, who.user, "owner"));
+  if (role === "member") statements.push(billingEmailDue(db, org.id, target.user_id));
   const done = await db.batch(statements);
   if (done[changed].meta.changes !== 1) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
-  if (role === "member") billingFollows(env, ctx, org.id, target.email);
+  if (role === "member") billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
@@ -786,11 +809,12 @@ export async function removePost(request, env, ctx) {
       { org: org.id, user: target.user_id, what: "removed_from_org", subject: who.user },
     ],
   });
+  if (target.role === "admin") statements.push(billingEmailDue(db, org.id, target.user_id));
   const done = await db.batch(statements);
   if (done[deleted].meta.changes !== 1) {
     return trouble(env, who, 409, "They left, or their role changed, a moment ago, so nothing was done. Reload your account page.");
   }
-  billingFollows(env, ctx, org.id, target.email);
+  if (target.role === "admin") billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
@@ -812,8 +836,9 @@ export async function leavePost(request, env, ctx) {
     org: org.id, user: who.user, role: org.role,
     events: [{ org: org.id, user: who.user, what: "org_left" }],
   });
+  if (org.role === "admin") statements.push(billingEmailDue(db, org.id, who.user));
   const done = await db.batch(statements);
-  if (done[deleted].meta.changes === 1) billingFollows(env, ctx, org.id, who.email);
+  if (done[deleted].meta.changes === 1 && org.role === "admin") billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
@@ -862,18 +887,27 @@ export async function transferPost(request, env, ctx) {
     db.prepare(`UPDATE memberships SET role = 'owner' WHERE org_id = ? AND user_id = ? AND role = 'admin'
                 AND NOT EXISTS (SELECT 1 FROM memberships WHERE org_id = ? AND role = 'owner') AND ${IS}`)
       .bind(org.id, target.user_id, org.id, org.id, who.user, "admin"),
+    billingEmailDue(db, org.id, who.user),
   ]);
   if (done[3].meta.changes !== 1) {
     return trouble(env, who, 409, "Their role changed a moment ago, so nothing was done. Reload your account page.");
   }
-  billingFollows(env, ctx, org.id, who.email);
+  billingFollows(env, ctx, org.id);
   return redirect("/");
 }
 
 /* ---------- switching ---------- */
 
 /* POST /org/switch: the session looks at another organisation its person
-   is in, and goes on to `next`. */
+   is in, and goes on to `next`. Switching to the one it looks at already
+   writes nothing, and an account switches SWITCHES_PER_DAY times a day at
+   most (accounts.js). A switch is counted before it is made, in one
+   statement that counts nothing past the day's number (session.js's
+   countWithin()), so switches sent at once are held to it too and a
+   refused one writes nothing. The session and the event are written only
+   while the session still looks at another organisation, so of switches
+   sent at once to one organisation, one is made, and the rest write
+   nothing and give their count back. */
 export async function switchPost(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -883,10 +917,17 @@ export async function switchPost(request, env) {
   const row = typeof wanted === "string" && wanted.length <= 100 ? await env.LIST.prepare(
     "SELECT org_id FROM memberships WHERE org_id = ? AND user_id = ?").bind(wanted, who.user).first() : null;
   if (!row) return trouble(env, who, 404, "You are not in that organisation, so nothing was changed.");
+  if (row.org_id === who.org.id) return redirect(nextPath(f.get("next")));
+  if (!await countWithin(env, "switch-user", who.user, DAY, SWITCHES_PER_DAY)) {
+    return trouble(env, who, 429,
+      `You have switched organisation ${SWITCHES_PER_DAY} times today, the most one account can in a day, so nothing was changed. Try again tomorrow.`);
+  }
   const db = env.LIST;
-  await db.batch([
-    db.prepare("UPDATE sessions SET org_id = ? WHERE id = ?").bind(row.org_id, who.id),
-    event(db, { org: row.org_id, user: who.user, what: "org_switched" }),
+  const lookingElsewhere = "EXISTS (SELECT 1 FROM sessions WHERE id = ? AND org_id IS NOT ?)";
+  const done = await db.batch([
+    eventIf(db, { org: row.org_id, user: who.user, what: "org_switched" }, lookingElsewhere, [who.id, row.org_id]),
+    db.prepare("UPDATE sessions SET org_id = ? WHERE id = ? AND org_id IS NOT ?").bind(row.org_id, who.id, row.org_id),
   ]);
+  if (done[1].meta.changes !== 1) await unbump(env, "switch-user", who.user, DAY);
   return redirect(nextPath(f.get("next")));
 }

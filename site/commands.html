@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat commands: check, watch, clean, scan and every flag</title>
-<meta name="description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo, update and hook, what each one reads and sends, and every flag it takes.">
+<meta name="description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo, update, login, whoami, logout and hook, what each sends, and every flag.">
 <link rel="canonical" href="https://ranwhat.com/commands">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/commands">
 <meta property="og:title" content="ranwhat commands: check, watch, clean, scan and every flag">
-<meta property="og:description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo, update and hook, what each one reads and sends, and every flag it takes.">
+<meta property="og:description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo, update, login, whoami, logout and hook, what each sends, and every flag.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat commands: check, watch, clean, scan and every flag">
-<meta name="twitter:description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo, update and hook, what each one reads and sends, and every flag it takes.">
+<meta name="twitter:description" content="Every ranwhat command in one place: check, watch, clean, sources, reach, scan, live, demo, update, login, whoami, logout and hook, what each sends, and every flag.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -47,6 +47,7 @@
       <a href="/pricing">Pricing</a>
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
     </nav>
     <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
       <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
@@ -80,6 +81,7 @@
     <li><a class="cmdname" href="/commands#live">live</a></li>
     <li><a class="cmdname" href="/commands#demo">demo</a></li>
     <li><a class="cmdname" href="/commands#update">update</a></li>
+    <li><a class="cmdname" href="/commands#login">login</a></li>
     <li><a class="cmdname" href="/commands#hook">hook</a></li>
   </ul>
   <p class="docnav-h">Reference</p>
@@ -94,9 +96,12 @@
     <p class="eyebrow">Commands</p>
     <h1>Every ranwhat command</h1>
     <p class="lede">
-      Ten commands in one tool, and no account for any of them. Start
-      with <span class="icode">check</span>: it reads what your agents ran and what they left
-      on disk, and changes nothing.
+      Thirteen commands in one tool. Only <span class="icode">login</span>,
+      <span class="icode">whoami</span> and <span class="icode">logout</span> work with
+      an account, <span class="icode">update</span> needs a Plus token, and the other
+      nine need neither.
+      Start with <span class="icode">check</span>: it reads what your agents ran and what they
+      left on disk, and changes nothing.
     </p>
   </div>
 </section>
@@ -108,7 +113,7 @@
       <h2>A bare ranwhat lists them all.</h2>
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
-        page of their own. The other seven are below, and every flag is at the end.
+        page of their own. The other ten are below, and every flag is at the end.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -122,7 +127,10 @@
   <span class="c-b">scan</span>     the authority a set of credentials carries
   <span class="c-b">live</span>     the same, asked of each token's own provider
   <span class="c-b">demo</span>     see the output without setting anything up
-  <span class="c-b">update</span>   refresh the capability catalogue (needs a subscription)
+  <span class="c-b">update</span>   refresh the capability catalogue (needs Plus)
+  <span class="c-b">login</span>    link this machine to your ranwhat.com account
+  <span class="c-b">whoami</span>   which account, organisation and plan this machine uses
+  <span class="c-b">logout</span>   unlink this machine and delete its token
   <span class="c-b">hook</span>     opt in: ask before a high-risk Claude Code call runs
 
   Start here:
@@ -130,8 +138,8 @@
     uvx ranwhat demo
 
 <span class="c-mut">  No account needed. live and --pull-usage ask only the provider that
-  issued each token, and update only fetches the catalogue. Everything
-  else reads locally and sends nothing.
+  issued each token, and update, login, whoami and logout talk only to
+  ranwhat.com. Everything else reads locally and sends nothing.
   Full options: uvx ranwhat --help</span></pre></div>
       </div>
     </div>
@@ -357,14 +365,16 @@
       <div class="term" aria-label="What ranwhat update --status prints">
         <div class="term-bar"><span>ranwhat update</span></div>
         <div class="term-body"><pre><span class="c-mut">$</span> uvx ranwhat update --status
-  No feed cached. The catalogue bundled with 0.5.0 is in use.
+  No feed cached. The catalogue bundled with 0.6.0 is in use.
 <span class="c-mut">  Plus gets new scopes the day they are added; the next free release
   gets them too: https://ranwhat.com/pricing</span></pre></div>
       </div>
       <p class="cmdnote">
-        It is the only command that talks to ranwhat's own server, and it sends
-        the subscription token and nothing else. Keep the token in
-        <span class="icode">RANWHAT_TOKEN</span>, or pass <span class="icode">--token</span> once with
+        It sends ranwhat's own server your token and nothing else.
+        <a href="#login">ranwhat login</a> saves a token for this machine where
+        <span class="icode">update</span> reads it. A CI token goes in
+        <span class="icode">RANWHAT_TOKEN</span>, and so can a subscription token
+        emailed before accounts, or pass that once with <span class="icode">--token</span> and
         <span class="icode">--save-token</span>. <span class="icode">--status</span> stays offline.
       </p>
       <p class="cmdnote">
@@ -378,9 +388,57 @@
   </div>
 </section>
 
-<section class="mark-3" id="hook">
+<section class="mark-3" id="login">
   <div class="shell band split">
-    <div class="marginal">08 / hook</div>
+    <div class="marginal">08 / login</div>
+    <div>
+      <h2>login, whoami, logout: link a machine to an account.</h2>
+      <p class="lede">
+        Optional: nothing else here needs an account.
+        <span class="icode">login</span> gives this machine a token of its own
+        from your account at account.ranwhat.com, which
+        <span class="icode">update</span> then uses while the account's
+        organisation is on Plus, so no shared token is copied from machine to
+        machine.
+      </p>
+      <div class="term" aria-label="Linking a machine">
+        <div class="term-bar"><span>ranwhat login</span></div>
+        <div class="term-body"><pre><span class="c-mut">$</span> uvx ranwhat login
+<span class="c-mut">$</span> uvx ranwhat whoami
+<span class="c-mut">$</span> uvx ranwhat logout</pre></div>
+      </div>
+      <p class="cmdnote">
+        <span class="icode">login</span> prints a code and
+        <span class="icode">https://ranwhat.com/device</span>, and opens that
+        page in your browser when it can. Sign in there, type the code, name
+        the machine and approve it, which asks for an emailed code typed in the
+        last 15 minutes, and the machine's token is saved at
+        <span class="icode">~/.ranwhat/token</span>, readable by you alone. The code is never in a link, so a link someone
+        sends you cannot approve a terminal. Type a code only because you ran
+        <span class="icode">login</span> yourself, just then.
+      </p>
+      <p class="cmdnote">
+        <span class="icode">whoami</span> shows the account, organisation, role,
+        plan and machine name a token belongs to.
+        <span class="icode">logout</span> asks the server to revoke this
+        machine's token, then deletes it; a shared token, a subscription's or a
+        CI token, is only deleted here. Machines can also be named and revoked
+        on the account page, and a terminal's token unused for 90 days is
+        revoked by itself.
+      </p>
+      <p class="cmdnote">
+        They talk to <span class="icode">feed.ranwhat.com</span> and nowhere
+        else, and send a code or the token, never a hostname, operating system,
+        user name or machine identifier.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-force"><span class="icode">--force</span></a>, <a href="#flag-no-browser"><span class="icode">--no-browser</span></a> (login), <a href="#flag-token"><span class="icode">--token TOKEN</span></a> (whoami), <a href="#flag-local"><span class="icode">--local</span></a> (logout).</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4" id="hook">
+  <div class="shell band split">
+    <div class="marginal">09 / hook</div>
     <div>
       <h2>hook: ask before the call, not after.</h2>
       <p class="lede">
@@ -420,9 +478,9 @@
   </div>
 </section>
 
-<section class="mark-4" id="flags">
+<section class="mark-5" id="flags">
   <div class="shell band split">
-    <div class="marginal">09 / Flags</div>
+    <div class="marginal">10 / Flags</div>
     <div>
       <h2>Every flag, and the commands that take it.</h2>
       <p class="lede">
@@ -448,7 +506,7 @@
               <td data-label="Commands">check, watch, clean</td>
               <td data-label="What it does">OpenClaw's state directory, <span class="icode">~/.openclaw</span> by default. The same as <span class="icode">--path openclaw=PATH</span>.</td></tr>
           <tr><td><code id="flag-json">--json</code></td>
-              <td data-label="Commands">every command but update; hook only with status</td>
+              <td data-label="Commands">every command but update, login, whoami and logout; hook only with status</td>
               <td data-label="What it does">Print the result as JSON instead of the report.</td></tr>
           <tr><td><code id="flag-apply">--apply</code></td>
               <td data-label="Commands">clean</td>
@@ -484,14 +542,23 @@
               <td data-label="Commands">live</td>
               <td data-label="What it does">A controls JSON to pair with what the tokens report.</td></tr>
           <tr><td><code id="flag-token">--token TOKEN</code></td>
-              <td data-label="Commands">update</td>
-              <td data-label="What it does">The subscription token. Prefer <span class="icode">RANWHAT_TOKEN</span>, or save it once with <span class="icode">--save-token</span>.</td></tr>
+              <td data-label="Commands">update, whoami</td>
+              <td data-label="What it does">A subscription or CI token to use instead of the saved one. Prefer <span class="icode">RANWHAT_TOKEN</span>, <span class="icode">ranwhat login</span>, or saving it once with <span class="icode">--save-token</span>: a value given as a flag is visible to every user on the machine through <span class="icode">ps</span>.</td></tr>
           <tr><td><code id="flag-save-token">--save-token</code></td>
               <td data-label="Commands">update</td>
               <td data-label="What it does">Write the token to <span class="icode">~/.ranwhat/token</span>, readable by you alone, so later runs need no flag.</td></tr>
           <tr><td><code id="flag-status">--status</code></td>
               <td data-label="Commands">update</td>
               <td data-label="What it does">Report the cached catalogue and exit, without going online.</td></tr>
+          <tr><td><code id="flag-force">--force</code></td>
+              <td data-label="Commands">login</td>
+              <td data-label="What it does">Replace the token this machine already has, and ask the server to revoke the one it replaced.</td></tr>
+          <tr><td><code id="flag-no-browser">--no-browser</code></td>
+              <td data-label="Commands">login</td>
+              <td data-label="What it does">Print the page to open without opening a browser. None is opened over SSH or without a display either.</td></tr>
+          <tr><td><code id="flag-local">--local</code></td>
+              <td data-label="Commands">logout</td>
+              <td data-label="What it does">Delete the saved token without asking the server to revoke it; revoke it on the account page instead.</td></tr>
           <tr><td><code id="flag-scope">--scope SCOPE</code></td>
               <td data-label="Commands">hook</td>
               <td data-label="What it does">Which Claude Code settings file: <span class="icode">user</span> (<span class="icode">~/.claude/settings.json</span>, or <span class="icode">$CLAUDE_CONFIG_DIR/settings.json</span> when that is set; the default), <span class="icode">project</span> (<span class="icode">.claude/settings.json</span> here) or <span class="icode">local</span> (<span class="icode">.claude/settings.local.json</span> here). <span class="icode">hook status</span> shows all three without it.</td></tr>
@@ -556,6 +623,7 @@
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/updates">Updates</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>

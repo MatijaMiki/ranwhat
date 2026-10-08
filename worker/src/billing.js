@@ -35,9 +35,12 @@
  * first Checkout with its owner's address (customerFor()), and every
  * Checkout is on it: never one Stripe makes from the address whoever pays
  * types, whom Stripe's billing-page login (/api/billing) would then let in
- * for good. When someone stops being an owner or an admin (members.js),
- * billingEmailFollows() moves that customer's address to the owner's if it
- * was theirs.
+ * for good. That address is the organisation's billing email, which an
+ * owner or an admin may change in Stripe's billing portal. When someone
+ * stops being an owner or an admin (members.js), billingEmailFollows()
+ * moves it back to the owner's address unless it belongs to someone who
+ * is still an owner or an admin, and not to an owner who has just handed
+ * the organisation on; the cron tries again while Stripe fails.
  *
  * Both POSTs leave this host only for an address Stripe gave back, and
  * only for checkout.stripe.com or billing.stripe.com; a page whose form
@@ -198,7 +201,12 @@ export async function billingPanel(env, who, onPlan, { error = "", upgraded = fa
   if (shown.length) {
     how = !manager ? `<p>An owner or an admin of ${name} manages its billing.</p>`
       : !env.STRIPE_SECRET_KEY ? "<p>Billing cannot be opened from here just now.</p>"
-        : confirmed ? "<p><small>Manage billing opens Stripe's billing page, to change the plan or the card, get invoices, or cancel.</small></p>"
+        : confirmed ? `<p><small>Manage billing opens Stripe's billing page, to change the plan or the card, get invoices, or cancel.</small></p>
+      <p><small>Stripe's billing page also opens, from ranwhat.com/api/billing, for whoever reads ${name}'s
+         billing email, to which Stripe mails a link. That is the owner's address unless an owner or an admin
+         changes it on that page, and whenever an owner or an admin leaves, is removed, is made a member or
+         hands on ownership, it goes back to the owner's address, unless it is the address of someone who is
+         still an owner or an admin here and did not just hand ownership on.</small></p>`
           : `<p>Manage billing needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
       ${form("/stepup", await formToken(env, who.id, "stepup"),
         `<input type="hidden" name="next" value="/"><button type="submit">Email me a code</button>`)}`;
@@ -396,30 +404,71 @@ export async function upgradePost(request, env) {
   return away(session.url);
 }
 
-/* After `lost` (an address) stops being an owner or an admin of the
-   organisation, by being removed, made a member, leaving or handing on
-   ownership (members.js): if Stripe's email for the organisation's
-   customer is theirs, it becomes the owner's, so that Stripe's
-   billing-page login no longer mails them a way in. Any other address
-   there is the one an owner or an admin chose in Manage billing, and
-   stays. Best effort, after the change is made: a failure is logged. */
-export async function billingEmailFollows(env, orgId, lost) {
-  if (!env.STRIPE_SECRET_KEY || typeof lost !== "string" || !lost) return;
-  const row = await env.LIST.prepare(
+/* The statement, for the batch that ends `lostUser`'s being an owner or
+   an admin of the organisation (or hands its ownership on), that leaves
+   its billing email to be checked: by billingEmailFollows() after the
+   response, and by the cron until that has been done. Only for an
+   organisation with a Stripe customer. */
+export const billingEmailDue = (db, orgId, lostUser) => db.prepare(
+  `INSERT INTO billing_email_due (org_id, lost_user, ticket, since) SELECT ?, ?, ?, ?
+   WHERE EXISTS (SELECT 1 FROM orgs WHERE id = ? AND customer IS NOT NULL)
+   ON CONFLICT (org_id) DO UPDATE SET lost_user = excluded.lost_user, ticket = excluded.ticket, since = excluded.since`)
+  .bind(orgId, lostUser, crypto.randomUUID(), now(), orgId);
+
+/* Stripe's email for the organisation's customer, which its billing-page
+   login (/api/billing) mails a way in to, after someone stopped being an
+   owner or an admin (billingEmailDue()). It stays only while it is the
+   address of someone who is an owner or an admin of the organisation now,
+   and not the address of whoever just handed ownership on (it follows the
+   owner); anything else, an address an admin chose in Stripe's billing
+   portal before being removed or one no member has, becomes the owner's.
+   Done once Stripe has answered; while Stripe fails it stays due, logged,
+   for the cron (billingEmailsDue()). */
+export async function billingEmailFollows(env, orgId) {
+  const db = env.LIST;
+  const due = await db.prepare("SELECT lost_user, ticket FROM billing_email_due WHERE org_id = ?").bind(orgId).first();
+  if (!due) return;
+  const done = () => db.prepare("DELETE FROM billing_email_due WHERE org_id = ? AND ticket = ?")
+    .bind(orgId, due.ticket).run();
+  const row = await db.prepare(
     `SELECT o.customer, u.email AS owner FROM orgs o
      JOIN memberships m ON m.org_id = o.id AND m.role = 'owner' JOIN users u ON u.id = m.user_id
      WHERE o.id = ?`).bind(orgId).first();
-  if (!row || !CUSTOMER.test(String(row.customer))) return;
+  if (!row || !CUSTOMER.test(String(row.customer))) return void await done();
+  if (!env.STRIPE_SECRET_KEY) return;
+  const { results: managers } = await db.prepare(
+    `SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id
+     WHERE m.org_id = ? AND m.role IN ('owner', 'admin')`).bind(orgId).all();
+  const lost = due.lost_user
+    ? await db.prepare("SELECT email FROM users WHERE id = ?").bind(due.lost_user).first() : null;
   const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-  if (same(row.owner, lost)) return;
   try {
     const email = await customerEmail(env, row.customer);
-    if (!email || !same(email, lost)) return;
-    await setCustomerEmail(env, row.customer, row.owner);
-    console.log("stripe billing email: moved to the owner");
+    const stays = Boolean(email) && managers.some((m) => same(m.email, email)) &&
+      !(lost && same(lost.email, email) && !same(lost.email, row.owner));
+    if (!stays) {
+      await setCustomerEmail(env, row.customer, row.owner);
+      console.log("stripe billing email: moved to the owner");
+    }
+    await done();
   } catch (err) {
     console.log(`stripe billing email: ${err.code || "error"}`);
   }
+}
+
+/* The cron, after the sweep (accounts.js), which makes the table in any
+   database accounts were ever on in: billing emails still to be checked,
+   the oldest few each run, so that a quarter hour's run asks Stripe at
+   most ten times for them. That goes on while accounts are switched off
+   again after being on; where they never were, it touches nothing. */
+export async function billingEmailsDue(env) {
+  const db = env.LIST;
+  if (!db || !env.STRIPE_SECRET_KEY) return;
+  if (!await db.prepare("SELECT 1 AS yes FROM sqlite_master WHERE type = 'table' AND name = 'billing_email_due'").first()) {
+    return;
+  }
+  const { results } = await db.prepare("SELECT org_id FROM billing_email_due ORDER BY since LIMIT 5").all();
+  for (const r of results) await billingEmailFollows(env, r.org_id);
 }
 
 /* ---------- Manage billing ---------- */

@@ -248,8 +248,9 @@ def _refusal(status, doc, doing):
     handles: the server's own (an OAuth error_description, or the sentence
     the feed host puts in `error`), or one made from the status."""
     if status == 404:
-        # Every account path answers 404 until accounts are switched on.
-        return "The server does not link terminals yet (HTTP 404)."
+        # Every account path answers 404 while accounts are switched off
+        # on the server (ACCOUNTS_ON in worker/wrangler.toml).
+        return "The server is not linking terminals just now (HTTP 404)."
     said = _shown(doc.get("error_description"), 200) or _shown(doc.get("error"), 200)
     if said and " " in said:
         return said

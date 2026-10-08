@@ -37,7 +37,7 @@
  * tokens are the subscription's to end.
  */
 import { schema as feedSchema, sha256 } from "./auth.js";
-import { DAY, accountsOn, canManage, now, schema as accountsSchema } from "./accounts.js";
+import { DAY, accountsOn, canManage, now, schema as accountsSchema, seenAddress } from "./accounts.js";
 import { randomToken } from "./session.js";
 
 export const CI_PREFIX = "rw_c_";
@@ -79,13 +79,18 @@ async function tables(db) {
 }
 
 /* The organisation's machines whose tokens are not revoked, newest first.
-   An expired CI token stays listed, saying so, until it is revoked. */
-export async function machinesOf(env, orgId) {
+   An expired CI token stays listed, saying so, until it is revoked.
+   email: the address of whoever linked or made each, as someone who
+   joined the organisation at `since` may see it (accounts.js's
+   seenAddress()): null for someone who had left before they joined. */
+export async function machinesOf(env, orgId, since = 0) {
   const db = env.LIST;
   await tables(db);
   const { results } = await db.prepare(
-    `SELECT ${COLUMNS} FROM ${FROM} WHERE m.org_id = ? AND k.revoked_at IS NULL
-     ORDER BY m.created_at DESC, m.id LIMIT ?`).bind(orgId, MAX_LISTED).all();
+    `SELECT m.id, m.kind, m.label, m.user_id, m.created_at, m.last_used_day, k.expires_at,
+            ${seenAddress("m.user_id", "u.email")} AS email
+     FROM ${FROM} WHERE m.org_id = ? AND k.revoked_at IS NULL
+     ORDER BY m.created_at DESC, m.id LIMIT ?`).bind(orgId, orgId, since, orgId, MAX_LISTED).all();
   return results;
 }
 
@@ -101,14 +106,20 @@ export async function machineIn(env, orgId, id) {
     .bind(id, orgId).first();
 }
 
-/* Renames it, with the event, in one batch. */
+/* Renames it, with the event, in one batch, only while its name is still
+   another: of renames to one name sent at once, one renames and the rest
+   write nothing. true when this request renamed it. */
 export async function renameMachine(env, who, machine, label) {
   const db = env.LIST;
-  await db.batch([
-    db.prepare("UPDATE machines SET label = ? WHERE id = ? AND org_id = ?").bind(label, machine.id, who.org.id),
-    db.prepare("INSERT INTO auth_events (org_id, user_id, event, subject, at) VALUES (?, ?, 'machine_renamed', ?, ?)")
-      .bind(who.org.id, who.user, machine.id, now()),
+  const done = await db.batch([
+    db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
+                SELECT ?, ?, 'machine_renamed', ?, ? WHERE EXISTS (
+                  SELECT 1 FROM machines WHERE id = ? AND org_id = ? AND label IS NOT ?)`)
+      .bind(who.org.id, who.user, machine.id, now(), machine.id, who.org.id, label),
+    db.prepare("UPDATE machines SET label = ? WHERE id = ? AND org_id = ? AND label IS NOT ?")
+      .bind(label, machine.id, who.org.id, label),
   ]);
+  return done[1].meta.changes === 1;
 }
 
 /* Revokes its token. The event is written only by the request that

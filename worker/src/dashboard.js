@@ -1,7 +1,7 @@
 /* account.ranwhat.com: signing in with an emailed code or a password,
  * making an account with a password, resetting one, and the account page
  * behind them. index.js sends every request for this host here, and only
- * once ACCOUNTS_ON is set.
+ * while ACCOUNTS_ON is set (wrangler.toml sets it).
  *
  *   GET  /              The account: who you are, your organisation, its
  *                       plan and what each plan has (features.js), its
@@ -120,14 +120,15 @@ import { escape } from "./list.js";
 import { plan } from "./auth.js";
 import { FEATURES, PLAN_NAMES, allows, atLeast, featuresOf } from "./features.js";
 import {
-  ACCOUNT_HOST, DAY, SESSION_MAX, canManage, event, forgetWaysIn, history, now, orgFor, orgName, ready, schema,
-  userForVerifiedEmail,
+  ACCOUNT_HOST, DAY, RENAMES_PER_DAY, SESSION_MAX, STEPUPS_PER_USER_DAY, canManage, event, forgetWaysIn, history,
+  joinedAt, now, orgFor, orgName, ownerOf, ready, schema, userForVerifiedEmail,
 } from "./accounts.js";
 import { challenge } from "./challenge.js";
 import {
   CODE_FOR, CODE_TRIES, FRESH_FOR, SESSION_COOKIE, SIGNIN_COOKIE, SIGNIN_FOR, address, attempt, bump, checkCode,
   clearCookie, current, formOk, formToken, fresh, nextPath, notCrossSite, openSession, orgFormOk, orgInput, orgToken,
-  randomToken, readCookie, requestCode, sameOrigin, setCookie, tellWayIn,
+  countWithin, holdNotice, randomToken, readCookie, releaseNotice, requestCode, sameOrigin, setCookie, tellWayIn,
+  unbump,
 } from "./session.js";
 import {
   LOCKOUT, MIN_LENGTH, attachPassword, checkPassword, detachPassword, hashAllowed, hashPassword, isPasswordHash,
@@ -260,7 +261,8 @@ async function signinPost(request, env, ctx) {
   return sendCode(request, env, ctx, { email, purpose: "signin", next, previous: binding });
 }
 
-/* Each refusal is about the network or the day, never the address. */
+/* Each refusal is about the network, the day or (for a step-up) the
+   account asking, never the address. */
 async function sendCode(request, env, ctx, wanted) {
   const result = await requestCode(request, env, ctx, wanted);
   if (result.refused === "network") {
@@ -271,8 +273,15 @@ async function sendCode(request, env, ctx, wanted) {
   if (result.refused === "network-day") {
     return page("Too many codes", `<h1>Too many codes asked for.</h1>
       <p>More sign-in codes were sent for your network today than we send to
-         one network in a day. Try again tomorrow, from another network, or
-         <a href="/signin/password">with your password</a> if you have one.</p>`, { status: 429 });
+         one network in a day. Try again tomorrow, from another network${wanted.purpose === "stepup" ? "."
+           : `, or <a href="/signin/password">with your password</a> if you have one.`}</p>`, { status: 429 });
+  }
+  if (result.refused === "account-day") {
+    return page("No more codes for this account today", `<h1>No more codes for this account today.</h1>
+      <p>This account has asked for ${STEPUPS_PER_USER_DAY} confirmation codes today, the most one account
+         can in a day. To confirm now, sign out and sign in again with an emailed code, which counts as
+         confirming; or try again tomorrow.</p>
+      <p><a href="/">Your account</a></p>`, { status: 429 });
   }
   if (result.refused === "budget") {
     return page("No more codes today", `<h1>No more codes today.</h1>
@@ -715,21 +724,21 @@ const EVENTS = {
   password_added: "Password added, confirmed with an emailed code",
   password_changed: "Password changed, and every other session signed out",
   password_reset: "Password reset with an emailed code, and every other session signed out",
-  password_removed: "Password removed",
+  password_removed: "Password removed, and every other session signed out",
   signout: "Signed out",
   signout_all: "Signed out everywhere",
   org_renamed: "Organisation renamed",
   signup_google: "Account made, with Google",
   signin_google: "Signed in with Google",
   linked_google: "Google account linked",
-  unlinked_google: "Google account unlinked",
+  unlinked_google: "Google account unlinked, and every other session signed out",
   signup_github: "Account made, with GitHub",
   signin_github: "Signed in with GitHub",
   linked_github: "GitHub account linked",
-  unlinked_github: "GitHub account unlinked",
+  unlinked_github: "GitHub account unlinked, and every other session signed out",
   signin_passkey: "Signed in with a passkey",
   passkey_added: "Passkey added, confirmed with an emailed code",
-  passkey_removed: "Passkey removed",
+  passkey_removed: "Passkey removed, and every other session signed out",
   ways_removed: "Every Google, GitHub and passkey way in removed",
   device_approved: "Terminal approved for ranwhat login, with a fresh code",
   device_denied: "Terminal denied for ranwhat login",
@@ -783,7 +792,9 @@ function panel(tier, onPlan) {
    is added, changed or removed with the current password or a code typed
    in the last 15 minutes (fresh() in session.js); without a password, only
    the code will do. Google and GitHub, where they are set up, are linked
-   and unlinked with such a code too, and passkeys added and removed. */
+   and unlinked with such a code too, and passkeys added and removed.
+   Changing the password, or taking any way in away, signs the account out
+   everywhere else, as the page says. */
 async function methods(env, who, error, providerError, passkeyError) {
   const stored = await passwordOf(env, who.user);
   const confirmed = fresh(who);
@@ -812,7 +823,7 @@ async function methods(env, who, error, providerError, passkeyError) {
       ${form("/password", await formToken(env, who.id, "password"), `${currentField("current-password")}${newField}
       <button type="submit">Change password</button>`)}
       <p>Changing it signs this account out everywhere else.</p>
-      ${remove}
+      ${remove}${remove ? "\n      <p>Removing it signs this account out everywhere else.</p>" : ""}
       ${confirmed ? "" : `<p>Forgot it? Confirm with an emailed code, and it is not asked for.</p>
       ${code("Email me a code")}`}</li>`;
   } else {
@@ -857,7 +868,8 @@ async function methods(env, who, error, providerError, passkeyError) {
     return `<li data-method="${key}"><strong>${name}</strong> <span class="tag">${tag}</span>
       <br>${about}
       ${mine.length ? `<ul>${items}</ul>` : ""}
-      ${mine.length && confirmed ? `<p>Unlinking one keeps its id here, so that it does not link itself back; linking it again does.</p>` : ""}
+      ${mine.length && confirmed ? `<p>Unlinking one keeps its id here, so that it does not link itself back; linking it again does.
+        Unlinking one also signs this account out everywhere else.</p>` : ""}
       ${problem(err)}
       ${confirmed ? linkForm
         : `<p>${on ? "Linking or unlinking" : "Unlinking"} ${name} needs an emailed code typed in the last ${FRESH_FOR / 60} minutes.</p>
@@ -891,6 +903,7 @@ async function passkeys(env, who, error, code) {
         <a href="/signin/passkey">passkey sign-in page</a>.`
         : "Sign in with this device's screen lock or a security key, once you add a passkey here."}
       ${mine.length ? `<ul>${items}</ul>` : ""}
+      ${mine.length && confirmed ? "<p>Removing one signs this account out everywhere else.</p>" : ""}
       ${problem(error)}
       ${confirmed
         ? (mine.length < MAX_PASSKEYS ? `<p><a class="button" href="/passkeys/add">Add a passkey</a></p>` : "")
@@ -919,6 +932,7 @@ async function dashboard(env, who, {
     <dl>
       <dt>Signed in as</dt><dd>${escape(who.email)}</dd>
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
+      <dt>Owner</dt><dd>${org.role === "owner" ? "You" : escape(await ownerOf(env, org.id) || "nobody")}</dd>
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd id="plan">${PLAN_NAMES[onPlan]}</dd>
     </dl>
@@ -1012,13 +1026,32 @@ async function rename(request, env) {
     return dashboard(env, who, { status: 400,
       error: "A name is 1 to 80 characters, with no control or formatting characters." });
   }
+  if (name === who.org.name) return redirect("/");
+  if (!await countRename(env, who)) return dashboard(env, who, { status: 429, error: TOO_MANY_RENAMES });
+  /* Written, with its event, only while the name is still another: of
+     renames to one name sent at once, one renames, and the rest write
+     nothing and give their count back. */
   const db = env.LIST;
-  await db.batch([
-    db.prepare("UPDATE orgs SET name = ? WHERE id = ?").bind(name, who.org.id),
-    event(db, { org: who.org.id, user: who.user, what: "org_renamed" }),
+  const done = await db.batch([
+    db.prepare(`INSERT INTO auth_events (org_id, user_id, event, subject, at)
+                SELECT ?, ?, 'org_renamed', NULL, ? WHERE EXISTS (SELECT 1 FROM orgs WHERE id = ? AND name IS NOT ?)`)
+      .bind(who.org.id, who.user, now(), who.org.id, name),
+    db.prepare("UPDATE orgs SET name = ? WHERE id = ? AND name IS NOT ?").bind(name, who.org.id, name),
   ]);
+  if (done[1].meta.changes !== 1) await uncountRename(env, who);
   return redirect("/");
 }
+
+/* Renames, of the organisation and its machines together, are counted
+   per account per day (accounts.js's RENAMES_PER_DAY). Counted before one
+   is made, in one statement that counts nothing past the day's number
+   (session.js's countWithin()), so renames sent at once are held to it
+   too and a refused one writes nothing; one that then changes nothing
+   gives its count back. */
+const countRename = (env, who) => countWithin(env, "rename-user", who.user, DAY, RENAMES_PER_DAY);
+const uncountRename = (env, who) => unbump(env, "rename-user", who.user, DAY);
+const TOO_MANY_RENAMES = `You have renamed things ${RENAMES_PER_DAY} times today, the most one account can in a
+  day, so nothing was renamed. Try again tomorrow.`.replace(/\s+/g, " ");
 
 /* ---------- the password, signed in ---------- */
 
@@ -1070,7 +1103,10 @@ async function setPassword(request, env) {
   return redirect("/");
 }
 
-/* Only while another way in remains, which the emailed code always is. */
+/* Only while another way in remains, which the emailed code always is.
+   Every other session of the account ends with it, as when the password
+   changes: one that must go may be in someone else's hands, and so may
+   the sessions it opened. */
 async function removePassword(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -1083,8 +1119,13 @@ async function removePassword(request, env) {
   }
   const ok = await allowed(request, env, who, stored, f.get("current"));
   if (ok !== true) return ok;
-  await env.LIST.batch(detachPassword(env, { user: who.user, org: who.org.id }));
+  await env.LIST.batch([...detachPassword(env, { user: who.user, org: who.org.id }), othersOut(env, who)]);
   return redirect("/");
+}
+
+/* The statement that ends every session of this account but this one. */
+function othersOut(env, who) {
+  return env.LIST.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").bind(who.user, who.id);
 }
 
 /* ---------- Google and GitHub ---------- */
@@ -1140,22 +1181,50 @@ async function providerBack(request, env, ctx, url, provider) {
            so nothing was linked.</p>
         <p><a href="/">Your account</a></p>`, { status: 403, cookies });
     }
+    /* The email that tells the account's address is taken first: without
+       it, nothing is linked (session.js's holdNotice()). */
+    const hold = await holdNotice(request, env, who.user);
+    if (hold.refused) return noNotice(name, hold.refused, true, cookies);
     const result = await attach(env, { user: who.user, org: who.org.id, provider, profile });
+    if (result.what !== "linked") await releaseNotice(env, hold);
     if (result.refused) return notLinked(name, result.refused, cookies);
-    if (result.what === "linked") tellWayIn(env, ctx, { user: who.user, what: provider });
+    if (result.what === "linked") tellWayIn(env, ctx, { user: who.user, what: provider, hold });
     return redirect("/", cookies);
   }
-  const result = await arrive(env, provider, profile);
+  const result = await arrive(env, provider, profile, {
+    hold: (user) => holdNotice(request, env, user), release: (hold) => releaseNotice(env, hold),
+  });
   if (result.refused === "unproven") return unproven(name, cookies);
   if (result.refused === "unlinked") return wasUnlinked(name, cookies);
+  if (result.refused === "notice") return noNotice(name, result.why, false, cookies);
   if (result.refused) return unverified(name, cookies);
   const user = result.user;
   const entered = await enter(request, env, { user, next: flow.next, coded: false, cookies, after: async (org) => [
     ...(result.what === "linked" ? [event(db, { org, user, what: `linked_${provider}` })] : []),
     event(db, { org, user, what: `${result.what === "signup" ? "signup" : "signin"}_${provider}` }),
   ] });
-  if (result.what === "linked") tellWayIn(env, ctx, { user, what: provider });
+  if (result.what === "linked") tellWayIn(env, ctx, { user, what: provider, hold: result.hold });
   return entered;
+}
+
+/* Why the email that tells of a new way in cannot go now, and when it
+   can: [the end of a sentence, a sentence]. */
+const unsent = (why) => (why === "network-day"
+  ? ["more account emails were sent for your network today than we send to one network in a day",
+    "Try again tomorrow, or from another network."]
+  : ["today's account emails are used up", "Try again after midnight UTC."]);
+
+/* A Google or GitHub account that would have been linked, to the account
+   signed in (`linking`) or to the one its address has, without the email
+   that tells that account so: nothing was linked, and nobody signed in. */
+function noNotice(name, why, linking, cookies) {
+  const [reason, advice] = unsent(why);
+  return page("Not linked", `<h1>Not linked.</h1>
+  <p class="bad">Linking ${name} to a ranwhat account sends that account's address an email to say so,
+     and ${reason}, so nothing was linked${linking ? "" : " and nobody was signed in"}.</p>
+  <p>${advice}</p>
+  <p>${linking ? `<a href="/">Back to your account</a>` : `<a href="/signin">Back to signing in</a>`}</p>`,
+  { status: why === "network-day" ? 429 : 503, cookies });
 }
 
 /* A flow that came back without an account to open (oauth.js's finish()). */
@@ -1216,7 +1285,8 @@ function notLinked(name, why, cookies) {
 }
 
 /* Takes a Google or GitHub account away, with a fresh code, while another
-   way in remains, which the emailed code always is. */
+   way in remains, which the emailed code always is, and ends every other
+   session of the account with it, the ones it opened among them. */
 async function unlinkPost(request, env, ctx, url, provider) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -1232,7 +1302,7 @@ async function unlinkPost(request, env, ctx, url, provider) {
     return dashboard(env, who, { status: 400, providerError: { provider,
       text: `This ${PROVIDERS[provider].name} account is your only way in, so it stays.` } });
   }
-  await env.LIST.batch(statements);
+  await env.LIST.batch([...statements, othersOut(env, who)]);
   return redirect("/");
 }
 
@@ -1293,14 +1363,23 @@ async function addPasskey(request, env, ctx) {
   const f = await fields(request);
   if (!await formOk(env, f, who.id, "passkey-add")) return refused();
   if (!fresh(who)) return needsPasskeyCode(env, who);
+  /* The email that tells the account's address is taken first: without
+     it, no passkey is added (session.js's holdNotice()). */
+  const hold = await holdNotice(request, env, who.user);
+  if (hold.refused) {
+    const [reason, advice] = unsent(hold.refused);
+    return addPasskeyForm(env, who, { status: hold.refused === "network-day" ? 429 : 503,
+      error: `No passkey was added: each one added sends your address an email to say so, and ${reason}. ${advice}` });
+  }
   const result = await register(env, who, {
     clientDataJSON: f.get("clientDataJSON"), attestationObject: f.get("attestationObject"),
     label: passkeyLabel(f.get("label")),
   });
   if (!result.refused) {
-    tellWayIn(env, ctx, { user: who.user, what: "passkey" });
+    tellWayIn(env, ctx, { user: who.user, what: "passkey", hold });
     return redirect("/");
   }
+  await releaseNotice(env, hold);
   const [status, error] = {
     expired: [400, "That passkey request has expired or was already used, so nothing was added. Try again."],
     taken: [409, "That passkey is already added."],
@@ -1309,7 +1388,9 @@ async function addPasskey(request, env, ctx) {
   return addPasskeyForm(env, who, { status, error });
 }
 
-/* Only while another way in remains, which the emailed code always is. */
+/* Only while another way in remains, which the emailed code always is,
+   and every other session of the account ends with it, the ones it opened
+   among them. */
 async function removePasskey(request, env) {
   const who = await current(request, env);
   if (!who) return signedOut(request);
@@ -1320,7 +1401,7 @@ async function removePasskey(request, env) {
   if (!statements.length) return redirect("/");
   const left = await otherWaysIn(env, who.user) - 1 + (await passwordOf(env, who.user) ? 1 : 0);
   if (left < 1) return dashboard(env, who, { status: 400, passkeyError: "This passkey is your only way in, so it stays." });
-  await env.LIST.batch(statements);
+  await env.LIST.batch([...statements, othersOut(env, who)]);
   return redirect("/");
 }
 
@@ -1417,7 +1498,7 @@ async function machinesPanel(env, who, onPlan, error) {
   const org = who.org;
   const confirmed = fresh(who);
   const t = now();
-  const list = await machinesOf(env, org.id);
+  const list = await machinesOf(env, org.id, await joinedAt(env, org.id, who.user));
   const renameToken = await formToken(env, who.id, "machine-rename");
   const revokeToken = await formToken(env, who.id, "machine-revoke");
   const items = list.map((m) => {
@@ -1426,7 +1507,7 @@ async function machinesPanel(env, who, onPlan, error) {
     const name = m.label ? escape(m.label) : UNNAMED[m.kind];
     const by = m.kind === "legacy"
       ? `The token emailed with a subscription, attached here on ${day(m.created_at)}.`
-      : `${m.kind === "ci" ? "Made" : "Linked"} by ${m.email ? escape(m.email) : "someone no longer here"} on ${day(m.created_at)}.`;
+      : `${m.kind === "ci" ? "Made" : "Linked"} by ${m.email ? escape(m.email) : "a former member"} on ${day(m.created_at)}.`;
     const used = m.kind === "legacy" ? "Its use is not recorded."
       : m.last_used_day === null ? "Not used yet." : `Last used ${day(m.last_used_day)}.`;
     const expired = m.expires_at !== null && m.expires_at <= t;
@@ -1516,7 +1597,9 @@ async function renameMachinePost(request, env) {
     return dashboard(env, who, { status: 400,
       machinesError: `A name is 1 to ${MAX_MACHINE_LABEL} characters, with no control or formatting characters.` });
   }
-  await renameMachine(env, who, machine, label);
+  if (label === machine.label) return redirect("/");
+  if (!await countRename(env, who)) return dashboard(env, who, { status: 429, machinesError: TOO_MANY_RENAMES });
+  if (!await renameMachine(env, who, machine, label)) await uncountRename(env, who);
   return redirect("/");
 }
 

@@ -52,11 +52,13 @@ class BranchBuildsCanRun(unittest.TestCase):
             self.assertNotIn("custom_domain", route)
 
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
-    def test_accounts_are_dark_and_passwords_fit_the_runtime(self):
+    def test_accounts_are_on_and_passwords_fit_the_runtime(self):
         with WRANGLER.open("rb") as fh:
             config = tomllib.load(fh)
-        # ACCOUNTS_ON is added in the change that switches accounts on.
-        self.assertNotIn("ACCOUNTS_ON", config["vars"])
+        # Switched on at go-live (7 October 2026); src/accounts.js's
+        # accountsOn() reads "1" or "true". Removing the line switches
+        # accounts off again.
+        self.assertEqual(config["vars"]["ACCOUNTS_ON"], "1")
         # Workers' WebCrypto refuses one PBKDF2 call above 100,000
         # iterations, so password.js runs its 600,000 as a chain of calls
         # within that. An override here could only lower the count.

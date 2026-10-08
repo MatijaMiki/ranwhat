@@ -19,8 +19,15 @@
  * A token is derived, not drawn: an HMAC of the subscription id under
  * LIST_SECRET. The welcome page and the webhook each make it, in either
  * order and as often as Stripe retries, and get the same one, while D1
- * still keeps only its SHA-256. Nothing else about the customer is kept
- * here: Stripe holds the email, the card and the invoices.
+ * still keeps only its SHA-256. Of the customer, D1 keeps the Stripe ids
+ * and the subscription's status (auth.js's subscriptions); while accounts
+ * are on, the subscription's interval and its renewal or end date
+ * (accounts.js's subscription_terms); and for Plus bought from an account,
+ * the organisation it is linked to and that organisation's customer id
+ * (org_subscriptions, orgs). Stripe holds the email, the card and the
+ * invoices; the address an organisation's customer is made with is its
+ * owner's, which the account keeps as its own address, not as billing
+ * data.
  *
  * Everything this sells carries metadata product=ranwhat-plus, and anything
  * without it (another site's sale on the same Stripe account) is ignored.
@@ -175,7 +182,7 @@ async function sync(env, id) {
 /* sync() for a subscription just fetched from Stripe: its status kept,
    and returned as kept, with its customer. While accounts are on, its
    terms too (termsOf()), for the billing panel to read without asking
-   Stripe; dark, nothing but what was always kept. */
+   Stripe; with accounts off, nothing but what was always kept. */
 async function keep(env, sub) {
   if (!sub.metadata || sub.metadata.product !== PRODUCT) return null;
   const db = env.LIST;
@@ -263,12 +270,12 @@ export async function checkout(request, env) {
      reading the form, asking Stripe or writing anything, and to the same
      address whatever the request says. Switched on but not ready
      (accounts.js's ready()), the account host answers every page with its
-     503, so until it is, Plus is sold here as it is dark. Nobody had
-     bought Plus here when that was decided; anything bought here before
-     the switch, or while it was not ready, is attached to an organisation
-     by hand, with scripts/org_admin.py link. The pricing page's
-     form-action (site/_headers) allows the account origin, as browsers
-     hold this redirect to it too. */
+     503, so until it is, Plus is sold here as it is with accounts off.
+     Nobody had bought Plus here when that was decided; anything bought
+     here before the switch, or while it was not ready, is attached to an
+     organisation by hand, with scripts/org_admin.py link. The pricing
+     page's form-action (site/_headers) allows the account origin, as
+     browsers hold this redirect to it too. */
   if (accountsOn(env) && ready(env)) return Response.redirect(UPGRADE, 303);
   if (!sellable(env)) return closed();
   let plan = null;

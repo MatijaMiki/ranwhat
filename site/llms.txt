@@ -2,9 +2,9 @@
 
 > ranwhat is an open-source command-line tool for AI agent security on a developer's own machine. It reads the history Claude Code and nineteen other coding agents write to disk as an audit trail and reports what each agent actually did: credential reads, destructive commands, package publishing and other risky actions. It scans that history for leaked credentials (secret scanning for agent transcripts), scores what an agent's credentials allow, and flags the grants never used where the provider keeps a record. MIT licence, Python 3.9 or newer, no dependencies.
 
-Run it without installing: `uvx ranwhat check`. Or install it: `pipx install ranwhat` or `pip install ranwhat`. No account is needed.
+Run it without installing: `uvx ranwhat check`. Or install it: `pipx install ranwhat` or `pip install ranwhat`. No account is needed; an optional one at account.ranwhat.com manages Plus.
 
-What goes online: `live` and `--pull-usage` ask only the provider that issued each token, and `update` only fetches the capability catalogue, sending the subscription token and nothing else. Everything else reads locally and sends nothing. There is no telemetry.
+What goes online: `live` and `--pull-usage` ask only the provider that issued each token, and `update`, `login`, `whoami` and `logout` talk only to ranwhat.com. `update` fetches the capability catalogue, sending your token and nothing else. Everything else reads locally and sends nothing. There is no telemetry.
 
 Where it fits: ranwhat is the after-the-fact side of AI agent security and developer OPSEC. It shows what already ran, what leaked to disk, and what the tokens still allow. It does not block actions while an agent works unless you install its opt-in Claude Code hook (`ranwhat hook install`), and it does not detect prompt injection. `reach` reads the MCP server configuration agents keep on disk and flags risky shapes in it, but it does not inspect a server's code, its tool descriptions or skills for malicious content.
 
@@ -19,7 +19,10 @@ Commands:
 - `ranwhat live`: the same, from read-only token introspection. Pass tokens in the environment (`RANWHAT_GITHUB_TOKEN`, `RANWHAT_GOOGLE_TOKEN`, `RANWHAT_SLACK_TOKEN`, `RANWHAT_STRIPE_TOKEN`), not as flags.
 - `ranwhat demo`: an authority scan on a bundled example, with no setup.
 - `ranwhat hook install`: the one opt-in exception to after the fact. It adds a PreToolUse hook to Claude Code's settings (`--scope user`, `project` or `local`), and each tool call watch's rules rate high or critical then waits for the user's yes (`--mode ask`, the default) or, when critical, is refused (`--mode deny`). It judges locally and sends nothing; a call no rule rates high or critical gets no answer, and if the hook fails the call goes ahead. `ranwhat hook status` shows where it is installed and `ranwhat hook uninstall` removes it. It needs a lasting install (`uv tool install`, `pipx install` or `pip install`), not `uvx`.
-- `ranwhat update`: refreshes the capability catalogue. Needs a Plus subscription, which is live: €12 a month per organisation. On a terminal, `scan`, `live` and `update --status` may add one dim line about the feed on stderr, never with `--json`; `RANWHAT_NO_HINTS=1` turns it off.
+- `ranwhat update`: refreshes the capability catalogue. Needs Plus, which is live: €12 a month per organisation. On a terminal, `scan`, `live` and `update --status` may add one dim line about the feed on stderr, never with `--json`; `RANWHAT_NO_HINTS=1` turns it off.
+- `ranwhat login`: links this machine to an account at account.ranwhat.com. It prints a code to type at ranwhat.com/device, signed in, and saves the machine's own token at `~/.ranwhat/token` (mode 0600) for `update`. It sends no hostname, operating system or machine identifier.
+- `ranwhat whoami`: the account, organisation, role and plan the saved token (or `RANWHAT_TOKEN`) belongs to.
+- `ranwhat logout`: revokes this machine's token on the server and deletes it here. A subscription's or a CI token is only deleted here.
 
 Exit status for `check`, `watch` and `clean`: 0 ran, 1 an error, 2 no agent history to read. `--fail-on SEVERITY` (`medium`, `high` or `critical`) exits 3 when anything at or above it is found; every secret `clean` finds is `critical`. `--sarif PATH` writes the findings as SARIF 2.1.0 for code scanning, each secret masked as the report shows it. In GitHub Actions, `uses: MatijaMiki/ranwhat@main` (the composite `action.yml` at the repository root) runs `check` with `--fail-on` and uploads the SARIF to code scanning. `keep N` in `clean`'s review is remembered as a keyed hash in `~/.ranwhat/known/kept.json`, so a kept value is not reported again.
 
@@ -52,8 +55,8 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 
 ## Project
 
-- [Pricing](https://ranwhat.com/pricing): free on your own machine; Plus is €12 a month or €120 a year per organisation, and its catalogue feed is live, with the rest of Plus being built; Team is annual, by contact, and being built.
-- [Terms](https://ranwhat.com/terms): the terms for buying Plus: billing, cancelling, the 14-day refund.
+- [Pricing](https://ranwhat.com/pricing): free on your own machine; Plus is €12 a month or €120 a year per organisation, bought from an account at account.ranwhat.com. Its catalogue feed, CI tokens and members are live, with the rest of Plus being built; the account itself, and a token per machine from `ranwhat login`, are free. Team is annual, by contact, and being built.
+- [Terms](https://ranwhat.com/terms): the terms for Plus and the account: organisations, billing, cancelling, the 14-day refund, tokens.
 - [About](https://ranwhat.com/about): who builds it and why
 - [Updates](https://ranwhat.com/updates): every release, newest first, with an [RSS feed](https://ranwhat.com/rss.xml) and email signup
 - [Source](https://github.com/MatijaMiki/ranwhat): MIT licensed

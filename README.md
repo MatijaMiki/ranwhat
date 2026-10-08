@@ -393,13 +393,44 @@ API. Copy them into a profile as that credential's `scopes` and `scan` it.
 ### `ranwhat update`: refresh the capability catalogue
 
 `ranwhat update` refreshes the capability catalogue from ranwhat's feed. It
-needs a Plus subscription, live now at €12 a month per organisation
-([pricing](https://ranwhat.com/pricing)), and sends only the subscription
-token.
+needs Plus, live now at €12 a month per organisation
+([pricing](https://ranwhat.com/pricing)), and sends only your token: the one
+`ranwhat login` saved for this machine, or one in `RANWHAT_TOKEN`.
 
 On a terminal, `scan`, `live` and `update --status` may add one dim line
 about the feed, on stderr and never with `--json`. `RANWHAT_NO_HINTS=1` turns
 it off.
+
+### Linking an account: `ranwhat login`, `whoami` and `logout`
+
+Optional, and nothing else needs it. An account at
+[account.ranwhat.com](https://account.ranwhat.com/) manages Plus for an
+organisation: its members, its machines, CI tokens and billing.
+
+```bash
+uvx ranwhat login     # prints a code to type at https://ranwhat.com/device
+uvx ranwhat whoami    # the account, organisation, role and plan
+uvx ranwhat logout    # revokes this machine's token, then deletes it
+```
+
+- `login` uses the device flow `gh auth login` uses: it prints a code, you
+  sign in at ranwhat.com/device, type the code there, name the machine and
+  approve it, which asks for an emailed code typed in the last 15 minutes.
+  The printed code is never in a link. The machine then has a token of its
+  own, saved at `~/.ranwhat/token` (mode 0600, never through a symlink),
+  which `update` reads. `--force` replaces a saved token and asks the server
+  to revoke the old one; `--no-browser` only prints the page.
+- `whoami` shows whose a token is: the one given with `--token`, otherwise
+  `RANWHAT_TOKEN`, otherwise the saved one, the order `update` reads them in.
+- `logout` asks the server to revoke this machine's token, then deletes it.
+  A shared token, a subscription's or a CI token, is only deleted here.
+  `--local` deletes it without asking the server.
+- They send `feed.ranwhat.com` a code or the token, and never a hostname,
+  operating system, user name or machine identifier. The server notes the day
+  a linked machine's token was last used, and nothing finer. Beside the token,
+  `~/.ranwhat/account.json` (mode 0600) keeps the plan, organisation and email
+  last heard for it, under the token's SHA-256, so the hints about Plus are
+  right; `logout` deletes both.
 
 ### `ranwhat hook install`: ask before a high-risk Claude Code call
 
@@ -481,10 +512,10 @@ agent's entire authority surface, which is useful to somebody other than you.
 ## What goes online
 
 No account needed. live and --pull-usage ask only the provider that issued
-each token, and update only fetches the catalogue. Everything else reads
-locally and sends nothing.
+each token, and update, login, whoami and logout talk only to ranwhat.com.
+Everything else reads locally and sends nothing.
 
-- Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own subscription token, and only with `update --save-token` (mode 0600).
+- Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own ranwhat token, at `~/.ranwhat/token` (mode 0600): the machine token from `ranwhat login`, or a subscription token saved with `update --save-token`.
 - Live introspection talks only to the credential's own issuer
 - Scans never exercise a permission and never need a write-scoped token
 - No runtime dependencies, so there is nothing to audit before you point this at your keys

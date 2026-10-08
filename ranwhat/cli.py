@@ -221,14 +221,14 @@ TAGLINE = "Flight recorder and authority scanner for AI agents."
 
 # What reaches the network, said once for the overview and --help. "Nothing is
 # transmitted" was false for live and --pull-usage, which send each token to
-# the provider that issued it, and for update, which fetches the catalogue.
-# site/install.html quotes it word for word. It names login, whoami and
-# logout, as COMMANDS lists them, in the change that switches accounts on
-# (with install.html, commands.html, llms.txt and the README): until then
-# the server answers them 404, and no page or overview offers them.
+# the provider that issued it, and for update, login, whoami and logout,
+# which talk to ranwhat's own server (feed.ranwhat.com). site/install.html
+# quotes it word for word, and commands.html, llms.txt and the README say
+# the same.
 NETWORK = ("No account needed. live and --pull-usage ask only the provider "
-           "that issued each token, and update only fetches the catalogue. "
-           "Everything else reads locally and sends nothing.")
+           "that issued each token, and update, login, whoami and logout "
+           "talk only to ranwhat.com. Everything else reads locally and "
+           "sends nothing.")
 
 # Descriptions wrap under their own column on a narrow terminal, rather than
 # being folded again by the terminal into ragged half-lines.
@@ -241,12 +241,15 @@ COMMANDS = (
     ("scan", "the authority a set of credentials carries"),
     ("live", "the same, asked of each token's own provider"),
     ("demo", "see the output without setting anything up"),
-    ("update", "refresh the capability catalogue (needs a subscription)"),
+    ("update", "refresh the capability catalogue (needs Plus)"),
+    ("login", "link this machine to your ranwhat.com account"),
+    ("whoami", "which account, organisation and plan this machine uses"),
+    ("logout", "unlink this machine and delete its token"),
     ("hook", "opt in: ask before a high-risk Claude Code call runs"),
 )
 
-# The opt-in commands that link this machine to an account (account.py).
-# They run, but are not listed above until accounts go live (see NETWORK).
+# The opt-in commands that link this machine to an account (account.py),
+# listed above with the rest. Nothing else needs an account.
 _ACCOUNT_COMMANDS = ("login", "whoami", "logout")
 
 # The commands whose report html_report can write.
@@ -478,9 +481,10 @@ def _overview(parser):
 def _update(args):
     """Fetch the subscribed catalogue, or report what is cached.
 
-    One of three things that go online, with live and --pull-usage, and the
-    only one that talks to ranwhat's own server. It sends the subscription
-    token and nothing else. --status reads the cache and stays offline.
+    It goes online, as live, --pull-usage, login, whoami and logout do, and
+    with the last three talks to ranwhat's own server. It sends the token
+    (this machine's from login, a subscription's or a CI token) and nothing
+    else. --status reads the cache and stays offline.
     """
     feed_mod = _module("feed_mod")
     if args.status:
@@ -513,10 +517,11 @@ def _update(args):
         return 1
     if not token:
         sys.stderr.write(
-            "  No token. Set RANWHAT_TOKEN, or pass --token with --save-token\n"
-            "  to store it at ~/.ranwhat/token.\n\n"
+            "  No token. Run %s login to link this machine to your\n"
+            "  account, or set RANWHAT_TOKEN to a subscription or CI token.\n\n"
             "  Everything else works without one; the feed only keeps the\n"
-            "  capability catalogue current. https://ranwhat.com/pricing\n")
+            "  capability catalogue current. https://ranwhat.com/pricing\n"
+            % invocation())
         return 1
     if args.token:
         sys.stderr.write(
@@ -560,7 +565,8 @@ def _update(args):
     cat = doc.get("catalogue", {})
     sys.stdout.write(
         "  Updated to feed %s\n  %d providers, %d scopes\n"
-        % (doc.get("version") or "?", len(cat), sum(len(v) for v in cat.values())))
+        % (doc.get("version") or "?", feed_mod.providers(cat),
+           sum(len(v) for v in cat.values())))
     return 0
 
 

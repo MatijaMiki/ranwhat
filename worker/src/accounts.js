@@ -2,11 +2,12 @@
  * organisations in them, the audit log, and the daily budget for the email
  * that signs people in.
  *
- * Dark until ACCOUNTS_ON is set: until then index.js answers 404 to
- * everything on the account host, before any of this runs, and the cron
- * makes none of these tables. Once they exist, its sweep keeps deleting
- * what is out of date with accounts on or off: switching them off stops
- * serving them, not deleting what this file promises to delete.
+ * Served while ACCOUNTS_ON is set, as wrangler.toml sets it. Unset, index.js
+ * answers 404 to everything on the account host, before any of this runs,
+ * and the cron makes none of these tables in a database that never had
+ * them. Once they exist, its sweep keeps deleting what is out of date with
+ * accounts on or off: switching them off stops serving them, not deleting
+ * what this file promises to delete.
  *
  * Every table the accounts design needs is made here, including the ones
  * later work fills (passwords, passkeys, Google and GitHub identities,
@@ -42,45 +43,135 @@ export const SESSION_MAX = 30 * DAY;    // and none lasts longer than this after
 const KEEP_EVENTS = 396 * DAY;          // the audit log: 13 months
 const KEEP_COUNTS = 7 * DAY;            // the daily email counts
 
-/* Sign-in codes, fresh-code checks, address checks and password resets
-   share Resend's free plan, 100 emails a day, with the paid token emails
-   and the release list's confirmations. This keeps the account mail to
-   about 60, so a burst of sign-ups can never hold back someone's token. */
-export const AUTH_MAIL_PER_DAY = 60;
+/* What one account may do in a day that adds a row to the audit log and
+   needs no fresh code: renames (of an organisation and of its machines,
+   together) and switches between its organisations. Each is counted
+   before it is made, in one statement that counts nothing past these
+   (session.js's countWithin()), so requests sent at once are held to them
+   as requests sent one after another are. One past them is refused with
+   nothing written. One that changes nothing writes nothing to the audit
+   log: a rename to the name it has, or a switch to the organisation the
+   session looks at already, is turned back before it is counted, and of
+   several sent at once that would make the same change, the one that
+   makes it is written and the others give their count back. So one
+   account adds at most 90 such rows a day to what the cron keeps for 13
+   months (about 36,000), and a request refused at its count costs the
+   database a read, never a write. */
+export const RENAMES_PER_DAY = 30;
+export const SWITCHES_PER_DAY = 60;
 
-/* The last of those are kept for someone already signed in who is asked to
-   confirm it is them (purpose 'stepup'): codes asked for from the sign-in,
-   sign-up and reset forms, by anyone, stop short of them. Strangers who use
-   up the day's sign-in mail still cannot stop a signed-in person from
-   approving a terminal or opening billing. */
-export const STEPUP_RESERVE = 10;
+/* ---------- the day's email ---------- */
 
-/* And one account's share of that reserve: a session that asks to confirm
-   itself over and over, from as many networks as it likes, uses up its own
-   day and nobody else's. */
+/* Everything the Worker mails through Resend counts against the daily
+   limit of the Resend plan it is on: sign-in codes, fresh-code checks,
+   address checks, password resets and the notices that a way in was added
+   (the account's own mail, below), invites to an organisation, the
+   release list's confirmations (list.js) and the email a buyer gets when
+   Plus is on (stripe.js). RESEND_DAILY, an optional [vars] setting in
+   wrangler.toml, is that limit; unset, or not a whole number from 1 to
+   999,999,999, it is the free plan's 100. Each count below is a fixed
+   part of it, rounded down (mailBudget()), in one place for session.js,
+   members.js and list.js:
+
+     the account's own mail                 60 in 100 (AUTH_MAIL_PER_DAY)
+       of it, kept for accounts signed in   15 in 100 (STEPUP_RESERVE)
+     invites                                25 in 100 (INVITE_MAIL_PER_DAY)
+     the list's confirmations, accounts on  10 in 100 (LIST_MAIL_PER_DAY)
+     the list's confirmations, accounts off 90 in 100 (LIST_MAIL_ALONE)
+
+   So together they never come to more than RESEND_DAILY, and with it at
+   100 or more none is smaller than on the free plan. What is left, at
+   least 5 in 100 with accounts on and 10 in 100 with them off, is for the
+   buyers' emails, which have no count of their own. Each count is kept
+   apart from the others, so none, used up, holds back another: a burst of
+   sign-ups stops no invite, list confirmation or buyer's email, and a
+   burst of signups to the list stops no sign-in code. The constants are
+   the counts on the free plan, RESEND_DAILY unset. */
+export const RESEND_FREE_DAILY = 100;
+const SHARES = Object.freeze({ auth: 60, reserve: 15, invites: 25, list: 10, listAlone: 90 });
+
+/* RESEND_DAILY as a whole number from 1 to 999,999,999, or the free
+   plan's 100. A number in wrangler.toml and a string set elsewhere read
+   the same. */
+export function resendDaily(env) {
+  const raw = String(env?.RESEND_DAILY ?? "").trim();
+  return /^[1-9][0-9]{0,8}$/.test(raw) ? Number(raw) : RESEND_FREE_DAILY;
+}
+
+/* The day's counts for `env`, each its part of RESEND_DAILY rounded down:
+   { daily, auth, reserve, invites, list, listAlone }. */
+export function mailBudget(env) {
+  const daily = resendDaily(env);
+  const part = (share) => Math.floor((daily * share) / 100);
+  return Object.freeze({
+    daily, auth: part(SHARES.auth), reserve: part(SHARES.reserve), invites: part(SHARES.invites),
+    list: part(SHARES.list), listAlone: part(SHARES.listAlone),
+  });
+}
+
+export const {
+  auth: AUTH_MAIL_PER_DAY, reserve: STEPUP_RESERVE, invites: INVITE_MAIL_PER_DAY,
+  list: LIST_MAIL_PER_DAY, listAlone: LIST_MAIL_ALONE,
+} = mailBudget({});
+
+/* The account's own mail (AUTH_MAIL_PER_DAY on the free plan, 60): sign-in
+   codes, fresh-code checks, address checks, password resets and the
+   notices that a way in was added, counted apart from invites and the
+   list.
+
+   Its reserve (STEPUP_RESERVE on the free plan, 15) is kept for accounts
+   already signed in: a step-up's code (purpose 'stepup') and the notice
+   that a way in was added. Codes asked for from the sign-in, sign-up and
+   reset forms, by anyone, stop short of it, so strangers who use up the
+   day's sign-in mail cannot stop a signed-in person from approving a
+   terminal or opening billing. Only an account made at least a day ago
+   draws on the reserve, and at most RESERVE_PER_USER_DAY a day for one
+   account and RESERVE_PER_NETWORK_DAY for one network (an IPv4 /24, an
+   IPv6 /48). Both shares are counted before the email is taken, each in
+   one statement, so step-ups sent at once are held to them as step-ups
+   one after another are, and a step-up refused because the address is
+   over its limits or the day's mail is used up gives them back
+   (session.js's signedInMail()); one that Resend then fails to deliver
+   does not. So neither accounts made today, nor
+   a handful of older ones, nor many from one network can empty it:
+   emptying it takes the reserve divided by RESERVE_PER_USER_DAY accounts
+   a day old or more, on the reserve divided by RESERVE_PER_NETWORK_DAY
+   networks, each rounded up: eight accounts on five networks on the free
+   plan, and more on a larger one. What an account
+   causes past its share comes out of the public forms' mail instead,
+   under that mail's own limits, as a code asked for there would. */
+export const RESERVE_PER_USER_DAY = 2;
+export const RESERVE_PER_NETWORK_DAY = 3;
+
+/* And the step-up codes one account may ask for in a day, from the
+   reserve and the public mail together, from as many networks as it
+   likes. */
 export const STEPUPS_PER_USER_DAY = 5;
 
 /* The email that tells an account a way in was added to it (a Google or
-   GitHub account linked, a passkey added: session.js's tellWayIn()) is
-   mail a signed-in account causes, so it comes out of the same reserve,
-   under a daily share of its own for each account, which step-ups cannot
-   use up. Past either, the notice is skipped: the account's activity
-   still lists what was added. */
+   GitHub account linked, a passkey added: session.js's holdNotice() and
+   tellWayIn()) is taken from the day's mail, as a step-up's code is,
+   before the way in is added, and without it the way in is not added.
+   So nothing another account does can silence it: other accounts can at
+   most use up the day's mail, which stops the adding with it. Each
+   account's first NOTICES_PER_USER_DAY a day are mailed; a way in added
+   past them that day is not, as its address has had that many already
+   that day, and the account's activity lists every one. */
 export const NOTICES_PER_USER_DAY = 3;
 
-/* Invites to an organisation (members.js) have a day of their own, apart
-   from AUTH_MAIL_PER_DAY: however many organisations invite, nobody's
-   sign-in code or step-up waits on it, and a burst of sign-ins never stops
-   an invite. With the account mail that keeps Resend's 100 a day at about
-   85, leaving the rest for token emails and the list's confirmations.
-   Each organisation also has its own share (INVITES_PER_ORG_DAY), smaller
-   than this, so one organisation's busy day leaves room for another's. */
-export const INVITE_MAIL_PER_DAY = 25;
+/* Invites to an organisation (members.js) have their own count
+   (INVITE_MAIL_PER_DAY on the free plan, 25), apart from the account's
+   own mail: however many organisations invite, nobody's sign-in code or
+   step-up waits on it, and a burst of sign-ins never stops an invite.
+   Each organisation also has its own share (members.js's
+   INVITES_PER_ORG_DAY, 20), smaller than the day's invites whenever
+   RESEND_DAILY is 84 or more, the free plan's 100 included, so one
+   organisation's busy day leaves room for another's. */
 
 export const now = () => Math.floor(Date.now() / 1000);
 
 /* "1" or "true" switch accounts on; unset, empty or anything else keeps
-   them dark. */
+   them off. */
 export const accountsOn = (env) => ["1", "true"].includes(String(env.ACCOUNTS_ON ?? "").trim().toLowerCase());
 
 /* Switched on and able to work: the database, a way to send the code, a
@@ -367,9 +458,10 @@ const SCHEMA = [
      window_start INTEGER NOT NULL,
      count INTEGER NOT NULL)`,
 
-  /* Emails sent per UTC day, by kind ('auth': codes from the public forms;
-     'auth-stepup': a signed-in step-up's; 'invite': invites to an
-     organisation). */
+  /* Emails sent per UTC day, by kind ('auth': codes from the public forms,
+     and what an account signed in causes past its share of the reserve;
+     'auth-stepup': the signed-in reserve, for the step-ups and notices of
+     accounts a day old or more; 'invite': invites to an organisation). */
   `CREATE TABLE IF NOT EXISTS mail_counts (
      day TEXT NOT NULL,
      kind TEXT NOT NULL,
@@ -397,6 +489,19 @@ const SCHEMA = [
      created_at INTEGER NOT NULL,
      expires_at INTEGER NOT NULL,
      used_at INTEGER)`,
+
+  /* An organisation whose Stripe customer email (billing.js) is still to
+     be checked after someone stopped being an owner or an admin of it:
+     written in the batch that changes their role, deleted once Stripe has
+     the right address, and tried again by the cron while Stripe fails.
+     lost_user: who stopped (or handed on ownership), as their id, never an
+     address. ticket: random, so that a check only deletes the row it
+     read, never one a later change wrote. */
+  `CREATE TABLE IF NOT EXISTS billing_email_due (
+     org_id TEXT PRIMARY KEY,
+     lost_user TEXT,
+     ticket TEXT NOT NULL,
+     since INTEGER NOT NULL)`,
 
   `INSERT OR IGNORE INTO settings (key, value) VALUES ('accounts_schema', '1')`,
 ];
@@ -511,6 +616,37 @@ export function orgName(input) {
 
 export const canManage = (org) => Boolean(org) && (org.role === "owner" || org.role === "admin");
 
+/* The address of the organisation's owner, or null. Names are not unique
+   (every personal organisation is "Personal"), so a page that asks for a
+   decision about one names its owner too. */
+export async function ownerOf(env, orgId) {
+  const row = await env.LIST.prepare(
+    `SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.role = 'owner'`)
+    .bind(orgId).first();
+  return row ? row.email : null;
+}
+
+/* When `userId` joined the organisation, or 0 when they are not in it. */
+export async function joinedAt(env, orgId, userId) {
+  const row = await env.LIST.prepare("SELECT created_at FROM memberships WHERE org_id = ? AND user_id = ?")
+    .bind(orgId, userId).first();
+  return row ? row.created_at : 0;
+}
+
+/* SQL for the address `email` of the user whose id is `id` (both SQL
+   expressions), as someone who joined the organisation at a given time
+   may see it: while that user is in the organisation, or when they left
+   it after the viewer joined, so that the two shared it; otherwise NULL,
+   which the pages show as a former member. Someone who joins later never
+   learns the address of someone who had already gone. Three values to
+   bind where it stands: the organisation, the organisation again, and
+   the time the viewer joined (joinedAt()). */
+export const seenAddress = (id, email) => `CASE
+  WHEN EXISTS (SELECT 1 FROM memberships sx WHERE sx.org_id = ? AND sx.user_id = ${id}) THEN ${email}
+  WHEN (SELECT max(sg.at) FROM auth_events sg WHERE sg.org_id = ? AND sg.user_id = ${id}
+        AND sg.event IN ('org_left', 'removed_from_org')) >= ? THEN ${email}
+  END`;
+
 /* ---------- ways in ---------- */
 
 /* The statements that take away every Google and GitHub account linked to
@@ -555,18 +691,20 @@ export async function history(env, userId, limit = 10) {
 
 const today = (t = now()) => new Date(t * 1000).toISOString().slice(0, 10);
 
-/* The day's account mail is three counters. A signed-in step-up, and the
-   notice that a way in was added (purpose 'notice'), draw only on
-   STEPUP_RESERVE ('auth-stepup'); an invite only on INVITE_MAIL_PER_DAY
-   ('invite'); everything else, from the public sign-in, sign-up and reset
-   forms, on the rest of AUTH_MAIL_PER_DAY ('auth'). None can spend
-   another's, so a stranger draining the forms cannot stop a step-up or an
-   invite, and a signed-in session spraying step-ups or invites cannot stop
-   anyone signing in. */
-const signedIn = (purpose) => purpose === "stepup" || purpose === "notice";
-const mailKind = (purpose) => (purpose === "invite" ? "invite" : signedIn(purpose) ? "auth-stepup" : "auth");
-const mailCap = (purpose) => (purpose === "invite" ? INVITE_MAIL_PER_DAY
-  : signedIn(purpose) ? STEPUP_RESERVE : AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+/* The day's account mail is three counters, each capped at its part of
+   RESEND_DAILY (mailBudget()). The signed-in reserve ('auth-stepup', the
+   reserve), which session.js draws on for an older account's step-ups and
+   notices within their shares; invites ('invite'); and the rest of the
+   account's own mail ('auth'), for the public sign-in, sign-up and reset
+   forms and for what an account signed in causes past its share of the
+   reserve. None can spend another's, so a stranger draining the forms
+   cannot stop an older account's step-up or an invite, and a session
+   spraying invites cannot stop anyone signing in. */
+const mailKind = (purpose) => (purpose === "invite" ? "invite" : purpose === "stepup" ? "auth-stepup" : "auth");
+function mailCap(env, purpose) {
+  const budget = mailBudget(env);
+  return purpose === "invite" ? budget.invites : purpose === "stepup" ? budget.reserve : budget.auth - budget.reserve;
+}
 
 /* How many more account emails for `purpose` may go out today. Read before
    the per-address limits, so a day that is used up answers the same for
@@ -574,18 +712,28 @@ const mailCap = (purpose) => (purpose === "invite" ? INVITE_MAIL_PER_DAY
 export async function authMailLeft(env, purpose = "signin") {
   const row = await env.LIST.prepare("SELECT sent FROM mail_counts WHERE day = ? AND kind = ?")
     .bind(today(), mailKind(purpose)).first();
-  return Math.max(0, mailCap(purpose) - (row ? row.sent : 0));
+  return Math.max(0, mailCap(env, purpose) - (row ? row.sent : 0));
 }
 
-/* Takes one email for `purpose` from today's budget, or returns false when
-   none is left for it. One statement, so two requests at once cannot both
-   take the last. */
+/* Takes one email for `purpose` from today's budget: the day it was taken
+   from, for giveBackAuthMail(), or false when none is left for it. One
+   statement, so two requests at once cannot both take the last. */
 export async function spendAuthMail(env, purpose = "signin") {
+  const day = today();
+  const cap = mailCap(env, purpose);
+  if (cap <= 0) return false;
   const taken = await env.LIST.prepare(
     `INSERT INTO mail_counts (day, kind, sent) VALUES (?, ?, 1)
      ON CONFLICT(day, kind) DO UPDATE SET sent = sent + 1 WHERE sent < ?`)
-    .bind(today(), mailKind(purpose), mailCap(purpose)).run();
-  return taken.meta.changes === 1;
+    .bind(day, mailKind(purpose), cap).run();
+  return taken.meta.changes === 1 ? day : false;
+}
+
+/* One email for `purpose` back to the day it was taken from, for one
+   taken for something that then did not happen. Never below nothing. */
+export async function giveBackAuthMail(env, purpose, day) {
+  await env.LIST.prepare("UPDATE mail_counts SET sent = sent - 1 WHERE day = ? AND kind = ? AND sent > 0")
+    .bind(day, mailKind(purpose)).run();
 }
 
 /* ---------- the cron ---------- */
@@ -594,9 +742,9 @@ export async function spendAuthMail(env, purpose = "signin") {
    out-of-date code, session, limit or count needed is deleted, so an
    address someone typed and never verified is gone within the code's ten
    minutes and the next run, and so is the password hash held with it.
-   That holds while accounts are dark again after being on, too: dark
-   stops serving, not deleting. A database accounts were never on in gets
-   no tables from it. */
+   That holds while accounts are switched off again after being on, too:
+   off stops serving, not deleting. A database accounts were never on in
+   gets no tables from it. */
 export async function sweep(env) {
   const db = env.LIST;
   /* A database whose tables an earlier deploy made gets the ones added

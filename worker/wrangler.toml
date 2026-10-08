@@ -32,19 +32,19 @@ zone_name = "ranwhat.com"
 
 # Accounts, in dashboard.js. A route, as for the feed, so a deploy needs no
 # DNS permission: the hostname needs a proxied DNS record of its own
-# (AAAA account -> 100::). Until ACCOUNTS_ON is set, every request here
+# (AAAA account -> 100::). With ACCOUNTS_ON unset, every request here
 # gets the same 404 as an unknown path. Its forms that mail a code check
-# Turnstile with TURNSTILE_SECRET, the contact form's widget: add
-# account.ranwhat.com to that widget's hostnames before switching it on,
-# or no code can be asked for.
+# Turnstile with TURNSTILE_SECRET, the contact form's widget, so
+# account.ranwhat.com has to be among that widget's hostnames, or no code
+# can be asked for.
 [[routes]]
 pattern = "account.ranwhat.com/*"
 zone_name = "ranwhat.com"
 
 # ranwhat.com/device, the address `ranwhat login` prints: a redirect to
 # account.ranwhat.com/device, where the code is typed (src/device.js).
-# Ahead of Pages for this path only, as for /api/*. Until ACCOUNTS_ON is
-# set it answers 404, as an unknown path does.
+# Ahead of Pages for this path only, as for /api/*. With ACCOUNTS_ON
+# unset it answers 404, as an unknown path does.
 [[routes]]
 pattern = "ranwhat.com/device*"
 zone_name = "ranwhat.com"
@@ -78,9 +78,9 @@ simple = { limit = 10, period = 60 }
 # ACCOUNT_SECRET keeps account codes, sessions and form tokens (src/session.js):
 # 32 characters or more, e.g. `openssl rand -base64 32`, and never the same
 # as LIST_SECRET. Accounts also need RESEND_API_KEY and TURNSTILE_SECRET.
-# ACCOUNTS_ON = "1" in [vars] below switches them on; until then they are
-# dark. Switched on with any of those missing, account.ranwhat.com only says
-# accounts are not available.
+# ACCOUNTS_ON in [vars] below switches them on. Switched on with any of
+# those missing, account.ranwhat.com only says accounts are not available,
+# and the pricing page goes on selling Plus with its own Checkout.
 #
 # GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (a Google Cloud OAuth client of
 # type Web application), and GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET (a
@@ -100,6 +100,31 @@ X_EVENT_LEAD = "tw-rfz6t-rfz7z"
 # it. "off": no tax in checkout. site/terms.html and privacy.html describe
 # "managed": change them with it.
 STRIPE_TAX = "managed"
+# Accounts are on (src/accounts.js's accountsOn() reads "1" or "true").
+# account.ranwhat.com and ranwhat.com/device answer, feed.ranwhat.com/v1
+# answers `ranwhat login`'s device code and token, whoami and logout, and,
+# while the account host is ready (ACCOUNT_SECRET, RESEND_API_KEY and
+# TURNSTILE_SECRET set, and the database bound), the pricing page's
+# /api/checkout sends every buyer to account.ranwhat.com/upgrade, so each
+# new purchase is an organisation's. Remove this line to switch accounts
+# off again: all of those answer 404 as an unknown path does, and the
+# pricing page sells Plus with its own Checkout. Nothing is deleted by
+# that: a machine already linked stays on its organisation's plan
+# (src/auth.js), and the cron keeps deleting what is out of date and
+# revoking idle terminals' tokens.
+ACCOUNTS_ON = "1"
+# RESEND_DAILY, not set here: how many emails a day the Resend plan sends,
+# e.g. RESEND_DAILY = 3000 on a paid plan. Unset, or not a whole number
+# from 1 to 999999999, it is the free plan's 100. Every daily count of email
+# is its fixed part of it, rounded down (src/accounts.js's mailBudget()):
+# account codes and notices 60 in 100, 15 of them kept for accounts signed
+# in, invites 25, the release list's confirmations 10 while accounts are
+# on and 90 while they are off, and the rest for the emails that say Plus
+# is on. So the counts never add up to more than it, and at 100 or more
+# none is lower than on the free plan. Set it no higher than the plan
+# sends in a day (for a plan with a monthly quota only, that quota divided
+# by the days in a month), or the counts let through more than the plan
+# sends.
 
 # Signups waiting to be confirmed, and which releases went out. No
 # database_id on purpose: the first deploy creates the database (Wrangler's
@@ -111,6 +136,6 @@ binding = "LIST"
 database_name = "ranwhat-list"
 
 # Reads /rss.xml and sends a new release as one broadcast; also sends the
-# confirmation emails the free plan's daily limit held back.
+# confirmation emails a day's limit held back, oldest first.
 [triggers]
 crons = ["7,22,37,52 * * * *"]

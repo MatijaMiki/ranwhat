@@ -1267,7 +1267,8 @@ test("the organisation's Stripe customer is its own, with the owner's address, a
     assert.equal(s.customers.get(cus).email, "ana@example.com");
     assert.equal(updates().length, 2);
 
-    /* An address an owner chose, someone else's, stays when an admin goes. */
+    /* An address that is no owner's or admin's, whoever chose it, goes
+       back to the owner's when an admin goes: it may be the one who went. */
     s.customers.get(cus).email = "billing@acme.example";
     const dee = new Browser(e, { ip: "203.0.113.92" });
     await signIn(dee, s, "dee@example.com");
@@ -1275,8 +1276,8 @@ test("the organisation's Stripe customer is its own, with the owner's address, a
     r = await ana.post("/members/remove", formsOf((await ana.get("/")).text, "/members/remove")
       .find((f) => f.user === userId(e, "dee@example.com")));
     assert.equal(r.status, 303, r.text);
-    assert.equal(s.customers.get(cus).email, "billing@acme.example");
-    assert.equal(updates().length, 2);
+    assert.equal(s.customers.get(cus).email, "ana@example.com");
+    assert.equal(updates().length, 3);
 
     /* Ownership handed on: the owner's address becomes the new owner's. */
     s.customers.get(cus).email = "ana@example.com";
@@ -1299,6 +1300,72 @@ test("the organisation's Stripe customer is its own, with the owner's address, a
     console.log = real;
   }
   for (const line of lines) assert.doesNotMatch(line, /@|cus_|sub_|sk_/);
+});
+
+test("Stripe's billing email never stays with someone who is no longer an owner or an admin, and a failed change is tried again", async () => {
+  const s = services();
+  const e = env();
+  const olga = new Browser(e);
+  await signIn(olga, s, "olga@corp.example");
+  const acme = orgOf(e, "olga@corp.example");
+  const adam = new Browser(e, { ip: "203.0.113.93" });
+  await signIn(adam, s, "adam@corp.example");
+  join(e, "adam@corp.example", acme, "admin");
+  const id = await upgrade(adam, s, "monthly");
+  const cus = customerOf(e, acme);
+  assert.equal((await deliver(e, completedEvent(s, (pay(s, id), id)))).status, 200);
+  const adamId = userId(e, "adam@corp.example");
+  const remove = async (who) => olga.post("/members/remove",
+    formsOf((await olga.get("/")).text, "/members/remove").find((f) => f.user === who));
+
+  /* Adam, an admin, makes the billing email a private address of his in
+     Stripe's billing page, then is removed: it is Olga's again. */
+  s.customers.get(cus).email = "adam.private@elsewhere.example";
+  assert.equal((await remove(adamId)).status, 303);
+  assert.equal(s.customers.get(cus).email, "olga@corp.example");
+  assert.equal(count(e, "billing_email_due"), 0, "done, so nothing is left to try again");
+
+  /* An admin made a member: the same. */
+  const bea = new Browser(e, { ip: "203.0.113.94" });
+  await signIn(bea, s, "bea@corp.example");
+  join(e, "bea@corp.example", acme, "admin");
+  s.customers.get(cus).email = "bea.home@elsewhere.example";
+  const demote = formsOf((await olga.get("/")).text, "/members/role").find((f) => f.user === userId(e, "bea@corp.example"));
+  assert.equal((await olga.post("/members/role", demote)).status, 303);
+  assert.equal(s.customers.get(cus).email, "olga@corp.example");
+
+  /* The address of someone who is still an admin stays when another goes. */
+  const cy = new Browser(e, { ip: "203.0.113.95" });
+  await signIn(cy, s, "cy@corp.example");
+  join(e, "cy@corp.example", acme, "admin");
+  run(e, "UPDATE memberships SET role = 'admin' WHERE org_id = ? AND user_id = ?", acme, userId(e, "bea@corp.example"));
+  s.customers.get(cus).email = "cy@corp.example";
+  assert.equal((await remove(userId(e, "bea@corp.example"))).status, 303);
+  assert.equal(s.customers.get(cus).email, "cy@corp.example");
+
+  /* Stripe down when Cy is removed: the change is made, and the cron tries
+     the billing email again until Stripe takes it. */
+  s.fail[`POST /v1/customers/${cus}`] = [500, { error: { type: "api_error" } }];
+  assert.equal((await remove(userId(e, "cy@corp.example"))).status, 303);
+  assert.equal(s.customers.get(cus).email, "cy@corp.example");
+  assert.equal(count(e, "billing_email_due"), 1);
+  assert.doesNotMatch(JSON.stringify(rows(e, "SELECT * FROM billing_email_due")), /@/, "what is kept to try again holds no address");
+  const cron = async () => {
+    const waits = [];
+    await worker.scheduled({}, e, { waitUntil: (p) => waits.push(p) });
+    await Promise.all(waits);
+  };
+  await cron();
+  assert.equal(s.customers.get(cus).email, "cy@corp.example", "still down");
+  delete s.fail[`POST /v1/customers/${cus}`];
+  await cron();
+  assert.equal(s.customers.get(cus).email, "olga@corp.example");
+  assert.equal(count(e, "billing_email_due"), 0);
+
+  /* The billing panel says what that address is for, and that it follows the owner. */
+  const panel = (await olga.get("/")).text;
+  assert.match(panel, /billing email/);
+  assert.match(panel, /goes back to the owner's address/);
 });
 
 /* ---------- paying twice ---------- */

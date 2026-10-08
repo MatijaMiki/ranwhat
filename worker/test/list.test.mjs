@@ -264,6 +264,102 @@ test("past the day's sending limit a confirmation waits, and the cron sends it",
   assert.equal(s.emails.length, 1, "sent once");
 });
 
+test("the list sends only so many confirmations a day, ten with accounts on, so account mail keeps its room; the rest wait", async () => {
+  const s = services();
+  const e = env({ ACCOUNTS_ON: "1" });
+  const answers = [];
+  for (let i = 0; i < 25; i++) answers.push(await signUp(e, `r${i}@example.com`));
+  assert.equal(s.emails.length, list.LIST_MAIL_PER_DAY);
+  assert.equal(list.LIST_MAIL_PER_DAY, 10);
+  assert.deepEqual(answers.slice(list.LIST_MAIL_PER_DAY), Array(25 - list.LIST_MAIL_PER_DAY).fill({ ok: true, queued: true }));
+  assert.equal(pending(e).filter((r) => r.mailed_at === 0).length, 25 - list.LIST_MAIL_PER_DAY);
+
+  /* The cron sends none of them past the day's ten either. */
+  await list.announce(e, feed([OLD]));
+  assert.equal(s.emails.length, list.LIST_MAIL_PER_DAY);
+
+  /* The next day's run sends ten more of those waiting, and no more. */
+  const realNow = Date.now;
+  Date.now = () => realNow() + 24 * 3600 * 1000;
+  try {
+    await list.announce(e, feed([OLD]));
+    assert.equal(s.emails.length, 2 * list.LIST_MAIL_PER_DAY);
+    assert.equal(new Set(s.emails.map((m) => m.to[0])).size, 2 * list.LIST_MAIL_PER_DAY, "each address mailed once");
+    assert.equal(pending(e).filter((r) => r.mailed_at === 0).length, 25 - 2 * list.LIST_MAIL_PER_DAY);
+    await list.announce(e, feed([OLD]));
+    assert.equal(s.emails.length, 2 * list.LIST_MAIL_PER_DAY);
+  } finally {
+    Date.now = realNow;
+  }
+
+  /* With accounts off, there is no account mail to keep room for. */
+  const alone = services();
+  const off = env();
+  for (let i = 0; i < 25; i++) await signUp(off, `r${i}@example.com`);
+  assert.equal(alone.emails.length, 25);
+  assert.ok(list.LIST_MAIL_ALONE >= 25 && list.LIST_MAIL_ALONE <= 90);
+});
+
+test("RESEND_DAILY raises the list's day in proportion: a tenth of it with accounts on, nine tenths with them off", async () => {
+  for (const [extra, cap] of [[{ ACCOUNTS_ON: "1", RESEND_DAILY: "3000" }, 300], [{ ACCOUNTS_ON: "1", RESEND_DAILY: "50" }, 5],
+                              [{ RESEND_DAILY: "30" }, 27], [{ ACCOUNTS_ON: "1", RESEND_DAILY: "not a number" }, 10],
+                              [{ ACCOUNTS_ON: "1", RESEND_DAILY: "9" }, 0]]) {
+    const s = services();
+    const e = env(extra);
+    const answers = [];
+    for (let i = 0; i < 40; i++) answers.push(await signUp(e, `r${i}@example.com`));
+    assert.equal(s.emails.length, Math.min(cap, 40), JSON.stringify(extra));
+    assert.equal(answers.filter((a) => a.queued).length, 40 - Math.min(cap, 40));
+  }
+});
+
+test("a signup that waits is kept until its email goes or it is 30 days old, sent oldest first; once sent, it is kept a week", async () => {
+  const s = services();
+  const e = env({ ACCOUNTS_ON: "1" });
+  const realNow = Date.now;
+  let days = 0;
+  const on = async (n) => {
+    days = n;
+    Date.now = () => realNow() + days * 24 * 3600 * 1000;
+    await list.announce(e, feed([OLD]));
+  };
+  try {
+    /* A burst: the day's ten are mailed, fifteen wait. */
+    for (let i = 0; i < 25; i++) {
+      Date.now = () => realNow() + i * 1000;   // in the order they signed up
+      await signUp(e, `r${i}@example.com`);
+    }
+    const waiting = () => pending(e).filter((r) => r.mailed_at === 0).map((r) => r.email).sort();
+    assert.equal(s.emails.length, list.LIST_MAIL_PER_DAY);
+
+    /* Eight days on, past the week the first ten had to confirm: they are
+       deleted, and the next day's ten are mailed, oldest first, none of
+       those waiting having been deleted unsent. */
+    await on(8);
+    assert.deepEqual(s.emails.slice(10).map((m) => m.to[0]),
+      Array.from({ length: 10 }, (_, i) => `r${i + 10}@example.com`));
+    assert.equal(pending(e).length, 15, "the first ten are gone, the fifteen that waited are kept");
+    assert.deepEqual(waiting(), ["r20@example.com", "r21@example.com", "r22@example.com", "r23@example.com",
+                                 "r24@example.com"]);
+
+    /* Resend's own daily limit holds the last five back for weeks: they
+       are kept until 30 days after they signed up, and then deleted
+       unsent; the ten mailed on day 8 go a week after their email. */
+    s.fail["POST /emails"] = { status: 429, name: "daily_quota_exceeded" };
+    await on(14);
+    assert.equal(pending(e).length, 15);
+    await on(16);
+    assert.deepEqual(pending(e).map((r) => r.email).sort(), waiting());
+    await on(29);
+    assert.equal(waiting().length, 5, "still waiting on day 29");
+    await on(31);
+    assert.equal(pending(e).length, 0, "deleted unsent 30 days after signing up");
+    assert.equal(s.emails.length, 20);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test("any other failed confirmation email says so, and the next try goes through at once", async () => {
   const s = services();
   const e = env();

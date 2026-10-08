@@ -848,9 +848,14 @@ test("wrong codes: five in ten minutes lock a session's form, and five at one wa
   const fifth = await typeDevice(b, stranger(cli.user_code, 5));
   assert.equal(fifth.status, 429);
   assert.match(fifth.text, /Too many wrong codes/);
+  /* Only the session is over its count (the account has typed five of its
+     ten), so the lock is the session's ten minutes, and the page says so. */
+  assert.match(fifth.text, /in this browser lately[\s\S]*for up to 10 minutes/);
   assert.equal(stateOf(e, cli.device_code).state, "pending", "codes it never named are untouched");
   /* Locked: even the right code waits, and the box is not shown. */
-  assert.equal((await b.get("/device")).status, 429);
+  const box = await b.get("/device");
+  assert.equal(box.status, 429);
+  assert.match(box.text, /for up to 10 minutes/);
   const right = await b.post("/device", { form: await formToken(e, b.session, "device"), user_code: cli.user_code });
   assert.equal(right.status, 429);
   assert.doesNotMatch(right.text, /Approve this terminal/);
@@ -939,6 +944,116 @@ test("an account gets ten wrong codes an hour over all its sessions", async () =
   assert.equal((await second.get("/device")).status, 429, "the account's hour is not over");
   later(HOUR);
   assert.equal((await second.get("/device")).status, 200);
+});
+
+test("a shared network's wrong codes hold back only accounts that typed wrong codes there themselves, and each lock says its real window", async () => {
+  const s = services();
+  const e = env();
+  const shared = "192.0.2.10";   // an office's NAT, a campus, a VPN's exit
+  const cli = await newCode(e);
+  let n = 0;
+  const signedIn = async (email) => {
+    const b = new Browser(e, { ip: `198.51.100.${60 + n++}` });
+    await signIn(b, s, email);
+    b.ip = shared;
+    return b;
+  };
+
+  /* Three accounts, each signed in somewhere else, type thirty wrong codes
+     from the shared address: two sessions of five each. */
+  const sessions = [];
+  let k = 0;
+  for (const name of ["m1", "m2", "m3"]) {
+    for (let twice = 0; twice < 2; twice++) {
+      const m = await signedIn(`${name}@example.org`);
+      sessions.push(m);
+      for (let i = 0; i < device.WRONG_PER_SESSION; i++) await typeDevice(m, stranger(cli.user_code, (k++ % 19) + 1));
+    }
+  }
+  assert.equal(k, device.WRONG_PER_NETWORK);
+
+  /* Ana, signed in and on the same address, has typed nothing wrong: the
+     box is there, and her own code shows her terminal. A slip or two
+     does not lock her out either. */
+  const ana = await signedIn("ana@example.com");
+  const mine = await newCode(e, { ip: shared });
+  assert.equal((await ana.get("/device")).status, 200);
+  const slip = await typeDevice(ana, stranger(mine.user_code, 1));
+  assert.equal(slip.status, 400);
+  assert.match(slip.text, /That code is not right\. 2 tries left\./);
+  const shown = await typeDevice(ana, mine.user_code);
+  assert.equal(shown.status, 200, shown.text);
+  assert.match(shown.text, /Approve this terminal/);
+
+  /* Someone else there who keeps typing wrong codes is held back by the
+     network's count after WRONG_BEFORE_NETWORK of their own, for up to an
+     hour, and is told so. */
+  const m4 = await signedIn("m4@example.org");
+  for (let i = 1; i < device.WRONG_BEFORE_NETWORK; i++) {
+    assert.equal((await typeDevice(m4, stranger(cli.user_code, i))).status, 400);
+  }
+  const held = await typeDevice(m4, stranger(cli.user_code, device.WRONG_BEFORE_NETWORK));
+  assert.equal(held.status, 429);
+  assert.match(held.text, /from your network in the last hour/);
+  assert.match(held.text, /for up to an hour/);
+  assert.equal((await m4.get("/device")).status, 429);
+
+  /* The lock on an account that has typed ten is an hour, and says that,
+     in each of its sessions: one also over its own five is locked for the
+     account's hour, not its own ten minutes. */
+  const session = await sessions[0].get("/device");
+  assert.equal(session.status, 429);
+  assert.match(session.text, /for this account in the last hour/);
+  assert.match(session.text, /for up to an hour/);
+  assert.doesNotMatch(session.text, /10 minutes/);
+  const m1 = await signedIn("m1@example.org");
+  const account = await m1.get("/device");
+  assert.equal(account.status, 429);
+  assert.match(account.text, /for this account in the last hour/);
+  assert.match(account.text, /for up to an hour/);
+  assert.doesNotMatch(account.text, /10 minutes/);
+  later(10 * MINUTE + 1);
+  assert.equal((await sessions[0].get("/device")).status, 429, "the session's account is still over its hour");
+  assert.equal((await m1.get("/device")).status, 429);
+  later(HOUR);
+  assert.equal((await (await signedIn("m1@example.org")).get("/device")).status, 200, "its hour is over");
+});
+
+test("a lock names the longest of the counts that hold it: a session over its five whose account is over its ten is locked for the hour", async () => {
+  const s = services();
+  const e = env();
+  const b = new Browser(e, { ip: "198.51.100.50" });
+  await signIn(b, s, "m1@example.org");
+  const cli = await newCode(e);
+  for (let k = 1; k <= device.WRONG_PER_SESSION; k++) await typeDevice(b, stranger(cli.user_code, k));
+  later(device.WRONG_WINDOW + 1);
+  /* The session's ten minutes are over, and it types five more: its own
+     count and its account's run out on the same code. */
+  for (let k = 1; k < device.WRONG_PER_SESSION; k++) {
+    assert.equal((await typeDevice(b, stranger(cli.user_code, k + 5))).status, 400);
+  }
+  const tenth = await typeDevice(b, stranger(cli.user_code, 10));
+  assert.equal(tenth.status, 429);
+  assert.match(tenth.text, /for this account in the last hour[\s\S]*for up to an hour/);
+  assert.doesNotMatch(tenth.text, /10 minutes/);
+  const box = await b.get("/device");
+  assert.equal(box.status, 429);
+  assert.match(box.text, /for up to an hour/);
+  assert.doesNotMatch(box.text, /10 minutes/);
+  /* Ten minutes on it is still locked, as the page said: in a new session
+     of the account too, whose own count is nothing. */
+  later(device.WRONG_WINDOW + 1);
+  const second = new Browser(e, { ip: "198.51.100.51" });
+  await signIn(second, s, "m1@example.org");
+  const again = await second.get("/device");
+  assert.equal(again.status, 429);
+  assert.match(again.text, /for this account in the last hour/);
+  later(HOUR);
+  const third = new Browser(e, { ip: "198.51.100.52" });
+  await signIn(third, s, "m1@example.org");
+  const open = await third.get("/device");
+  assert.equal(open.status, 200, "the account's hour is over");
+  assert.match(open.text, /action="\/device"/);
 });
 
 /* ---------- tokens of every kind ---------- */

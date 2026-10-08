@@ -48,6 +48,7 @@
       <a href="/pricing" aria-current="page">Pricing</a>
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
     </nav>
     <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
       <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
@@ -82,7 +83,7 @@
       <div class="plan">
         <div class="tier">Free</div>
         <div class="price">Free<small> · forever</small></div>
-        <p class="who">One machine. No account, no telemetry, no expiry.</p>
+        <p class="who">One machine. No account needed, no telemetry, no expiry.</p>
         <ul>
           <li>Every watch source and every rule</li>
           <li>Authority scan across twelve providers</li>
@@ -90,6 +91,8 @@
           <li>HTML and JSON reports</li>
           <li>MIT licensed, no dependencies</li>
           <li>Nothing sent to us</li>
+          <li>An optional free account, to link machines with
+              <span class="icode">ranwhat login</span> and see what Plus adds</li>
         </ul>
         <a class="act" href="/install">Install</a>
       </div>
@@ -103,14 +106,17 @@
         </fieldset>
         <div class="price p-monthly">&euro;12<small> / month</small></div>
         <div class="price p-annual">&euro;10<small> / month, &euro;120 a year</small></div>
-        <p class="state">Live now: the catalogue feed. The rest is being built,
-           and comes at the same price as it ships.</p>
+        <p class="state">Live now: the catalogue feed, and CI tokens and
+           members on your account. The rest is being built, and comes at the
+           same price as it ships.</p>
         <p class="who">One price for the whole team, however many agents or people you run.</p>
         <ul>
           <li>Everything in Free</li>
           <li><strong>A current capability catalogue</strong>, pulled as
               providers add scopes, rather than whatever shipped with your
               version</li>
+          <li>CI tokens for your pipelines, and your team invited by email,
+              on your account at account.ranwhat.com</li>
           <li class="soon"><strong>One view across every machine and CI runner</strong>,
               instead of a report per laptop</li>
           <li class="soon">13-month retention, kept by us rather than by your backups</li>
@@ -119,7 +125,7 @@
           <li class="soon">Payloads hashed before they leave your network</li>
         </ul>
         <button class="act" type="submit">Subscribe</button>
-        <p class="fine">Paid through Stripe, VAT included. Cancel any time; refund in the first 14 days.</p>
+        <p class="fine">Bought from your account at account.ranwhat.com and paid through Stripe, VAT included. Cancel any time; refund in the first 14 days.</p>
       </form>
 
       <div class="plan">
@@ -217,17 +223,21 @@
         </div>
         <div class="cell">
           <h3>How do we cancel?</h3>
-          <p>From the <a href="/api/billing">billing page</a>, any time. The feed
+          <p>With Manage billing on your account at account.ranwhat.com, or from
+             the <a href="/api/billing">billing page</a>, any time. The feed
              keeps working to the end of the period you paid for. Changed your
              mind in the first 14 days? Write to us and the first payment is
              refunded in full. The <a href="/terms">terms</a> have the rest.</p>
         </div>
         <div class="cell">
           <h3>Where does the token go?</h3>
-          <p>It is on the page you land on after paying, and in an email. Run
-             <span class="icode">ranwhat update --save-token</span> with it once
-             on each machine; after that <span class="icode">ranwhat update</span>
-             needs nothing more.</p>
+          <p>Run <span class="icode">uvx ranwhat login</span> once on each
+             machine: it prints a code to type at ranwhat.com/device, signed in
+             to your account, and that machine gets a token of its own, which
+             <span class="icode">ranwhat update</span> then uses. Pipelines use a
+             CI token from your account page. Anyone who bought Plus before
+             accounts keeps the token they were emailed, saved once with
+             <span class="icode">ranwhat update --save-token</span>.</p>
         </div>
       </div>
       <div class="note" style="margin-top:22px">
@@ -236,7 +246,10 @@
            Plus, the catalogue feed is live: subscribe, and
            <span class="icode">ranwhat update</span> keeps your catalogue
            current from <span class="icode">feed.ranwhat.com</span> as
-           providers add scopes. The cross-machine view, retention and alerts
+           providers add scopes. So are CI tokens and members, on the account
+           at account.ranwhat.com. The account itself is free, and so is
+           linking a machine to it with <span class="icode">ranwhat login</span>.
+           The cross-machine view, retention and alerts
            are not written yet, and nor are Team's hash-chained records. Plus
            subscribers get each of them at the same price as it ships, and
            Team is not for sale until its records exist. If you want Team now,
@@ -297,6 +310,7 @@
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/updates">Updates</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>

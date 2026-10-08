@@ -24,9 +24,11 @@
  * address alone is the mail it can be sent in an hour. Wrong codes count
  * against the network that typed them, never against another browser's
  * attempt. The day's account mail (accounts.js) keeps a reserve for
- * signed-in step-ups, and each network (for this, an IPv4 /24) gets a
- * share of the rest. The forms that mail a code also pass Turnstile first
- * (dashboard.js, challenge.js).
+ * accounts signed in, which each account a day old or more, and each
+ * network, may draw on only so far (signedInMail() below), and each
+ * network (for this, an IPv4 /24) gets a share of the rest. The forms
+ * that mail a code also pass Turnstile first (dashboard.js,
+ * challenge.js).
  *
  * The session. __Host-rw_session holds 32 random bytes; D1 keeps their
  * SHA-256 as the session's id. Every sign-in opens a new one and ends the
@@ -42,8 +44,8 @@
 import { sha256 } from "./auth.js";
 import { REPLY_TO, escape, mail, resend, same } from "./list.js";
 import {
-  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, NOTICES_PER_USER_DAY, SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY,
-  authMailLeft, now, orgFor, spendAuthMail,
+  ACCOUNT_HOST, ACCOUNT_ORIGIN, DAY, HOUR, NOTICES_PER_USER_DAY, RESERVE_PER_NETWORK_DAY, RESERVE_PER_USER_DAY,
+  SESSION_IDLE, SESSION_MAX, STEPUPS_PER_USER_DAY, authMailLeft, giveBackAuthMail, now, orgFor, spendAuthMail,
 } from "./accounts.js";
 
 export const SESSION_COOKIE = "__Host-rw_session";
@@ -252,6 +254,26 @@ export async function bump(env, kind, who, window) {
   return row.count;
 }
 
+/* Counts one more in the window only while that keeps the count within
+   `limit`: true when it was counted, false when the count is at the limit
+   already, which writes nothing. One statement, as bump() is, so of
+   requests sent at once exactly as many are counted as the limit has room
+   for, and none is counted past it. A caller that counts more than one
+   thing gives back with unbump() what it counted when a later count, or
+   what it was counted for, does not go through. */
+export async function countWithin(env, kind, who, window, limit) {
+  if (!(limit > 0)) return false;
+  const t = now();
+  const key = await throttleKey(env, kind, who);
+  const counted = await env.LIST.prepare(
+    `INSERT INTO throttle (key, window_start, count) VALUES (?, ?, 1)
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN window_start <= ? THEN 1 ELSE count + 1 END,
+       window_start = CASE WHEN window_start <= ? THEN excluded.window_start ELSE window_start END
+     WHERE window_start <= ? OR count < ?`).bind(key, t, t - window, t - window, t - window, limit).run();
+  return counted.meta.changes === 1;
+}
+
 /* The count so far in the window, without adding to it. */
 export async function peek(env, kind, who, window) {
   const key = await throttleKey(env, kind, who);
@@ -262,7 +284,8 @@ export async function peek(env, kind, who, window) {
 
 /* One fewer in the window, for a count bumped before the thing it limits
    turned out not to be one (a right code, counted as a try before it was
-   looked up). Never below nothing. */
+   looked up; a share of the day's mail counted for an email that was not
+   sent). Never below nothing. */
 export async function unbump(env, kind, who, window) {
   const key = await throttleKey(env, kind, who);
   await env.LIST.prepare("UPDATE throttle SET count = count - 1 WHERE key = ? AND window_start > ? AND count > 0")
@@ -281,12 +304,18 @@ export async function forget(env, kind, who) {
    ctx.waitUntil. Returns { token } for the __Host-rw_signin cookie, or
    { refused: "network" | "network-day" | "budget" } when nothing can be
    sent right now: none depends on the address, so none says anything
-   about it.
+   about it. A step-up can also get { refused: "account-day" }: its
+   account has asked for STEPUPS_PER_USER_DAY today.
 
    The order matters. The network's requests this hour are counted first,
-   then the day's mail for this purpose and the network's share of it are
-   read, before anything about the address; mail is taken from both only
-   when a code is mailed, so they say no more about an address than the
+   then the day's mail for this purpose is read and the network's share of
+   it counted (for a step-up from the reserve, the account's share and its
+   network's: signedInMail()), before anything about the address. A share
+   is counted before the code is mailed, so that requests sent at once are
+   held to it too, and given back when the address is over its limits or
+   the day's mail is used up; the day's mail is taken only when a code is
+   to be sent. A code Resend then refuses or fails to send is not given
+   back: the send runs after the reply and only logs. So they say no more about an address than the
    day's budget always has. Then the address, as asked for from this
    network (a minute, an hour) and from everywhere (an hour). A stranger's
    requests for someone's address therefore use up the stranger's own
@@ -310,13 +339,16 @@ export async function requestCode(request, env, ctx, {
   const db = env.LIST;
   const t = now();
   const net = network(request);
-  const wide = network(request, { v4: 24 });
   if (await bump(env, "ask-ip", net, HOUR) > ASKS_PER_NETWORK) return { refused: "network" };
-  // A step-up is keyed on the account, which no change of network escapes.
-  if (purpose === "stepup" && userId &&
-      await bump(env, "stepup-user", userId, DAY) > STEPUPS_PER_USER_DAY) return { refused: "budget" };
-  if (await authMailLeft(env, purpose) <= 0) return { refused: "budget" };
-  if (await peek(env, "mail-net", wide, DAY) >= NETWORK_MAIL_PER_DAY) return { refused: "network-day" };
+  let draw;
+  if (purpose === "stepup" && userId) {
+    // A step-up is keyed on the account, which no change of network escapes.
+    if (await bump(env, "stepup-user", userId, DAY) > STEPUPS_PER_USER_DAY) return { refused: "account-day" };
+    draw = await signedInMail(request, env, userId);
+  } else {
+    draw = await publicMail(request, env);
+  }
+  if (draw.refused) return { refused: draw.refused };
 
   const emailMac = await mac(env, `email:${email}`);
   const here = both(email, net);
@@ -326,6 +358,7 @@ export async function requestCode(request, env, ctx, {
   const before = previous ? await db.prepare(
     "SELECT email_mac, purpose, expires_at, tries, used_at FROM signins WHERE id = ?")
     .bind(await sha256(previous)).first() : null;
+  if (limited) await release(env, draw);
   if (limited && before && before.email_mac === emailMac && before.purpose === purpose &&
       !before.used_at && before.tries < CODE_TRIES && before.expires_at > t) {
     if (passwordHash) {
@@ -334,10 +367,7 @@ export async function requestCode(request, env, ctx, {
     }
     return { token: previous };
   }
-  if (!limited) {
-    if (!await spendAuthMail(env, purpose)) return { refused: "budget" };
-    await bump(env, "mail-net", wide, DAY);
-  }
+  if (!limited && !await take(request, env, draw)) return { refused: "budget" };
 
   const token = randomToken();
   const id = await sha256(token);
@@ -360,6 +390,77 @@ export async function requestCode(request, env, ctx, {
     }));
   }
   return { token };
+}
+
+/* ---------- the day's mail, for the public forms and for someone signed in ---------- */
+
+/* Where a code from the public sign-in, sign-up and reset forms comes
+   from: the day's public mail ('auth'), under this network's share of it
+   (an IPv4 /24, an IPv6 /64), which is counted here: { from: "public",
+   counts }, or { refused }. */
+async function publicMail(request, env) {
+  const wide = network(request, { v4: 24 });
+  if (await authMailLeft(env, "signin") <= 0) return { refused: "budget" };
+  if (!await countWithin(env, "mail-net", wide, DAY, NETWORK_MAIL_PER_DAY)) return { refused: "network-day" };
+  return { from: "public", counts: [["mail-net", wide]] };
+}
+
+/* Where an email that an account signed in causes comes from: a
+   step-up's code, or the notice that a way in was added. The signed-in
+   reserve, for an account made at least a day ago while it has its
+   share of the reserve today (RESERVE_PER_USER_DAY) and its network has
+   (RESERVE_PER_NETWORK_DAY, an IPv4 /24 or an IPv6 /48, so that one
+   holder of many /64s is one network); otherwise the public mail, as a
+   code asked for from the forms would. Both shares are counted here,
+   before the email is taken, each in one statement (countWithin()), so
+   that step-ups sent at once are held to them as step-ups one after
+   another are; a share counted for an email that is then not taken is
+   given back (release()). So accounts made today, and those past their
+   share, never spend what the reserve keeps for everyone else, and a
+   stranger who uses up the public mail still leaves the reserve to older
+   accounts. { from, counts }, or { refused }. */
+async function signedInMail(request, env, user) {
+  const net = network(request, { v4: 24, v6: 48 });
+  const account = await env.LIST.prepare("SELECT created_at FROM users WHERE id = ?").bind(user).first();
+  if (account && account.created_at <= now() - DAY && await authMailLeft(env, "stepup") > 0 &&
+      await countWithin(env, "reserve-user", user, DAY, RESERVE_PER_USER_DAY)) {
+    if (await countWithin(env, "reserve-net", net, DAY, RESERVE_PER_NETWORK_DAY)) {
+      return { from: "reserve", counts: [["reserve-user", user], ["reserve-net", net]] };
+    }
+    await unbump(env, "reserve-user", user, DAY);
+  }
+  return publicMail(request, env);
+}
+
+/* The shares a draw counted, given back, for an email that is not going
+   to be taken. */
+async function release(env, draw) {
+  for (const [kind, who] of draw.counts || []) await unbump(env, kind, who, DAY);
+}
+
+/* Takes the email `draw` names from today's mail; the shares it was
+   counted against stay counted. A reserve another request took the last
+   of meanwhile gives its shares back and gives way to the public mail.
+   What was taken, for giveBack(), or null when nothing could be, with
+   every share given back. */
+async function take(request, env, draw) {
+  if (draw.from === "reserve") {
+    const day = await spendAuthMail(env, "stepup");
+    if (day) return { purpose: "stepup", day, counts: draw.counts };
+    await release(env, draw);
+    draw = await publicMail(request, env);
+    if (draw.refused) return null;
+  }
+  const day = await spendAuthMail(env, "signin");
+  if (day) return { purpose: "signin", day, counts: draw.counts };
+  await release(env, draw);
+  return null;
+}
+
+/* What take() took, back, for an email that is not going to be sent. */
+async function giveBack(env, taken) {
+  await giveBackAuthMail(env, taken.purpose, taken.day);
+  await release(env, taken);
 }
 
 export const ACCOUNT_FROM = "ranwhat <account@ranwhat.com>";
@@ -417,21 +518,47 @@ const ADDED = {
   passkey: "A passkey was added to",
 };
 
+/* Before a way in is added to `user`'s account (a Google or GitHub
+   account linked, a passkey added), the email that will tell its address
+   so, taken from the day's mail as a step-up's code is (signedInMail()),
+   so that one its owner did not add is noticed. { mail: true, ... } when
+   it is taken, for tellWayIn() once the way in is added, or
+   releaseNotice() if it is not; { mail: false } when the account has had
+   NOTICES_PER_USER_DAY today (accounts.js), and the way in is added
+   without one; { refused } when no email can be sent for it today, and
+   the way in must not be added. Nothing another account does can make a
+   way in be added without its email: at most it uses up the day's mail,
+   which refuses the adding too. */
+export async function holdNotice(request, env, user) {
+  if (await bump(env, "notice-user", user, DAY) > NOTICES_PER_USER_DAY) return { mail: false };
+  const draw = await signedInMail(request, env, user);
+  const taken = draw.refused ? null : await take(request, env, draw);
+  if (!taken) {
+    await unbump(env, "notice-user", user, DAY);
+    return { refused: draw.refused || "budget" };
+  }
+  return { mail: true, user, taken };
+}
+
+/* A notice holdNotice() took for a way in that was not added after all,
+   given back. */
+export async function releaseNotice(env, hold) {
+  if (!hold || !hold.mail) return;
+  await giveBack(env, hold.taken);
+  await unbump(env, "notice-user", hold.user, DAY);
+}
+
 /* Mails `user`'s address that a way in was just added to the account
-   (`what`: google, github or passkey), after the reply has gone, so that
-   one its owner did not add is noticed. Out of the signed-in reserve,
-   at most NOTICES_PER_USER_DAY a day for one account (accounts.js), and
-   skipped past either: the account's activity lists it all the same. It
-   names the kind of way in and nothing else, no provider id, label or
-   address but the account's own. All of it runs after the reply, so a
-   notice that fails never undoes what it tells of. */
-export function tellWayIn(env, ctx, { user, what }) {
+   (`what`: google, github or passkey), with the email `hold` took for it
+   (holdNotice()), after the reply has gone. It names the kind of way in
+   and nothing else, no provider id, label or address but the account's
+   own. All of it runs after the reply, so a notice that fails never undoes
+   what it tells of. */
+export function tellWayIn(env, ctx, { user, what, hold }) {
+  if (!hold || !hold.mail || !Object.hasOwn(ADDED, what)) return;
   ctx.waitUntil((async () => {
     const row = await env.LIST.prepare("SELECT email FROM users WHERE id = ?").bind(user).first();
-    if (!row || !Object.hasOwn(ADDED, what)) return;
-    if (await bump(env, "notice-user", user, DAY) > NOTICES_PER_USER_DAY) return;
-    if (!await spendAuthMail(env, "notice")) return;
-    await mailWayIn(env, row.email, what);
+    if (row) await mailWayIn(env, row.email, what);
   })().catch((err) => {
     console.log(`account notice mail: ${err.code || err.name || "error"}`);
   }));

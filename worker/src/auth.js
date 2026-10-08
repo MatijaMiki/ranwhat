@@ -21,6 +21,15 @@
  *
  * Any of them is refused once revoked, or past its expires_at. The last two
  * answer exactly as they did before organisations existed.
+ *
+ * Which organisation a machine or a linked subscription belongs to, and
+ * the grants and subscriptions its plan comes from, are accounts.js's
+ * tables (machines, org_subscriptions, grants). What identify() writes is
+ * one thing: for a device or ci token, the start of the UTC day it was
+ * last accepted (machines.last_used_day), at most once a day and no finer,
+ * which the account page shows and machines.js's cron reads to revoke a
+ * terminal unused for 90 days. Nothing is written for a subscription's or
+ * a hand-made token, and nothing about the request for any.
  */
 import { accountsOn, schema as accountsSchema } from "./accounts.js";
 import { allows } from "./features.js";

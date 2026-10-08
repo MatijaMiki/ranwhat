@@ -351,7 +351,7 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     const mail = lastTo(s, "bo@example.com");
     assert.equal(mail.from, "ranwhat <account@ranwhat.com>");
     assert.equal(mail.reply_to, "hello@ranwhat.com");
-    assert.match(mail.text, /^ana@example\.com invited you to join Acme on ranwhat, as a member\./);
+    assert.match(mail.text, /^ana@example\.com invited you to join an organisation on ranwhat, as a member\.\n\nIts name, as its owner or an admin typed it: "Acme"\nranwhat sends this on their behalf/);
     assert.match(mail.text, /works once, for 7 days, and only signed in to account\.ranwhat\.com as bo@example\.com/);
     assert.equal(mail.text.match(/https?:\/\//g).length, 1, "the invite link is the only link in the text");
     const token = inviteFor(s, "bo@example.com");
@@ -391,7 +391,7 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.equal(join[0].token, token);
     assert.match(r.text, /<button type="submit">Join Acme<\/button>/);
     /* What joining shares, said as it is: every member sees every other's address and terminals. */
-    assert.match(r.text, /Everyone in Acme sees your email address, and the\s+terminals you link to it/);
+    assert.match(r.text, /Everyone in Acme sees your email address and the\s+terminals you link to it/);
     /* GETs, as many as you like, join nobody. */
     assert.equal((await bo.get(`/invite/${token}`)).status, 200);
     assert.equal(roleIn(e, acme, "bo@example.com"), null);
@@ -648,6 +648,36 @@ test("with the day's invite mail used up, nobody is invited and the organisation
   assert.match(r.text, /today's are used up/);
   assert.equal(invitesOf(e, acme).length, 0);
   assert.equal(lastTo(s, "bo@example.com"), undefined);
+  assert.equal(await peek(e, "invite-org", acme, DAY), 0);
+});
+
+test("RESEND_DAILY raises the day's invite mail in proportion: a quarter of it", async () => {
+  const s = services();
+  const e = env({ RESEND_DAILY: "1000" });
+  const { ana, acme } = await acmeOwner(e, s);
+  const used = (n) => run(e, `INSERT INTO mail_counts (day, kind, sent) VALUES (?, 'invite', ?)
+          ON CONFLICT (day, kind) DO UPDATE SET sent = excluded.sent`, isoDay(unix()), n);
+  /* Past the free plan's 25, invites still go. */
+  used(INVITE_MAIL_PER_DAY);
+  assert.equal((await invite(ana, "bo@example.com")).status, 303);
+  assert.ok(lastTo(s, "bo@example.com"));
+  /* At a quarter of 1000, they stop. */
+  used(250);
+  const r = await invite(ana, "cy@example.com");
+  assert.equal(r.status, 503);
+  assert.match(r.text, /today's are used up/);
+  assert.equal(lastTo(s, "cy@example.com"), undefined);
+  assert.equal(invitesOf(e, acme).length, 1);
+});
+
+test("with RESEND_DAILY so low that invites' part of it rounds down to none, nobody is invited", async () => {
+  const s = services();
+  const e = env({ RESEND_DAILY: "3" });
+  const { ana, acme } = await acmeOwner(e, s);
+  const r = await invite(ana, "bo@example.com");
+  assert.equal(r.status, 503);
+  assert.equal(lastTo(s, "bo@example.com"), undefined);
+  assert.equal(invitesOf(e, acme).length, 0);
   assert.equal(await peek(e, "invite-org", acme, DAY), 0);
 });
 
@@ -977,6 +1007,101 @@ test("leaving: the terminals linked to it go too, and a form drawn for another o
   assert.deepEqual(eventsOf(e, "org_left"), [{ org_id: acme, user_id: boId, subject: null }]);
   assert.deepEqual(eventsOf(e, "machine_left_org"), [{ org_id: acme, user_id: boId, subject: terminal.id }]);
   assert.match((await bo.get("/")).text, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
+});
+
+test("someone who left is a former member to whoever joined after, on Machines and in the record; Join and Leave say what stays", async () => {
+  const s = services();
+  const e = env();
+  const { ana, acme } = await acmeOwner(e, s);
+  const bob = await inOrg(e, s, acme, "bob@example.com", "admin");
+  await makeCi(bob, "bob-made-ci");
+  const leaving = (await bob.get("/")).text;
+  assert.equal((await submit(bob, "/members/leave")).location, "/");
+  later(60);
+
+  /* Ana was there when Bob left: she still sees his address. */
+  const anas = (await ana.get("/")).text;
+  assert.match(anas, /Made by bob@example\.com on/);
+  assert.match(panel(anas).html, /bob@example\.com left/);
+
+  /* Zoe joins after: she never shared Acme with Bob, and sees a former member. */
+  const zoe = await inOrg(e, s, acme, "zoe@example.com", "admin");
+  const zoes = (await zoe.get("/")).text;
+  assert.ok(!zoes.includes("bob@example.com"), "Bob's address is nowhere on Zoe's page");
+  assert.match(zoes, /Made by a former member on/);
+  assert.match(panel(zoes).html, /a former member left/);
+  assert.match(panel(zoes).html, /zoe@example\.com/);
+
+  /* Leaving, an admin was told the CI tokens they made stay. */
+  assert.match(leaving, /CI tokens you made are Acme's, and keep working until an owner or an admin revokes them/);
+
+  /* Should Bob come back, he is a member again, and named. */
+  run(e, "INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)",
+    acme, userId(e, "bob@example.com"), unix());
+  assert.match((await zoe.get("/")).text, /Made by bob@example\.com on/);
+
+  /* The Join page says what the organisation keeps of whoever joins. */
+  assert.equal((await invite(ana, "carl@example.com")).location, "/");
+  const carl = new Browser(e);
+  await signIn(carl, s, "carl@example.com");
+  const page = (await carl.get(`/invite/${inviteFor(s, "carl@example.com")}`)).text;
+  assert.match(page, /its owners and admins see when you join,\s+leave or change role/);
+  assert.match(page, /anyone who joins after you leave sees you only as a former member/);
+});
+
+test("approving a terminal shows whose organisation it joins and your role there, and warns when it is not your own", async () => {
+  const s = services();
+  const e = env();
+  const mal = new Browser(e);
+  await signIn(mal, s, "mal@example.com");
+  const theirs = ownOrg(e, "mal@example.com");
+  grant(e, theirs);
+  /* Ana, invited into Mal's "Personal", is looking at it: the same name as her own. */
+  const ana = await inOrg(e, s, theirs, "ana@example.com", "member");
+  const mine = ownOrg(e, "ana@example.com");
+  assert.equal(one(e, "SELECT name FROM orgs WHERE id = ?", mine).name, one(e, "SELECT name FROM orgs WHERE id = ?", theirs).name);
+  const home = (await ana.get("/")).text;
+  assert.match(home, /<dt>Owner<\/dt><dd>mal@example\.com<\/dd>/);
+
+  const cli = (await call(e, "/v1/device/code", { form: { client_id: "ranwhat-cli" } })).json;
+  const box = await ana.get("/device");
+  assert.match(box.text, /linked to <strong>Personal<\/strong>, owned by <strong>mal@example\.com<\/strong>/);
+  const shown = await ana.post("/device", { form: tokenFor(box.text, "/device"), user_code: cli.user_code });
+  assert.equal(shown.status, 200, shown.text);
+  assert.match(shown.text, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
+  assert.match(shown.text, /<dt>Owner<\/dt><dd>mal@example\.com<\/dd>/);
+  assert.match(shown.text, /<dt>Your role<\/dt><dd>Member<\/dd>/);
+  assert.match(shown.text, /not an organisation of your own/);
+  const done = await ana.post("/device/approve", { form: tokenFor(shown.text, "/device/approve"),
+    user_code: shown.text.match(/name="user_code" value="([^"]+)"/)[1],
+    org: shown.text.match(/name="org" value="([^"]+)"/)[1], label: "Ana work laptop" });
+  assert.equal(done.status, 200, done.text);
+  assert.match(done.text, /owned by <strong>mal@example\.com<\/strong>/);
+
+  /* Her own: she is its owner, and there is nothing to warn of. */
+  await submit(ana, "/org/switch", () => true, { org: mine });
+  const own = await ana.post("/device", { form: tokenFor((await ana.get("/device")).text, "/device"),
+    user_code: (await call(e, "/v1/device/code", { form: { client_id: "ranwhat-cli" } })).json.user_code });
+  assert.equal(own.status, 200, own.text);
+  assert.match(own.text, /<dt>Owner<\/dt><dd>You<\/dd>/);
+  assert.doesNotMatch(own.text, /not an organisation of your own/);
+});
+
+test("an invite email quotes the organisation's name as its admins typed it, and says ranwhat sends it on their behalf", async () => {
+  const s = services();
+  const e = env();
+  const { ana, acme } = await acmeOwner(e, s);
+  const name = "ranwhat security. Your access lapses: re-verify at https://evil.example/rw";
+  run(e, "UPDATE orgs SET name = ? WHERE id = ?", name, acme);
+  assert.equal((await invite(ana, "stranger@victim.example")).location, "/");
+  const mail = lastTo(s, "stranger@victim.example");
+  const lines = mail.text.split("\n");
+  assert.equal(lines[0], "ana@example.com invited you to join an organisation on ranwhat, as a member.");
+  assert.ok(lines.includes(`Its name, as its owner or an admin typed it: "${name}"`), mail.text);
+  assert.match(mail.text, /ranwhat sends this on their behalf, and wrote none of that name/);
+  assert.equal(lines.filter((l) => l.includes(name)).length, 1, "the name appears once, quoted");
+  assert.ok(mail.html.includes(`&quot;${name.replace(/&/g, "&amp;")}&quot;`) || mail.html.includes(`“${name}”`), mail.html);
+  assert.equal(mail.subject, "An invite to an organisation on ranwhat");
 });
 
 test("someone left in no organisation gets a personal one, and stays signed in", async () => {

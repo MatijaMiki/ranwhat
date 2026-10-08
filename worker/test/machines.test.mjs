@@ -11,13 +11,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { d1 } from "./stand-ins.mjs";
+import { d1, slow } from "./stand-ins.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const device = await import("../src/device.js");
 const machines = await import("../src/machines.js");
 const { FEATURES, allows } = await import("../src/features.js");
-const { formToken } = await import("../src/session.js");
+const { formToken, peek } = await import("../src/session.js");
+const { RENAMES_PER_DAY } = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const FEED = "https://feed.ranwhat.com";
@@ -427,6 +428,60 @@ test("renaming: an owner or admin, or whoever linked it; a name is escaped and p
   }
   assert.equal(labelOf(bos.id), "Bo's");
   assert.equal(rows(e, "SELECT 1 FROM auth_events WHERE event = 'machine_renamed'").length, 4);
+});
+
+test("renaming a machine to its own name writes nothing, and renames are counted per account per day", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const mine = await linkTerminal(e, ana, "Laptop");
+  const rename = async (label) => ana.post("/machines/rename",
+    { form: tokenFor((await ana.get("/")).text, "/machines/rename"), id: mine.id, label });
+  const renamed = () => rows(e, "SELECT 1 FROM auth_events WHERE event = 'machine_renamed'").length;
+  assert.equal((await rename("  Laptop ")).location, "/");
+  assert.equal(renamed(), 0, "the same name: nothing written");
+  for (let i = 0; i < RENAMES_PER_DAY; i++) assert.equal((await rename(`Laptop ${i}`)).location, "/");
+  assert.equal(renamed(), RENAMES_PER_DAY);
+  const over = await rename("Laptop again");
+  assert.equal(over.status, 429);
+  assert.match(over.text, /renamed things \d+ times today/);
+  assert.equal(renamed(), RENAMES_PER_DAY);
+  assert.equal(one(e, "SELECT label FROM machines WHERE id = ?", mine.id).label, `Laptop ${RENAMES_PER_DAY - 1}`);
+  later(DAY + 1);
+  assert.equal((await rename("Laptop again")).location, "/");
+});
+
+test("machine renames sent at once are held to the day's count, and those that change nothing write and cost nothing, with D1's latency or without", async () => {
+  for (const latency of [false, true]) {
+    later(DAY + 1);
+    const s = services();
+    const e = env();
+    const ana = new Browser(e);
+    await signIn(ana, s);
+    const mine = await linkTerminal(e, ana, "Laptop");
+    const user = one(e, "SELECT id FROM users WHERE email = 'ana@example.com'").id;
+    const form = tokenFor((await ana.get("/")).text, "/machines/rename");
+    if (latency) e.LIST = slow(e.LIST, 3);
+    const renamed = () => rows(e, "SELECT 1 FROM auth_events WHERE event = 'machine_renamed'").length;
+    const done = (replies) => replies.filter((r) => r.location === "/").length;
+
+    /* Ten at once to one new name: one is made, and counted once. */
+    let replies = await Promise.all(Array.from({ length: 10 }, () =>
+      ana.post("/machines/rename", { form, id: mine.id, label: "Desk" })));
+    assert.equal(done(replies), 10);
+    assert.equal(renamed(), 1);
+    assert.equal(await peek(e, "rename-user", user, DAY), 1);
+
+    /* Twice the day's at once, each to a name of its own: the rest of the
+       day's are made, every other one is refused. */
+    replies = await Promise.all(Array.from({ length: 2 * RENAMES_PER_DAY }, (_, i) =>
+      ana.post("/machines/rename", { form, id: mine.id, label: `Desk ${i}` })));
+    assert.equal(done(replies), RENAMES_PER_DAY - 1);
+    assert.equal(replies.filter((r) => r.status === 429).length, RENAMES_PER_DAY + 1);
+    assert.equal(renamed(), RENAMES_PER_DAY);
+    assert.equal(await peek(e, "rename-user", user, DAY), RENAMES_PER_DAY);
+  }
 });
 
 /* ---------- revoking ---------- */

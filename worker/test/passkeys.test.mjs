@@ -25,7 +25,7 @@ const {
   CHALLENGE_FOR, CHALLENGES_PER_NETWORK, MAX_LABEL, OPTIONS_PER_USER, PAGE_SCRIPT, passkeyLabel,
 } = await import("../src/passkeys.js");
 const { coseKey } = await import("../src/webauthn.js");
-const { schema, sweep } = await import("../src/accounts.js");
+const { AUTH_MAIL_PER_DAY, STEPUP_RESERVE, schema, sweep } = await import("../src/accounts.js");
 
 const SECRET = "an-account-test-secret-" + "that-is-long-enough-0123456789";
 const SESSION = "__Host-rw_session";
@@ -277,7 +277,7 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
   assert.match(notice.text, /^A passkey was added to your ranwhat account \(ana@example\.com\)/);
   assert.ok(!JSON.stringify(notice).includes(device.keys[0].id) && !JSON.stringify(notice).includes("Work laptop"));
   assert.deepEqual(rows(e, "SELECT kind, sent FROM mail_counts ORDER BY kind"),
-                   [{ kind: "auth", sent: 1 }, { kind: "auth-stepup", sent: 1 }], "out of the signed-in reserve");
+                   [{ kind: "auth", sent: 2 }], "an account made today: out of the public mail, with its sign-in code");
   assert.equal(rows(e, "SELECT used_at FROM passkey_challenges")[0].used_at > 0, true);
 
   /* The handle is made once; the passkey just added is left out next time. */
@@ -346,6 +346,41 @@ test("adding a passkey needs a session and a code typed in the last 15 minutes",
   const { res } = await addPasskey(b, device);
   assert.equal(res.status, 303);
   assert.equal(count(e, "passkeys"), 1);
+});
+
+test("other accounts' mail never silences the email that tells of a passkey: without one, none is added", async () => {
+  const s = services();
+  const e = env();
+  const b = new Browser(e);
+  await signInByCode(b, s, "ana@example.com");
+  later(DAY + MINUTE);            // an account older than a day
+  await confirm(b, s);
+  const day = new Date(Date.now()).toISOString().slice(0, 10);
+  const used = (kind, sent) => e.LIST.sql.prepare(
+    "INSERT OR REPLACE INTO mail_counts (day, kind, sent) VALUES (?, ?, ?)").run(day, kind, sent);
+
+  /* Other accounts have used up the day's signed-in reserve: the email
+     goes all the same, from the public mail. */
+  used("auth-stepup", STEPUP_RESERVE);
+  const device = new Device();
+  const before = s.emails.length;
+  const { res } = await addPasskey(b, device);
+  assert.equal(res.status, 303, res.text);
+  assert.equal(s.emails.length, before + 1);
+  assert.equal(s.emails.at(-1).subject, "A new way into your ranwhat account");
+  assert.deepEqual(s.emails.at(-1).to, ["ana@example.com"]);
+
+  /* With the public mail used up as well, no passkey is added without its
+     email, and nothing is spent. */
+  used("auth", AUTH_MAIL_PER_DAY - STEPUP_RESERVE);
+  const again = await addPasskey(b, device, { label: "Phone" });
+  assert.equal(again.res.status, 503);
+  assert.match(again.res.text, /No passkey was added/);
+  assert.equal(passkeysOf(e, "ana@example.com").length, 1);
+  assert.equal(s.emails.length, before + 1);
+  assert.deepEqual(rows(e, "SELECT kind, sent FROM mail_counts WHERE day = ? ORDER BY kind", day),
+                   [{ kind: "auth", sent: AUTH_MAIL_PER_DAY - STEPUP_RESERVE }, { kind: "auth-stepup", sent: STEPUP_RESERVE }]);
+  assert.equal(eventsOf(e, "ana@example.com").filter((x) => x === "passkey_added").length, 1);
 });
 
 /* ---------- challenges ---------- */
@@ -696,6 +731,25 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
   const back = new Browser(e, { ip: "203.0.113.62" });
   await signInByCode(back, s, "ana@example.com");
   assert.equal((await back.get("/")).status, 200);
+});
+
+test("removing a passkey ends every other session of the account, the one it opened among them, and the page says so", async () => {
+  const s = services();
+  const e = env();
+  const { b, device } = await withPasskey(e, s);
+  const thief = new Browser(e, { ip: "203.0.113.63" });
+  assert.equal((await passkeySignIn(thief, device)).status, 303);
+  assert.equal((await thief.get("/")).status, 200);
+
+  const home = await b.get("/");
+  const r = await b.post("/passkeys/remove", { form: tokenFor(home.text, "/passkeys/remove"), id: device.keys[0].id });
+  assert.equal(r.status, 303, r.text);
+  assert.equal(passkeysOf(e, "ana@example.com").length, 0);
+  assert.equal((await thief.get("/")).location, "/signin", "the passkey's session is over");
+  assert.equal((await b.get("/")).status, 200, "this one goes on");
+  assert.equal(count(e, "sessions"), 1);
+  assert.match((await b.get("/")).text, /Passkey removed, and every other session signed out/);
+  assert.match(home.text, /Removing one signs this account out everywhere else\./);
 });
 
 /* ---------- the script ---------- */

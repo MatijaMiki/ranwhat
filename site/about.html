@@ -49,6 +49,7 @@
       <a href="/pricing">Pricing</a>
       <a href="/about" aria-current="page">About</a>
       <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
     </nav>
     <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
       <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
@@ -164,9 +165,11 @@
           <div class="num">03</div>
           <h3>Local unless you ask</h3>
           <p>Anything touching a secret runs locally. Introspection talks only
-             to the credential's own issuer, and update sends only a
-             subscription token to our server. This is an architecture rather
-             than a promise, which is why it is short to review.</p>
+             to the credential's own issuer, and update sends only your token
+             to our server. login, whoami and logout, which link a machine to
+             an optional account, are the only other commands that talk to it.
+             This is an architecture rather than a promise, which is why it is
+             short to review.</p>
         </div>
         <div class="principle">
           <div class="num">04</div>
@@ -227,7 +230,7 @@
     <div>
       <h2>What the catalogue knows.</h2>
       <p class="lede">
-        12 providers and 104 permissions, each mapped to what it actually lets
+        12 providers and 204 permissions, each mapped to what it actually lets
         an agent do: whether it can be undone, what it reaches, and the
         sentence explaining why that matters.
       </p>
@@ -235,18 +238,18 @@
       <table>
         <thead><tr><th>Provider</th><th>Scopes</th><th>Of which</th></tr></thead>
         <tbody>
-          <tr><td><strong>HubSpot</strong></td><td class="mono">12</td><td>1 destructive, 4 financial</td></tr>
-          <tr><td><strong>Google Workspace</strong></td><td class="mono">11</td><td>3 destructive</td></tr>
-          <tr><td><strong>Atlassian</strong></td><td class="mono">9</td><td>6 destructive</td></tr>
-          <tr><td><strong>Discord</strong></td><td class="mono">9</td><td class="mono" style="color:var(--faint)">none</td></tr>
-          <tr><td><strong>GitLab</strong></td><td class="mono">9</td><td>3 destructive</td></tr>
-          <tr><td><strong>GitHub</strong></td><td class="mono">8</td><td>3 destructive</td></tr>
-          <tr><td><strong>AWS</strong></td><td class="mono">8</td><td>4 destructive</td></tr>
-          <tr><td><strong>Microsoft 365</strong></td><td class="mono">8</td><td>4 destructive</td></tr>
-          <tr><td><strong>Sentry</strong></td><td class="mono">8</td><td>4 destructive</td></tr>
-          <tr><td><strong>Shopify</strong></td><td class="mono">8</td><td>3 financial</td></tr>
-          <tr><td><strong>Slack</strong></td><td class="mono">7</td><td>1 destructive</td></tr>
-          <tr><td><strong>Stripe</strong></td><td class="mono">7</td><td>1 destructive, 4 financial</td></tr>
+          <tr><td><strong>Google Workspace</strong></td><td class="mono">21</td><td>9 destructive, 1 financial</td></tr>
+          <tr><td><strong>GitHub</strong></td><td class="mono">20</td><td>10 destructive, 2 financial</td></tr>
+          <tr><td><strong>Microsoft 365</strong></td><td class="mono">20</td><td>12 destructive</td></tr>
+          <tr><td><strong>HubSpot</strong></td><td class="mono">19</td><td>2 destructive, 5 financial</td></tr>
+          <tr><td><strong>Shopify</strong></td><td class="mono">18</td><td>3 destructive, 8 financial</td></tr>
+          <tr><td><strong>Discord</strong></td><td class="mono">17</td><td class="mono" style="color:var(--faint)">none</td></tr>
+          <tr><td><strong>AWS</strong></td><td class="mono">16</td><td>10 destructive</td></tr>
+          <tr><td><strong>Atlassian</strong></td><td class="mono">16</td><td>10 destructive</td></tr>
+          <tr><td><strong>Sentry</strong></td><td class="mono">16</td><td>8 destructive</td></tr>
+          <tr><td><strong>Slack</strong></td><td class="mono">15</td><td>4 destructive</td></tr>
+          <tr><td><strong>GitLab</strong></td><td class="mono">15</td><td>5 destructive</td></tr>
+          <tr><td><strong>Stripe</strong></td><td class="mono">11</td><td>1 destructive, 7 financial</td></tr>
         </tbody>
       </table>
       </div>
@@ -313,6 +316,7 @@
         <ul>
           <li><a href="/about">About</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/updates">Updates</a></li>
           <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>

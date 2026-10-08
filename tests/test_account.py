@@ -372,11 +372,12 @@ class Login(AccountCase):
         self.assertIn("Could not reach 127.0.0.1", err)
         self.assertNotIn(CODE, out)
 
-    def test_accounts_not_switched_on_yet(self):
-        # The Worker answers 404 on every device path until ACCOUNTS_ON.
+    def test_accounts_switched_off(self):
+        # The Worker answers 404 on every device path while ACCOUNTS_ON is
+        # unset: switched off again after go-live, the CLI says so plainly.
         status, _out, err = self.run_cli("login")
         self.assertEqual(status, 1)
-        self.assertIn("does not link terminals yet", err)
+        self.assertIn("is not linking terminals just now", err)
 
     def test_plain_http_is_refused_anywhere_but_this_machine(self):
         os.environ["RANWHAT_ACCOUNT_URL"] = "http://feed.ranwhat.com/v1"
@@ -1096,15 +1097,15 @@ class Flags(AccountCase):
                 self.assertEqual(caught.exception.code, 2)
         self.assertEqual(self.server.seen, [])
 
-    def test_nothing_offers_them_until_accounts_go_live(self):
-        # The server answers them 404 until ACCOUNTS_ON is set. The change
-        # that sets it lists them in the overview, NETWORK, install.html
-        # (which quotes NETWORK), commands.html, llms.txt and the README,
-        # together: none of them may promise a command that cannot work yet.
+    def test_every_place_offers_them_now_accounts_are_live(self):
+        # ACCOUNTS_ON is set in worker/wrangler.toml, so the server answers
+        # them, and the overview, NETWORK, install.html (which quotes
+        # NETWORK), commands.html, llms.txt and the README list them
+        # together: none may leave out a command that works.
         names = [name for name, _what in cli.COMMANDS]
         for name in cli._ACCOUNT_COMMANDS:
-            self.assertNotIn(name, names)
-            self.assertNotIn(name, cli.NETWORK)
+            self.assertIn(name, names)
+            self.assertIn(name, cli.NETWORK)
         for path in (os.path.join(ROOT, "README.md"),
                      os.path.join(ROOT, "site", "llms.txt"),
                      os.path.join(ROOT, "site", "install.html"),
@@ -1112,8 +1113,13 @@ class Flags(AccountCase):
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
             for name in cli._ACCOUNT_COMMANDS:
-                self.assertNotRegex(text, r"ranwhat %s\b|>%s<" % (name, name), path)
-            self.assertNotIn("ranwhat.com/device", text, path)
+                self.assertRegex(text, r"ranwhat %s\b|>%s<" % (name, name), path)
+        for path in (os.path.join(ROOT, "README.md"),
+                     os.path.join(ROOT, "site", "commands.html")):
+            with open(path, encoding="utf-8") as fh:
+                self.assertIn("ranwhat.com/device", fh.read(), path)
+        with open(os.path.join(ROOT, "worker", "wrangler.toml"), encoding="utf-8") as fh:
+            self.assertRegex(fh.read(), r'(?m)^ACCOUNTS_ON = "1"$')
 
 
 class TheModule(unittest.TestCase):

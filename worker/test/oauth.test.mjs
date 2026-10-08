@@ -21,7 +21,9 @@ import { d1 } from "./stand-ins.mjs";
 const worker = (await import("../src/index.js")).default;
 const { FRESH_FOR, formToken } = await import("../src/session.js");
 const { FLOW_FOR, SKEW, STARTS_PER_NETWORK, forgetKeys, googleGivesOut } = await import("../src/oauth.js");
-const { NOTICES_PER_USER_DAY, userForVerifiedEmail } = await import("../src/accounts.js");
+const {
+  AUTH_MAIL_PER_DAY, NOTICES_PER_USER_DAY, STEPUP_RESERVE, userForVerifiedEmail,
+} = await import("../src/accounts.js");
 
 const ORIGIN = "https://account.ranwhat.com";
 const SECRET = "an-account-test-secret-" + "that-is-long-enough-0123456789";
@@ -1095,6 +1097,27 @@ test("a password reset can take every Google, GitHub and passkey way in with it"
   assert.equal((await ana.get("/")).location, "/signin", "every other session ended");
 });
 
+test("unlinking Google or GitHub ends every other session of the account, the one it opened among them", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  await viaProvider(ana, s, "github", { user: { id: 9001 } }, { link: true });
+  /* Someone with that GitHub account signs in with it, somewhere else. */
+  const thief = new Browser(e, { ip: "203.0.113.64" });
+  assert.equal((await viaProvider(thief, s, "github", { user: { id: 9001 } })).res.status, 303);
+  assert.equal((await thief.get("/")).status, 200);
+
+  const home = await ana.get("/");
+  const r = await ana.post("/auth/github/unlink", { form: tokenFor(home.text, "/auth/github/unlink"), subject: "9001" });
+  assert.equal(r.status, 303, r.text);
+  assert.equal((await thief.get("/")).location, "/signin", "the GitHub session is over");
+  assert.equal((await ana.get("/")).status, 200, "this one goes on");
+  assert.equal(count(e, "sessions"), 1);
+  assert.match((await ana.get("/")).text, /GitHub account unlinked, and every other session signed out/);
+  assert.match(home.text, /Unlinking one also signs this account out everywhere else\./);
+});
+
 /* ---------- telling the account ---------- */
 
 test("the account's address is told when a Google or GitHub account is linked to it, within a daily share", async () => {
@@ -1125,14 +1148,49 @@ test("the account's address is told when a Google or GitHub account is linked to
   assert.equal((await viaProvider(new Browser(e, { ip: "203.0.113.98" }), s, "google",
     { claims: { sub: "4004", email: "dee@gmail.com", hd: undefined } })).res.status, 303);
   assert.equal(s.emails.length, mails + 2);
-  /* At most NOTICES_PER_USER_DAY a day for one account, from the
-     signed-in reserve; the activity lists every link all the same. */
+  /* At most NOTICES_PER_USER_DAY a day for one account, and for an
+     account made today from the public mail, as its step-ups are (the
+     reserve is for accounts a day old or more); the activity lists every
+     link all the same. */
   for (let id = 800; id < 800 + NOTICES_PER_USER_DAY; id++) {
     assert.equal((await viaProvider(ana, s, "github", { user: { id } }, { link: true })).res.status, 303);
   }
   assert.equal(s.emails.length, mails + NOTICES_PER_USER_DAY);
-  assert.deepEqual(rows(e, "SELECT sent FROM mail_counts WHERE kind = 'auth-stepup'"), [{ sent: NOTICES_PER_USER_DAY }]);
+  assert.deepEqual(rows(e, "SELECT kind, sent FROM mail_counts"), [{ kind: "auth", sent: 1 + NOTICES_PER_USER_DAY }],
+                   "the sign-in code and the notices, and nothing more taken for the links past them");
   assert.equal(eventsOf(e, user).filter((x) => x === "linked_github").length, 1 + NOTICES_PER_USER_DAY);
+});
+
+test("Google or GitHub is linked only with the email that tells of it: with no account mail left today, nothing is linked", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signInByCode(ana, s, "ana@example.com");
+  const day = new Date(Date.now()).toISOString().slice(0, 10);
+  e.LIST.sql.prepare("INSERT OR REPLACE INTO mail_counts (day, kind, sent) VALUES (?, 'auth', ?), (?, 'auth-stepup', ?)")
+    .run(day, AUTH_MAIL_PER_DAY - STEPUP_RESERVE, day, STEPUP_RESERVE);
+  const mails = s.emails.length;
+
+  /* Google, the authority for the address, would link itself and sign in. */
+  const b = new Browser(e, { ip: "203.0.113.98" });
+  const google = await viaProvider(b, s, "google", { claims: { sub: "2002" } });
+  assert.equal(google.res.status, 503);
+  assert.match(google.res.text, /nothing was linked/);
+  assert.equal(b.jar.has(SESSION), false, "nobody signed in");
+  /* GitHub, linked from the account page. */
+  const github = await viaProvider(ana, s, "github", { user: { id: 777 } }, { link: true });
+  assert.equal(github.res.status, 503);
+  assert.match(github.res.text, /nothing was linked/);
+  assert.deepEqual(identities(e).map((i) => i.provider), ["email"]);
+  assert.equal(s.emails.length, mails, "no email, and no way in added without one");
+  assert.equal(count(e, "unlinked_identities"), 0);
+
+  /* The next day there is mail again: Google links itself, and says so. */
+  later(24 * 3600);
+  const next = await viaProvider(new Browser(e, { ip: "203.0.113.99" }), s, "google", { claims: { sub: "2002" } });
+  assert.equal(next.res.status, 303, next.res.text);
+  assert.equal(s.emails.at(-1).subject, "A new way into your ranwhat account");
+  assert.deepEqual(identities(e).map((i) => i.provider), ["email", "google"]);
 });
 
 /* ---------- limits, the session, and the sweep ---------- */

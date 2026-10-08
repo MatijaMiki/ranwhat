@@ -38,3 +38,27 @@ export function d1() {
     },
   };
 }
+
+/* The same database with every call to it taking 1 to 8 ms, as a round
+   trip to D1 does, so that requests sent at once interleave between their
+   queries as they would on Workers. The delays follow a fixed seed, so a
+   run can be repeated. */
+export function slow(db, seed = 1) {
+  let x = seed >>> 0 || 1;
+  const wait = () => {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+    return new Promise((resolve) => setTimeout(resolve, 1 + (x >>> 29)));
+  };
+  const statement = (st) => ({
+    bind: (...p) => statement(st.bind(...p)),
+    first: async () => { await wait(); return st.first(); },
+    all: async () => { await wait(); return st.all(); },
+    run: async () => { await wait(); return st.run(); },
+    now: st.now,
+  });
+  return {
+    sql: db.sql,
+    prepare: (sql) => statement(db.prepare(sql)),
+    batch: async (statements) => { await wait(); return db.batch(statements); },
+  };
+}
