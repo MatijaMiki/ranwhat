@@ -73,13 +73,15 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;   // 32 random bytes, base64url
    goes into an email's To. */
 const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".]+)+$/;
 
-/* Where a sign-in may send the browser on to: the account, the page that
-   approves a terminal (device.js), the one that upgrades to Plus
-   (billing.js), or the invite waiting in the browser's cookie (members.js,
-   which keeps the invite's token out of `next` and so out of the
-   database). Anything else, a query string included, goes to the
-   account. */
-const NEXT = new Set(["/", "/device", "/upgrade", "/invite"]);
+/* Where a sign-in may send the browser on to: the account's pages (ui.js's
+   APP_PAGES), the page that approves a terminal (device.js), the one that
+   upgrades to Plus (billing.js), or the invite waiting in the browser's
+   cookie (members.js, which keeps the invite's token out of `next` and so
+   out of the database). Anything else, a query string included, goes to
+   the account. */
+const NEXT = new Set([
+  "/", "/machines", "/members", "/billing", "/security", "/activity", "/device", "/upgrade", "/invite",
+]);
 export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 
 /* ---------- secrets ---------- */

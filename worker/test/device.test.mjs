@@ -805,7 +805,7 @@ test("a terminal is named on the page that approves it: without a good name noth
   const machine = one(e, "SELECT * FROM machines WHERE hash = ?", sha(got.json.access_token));
   assert.equal(machine.label, "Build box");
   assert.equal((await whoami(e, got.json.access_token)).json.machine.label, "Build box");
-  const home = await b.get("/");
+  const home = await b.get("/machines");
   assert.ok(home.text.includes("<strong>Build box</strong>"), "listed by that name");
   assert.ok(!home.text.includes("Unnamed terminal"));
   const all = dump(e);

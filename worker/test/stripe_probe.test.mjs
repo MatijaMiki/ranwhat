@@ -325,7 +325,7 @@ test("it calls the Worker's own functions, which send Stripe exactly what they s
     assert.deepEqual([checkouts[0]["line_items[0][price]"], checkouts[1]["line_items[0][price]"]],
       ["price_monthly1", "price_annual1"]);
     assert.equal(portalForm.configuration, "bpc_plus");
-    assert.equal(portalForm.return_url, "https://account.ranwhat.com/");
+    assert.equal(portalForm.return_url, "https://account.ranwhat.com/billing");
     /* billingEmailFollows() read the customer's address and moved it to the owner's. */
     const moved = stand.calls.filter((c) => c.route === `POST /v1/customers/${customer}`).map((c) => c.form);
     assert.equal(moved.length, 1);

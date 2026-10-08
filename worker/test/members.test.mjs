@@ -124,7 +124,7 @@ const tokenFor = (html, action) => {
 
 /* Sends the account page's form for `action` that `pick` chooses, with `extra`. */
 async function submit(b, action, pick = () => true, extra = {}) {
-  const home = await b.get("/");
+  const home = await b.get(action === "/org/switch" ? "/" : "/members");
   const found = forms(home.text, action).find(pick);
   assert.ok(found, `no ${action} form`);
   return b.post(action, { ...found, ...extra });
@@ -157,7 +157,7 @@ async function signIn(b, s, email, next = "/") {
 
 /* A fresh code for a session that is no longer fresh. */
 async function confirm(b, s) {
-  const home = await b.get("/");
+  const home = await b.get("/security");
   const asked = await b.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" });
   assert.equal(asked.location, "/signin/code");
   const mail = s.emails.at(-1);
@@ -217,11 +217,30 @@ const forged = async (e, b, action, org, fields = {}) =>
     }[action]}:${org}`), org, ...fields,
   });
 
+/* Every account page's HTML, one after another, for what may be on any of them. */
+async function everyPage(b) {
+  let html = "";
+  for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) {
+    const r = await b.get(path);
+    assert.equal(r.status, 200, `${path}: ${r.status}`);
+    html += r.text;
+  }
+  return html;
+}
+
+/* The Members page's own content, everything but the sidebar, and whether
+   its members card is drawn locked. */
 const panel = (html) => {
-  const m = html.match(/<section class="panel( locked)?" id="members" data-feature="members">([\s\S]*?)<\/section>/);
-  assert.ok(m, "no members panel");
-  return { locked: Boolean(m[1]), html: m[2] };
+  const m = html.match(/<main id="main" class="main" data-page="members">([\s\S]*?)<\/main>/);
+  assert.ok(m, "no members page");
+  const card = m[1].match(/<section class="card( locked)?" id="members" data-feature="members">/);
+  assert.ok(card, "no members panel");
+  return { locked: Boolean(card[1]), html: m[1] };
 };
+
+/* A person's row in the members table: their address, then their role. */
+const memberRow = (email, role, you = false) => new RegExp(`<tr data-member="[^"]+"><td class="cell-main"><strong>${
+  email.replace(/[.]/g, "\\.")}</strong>${you ? ' <span class="pill">You</span>' : ""}</td><td data-label="Role"><span class="pill[^"]*">${role}</span></td>`);
 
 /* ---------- the feed host and terminals ---------- */
 
@@ -262,7 +281,7 @@ async function linkTerminal(e, b, label = "Laptop") {
 
 /* A CI token made with the account page's form. */
 async function makeCi(b, label = "deploy") {
-  const home = await b.get("/");
+  const home = await b.get("/machines");
   const r = await b.post("/tokens/ci", { ...forms(home.text, "/tokens/ci")[0], label, expires: "never" });
   assert.equal(r.status, 200, r.text);
   return r.text.match(/<code class="secret">(rw_c_[A-Za-z0-9_-]{43})<\/code>/)[1];
@@ -306,14 +325,14 @@ test("Free: the members panel is locked with the way up, and an invite is refuse
   const s = services();
   const e = env();
   const { ana, acme } = await acmeOwner(e, s, null);
-  const home = (await ana.get("/")).text;
+  const home = await everyPage(ana);
   const p = panel(home);
   assert.ok(p.locked);
-  assert.match(p.html, /locked, needs Plus/);
+  assert.match(p.html, /<span class="lock">[\s\S]*?<\/span>Members<\/h2><span class="pill brand">Needs Plus<\/span>/);
   assert.match(p.html, /Invite your team: in Plus, one price however many people\./);
-  assert.match(p.html, /<a href="\/upgrade">Upgrade to Plus<\/a>/);
+  assert.match(p.html, /<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.equal(forms(home, "/members/invite").length, 0);
-  assert.match(home, /<li data-feature="members"><strong>Members<\/strong> <span class="tag">Needs Plus<\/span>/);
+  assert.match(home, /<li class="feat" data-feature="members"><div class="feat-top"><svg[\s\S]*?<\/svg><strong>Members<\/strong><span class="pill brand">Needs Plus<\/span>/);
 
   const mails = s.emails.length;
   const sent = rows(e, "SELECT * FROM mail_counts");
@@ -327,7 +346,7 @@ test("Free: the members panel is locked with the way up, and an invite is refuse
 
   /* A Team grant opens it as Plus does. */
   grant(e, acme, "team");
-  assert.ok(!panel((await ana.get("/")).text).locked);
+  assert.ok(!panel((await ana.get("/members")).text).locked);
   assert.equal((await invite(ana, "bo@example.com")).status, 303);
   assert.ok(inviteFor(s, "bo@example.com"));
 });
@@ -342,12 +361,12 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     const s = services();
     const e = env();
     const { ana, acme } = await acmeOwner(e, s);
-    let home = (await ana.get("/")).text;
+    let home = (await ana.get("/members")).text;
     assert.ok(!panel(home).locked);
-    assert.match(panel(home).html, /<strong>ana@example\.com<\/strong> <span class="tag">Owner, you<\/span>/);
+    assert.match(panel(home).html, memberRow("ana@example.com", "Owner", true));
 
     let r = await invite(ana, "Bo@Example.com ");
-    assert.equal(r.location, "/", r.text);
+    assert.equal(r.location, "/members", r.text);
     const mail = lastTo(s, "bo@example.com");
     assert.equal(mail.from, "ranwhat <account@ranwhat.com>");
     assert.equal(mail.reply_to, "hello@ranwhat.com");
@@ -366,8 +385,9 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.equal(row.expires_at - row.created_at, 7 * DAY);
     assert.ok(!dump(e).includes(token), "the link's token is nowhere in the database");
     assert.deepEqual(eventsOf(e, "member_invited"), [{ org_id: acme, user_id: userId(e, "ana@example.com"), subject: row.id }]);
-    home = (await ana.get("/")).text;
-    assert.match(panel(home).html, new RegExp(`<li data-invite="${row.id}">bo@example\\.com, sent ${isoDay(unix())}, works until ${isoDay(unix() + 7 * DAY)}`));
+    home = (await ana.get("/members")).text;
+    assert.match(panel(home).html, new RegExp(`<tr data-invite="${row.id}"><td class="cell-main"><strong>bo@example\\.com</strong></td>` +
+      `<td data-label="Sent"><time [^>]*>${isoDay(unix())}</time></td><td data-label="Works until"><time [^>]*>${isoDay(unix() + 7 * DAY)}</time></td>`));
 
     /* Bo, signed out, opens the link: the organisation, who sent it, and the way to sign in. */
     const bo = new Browser(e);
@@ -389,7 +409,7 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     const join = forms(r.text, "/invite");
     assert.equal(join.length, 1);
     assert.equal(join[0].token, token);
-    assert.match(r.text, /<button type="submit">Join Acme<\/button>/);
+    assert.match(r.text, /<button type="submit" class="primary wide">Join Acme<\/button>/);
     /* What joining shares, said as it is: every member sees every other's address and terminals. */
     assert.match(r.text, /Everyone in Acme sees your email address and the\s+terminals you link to it/);
     /* GETs, as many as you like, join nobody. */
@@ -405,22 +425,23 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.ok(row.accepted_at);
     assert.equal(row.email, null, "the address goes once the invite is used");
     assert.deepEqual(eventsOf(e, "invite_accepted"), [{ org_id: acme, user_id: userId(e, "bo@example.com"), subject: row.id }]);
-    const boHome = (await bo.get("/")).text;
+    const boHome = await everyPage(bo);
     assert.match(boHome, /<dt>Organisation<\/dt><dd>Acme<\/dd>/, "the session looks at the organisation joined");
     assert.match(boHome, /<dt>Your role<\/dt><dd>Member<\/dd>/);
-    assert.match(boHome, /<dt>Plan<\/dt><dd id="plan">Plus<\/dd>/);
+    assert.match(boHome, /<dt>Plan<\/dt><dd>Plus<\/dd>/);
     assert.match(boHome, /Joined an organisation from an invite/);
     /* As the Join page said: a plain member sees the others' addresses, and the terminals they link. */
-    assert.match(panel(boHome).html, /<strong>ana@example\.com<\/strong> <span class="tag">Owner<\/span>/);
+    assert.match(panel(boHome).html, memberRow("ana@example.com", "Owner"));
     await linkTerminal(e, ana, "Ana laptop");
-    assert.match((await bo.get("/")).text, /Ana laptop[\s\S]*?Linked by ana@example\.com on/);
+    assert.match((await bo.get("/machines")).text,
+      /<strong>Ana laptop<\/strong><\/td><td data-label="Kind"><span class="pill">Terminal<\/span><\/td><td data-label="Added by">ana@example\.com<\/td>/);
 
-    home = (await ana.get("/")).text;
-    assert.match(panel(home).html, /<strong>bo@example\.com<\/strong> <span class="tag">Member<\/span>/);
+    home = (await ana.get("/members")).text;
+    assert.match(panel(home).html, memberRow("bo@example.com", "Member"));
     assert.match(panel(home).html, /bo@example\.com joined/);
     assert.match(panel(home).html, /ana@example\.com invited someone/);
     assert.doesNotMatch(panel(home).html, /data-invite=/);
-    assert.match(home, /Invited someone to the organisation, with a fresh code/);
+    assert.match((await ana.get("/activity")).text, /Invited someone to the organisation, with a fresh code/);
 
     /* Used once: the same link, the same form, again, joins nothing more. */
     r = await bo.post("/invite", join[0]);
@@ -511,7 +532,7 @@ test("an expired invite joins nobody, and the address can be invited again", asy
   r = await bo.post("/invite", join);
   assert.equal(r.status, 410);
   assert.equal(roleIn(e, acme, "bo@example.com"), null);
-  assert.doesNotMatch(panel((await ana.get("/")).text).html, /data-invite=/, "an expired invite is not listed as waiting");
+  assert.doesNotMatch(panel((await ana.get("/members")).text).html, /data-invite=/, "an expired invite is not listed as waiting");
 
   /* A new one, with a new link; the old one stays dead and its address is cleared. */
   await confirm(ana, s);
@@ -559,12 +580,12 @@ test("an invite taken back stops working; only an owner or admin of that organis
   assert.equal(invitesOf(e, acme)[0].revoked_at, null);
 
   r = await submit(ana, "/invites/revoke", (f) => f.invite === id);
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/members", r.text);
   const [row] = invitesOf(e, acme);
   assert.ok(row.revoked_at);
   assert.equal(row.email, null);
   assert.deepEqual(eventsOf(e, "invite_revoked"), [{ org_id: acme, user_id: userId(e, "ana@example.com"), subject: id }]);
-  assert.doesNotMatch(panel((await ana.get("/")).text).html, /data-invite=/);
+  assert.doesNotMatch(panel((await ana.get("/members")).text).html, /data-invite=/);
 
   const bo = new Browser(e);
   await signIn(bo, s, "bo@example.com");
@@ -717,12 +738,14 @@ test("inviting, roles, removing and ownership need a fresh code; nothing is done
   const bo = await inOrg(e, s, acme, "bo@example.com", "admin");
   const boId = userId(e, "bo@example.com");
   later(FRESH_FOR + 1);
-  const home = (await ana.get("/")).text;
+  const home = (await ana.get("/members")).text;
   const p = panel(home).html;
   assert.match(p, /Inviting someone, changing a role or removing someone needs an emailed\s+code typed in the last 15 minutes/);
   assert.equal(forms(p, "/stepup").length, 1);
+  const anywhere = await everyPage(ana);
   for (const action of ["/members/invite", "/members/role", "/members/remove", "/members/transfer"]) {
     assert.equal(forms(home, action).length, 0, action);
+    assert.equal(forms(anywhere, action).length, 0, `${action} on any account page`);
   }
   for (const [action, fields] of [["/members/invite", { email: "carl@example.com" }],
                                   ["/members/role", { user: boId, role: "member" }],
@@ -766,8 +789,10 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   r = await forged(e, ana, "/members/role", acme, { user: boId, role: "owner" });
   assert.equal(r.status, 400, "owner is not a role a form gives");
   assert.equal(roleIn(e, acme, "ana@example.com"), "owner");
-  const home = (await ana.get("/")).text;
+  const home = (await ana.get("/members")).text;
   assert.equal(forms(home, "/members/leave").length, 0);
+  const anywhere = await everyPage(ana);
+  assert.equal(forms(anywhere, "/members/leave").length, 0, "the owner is offered Leave on no account page");
   assert.match(panel(home).html, /As its owner you cannot leave Acme: make one of its admins the owner first/);
 
   /* Ownership only to an admin. */
@@ -775,9 +800,10 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   assert.equal(r.status, 400);
   assert.match(r.text, /Only an admin of Acme can be made its owner/);
   assert.equal(forms(home, "/members/transfer").length, 0);
+  assert.equal(forms(anywhere, "/members/transfer").length, 0, "nor ownership for a member, on any page");
 
   r = await submit(ana, "/members/role", (f) => f.user === boId, {});
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/members", r.text);
   assert.equal(roleIn(e, acme, "bo@example.com"), "admin");
   assert.deepEqual(eventsOf(e, "member_made_admin"), [{ org_id: acme, user_id: anaId, subject: boId }]);
   assert.deepEqual(eventsOf(e, "role_now_admin"), [{ org_id: acme, user_id: boId, subject: anaId }]);
@@ -795,19 +821,19 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   /* The first post says what it does and does nothing; the second does it. */
   r = await submit(ana, "/members/transfer", (f) => f.user === boId);
   assert.equal(r.status, 200);
-  assert.match(r.text, /Make bo@example\.com the owner of Acme\?/);
+  assert.match(r.text, /<h1>Make bo@<wbr>example\.com the owner of Acme\?<\/h1>/);
   assert.equal(roleIn(e, acme, "ana@example.com"), "owner");
   const confirmForm = forms(r.text, "/members/transfer")[0];
   assert.equal(confirmForm.confirm, "yes");
   r = await ana.post("/members/transfer", confirmForm);
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/members", r.text);
   assert.equal(roleIn(e, acme, "bo@example.com"), "owner");
   assert.equal(roleIn(e, acme, "ana@example.com"), "admin");
   assert.equal(rows(e, "SELECT 1 FROM memberships WHERE org_id = ? AND role = 'owner'", acme).length, 1);
   assert.deepEqual(eventsOf(e, "ownership_transferred"), [{ org_id: acme, user_id: anaId, subject: boId }]);
   assert.deepEqual(eventsOf(e, "ownership_received"), [{ org_id: acme, user_id: boId, subject: anaId }]);
-  assert.match((await bo.get("/")).text, /<dt>Your role<\/dt><dd>Owner<\/dd>/);
-  assert.match(panel((await bo.get("/")).text).html, /ana@example\.com made bo@example\.com the owner/);
+  assert.match((await bo.get("/members")).text, /<dt>Your role<\/dt><dd>Owner<\/dd>/);
+  assert.match(panel((await bo.get("/members")).text).html, /ana@example\.com made bo@example\.com the owner/);
 
   /* Sent again, it does nothing: Ana is no longer the owner. */
   r = await ana.post("/members/transfer", confirmForm);
@@ -823,6 +849,60 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   assert.equal(roleIn(e, acme, "ana@example.com"), null);
 });
 
+test("a members form that does nothing draws Members again, with why in the card whose form it was", async () => {
+  const s = services();
+  const e = env();
+  const { ana, acme } = await acmeOwner(e, s);
+  const bo = await inOrg(e, s, acme, "bo@example.com");
+  const boId = userId(e, "bo@example.com");
+  const cardOf = (html, id) => {
+    const m = html.match(new RegExp(`<section class="card[^"]*" id="${id}"[^>]*>([\\s\\S]*?)</section>`));
+    assert.ok(m, `no ${id} card`);
+    return m[1];
+  };
+  const onMembers = (r) => assert.match(r.text, /<a href="\/members" aria-current="page">/, "the Members page, in its shell");
+
+  /* An invite to someone already in: said in the invite card. */
+  let r = await invite(ana, "bo@example.com");
+  assert.equal(r.status, 409);
+  onMembers(r);
+  assert.match(cardOf(r.text, "invite"), /<p class="bad">bo@example\.com is in Acme already\.<\/p>/);
+  assert.doesNotMatch(cardOf(r.text, "members"), /class="bad"/);
+  assert.equal(invitesOf(e, acme).length, 0);
+
+  /* Removing someone who is not in it: above the members table. */
+  r = await forged(e, ana, "/members/remove", acme, { user: randomUUID() });
+  assert.equal(r.status, 404);
+  onMembers(r);
+  assert.match(cardOf(r.text, "members"), /<p class="bad">That person is not in Acme, so nothing was done\.<\/p>/);
+
+  /* A form drawn for another organisation: at the top of the page this session looks at. */
+  r = await forged(e, ana, "/members/leave", randomUUID());
+  assert.equal(r.status, 409);
+  onMembers(r);
+  assert.match(r.text, /<div class="grid">\s*<p class="bad">That form was for another of your organisations/);
+
+  /* Without a fresh code: why, in the card, and the way to a code once, at the top. */
+  later(FRESH_FOR + 1);
+  r = await forged(e, ana, "/members/role", acme, { user: boId, role: "admin" });
+  assert.equal(r.status, 403);
+  onMembers(r);
+  assert.match(cardOf(r.text, "members"), /Changing a role needs an emailed code typed in the last 15 minutes, so nothing was done/);
+  assert.equal(forms(r.text, "/stepup").length, 1);
+  assert.match(r.text, /<div class="callout warn" id="confirm">[\s\S]*?<input type="hidden" name="next" value="\/members">/);
+  assert.equal(forms(r.text, "/members/role").length, 0, "and no form the session may not use");
+  assert.equal(roleIn(e, acme, "bo@example.com"), "member");
+
+  /* A member refused: Members drawn for him, with no admin's form on it. */
+  r = await forged(e, bo, "/members/invite", acme, { email: "new@example.com" });
+  assert.equal(r.status, 403);
+  onMembers(r);
+  assert.match(cardOf(r.text, "invite"), /Only an owner or an admin of Acme can invite people, so nobody was invited/);
+  for (const action of ["/members/invite", "/invites/revoke", "/members/role", "/members/remove", "/members/transfer"]) {
+    assert.equal(forms(r.text, action).length, 0, action);
+  }
+});
+
 test("a member is refused every admin action, and an admin every owner action", async () => {
   const s = services();
   const e = env();
@@ -835,11 +915,15 @@ test("a member is refused every admin action, and an admin every owner action", 
   const [anaId, boId, carlId, deeId] = ["ana", "bo", "carl", "dee"].map((n) => userId(e, `${n}@example.com`));
 
   /* A member's panel: everyone, and Leave; nothing else. */
-  const html = (await bo.get("/")).text;
+  const html = (await bo.get("/members")).text;
+  const bosPages = await everyPage(bo);
   for (const action of ["/members/invite", "/invites/revoke", "/members/role", "/members/remove", "/members/transfer"]) {
     assert.equal(forms(html, action).length, 0, action);
+    assert.equal(forms(bosPages, action).length, 0, `${action} on any of a member's pages`);
   }
   assert.equal(forms(html, "/members/leave").length, 1);
+  assert.equal(forms(bosPages, "/members/leave").length, 1);
+  assert.ok(!bosPages.includes("zed@example.com"), "a member sees who is invited on no page");
   assert.match(panel(html).html, /An owner or an admin of Acme can invite people/);
   assert.ok(!html.includes("zed@example.com"), "a member does not see who is invited");
   assert.doesNotMatch(panel(html).html, /invited someone/, "nor the organisation's record");
@@ -870,11 +954,16 @@ test("a member is refused every admin action, and an admin every owner action", 
   assert.equal(r.status, 403);
   r = await forged(e, dee, "/members/transfer", acme, { user: deeId, confirm: "yes" });
   assert.equal(r.status, 403);
-  const deeHtml = (await dee.get("/")).text;
+  const deeHtml = (await dee.get("/members")).text;
   assert.equal(forms(deeHtml, "/members/role").length, 0);
   assert.equal(forms(deeHtml, "/members/transfer").length, 0);
   assert.deepEqual(forms(deeHtml, "/members/remove").map((f) => f.user).sort(), [boId, carlId].sort(),
     "an admin is offered Remove for members only");
+  const deesPages = await everyPage(dee);
+  assert.equal(forms(deesPages, "/members/role").length, 0, "an admin is offered no role change on any page");
+  assert.equal(forms(deesPages, "/members/transfer").length, 0, "nor ownership");
+  assert.deepEqual(forms(deesPages, "/members/remove").map((f) => f.user).sort(), [boId, carlId].sort(),
+    "and Remove for members only, on every page");
   unchanged();
 
   run(e, "UPDATE memberships SET role = 'admin' WHERE org_id = ? AND user_id = ?", acme, boId);
@@ -884,7 +973,7 @@ test("a member is refused every admin action, and an admin every owner action", 
   assert.equal(roleIn(e, acme, "bo@example.com"), "admin");
 
   r = await submit(dee, "/members/remove", (f) => f.user === carlId);
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/members", r.text);
   assert.equal(roleIn(e, acme, "carl@example.com"), null);
   assert.deepEqual(eventsOf(e, "member_removed"), [{ org_id: acme, user_id: deeId, subject: carlId }]);
   assert.deepEqual(eventsOf(e, "removed_from_org"), [{ org_id: acme, user_id: carlId, subject: deeId }]);
@@ -928,12 +1017,12 @@ test("ids and forms from another organisation are refused, and change nothing in
   /* Nor can Ana look at Evil. */
   r = await ana.post("/org/switch", { form: await formToken(e, ana.session, "org-switch"), org: evil, next: "/" });
   assert.equal(r.status, 404);
-  assert.match((await ana.get("/")).text, /<dt>Organisation<\/dt><dd>Acme<\/dd>/);
+  assert.match((await ana.get("/members")).text, /<dt>Organisation<\/dt><dd>Acme<\/dd>/);
 
   assert.equal(dump(e).replace(/"seen_at":\d+/g, ""), before.replace(/"seen_at":\d+/g, ""));
-  const anaHtml = (await ana.get("/")).text;
+  const anaHtml = await everyPage(ana);
   assert.ok(!anaHtml.includes("max@example.com") && !anaHtml.includes("zed@example.com"));
-  const malloryHtml = (await mallory.get("/")).text;
+  const malloryHtml = await everyPage(mallory);
   assert.ok(!malloryHtml.includes("bo@example.com") && !malloryHtml.includes("ana@example.com"));
 });
 
@@ -957,7 +1046,7 @@ test("removed: the member's terminals for that organisation are revoked with the
   for (const token of [bosAcme.token, ci, anas.token]) assert.equal((await feed(e, token)).status, 200);
 
   let r = await submit(ana, "/members/remove", (f) => f.user === boId);
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/members", r.text);
   assert.equal(roleIn(e, acme, "bo@example.com"), null);
   assert.ok(revoked(e, bosAcme.token));
   assert.equal((await feed(e, bosAcme.token)).status, 403);
@@ -968,13 +1057,14 @@ test("removed: the member's terminals for that organisation are revoked with the
   assert.deepEqual(eventsOf(e, "member_removed"), [{ org_id: acme, user_id: anaId, subject: boId }]);
   assert.deepEqual(eventsOf(e, "removed_from_org"), [{ org_id: acme, user_id: boId, subject: anaId }]);
   assert.deepEqual(eventsOf(e, "machine_left_org"), [{ org_id: acme, user_id: boId, subject: bosAcme.id }]);
-  assert.match(panel((await ana.get("/")).text).html, /ana@example\.com removed bo@example\.com/);
+  assert.match(panel((await ana.get("/members")).text).html, /ana@example\.com removed bo@example\.com/);
 
   /* Bo is still signed in, in his own organisation. */
   const home = await bo.get("/");
   assert.equal(home.status, 200);
-  assert.match(home.text, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
-  assert.match(home.text, /Removed from an organisation/);
+  const shown = await everyPage(bo);
+  assert.match(shown, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
+  assert.match(shown, /Removed from an organisation/);
 
   /* Removed twice: nobody there. */
   r = await forged(e, ana, "/members/remove", acme, { user: boId });
@@ -989,7 +1079,7 @@ test("leaving: the terminals linked to it go too, and a form drawn for another o
   const bo = await inOrg(e, s, acme, "bo@example.com");
   const boId = userId(e, "bo@example.com");
   const terminal = await linkTerminal(e, bo);
-  const leave = forms((await bo.get("/")).text, "/members/leave")[0];
+  const leave = forms((await bo.get("/members")).text, "/members/leave")[0];
   assert.equal(leave.org, acme);
 
   /* Switched to his own organisation in another tab, the Acme form leaves nothing. */
@@ -1006,7 +1096,7 @@ test("leaving: the terminals linked to it go too, and a form drawn for another o
   assert.ok(revoked(e, terminal.token));
   assert.deepEqual(eventsOf(e, "org_left"), [{ org_id: acme, user_id: boId, subject: null }]);
   assert.deepEqual(eventsOf(e, "machine_left_org"), [{ org_id: acme, user_id: boId, subject: terminal.id }]);
-  assert.match((await bo.get("/")).text, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
+  assert.match((await bo.get("/members")).text, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
 });
 
 test("someone who left is a former member to whoever joined after, on Machines and in the record; Join and Leave say what stays", async () => {
@@ -1015,20 +1105,21 @@ test("someone who left is a former member to whoever joined after, on Machines a
   const { ana, acme } = await acmeOwner(e, s);
   const bob = await inOrg(e, s, acme, "bob@example.com", "admin");
   await makeCi(bob, "bob-made-ci");
-  const leaving = (await bob.get("/")).text;
+  const leaving = (await bob.get("/members")).text;
   assert.equal((await submit(bob, "/members/leave")).location, "/");
   later(60);
 
   /* Ana was there when Bob left: she still sees his address. */
-  const anas = (await ana.get("/")).text;
-  assert.match(anas, /Made by bob@example\.com on/);
+  const anas = await everyPage(ana);
+  const madeBy = (who) => new RegExp(`<span class="pill info">CI</span></td><td data-label="Added by">${who}</td>`);
+  assert.match(anas, madeBy("bob@example\\.com"));
   assert.match(panel(anas).html, /bob@example\.com left/);
 
   /* Zoe joins after: she never shared Acme with Bob, and sees a former member. */
   const zoe = await inOrg(e, s, acme, "zoe@example.com", "admin");
-  const zoes = (await zoe.get("/")).text;
+  const zoes = await everyPage(zoe);
   assert.ok(!zoes.includes("bob@example.com"), "Bob's address is nowhere on Zoe's page");
-  assert.match(zoes, /Made by a former member on/);
+  assert.match(zoes, madeBy('<span class="none">A former member</span>'));
   assert.match(panel(zoes).html, /a former member left/);
   assert.match(panel(zoes).html, /zoe@example\.com/);
 
@@ -1038,10 +1129,10 @@ test("someone who left is a former member to whoever joined after, on Machines a
   /* Should Bob come back, he is a member again, and named. */
   run(e, "INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)",
     acme, userId(e, "bob@example.com"), unix());
-  assert.match((await zoe.get("/")).text, /Made by bob@example\.com on/);
+  assert.match((await zoe.get("/machines")).text, madeBy("bob@example\\.com"));
 
   /* The Join page says what the organisation keeps of whoever joins. */
-  assert.equal((await invite(ana, "carl@example.com")).location, "/");
+  assert.equal((await invite(ana, "carl@example.com")).location, "/members");
   const carl = new Browser(e);
   await signIn(carl, s, "carl@example.com");
   const page = (await carl.get(`/invite/${inviteFor(s, "carl@example.com")}`)).text;
@@ -1060,8 +1151,8 @@ test("approving a terminal shows whose organisation it joins and your role there
   const ana = await inOrg(e, s, theirs, "ana@example.com", "member");
   const mine = ownOrg(e, "ana@example.com");
   assert.equal(one(e, "SELECT name FROM orgs WHERE id = ?", mine).name, one(e, "SELECT name FROM orgs WHERE id = ?", theirs).name);
-  const home = (await ana.get("/")).text;
-  assert.match(home, /<dt>Owner<\/dt><dd>mal@example\.com<\/dd>/);
+  const home = (await ana.get("/members")).text;
+  assert.match(home, /<dt>Owner<\/dt><dd>mal@<wbr>example\.com<\/dd>/, "the owner's address, which may break after its @");
 
   const cli = (await call(e, "/v1/device/code", { form: { client_id: "ranwhat-cli" } })).json;
   const box = await ana.get("/device");
@@ -1069,7 +1160,7 @@ test("approving a terminal shows whose organisation it joins and your role there
   const shown = await ana.post("/device", { form: tokenFor(box.text, "/device"), user_code: cli.user_code });
   assert.equal(shown.status, 200, shown.text);
   assert.match(shown.text, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
-  assert.match(shown.text, /<dt>Owner<\/dt><dd>mal@example\.com<\/dd>/);
+  assert.match(shown.text, /<dt>Owner<\/dt><dd>mal@<wbr>example\.com<\/dd>/, "the owner's address, which may break after its @");
   assert.match(shown.text, /<dt>Your role<\/dt><dd>Member<\/dd>/);
   assert.match(shown.text, /not an organisation of your own/);
   const done = await ana.post("/device/approve", { form: tokenFor(shown.text, "/device/approve"),
@@ -1093,7 +1184,7 @@ test("an invite email quotes the organisation's name as its admins typed it, and
   const { ana, acme } = await acmeOwner(e, s);
   const name = "ranwhat security. Your access lapses: re-verify at https://evil.example/rw";
   run(e, "UPDATE orgs SET name = ? WHERE id = ?", name, acme);
-  assert.equal((await invite(ana, "stranger@victim.example")).location, "/");
+  assert.equal((await invite(ana, "stranger@victim.example")).location, "/members");
   const mail = lastTo(s, "stranger@victim.example");
   const lines = mail.text.split("\n");
   assert.equal(lines[0], "ana@example.com invited you to join an organisation on ranwhat, as a member.");
@@ -1117,17 +1208,17 @@ test("someone left in no organisation gets a personal one, and stays signed in",
   await submit(bo, "/org/switch", () => true, { org: home });
   let r = await submit(bo, "/members/transfer", (f) => f.user === anaId);
   r = await bo.post("/members/transfer", forms(r.text, "/members/transfer")[0]);
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/members", r.text);
   assert.equal((await submit(bo, "/members/leave")).location, "/");
   assert.deepEqual(rows(e, "SELECT org_id FROM memberships WHERE user_id = ?", boId), [{ org_id: acme }]);
 
   r = await submit(ana, "/members/remove", (f) => f.user === boId);
-  assert.equal(r.location, "/", r.text);
+  assert.equal(r.location, "/members", r.text);
   const left = rows(e, "SELECT m.org_id, m.role, o.name, o.personal FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = ?", boId);
   assert.equal(left.length, 1);
   assert.ok(![acme, home].includes(left[0].org_id));
   assert.deepEqual({ ...left[0], org_id: undefined }, { org_id: undefined, role: "owner", name: "Personal", personal: 1 });
-  const page = await bo.get("/");
+  const page = await bo.get("/members");
   assert.equal(page.status, 200);
   assert.match(page.text, /<dt>Your role<\/dt><dd>Owner<\/dd>/);
 });
@@ -1152,24 +1243,29 @@ test("an organisation whose Plus ended takes nobody new, and can still tidy up",
   assert.equal(roleIn(e, acme, "bo@example.com"), null);
 
   /* The panel still lists who is in it, with Remove; inviting is locked. */
-  const html = (await ana.get("/")).text;
+  const html = (await ana.get("/members")).text;
   const p = panel(html);
   assert.ok(!p.locked);
   assert.match(p.html, /Inviting people needs Plus/);
   assert.equal(forms(html, "/members/invite").length, 0);
+  assert.equal(forms(await everyPage(ana), "/members/invite").length, 0, "no invite form on any page once Plus ended");
   assert.equal((await forged(e, ana, "/members/invite", acme, { email: "dee@example.com" })).status, 403);
   /* Without a fresh code, the way to one is still offered, for removing and roles. */
   later(FRESH_FOR + 1);
-  const stale = (await ana.get("/")).text;
+  const stale = (await ana.get("/members")).text;
   assert.match(panel(stale).html, /Changing a role or removing someone needs an emailed\s+code/);
   assert.equal(forms(panel(stale).html, "/stepup").length, 1);
   assert.equal(forms(stale, "/members/remove").length, 0);
+  const staleEverywhere = await everyPage(ana);
+  for (const action of ["/members/remove", "/members/role", "/members/transfer", "/members/invite"]) {
+    assert.equal(forms(staleEverywhere, action).length, 0, `${action} without a fresh code, on any page`);
+  }
   await confirm(ana, s);
   r = await submit(ana, "/members/remove", (f) => f.user === userId(e, "carl@example.com"));
-  assert.equal(r.location, "/");
-  assert.equal((await submit(ana, "/invites/revoke", (f) => f.invite === id)).location, "/");
+  assert.equal(r.location, "/members");
+  assert.equal((await submit(ana, "/invites/revoke", (f) => f.invite === id)).location, "/members");
   /* Alone again, with nothing waiting: locked. */
-  assert.ok(panel((await ana.get("/")).text).locked);
+  assert.ok(panel((await ana.get("/members")).text).locked);
 });
 
 /* ---------- switching ---------- */
@@ -1188,7 +1284,7 @@ test("someone in several organisations switches between them, on the account pag
   let r = await submit(bo, "/org/switch", () => true, { org: personal });
   assert.equal(r.location, "/");
   assert.equal(one(e, "SELECT org_id FROM sessions WHERE id = ?", bo.session).org_id, personal);
-  html = (await bo.get("/")).text;
+  html = await everyPage(bo);
   assert.match(html, /<dt>Organisation<\/dt><dd>Personal<\/dd>/);
   assert.match(html, /Switched organisation/);
   assert.deepEqual(eventsOf(e, "org_switched"), [{ org_id: personal, user_id: boId, subject: null }]);
@@ -1230,14 +1326,14 @@ test("an invite is only as good as its sender's role: removed, made a member or 
 
   /* Each admin, expecting to lose the role, first invites an address of their own. */
   for (const [b, alt] of [[bob, "bob.alt@example.net"], [cy, "cy.alt@example.net"], [dee, "dee.alt@example.net"]]) {
-    assert.equal((await invite(b, alt)).location, "/");
+    assert.equal((await invite(b, alt)).location, "/members");
     assert.ok(inviteFor(s, alt));
   }
   /* An invite of Ana's own, to someone else, which none of this touches. */
-  assert.equal((await invite(ana, "eve@example.com")).location, "/");
+  assert.equal((await invite(ana, "eve@example.com")).location, "/members");
 
   /* Removed: Bob's waiting invite is taken back in the same batch, and the link joins nobody. */
-  assert.equal((await submit(ana, "/members/remove", (f) => f.user === bobId)).location, "/");
+  assert.equal((await submit(ana, "/members/remove", (f) => f.user === bobId)).location, "/members");
   assert.equal(roleIn(e, acme, "bob@example.com"), null);
   let row = waiting("bob@example.com");
   assert.ok(row.revoked_at, "taken back");
@@ -1255,7 +1351,7 @@ test("an invite is only as good as its sender's role: removed, made a member or 
   assert.equal(roleIn(e, acme, "bob.alt@example.net"), null);
 
   /* Made a member: Cy's waiting invite goes with the role. */
-  assert.equal((await submit(ana, "/members/role", (f) => f.user === cyId)).location, "/");
+  assert.equal((await submit(ana, "/members/role", (f) => f.user === cyId)).location, "/members");
   assert.equal(roleIn(e, acme, "cy@example.com"), "member");
   row = waiting("cy@example.com");
   assert.ok(row.revoked_at);
@@ -1286,7 +1382,7 @@ test("Join checks, in its own batch, that whoever sent the invite is still an ow
   const e = env();
   const { acme } = await acmeOwner(e, s);
   const fay = await inOrg(e, s, acme, "fay@example.com", "admin");
-  assert.equal((await invite(fay, "gus@example.com")).location, "/");
+  assert.equal((await invite(fay, "gus@example.com")).location, "/members");
   const gus = new Browser(e);
   await signIn(gus, s, "gus@example.com");
   const join = forms((await gus.get(`/invite/${inviteFor(s, "gus@example.com")}`)).text, "/invite")[0];

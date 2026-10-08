@@ -78,7 +78,7 @@ import {
   FRESH_FOR, SESSION_COOKIE, bump, clearCookie, current, formOk, formToken, fresh, mac, network, peek, randomToken,
   readCookie, unbump,
 } from "./session.js";
-import { fields, form, page, redirect, refused } from "./ui.js";
+import { back, callout, dangerButton, fields, form, page, redirect, refused, shownAddress } from "./ui.js";
 import { switcher } from "./members.js";
 
 export const FEED_HOST = "feed.ranwhat.com";
@@ -554,23 +554,23 @@ function tooMany(over) {
     network: `Too many codes typed from your network in the last hour were not right, some of them
        for this account, so this form is locked for it for up to an hour.`,
   }[over];
-  return page("Too many wrong codes", `<h1>Too many wrong codes.</h1>
+  return page("Too many wrong codes", `<h1>Too many wrong codes</h1>
   <p class="bad">${why} Try again then, or run <strong>ranwhat login</strong> again in your terminal for a
      new code once you can.</p>
-  <p><a href="/">Your account</a></p>`, { status: 429 });
+  ${back("/", "Your account")}`, { status: 429, icon: "clock", tone: "warn" });
 }
 
 /* The step-up, for a session whose last emailed code is older than
    FRESH_FOR: a new code mailed to the account, back here once typed. */
 async function needsCode(env, who, { status = 200, error = "" } = {}) {
   return page("Link a terminal", `<h1>Link a terminal</h1>
-    <p>Approving a terminal needs an emailed code typed in the last ${FRESH_FOR / 60} minutes. We
+    <p class="lead">Approving a terminal needs an emailed code typed in the last ${FRESH_FOR / 60} minutes. We
        send one to <strong>${escape(who.email)}</strong>; once you type it you come back here.</p>
     ${problem(error)}
     ${form("/stepup", await formToken(env, who.id, "stepup"), `
       <input type="hidden" name="next" value="/device">
-      <button type="submit">Email me a code</button>`)}
-    <p><a href="/">Your account</a></p>`, { status });
+      <button type="submit" class="primary wide">Email me a code</button>`)}
+    <div class="alt">${back("/machines", "Back to Machines")}</div>`, { status, icon: "security", tone: "warn" });
 }
 
 const ROLES = Object.freeze({ owner: "Owner", admin: "Admin", member: "Member" });
@@ -589,18 +589,18 @@ async function codeBox(request, env, who, { error = "", status = 200 } = {}) {
   if (over) return tooMany(over);
   const owner = await owned(env, who);
   return page("Link a terminal", `<h1>Link a terminal</h1>
-    <p>Type the code your terminal printed after <strong>ranwhat login</strong>. The terminal is
+    <p class="lead">Type the code your terminal printed after <strong>ranwhat login</strong>. The terminal is
        linked to <strong>${escape(who.org.name)}</strong>${owner
          ? `, owned by <strong>${escape(owner)}</strong>, not an organisation of your own` : ""}.</p>
-    ${await switcher(env, who, "/device")}
+    ${await switcher(env, who, "/device", { compact: true })}
     ${WARNING}
     ${form("/device", await formToken(env, who.id, "device"), `
       <label for="user_code">Code from your terminal</label>
       <input id="user_code" name="user_code" type="text" autocomplete="off" autocapitalize="characters"
-             spellcheck="false" maxlength="12" required autofocus>
+             spellcheck="false" maxlength="12" required autofocus placeholder="XXXX-XXXX">
       ${problem(error)}
-      <button type="submit">Continue</button>`)}
-    <p><a href="/">Your account</a></p>`, { status });
+      <button type="submit" class="primary wide">Continue</button>`)}
+    <div class="alt">${back("/machines", "Back to Machines")}</div>`, { status, icon: "code" });
 }
 
 /* GET /device. */
@@ -620,9 +620,9 @@ function notWaiting(row) {
       : row.state === "denied"
         ? ["Code denied", "That code was denied, so it no longer works. Run ranwhat login again in your terminal for a new one."]
         : ["Code already used", "That code was already approved, so it cannot be used again. Run ranwhat login again in your terminal for a new one."];
-  return page(title, `<h1>${title}.</h1>
+  return page(title, `<h1>${title}</h1>
     <p class="bad">${text}</p>
-    <p><a href="/device">Type another code</a></p>`, { status: 400 });
+    ${back("/device", "Type another code")}`, { status: 400, icon: "alert", tone: "warn" });
 }
 
 /* A wrong code, already counted for this session, this account and this
@@ -683,9 +683,12 @@ async function confirmPage(env, who, code, row, { error = "", status = 200 } = {
   const onPlan = await plan(env, org.id);
   const where = countryName(row.country);
   const owner = await owned(env, who);
-  const notOwn = owner ? `<p class="bad"><strong>${escape(org.name)}</strong> is not an organisation of your own: it is
-       owned by <strong>${escape(owner)}</strong>. Everyone in it sees this terminal, who linked it and the day it
-       was last used, and its owner and admins can revoke it.</p>` : "";
+  /* Worth knowing rather than a warning: the one warning on this page is
+     WARNING's. */
+  const notOwn = owner ? callout({ tone: "info", icon: "members",
+    text: `<p><strong>${escape(org.name)}</strong> is not an organisation of your own: it is owned by
+       <strong>${escape(owner)}</strong>. Everyone in it sees this terminal, who linked it and the day it was last
+       used, and its owner and admins can revoke it.</p>` }) : "";
   const free = onPlan === "free"
     ? `<p>${escape(org.name)} is on Free: the terminal is linked, and what needs the server
        (ranwhat update's feed) asks for Plus.</p>` : "";
@@ -695,7 +698,7 @@ async function confirmPage(env, who, code, row, { error = "", status = 200 } = {
       <dt>Code</dt><dd>${escape(shownCode(code))}</dd>
       <dt>Asked for</dt><dd>${escape(ago(now() - row.created_at))}${where ? `, from ${escape(where)}` : ""}</dd>
       <dt>Organisation</dt><dd>${escape(org.name)}</dd>
-      <dt>Owner</dt><dd>${owner ? escape(owner) : "You"}</dd>
+      <dt>Owner</dt><dd>${owner ? shownAddress(owner) : "You"}</dd>
       <dt>Your role</dt><dd>${ROLES[org.role] || "Member"}</dd>
       <dt>Plan</dt><dd>${PLAN_NAMES[onPlan]}</dd>
     </dl>
@@ -711,11 +714,14 @@ async function confirmPage(env, who, code, row, { error = "", status = 200 } = {
       <input id="label" name="label" type="text" maxlength="${MAX_LABEL}" required autocomplete="off"
              placeholder="Work laptop">
       ${problem(error)}
-      <button type="submit">Approve</button>`)}
-    ${form("/device/deny", await formToken(env, who.id, denyAction(code)), `
+      <button type="submit" class="primary wide">Approve</button>`)}
+    <div class="alt deny">
+      <p>Did not start it yourself, or not sure?</p>
+      ${form("/device/deny", await formToken(env, who.id, denyAction(code)), `
       <input type="hidden" name="user_code" value="${escape(code)}">
-      <button type="submit">Deny</button>`, "row")}
-    <p><a href="/device">Type another code</a></p>`, { status });
+      ${dangerButton("Deny")}`)}
+    </div>
+    <div class="alt">${back("/device", "Type another code")}</div>`, { status, icon: "code" });
 }
 
 /* POST /device/approve: with a fresh code, for the organisation the page
@@ -733,10 +739,10 @@ export async function approve(request, env) {
   const orgId = String(f.get("org") ?? "");
   if (!code || !await formOk(env, f, who.id, approveAction(code, orgId))) return refused();
   if (orgId !== who.org.id) {
-    return page("Not approved", `<h1>Not approved.</h1>
+    return page("Not approved", `<h1>Not approved</h1>
       <p class="bad">That page offered to link the terminal to an organisation this account is not
          looking at now, so nothing was approved. Type the code again to see where it would go.</p>
-      <p><a href="/device">Type the code again</a></p>`, { status: 403 });
+      ${back("/device", "Type the code again")}`, { status: 403, icon: "alert", tone: "warn" });
   }
   if (!fresh(who)) return needsCode(env, who, { status: 403,
     error: "Your last emailed code is too old, so nothing was approved. Confirm with a new one, then type the code again." });
@@ -760,13 +766,13 @@ export async function approve(request, env) {
   }
   await event(db, { org: who.org.id, user: who.user, what: "device_approved" }).run();
   const owner = await owned(env, who);
-  return page("Approved", `<h1>Approved.</h1>
-    <p>Go back to your terminal. Within a few seconds it says it is linked to
+  return page("Approved", `<h1>Approved</h1>
+    <p class="lead">Go back to your terminal. Within a few seconds it says it is linked to
        <strong>${escape(who.org.name)}</strong> as <strong>${escape(who.email)}</strong>. If it names
        anything else, run <strong>ranwhat logout</strong> there.</p>
     ${owner ? `<p><strong>${escape(who.org.name)}</strong> is owned by <strong>${escape(owner)}</strong>, not you.</p>` : ""}
     <p>It is listed under Machines on your account page as <strong>${escape(label)}</strong>.</p>
-    <p><a href="/">Your account</a></p>`);
+    <div class="actions"><a class="btn" href="/machines">See it under Machines</a></div>`, { icon: "check", tone: "ok" });
 }
 
 /* POST /device/deny: the terminal is told access_denied, and gets nothing. */
@@ -789,7 +795,7 @@ export async function deny(request, env) {
       || { expires_at: 0 });
   }
   await event(db, { org: who.org.id, user: who.user, what: "device_denied" }).run();
-  return page("Denied", `<h1>Denied.</h1>
-    <p>The terminal that asked is told no, and gets nothing.</p>
-    <p><a href="/">Your account</a></p>`);
+  return page("Denied", `<h1>Denied</h1>
+    <p class="lead">The terminal that asked is told no, and gets nothing.</p>
+    ${back("/", "Your account")}`, { icon: "info", tone: "info" });
 }

@@ -15,6 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { d1 } from "./stand-ins.mjs";
+import { onNoPage } from "./account-pages.mjs";
 import {
   AT, ORIGIN, UP, UV, authData, b64, bytes, cbor, clientData, concat, ed25519, es256, rs256, sha256, unb64,
 } from "./authenticators.mjs";
@@ -117,6 +118,15 @@ function tokenFor(html, action, nth = 0) {
   return all[nth][1];
 }
 
+/* A way to sign in, as its card on the Security page names it:
+   [its name, its state]. */
+function method(html, key) {
+  const m = html.match(new RegExp(`data-method="${key}">\\s*<header class="card-head"><h3>(?:<svg[\\s\\S]*?</svg>)?` +
+    `([^<]*)</h3><span class="pill[^"]*">([^<]*)</span>`));
+  assert.ok(m, `no card for ${key}`);
+  return [m[1], m[2]];
+}
+
 const codeIn = (mail) => mail.text.match(/^ {4}([0-9A-Z]{4}-[0-9A-Z]{4})$/m)[1];
 
 async function signInByCode(b, s, email) {
@@ -129,7 +139,7 @@ async function signInByCode(b, s, email) {
 
 /* A fresh code for someone signed in, from the account page. */
 async function confirm(b, s) {
-  const home = await b.get("/");
+  const home = await b.get("/security");
   assert.equal((await b.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" })).status, 303);
   const page = await b.get("/signin/code");
   const done = await b.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: codeIn(s.emails.at(-1)) });
@@ -218,9 +228,9 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
   await signInByCode(b, s, "ana@example.com");
   const device = new Device();
 
-  let home = await b.get("/");
-  assert.match(home.text, /data-method="passkeys"><strong>Passkeys<\/strong> <span class="tag">none added/);
-  assert.match(home.text, /<a class="button" href="\/passkeys\/add">Add a passkey<\/a>/);
+  let home = await b.get("/security");
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "None added"]);
+  assert.match(home.text, /<a class="btn" href="\/passkeys\/add"><svg class="i"[^>]*>[^]*?<\/svg>Add a passkey<\/a>/);
 
   const page = await b.get("/passkeys/add");
   assert.equal(page.status, 200);
@@ -260,7 +270,7 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
   const made = device.create(options);
   const added = await b.post("/passkeys", { form: tokenFor(page.text, "/passkeys"), label: "  Work\u202e laptop\n ", ...made });
   assert.equal(added.status, 303, added.text);
-  assert.equal(added.location, "/");
+  assert.equal(added.location, "/security");
   const [row] = passkeysOf(e, "ana@example.com");
   assert.deepEqual({ ...row, created_at: 0 }, {
     id: device.keys[0].id, user_id: userOf(e, "ana@example.com"), public_key: b64(cbor(device.keys[0].pair.cose)),
@@ -286,12 +296,12 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
   assert.notEqual(again.challenge, options.challenge);
   assert.deepEqual(again.excludeCredentials, [{ type: "public-key", id: device.keys[0].id }]);
 
-  home = await b.get("/");
+  home = await b.get("/security");
   assert.doesNotMatch(home.text, /<script/);
-  assert.match(home.text, /<span class="tag">1 added<\/span>/);
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "1 added"]);
   const date = new Date(nowS() * 1000).toISOString().slice(0, 10);
-  assert.match(home.text, new RegExp(`<li>Work laptop, added ${date},\\s+never used<form method="post" action="/passkeys/remove"`));
-  assert.match(home.text, /Passkey added, confirmed with an emailed code/);
+  assert.match(home.text, new RegExp(`<li><span>Work laptop, added ${date},\\s+never used</span><form method="post" action="/passkeys/remove"`));
+  assert.match((await b.get("/")).text, /Passkey added, confirmed with an emailed code/);
 });
 
 test("adding a passkey takes RS256 and Ed25519 keys too, and labels are cleaned, never refused", async () => {
@@ -339,9 +349,10 @@ test("adding a passkey needs a session and a code typed in the last 15 minutes",
   assert.equal(addPage.status, 403);
   assert.doesNotMatch(addPage.text, /<script/);
 
-  const home = await b.get("/");
+  const home = await b.get("/security");
   assert.doesNotMatch(home.text, /href="\/passkeys\/add"/);
-  assert.match(home.text, /Adding or removing a passkey needs an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /<div class="callout warn" id="confirm">[^]*?[Aa]dding or removing a passkey[^.]* needs? an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /data-method="passkeys">\s*<header class="card-head"><h3>[^]*?<\/h3><span class="pill">None added<\/span><span class="pill warn">Needs a code<\/span>/);
   await confirm(b, s);
   const { res } = await addPasskey(b, device);
   assert.equal(res.status, 303);
@@ -607,12 +618,13 @@ test("someone whose only way in besides the code is a passkey signs in with it",
   assert.equal(eventsOf(e, "ana@example.com").at(-1), "signin_passkey");
   /* Not fresh: what needs a code still needs one. */
   assert.equal(sessionOf(e, b).authed_at, 0);
-  assert.match(signedIn.text, /Adding or removing a passkey needs an emailed code/);
+  const security = await b.get("/security");
+  assert.match(security.text, /<div class="callout warn" id="confirm">[^]*?[Aa]dding or removing a passkey[^.]* needs? an emailed code/);
   const [row] = passkeysOf(e, "ana@example.com");
   assert.equal(row.sign_count, 2);
   assert.equal(row.used_at, today() * DAY, "the day, and no finer");
   const date = new Date(today() * DAY * 1000).toISOString().slice(0, 10);
-  assert.match(signedIn.text, new RegExp(`last used ${date}`));
+  assert.match(security.text, new RegExp(`last used ${date}`));
 
   /* Signed in already: the page sends you on. */
   assert.equal((await b.get("/signin/passkey")).location, "/");
@@ -692,8 +704,8 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
   assert.equal((await addPasskey(b, second, { label: "Phone" })).res.status, 303);
   assert.equal(passkeysOf(e, "ana@example.com").length, 2);
 
-  let home = await b.get("/");
-  assert.match(home.text, /<span class="tag">2 added<\/span>/);
+  let home = await b.get("/security");
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "2 added"]);
   const remove = tokenFor(home.text, "/passkeys/remove");
 
   /* Someone else's passkey: nothing happens. */
@@ -703,8 +715,9 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
 
   /* Without a fresh code: refused, and no form to do it with. */
   later(FRESH_FOR + 1);
-  home = await b.get("/");
+  home = await b.get("/security");
   assert.doesNotMatch(home.text, /action="\/passkeys\/remove"/);
+  await onNoPage(b, /action="\/passkeys\/remove"|href="\/passkeys\/add"/, { why: "removing or adding a passkey without a fresh code" });
   const late = await b.post("/passkeys/remove", { form: remove, id: device.keys[0].id });
   assert.equal(late.status, 403);
   assert.match(late.text, /Adding or removing a passkey needs an emailed code typed in the last 15 minutes/);
@@ -713,7 +726,7 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
   /* A step-up opens a new session, so the page's forms are new too. */
   await confirm(b, s);
   assert.equal((await b.post("/passkeys/remove", { form: remove, id: device.keys[0].id })).status, 403);
-  home = await b.get("/");
+  home = await b.get("/security");
   const removeNow = tokenFor(home.text, "/passkeys/remove");
   assert.equal((await b.post("/passkeys/remove", { form: removeNow, id: device.keys[0].id })).status, 303);
   assert.deepEqual(passkeysOf(e, "ana@example.com").map((p) => p.label), ["Phone"]);
@@ -725,9 +738,9 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
   /* The last one can go too: the emailed code is always a way in. */
   assert.equal((await b.post("/passkeys/remove", { form: removeNow, id: second.keys[0].id })).status, 303);
   assert.equal(passkeysOf(e, "ana@example.com").length, 0);
-  home = await b.get("/");
-  assert.match(home.text, /<span class="tag">none added<\/span>/);
-  assert.match(home.text, /Passkey removed/);
+  home = await b.get("/security");
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "None added"]);
+  assert.match((await b.get("/")).text, /Passkey removed/);
   const back = new Browser(e, { ip: "203.0.113.62" });
   await signInByCode(back, s, "ana@example.com");
   assert.equal((await back.get("/")).status, 200);
@@ -741,7 +754,7 @@ test("removing a passkey ends every other session of the account, the one it ope
   assert.equal((await passkeySignIn(thief, device)).status, 303);
   assert.equal((await thief.get("/")).status, 200);
 
-  const home = await b.get("/");
+  const home = await b.get("/security");
   const r = await b.post("/passkeys/remove", { form: tokenFor(home.text, "/passkeys/remove"), id: device.keys[0].id });
   assert.equal(r.status, 303, r.text);
   assert.equal(passkeysOf(e, "ana@example.com").length, 0);
@@ -981,16 +994,20 @@ test("a database the first deploy made: the account page, adding a passkey, sign
   for (const sql of WAVE_1) e.LIST.sql.exec(sql);
   const b = new Browser(e);
   await signInByCode(b, s, "ana@example.com");
-  let home = await b.get("/");
+  for (const path of ["/", "/machines", "/members", "/billing", "/activity"]) {
+    const shown = await b.get(path);
+    assert.equal(shown.status, 200, `${path}: ${shown.text}`);
+  }
+  let home = await b.get("/security");
   assert.equal(home.status, 200, home.text);
-  assert.match(home.text, /<span class="tag">none added<\/span>/);
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "None added"]);
   const device = new Device();
   const { res } = await addPasskey(b, device);
   assert.equal(res.status, 303, res.text);
   const signedIn = await passkeySignIn(new Browser(e, { ip: "203.0.113.90" }), device);
   assert.equal(signedIn.status, 303, signedIn.text);
   assert.equal(passkeysOf(e, "ana@example.com")[0].used_at, today() * DAY);
-  home = await b.get("/");
+  home = await b.get("/security");
   assert.match(home.text, new RegExp(`Work laptop, added [0-9-]+,\\s+last used ${new Date(today() * DAY * 1000).toISOString().slice(0, 10)}`));
 
   for (const on of ["1", ""]) {

@@ -312,13 +312,13 @@ export async function probe({
         if (typeof portal.url !== "string" || !portal.url.startsWith(`${PORTAL_ORIGIN}/`)) {
           wrong.push(`its address is not on ${PORTAL_ORIGIN}, so billing.js's billingPost() would not send the browser to it`);
         }
-        if (portal.return_url !== `${ACCOUNT_ORIGIN}/`) wrong.push(`it returns to ${portal.return_url}, not ${ACCOUNT_ORIGIN}/`);
+        if (portal.return_url !== `${ACCOUNT_ORIGIN}/billing`) wrong.push(`it returns to ${portal.return_url}, not ${ACCOUNT_ORIGIN}/billing`);
         const login = ours.login_page && ours.login_page.enabled
           ? "That configuration's login page, where /api/billing sends subscribers, is on."
           : `That configuration's login page is off, so /api/billing sends subscribers to the contact page: ${SETUP} switches it on.`;
         return wrong.length ? fail(`opened ${portal.id}, but ${wrong.join(", and ")}. ${login}`)
           : pass(`opened ${portal.id} on ${ours.id}, the configuration stripe_setup.py made, for the customer, ` +
-            `returning to ${ACCOUNT_ORIGIN}/. ${login}`);
+            `returning to ${ACCOUNT_ORIGIN}/billing. ${login}`);
       }, customer ? null : "the customer from (a)");
 
       await check("e", "billingEmailFollows(), the customer's email moved to the owner's", async (mine) => {
