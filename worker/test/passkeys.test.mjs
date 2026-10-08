@@ -15,6 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { d1 } from "./stand-ins.mjs";
+import { onNoPage } from "./account-pages.mjs";
 import {
   AT, ORIGIN, UP, UV, authData, b64, bytes, cbor, clientData, concat, ed25519, es256, rs256, sha256, unb64,
 } from "./authenticators.mjs";
@@ -715,6 +716,7 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
   later(FRESH_FOR + 1);
   home = await b.get("/security");
   assert.doesNotMatch(home.text, /action="\/passkeys\/remove"/);
+  await onNoPage(b, /action="\/passkeys\/remove"|href="\/passkeys\/add"/, { why: "removing or adding a passkey without a fresh code" });
   const late = await b.post("/passkeys/remove", { form: remove, id: device.keys[0].id });
   assert.equal(late.status, 403);
   assert.match(late.text, /Adding or removing a passkey needs an emailed code typed in the last 15 minutes/);

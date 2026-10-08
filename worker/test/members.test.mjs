@@ -742,8 +742,10 @@ test("inviting, roles, removing and ownership need a fresh code; nothing is done
   const p = panel(home).html;
   assert.match(p, /Inviting someone, changing a role or removing someone needs an emailed\s+code typed in the last 15 minutes/);
   assert.equal(forms(p, "/stepup").length, 1);
+  const anywhere = await everyPage(ana);
   for (const action of ["/members/invite", "/members/role", "/members/remove", "/members/transfer"]) {
     assert.equal(forms(home, action).length, 0, action);
+    assert.equal(forms(anywhere, action).length, 0, `${action} on any account page`);
   }
   for (const [action, fields] of [["/members/invite", { email: "carl@example.com" }],
                                   ["/members/role", { user: boId, role: "member" }],
@@ -789,6 +791,8 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   assert.equal(roleIn(e, acme, "ana@example.com"), "owner");
   const home = (await ana.get("/members")).text;
   assert.equal(forms(home, "/members/leave").length, 0);
+  const anywhere = await everyPage(ana);
+  assert.equal(forms(anywhere, "/members/leave").length, 0, "the owner is offered Leave on no account page");
   assert.match(panel(home).html, /As its owner you cannot leave Acme: make one of its admins the owner first/);
 
   /* Ownership only to an admin. */
@@ -796,6 +800,7 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   assert.equal(r.status, 400);
   assert.match(r.text, /Only an admin of Acme can be made its owner/);
   assert.equal(forms(home, "/members/transfer").length, 0);
+  assert.equal(forms(anywhere, "/members/transfer").length, 0, "nor ownership for a member, on any page");
 
   r = await submit(ana, "/members/role", (f) => f.user === boId, {});
   assert.equal(r.location, "/members", r.text);
@@ -857,10 +862,14 @@ test("a member is refused every admin action, and an admin every owner action", 
 
   /* A member's panel: everyone, and Leave; nothing else. */
   const html = (await bo.get("/members")).text;
+  const bosPages = await everyPage(bo);
   for (const action of ["/members/invite", "/invites/revoke", "/members/role", "/members/remove", "/members/transfer"]) {
     assert.equal(forms(html, action).length, 0, action);
+    assert.equal(forms(bosPages, action).length, 0, `${action} on any of a member's pages`);
   }
   assert.equal(forms(html, "/members/leave").length, 1);
+  assert.equal(forms(bosPages, "/members/leave").length, 1);
+  assert.ok(!bosPages.includes("zed@example.com"), "a member sees who is invited on no page");
   assert.match(panel(html).html, /An owner or an admin of Acme can invite people/);
   assert.ok(!html.includes("zed@example.com"), "a member does not see who is invited");
   assert.doesNotMatch(panel(html).html, /invited someone/, "nor the organisation's record");
@@ -896,6 +905,11 @@ test("a member is refused every admin action, and an admin every owner action", 
   assert.equal(forms(deeHtml, "/members/transfer").length, 0);
   assert.deepEqual(forms(deeHtml, "/members/remove").map((f) => f.user).sort(), [boId, carlId].sort(),
     "an admin is offered Remove for members only");
+  const deesPages = await everyPage(dee);
+  assert.equal(forms(deesPages, "/members/role").length, 0, "an admin is offered no role change on any page");
+  assert.equal(forms(deesPages, "/members/transfer").length, 0, "nor ownership");
+  assert.deepEqual(forms(deesPages, "/members/remove").map((f) => f.user).sort(), [boId, carlId].sort(),
+    "and Remove for members only, on every page");
   unchanged();
 
   run(e, "UPDATE memberships SET role = 'admin' WHERE org_id = ? AND user_id = ?", acme, boId);
@@ -1180,6 +1194,7 @@ test("an organisation whose Plus ended takes nobody new, and can still tidy up",
   assert.ok(!p.locked);
   assert.match(p.html, /Inviting people needs Plus/);
   assert.equal(forms(html, "/members/invite").length, 0);
+  assert.equal(forms(await everyPage(ana), "/members/invite").length, 0, "no invite form on any page once Plus ended");
   assert.equal((await forged(e, ana, "/members/invite", acme, { email: "dee@example.com" })).status, 403);
   /* Without a fresh code, the way to one is still offered, for removing and roles. */
   later(FRESH_FOR + 1);
@@ -1187,6 +1202,10 @@ test("an organisation whose Plus ended takes nobody new, and can still tidy up",
   assert.match(panel(stale).html, /Changing a role or removing someone needs an emailed\s+code/);
   assert.equal(forms(panel(stale).html, "/stepup").length, 1);
   assert.equal(forms(stale, "/members/remove").length, 0);
+  const staleEverywhere = await everyPage(ana);
+  for (const action of ["/members/remove", "/members/role", "/members/transfer", "/members/invite"]) {
+    assert.equal(forms(staleEverywhere, action).length, 0, `${action} without a fresh code, on any page`);
+  }
   await confirm(ana, s);
   r = await submit(ana, "/members/remove", (f) => f.user === userId(e, "carl@example.com"));
   assert.equal(r.location, "/members");

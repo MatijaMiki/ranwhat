@@ -12,6 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { d1, slow } from "./stand-ins.mjs";
+import { eachPage, onNoPage } from "./account-pages.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const device = await import("../src/device.js");
@@ -586,6 +587,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   assert.match(locked[1], /<span class="lock">[\s\S]*?<\/span>CI tokens<\/h2><span class="pill brand">Needs Plus<\/span>/);
   assert.match(locked[1], /<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
+  await onNoPage(ana, /action="\/tokens\/ci"/, { why: "a CI token form on Free" });
   let r = await forgedCi(e, ana);
   assert.equal(r.status, 403);
   assert.match(r.text, /CI tokens come with Plus, so none was made/);
@@ -603,6 +605,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   join(e, "bo@example.com", acme, "member");
   html = (await bo.get("/machines")).text;
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
+  await onNoPage(bo, /action="\/tokens\/ci"/, { why: "a member's CI token form" });
   assert.match(section(html), /An owner or an admin of Personal can make a CI token here/);
   r = await forgedCi(e, bo);
   assert.equal(r.status, 403);
@@ -617,6 +620,7 @@ test("CI tokens: Plus or Team only, an owner or admin, with a fresh code; locked
   later(16 * MINUTE);
   html = (await ana.get("/machines")).text;
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
+  await onNoPage(ana, /action="\/tokens\/ci"/, { why: "a CI token form without a fresh code" });
   assert.match(section(html), /Making one needs an emailed code typed in the last 15 minutes/);
   r = await forgedCi(e, ana);
   assert.equal(r.status, 403);
@@ -693,9 +697,8 @@ test("a CI token is shown once, right after it is made, and kept only as a hash;
   const again = await ana.post("/tokens/ci", made.sent);
   assert.deepEqual([again.status, again.location], [303, "/machines"]);
   assert.equal(count(e, "machines"), 1);
-  for (const path of ["/", "/machines", "/activity"]) {
-    const shown = (await ana.get(path)).text;
-    assert.ok(!shown.includes(token) && !shown.includes(sha(token)), `never shown again: ${path}`);
+  for (const { path, text } of await eachPage(ana)) {
+    assert.ok(!text.includes(token) && !text.includes(sha(token)) && !text.includes(token.slice(5)), `never shown again: ${path}`);
   }
   const home = await ana.get("/");
   assert.match(home.text, /CI token made, with a fresh code/);
@@ -745,6 +748,7 @@ test("an organisation holds at most fifty CI tokens at once; revoked and expired
   assert.equal((await makeCi(ana, { label: "the fiftieth" })).r.status, 200);
   let html = (await ana.get("/machines")).text;
   assert.doesNotMatch(html, /action="\/tokens\/ci"/);
+  await onNoPage(ana, /action="\/tokens\/ci"/, { why: "a CI token form at fifty" });
   assert.match(section(html), /Personal holds 50 CI tokens, the most it can/);
   const r = await forgedCi(e, ana);
   assert.equal(r.status, 400);

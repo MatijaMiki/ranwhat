@@ -17,6 +17,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { d1 } from "./stand-ins.mjs";
+import { onNoPage } from "./account-pages.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const { FRESH_FOR, formToken } = await import("../src/session.js");
@@ -303,12 +304,14 @@ test("a provider switched off after an account linked it still lists that link, 
   assert.deepEqual(method(home.text, "github"), ["GitHub", "not offered now"]);
   assert.match(home.text, /name="subject" value="9001"/);
   assert.doesNotMatch(home.text, /action="\/auth\/github"/, "nothing new links");
+  await onNoPage(ana, /action="\/auth\/github"/, { csp: /github\.com/, why: "linking GitHub while it is off" });
   for (const path of ["/auth/github", "/auth/github/callback"]) assert.equal((await ana.get(path)).status, 404, path);
   /* Not fresh: the page says unlinking needs a code, and the POST is refused. */
   const unlink = tokenFor(home.text, "/auth/github/unlink");
   later(FRESH_FOR + 1);
   home = await ana.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/github\/unlink"/);
+  await onNoPage(ana, /action="\/auth\//, { csp: /accounts\.google\.com|github\.com/, why: "linking or unlinking without a fresh code" });
   assert.match(home.text, /Unlinking GitHub needs an emailed code/);
   assert.equal((await ana.post("/auth/github/unlink", { form: unlink, subject: "9001" })).status, 403);
   assert.equal(identities(e).filter((i) => i.provider === "github").length, 1);
@@ -788,6 +791,7 @@ test("signed in with a fresh code, a person links GitHub with another verified a
   assert.doesNotMatch(home.text, /action="\/auth\/google"/);
   assert.match(home.text, /Linking or unlinking Google needs an emailed code typed in the last 15 minutes/);
   assert.match(home.headers.get("content-security-policy"), /form-action 'self'; /);
+  await onNoPage(ana, /action="\/auth\//, { csp: /accounts\.google\.com|github\.com/, why: "linking or unlinking without a fresh code" });
   const flows = count(e, "oauth_flows");
   const stale = await ana.post("/auth/google", { form: token });
   assert.equal(stale.status, 403);
@@ -880,6 +884,7 @@ test("unlinking needs a fresh code, takes only this account's own, and leaves th
   /* Fresh again with a step-up code. */
   home = await ana.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/github\/unlink"/);
+  await onNoPage(ana, /action="\/auth\//, { csp: /accounts\.google\.com|github\.com/, why: "linking or unlinking without a fresh code" });
   await ana.post("/stepup", { form: tokenFor(home.text, "/stepup"), next: "/" });
   const page = await ana.get("/signin/code");
   await ana.post("/signin/code", { form: tokenFor(page.text, "/signin/code"), code: codeIn(s.emails.at(-1)) });
@@ -1237,6 +1242,7 @@ test("signed in already, the sign-in link goes home; a Google session is not fre
   assert.equal(again.location, "/");
   const home = await b.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/github"/);
+  await onNoPage(b, /action="\/auth\//, { csp: /accounts\.google\.com|github\.com/, why: "a Google session linking or unlinking" });
   const late = await b.post("/password", { form: await formToken(e, sha256(b.jar.get(SESSION)), "password"),
                                           password: "slipped in without a code" });
   assert.equal(late.status, 403);

@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { d1 } from "./stand-ins.mjs";
+import { onNoPage } from "./account-pages.mjs";
 
 const worker = (await import("../src/index.js")).default;
 const { formToken, FRESH_FOR } = await import("../src/session.js");
@@ -512,6 +513,8 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   const memberHome = (await bo.get("/billing")).text;
   assert.match(memberHome, /Personal is on Free\. An owner or an admin of it can upgrade it to Plus\./);
   assert.doesNotMatch(memberHome, /bought without an account|subject=Move/, "only owners and admins are told how to move one");
+  /* No account page offers the member either form, or lets one go to Stripe. */
+  await onNoPage(bo, /action="\/(upgrade|billing)"|subject=Move/, { csp: /stripe/, why: "a member's upgrade or billing" });
 
   /* A form made for the member's own session, as a forged one would be: refused before Stripe is asked. */
   const r = await bo.post("/upgrade", { ...await bound(e, bo, "upgrade", org), plan: "monthly" });
@@ -537,6 +540,7 @@ test("a member cannot upgrade or open billing; an admin can", async () => {
   assert.match(home.text, /An owner or an admin of Personal manages its billing\./);
   assert.doesNotMatch(home.text, /action="\/billing"/);
   assert.doesNotMatch(home.headers.get("content-security-policy"), /billing\.stripe\.com/);
+  await onNoPage(bo, /action="\/(upgrade|billing)"/, { csp: /stripe/, why: "a member's Manage billing" });
   const tried = await bo.post("/billing", { ...await bound(e, bo, "billing", org), subscription: sub.id });
   assert.equal(tried.status, 403);
   assert.match(tried.text, /Only an owner or an admin of Personal can open its billing\./);
@@ -740,7 +744,7 @@ test("Manage billing opens the portal for the organisation's own customer, with 
   assert.equal(r.status, 303, r.text);
   assert.match(r.location, /^https:\/\/billing\.stripe\.com\/p\/session\/test_/);
   assert.deepEqual(portals(s).at(-1).form,
-    { customer: sub.customer, return_url: "https://account.ranwhat.com/", configuration: "bpc_plus" });
+    { customer: sub.customer, return_url: "https://account.ranwhat.com/billing", configuration: "bpc_plus" });
   assert.deepEqual(eventsOf(e, org).at(-1), { user_id: userId(e, "ana@example.com"), event: "billing_opened", subject: sub.id });
 
   /* Stripe's portal down: said so, with the portal's own login as the way round. */
@@ -756,6 +760,7 @@ test("Manage billing opens the portal for the organisation's own customer, with 
   assert.doesNotMatch(stale.text, /action="\/billing"/);
   assert.match(stale.text, /Manage billing needs an emailed code typed in the last 15 minutes/);
   assert.doesNotMatch(stale.headers.get("content-security-policy"), /stripe/);
+  await onNoPage(ana, /action="\/billing"/, { csp: /stripe/, why: "Manage billing without a fresh code" });
   const n = portals(s).length;
   const refused = await ana.post("/billing", hidden(home.text, "/billing"));
   assert.equal(refused.status, 403);

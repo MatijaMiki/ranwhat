@@ -724,8 +724,8 @@ export async function billing(request, env) {
 /* A billing-portal session for `customer`, the Stripe customer of a
    subscription linked to the organisation (billing.js checks that, the
    role and the fresh code first), on the portal scripts/stripe_setup.py
-   made where it is found, and back to the account page after. Returns the
-   session; throws as stripe() does. */
+   made where it is found, and back to the account's Billing page, where
+   Manage billing is, after. Returns the session; throws as stripe() does. */
 export async function portalSession(env, customer) {
   if (typeof customer !== "string" || !CUSTOMER.test(customer)) {
     throw Object.assign(new Error("bad customer"), { code: "bad_customer", status: 400 });
@@ -734,7 +734,7 @@ export async function portalSession(env, customer) {
   const portal = data.find((c) => c.metadata && c.metadata.product === PRODUCT);
   return stripe(env, "POST", "/billing_portal/sessions", {
     customer,
-    return_url: `${ACCOUNT_ORIGIN}/`,
+    return_url: `${ACCOUNT_ORIGIN}/billing`,
     configuration: portal ? portal.id : undefined,
   });
 }
