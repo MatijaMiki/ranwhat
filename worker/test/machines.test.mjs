@@ -336,7 +336,7 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   assert.ok(!html.includes(theirs.id), "another organisation's machine is not listed");
   const today = isoDay(unix());
 
-  assert.match(items[terminal.id], /^<td class="cell-main"><strong>Ana's &lt;laptop&gt;<\/strong><\/td><td data-label="Kind"><span class="pill">terminal<\/span><\/td>/,
+  assert.match(items[terminal.id], /^<td class="cell-main"><strong>Ana's &lt;laptop&gt;<\/strong><\/td><td data-label="Kind"><span class="pill">Terminal<\/span><\/td>/,
                "named as it was on the page that approved it, escaped");
   assert.equal(column(items[terminal.id], "Added by"), "ana@example.com");
   assert.match(column(items[terminal.id], "Added"), new RegExp(`^<time datetime="${today}" [^>]*>${today}</time>$`));
@@ -346,7 +346,7 @@ test("the Machines section lists each machine of the organisation: name, kind, w
   assert.match(column(items[ciId], "Added"), new RegExp(`^<time datetime="${today}" [^>]*>${today}</time>$`));
   assert.equal(column(items[ciId], "Last used"), '<span class="none">Not used yet</span>');
   assert.ok(items[ciId].includes(`<span class="sub">Expires ${isoDay(unix() + 90 * DAY)}</span>`));
-  assert.match(items[old.id], /^<td class="cell-main"><strong>Subscription token<\/strong><\/td><td data-label="Kind"><span class="pill warn">old subscription token<\/span><\/td>/);
+  assert.match(items[old.id], /^<td class="cell-main"><strong>Subscription token<\/strong><\/td><td data-label="Kind"><span class="pill warn">Old subscription token<\/span><\/td>/);
   assert.equal(column(items[old.id], "Added by"), '<span class="none">Emailed with a subscription</span>');
   assert.equal(column(items[old.id], "Last used"), '<span class="none">Not recorded</span>');
 
@@ -727,7 +727,7 @@ test("a CI token is shown once, right after it is made, and kept only as a hash;
   const item = listed((await b.get("/machines")).text)[machine.id];
   assert.match(item, /<td data-label="Kind"><span class="pill crit">CI, expired<\/span><\/td>/);
   assert.ok(item.includes(`<span class="sub">Expired ${isoDay(row.created_at + 30 * DAY)}</span>`));
-  assert.match(item, /<button type="submit" class="danger compact">Remove<\/button>/);
+  assert.match(item, /<button type="submit" class="danger compact"><svg class="i"[^>]*>[^]*?<\/svg>Remove<\/button>/);
 });
 
 test("an organisation holds at most fifty CI tokens at once; revoked and expired ones make room", async () => {

@@ -229,8 +229,8 @@ test("adding a passkey: the options, the challenge kept hashed, the row, and the
   const device = new Device();
 
   let home = await b.get("/security");
-  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "none added"]);
-  assert.match(home.text, /<a class="btn" href="\/passkeys\/add">Add a passkey<\/a>/);
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "None added"]);
+  assert.match(home.text, /<a class="btn" href="\/passkeys\/add"><svg class="i"[^>]*>[^]*?<\/svg>Add a passkey<\/a>/);
 
   const page = await b.get("/passkeys/add");
   assert.equal(page.status, 200);
@@ -351,7 +351,8 @@ test("adding a passkey needs a session and a code typed in the last 15 minutes",
 
   const home = await b.get("/security");
   assert.doesNotMatch(home.text, /href="\/passkeys\/add"/);
-  assert.match(home.text, /Adding or removing a passkey needs an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /<div class="callout warn" id="confirm">[^]*?[Aa]dding or removing a passkey[^.]* needs? an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /data-method="passkeys">\s*<header class="card-head"><h3>[^]*?<\/h3><span class="pill">None added<\/span><span class="pill warn">Needs a code<\/span>/);
   await confirm(b, s);
   const { res } = await addPasskey(b, device);
   assert.equal(res.status, 303);
@@ -618,7 +619,7 @@ test("someone whose only way in besides the code is a passkey signs in with it",
   /* Not fresh: what needs a code still needs one. */
   assert.equal(sessionOf(e, b).authed_at, 0);
   const security = await b.get("/security");
-  assert.match(security.text, /Adding or removing a passkey needs an emailed code/);
+  assert.match(security.text, /<div class="callout warn" id="confirm">[^]*?[Aa]dding or removing a passkey[^.]* needs? an emailed code/);
   const [row] = passkeysOf(e, "ana@example.com");
   assert.equal(row.sign_count, 2);
   assert.equal(row.used_at, today() * DAY, "the day, and no finer");
@@ -738,7 +739,7 @@ test("removing a passkey: a fresh code, only your own, and it no longer signs in
   assert.equal((await b.post("/passkeys/remove", { form: removeNow, id: second.keys[0].id })).status, 303);
   assert.equal(passkeysOf(e, "ana@example.com").length, 0);
   home = await b.get("/security");
-  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "none added"]);
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "None added"]);
   assert.match((await b.get("/")).text, /Passkey removed/);
   const back = new Browser(e, { ip: "203.0.113.62" });
   await signInByCode(back, s, "ana@example.com");
@@ -999,7 +1000,7 @@ test("a database the first deploy made: the account page, adding a passkey, sign
   }
   let home = await b.get("/security");
   assert.equal(home.status, 200, home.text);
-  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "none added"]);
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "None added"]);
   const device = new Device();
   const { res } = await addPasskey(b, device);
   assert.equal(res.status, 303, res.text);

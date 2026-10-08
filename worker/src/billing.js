@@ -167,8 +167,11 @@ async function grantOf(env, orgId) {
    { top, current, side, notes, away }: the notices for the top of the
    page, the plan's card and the one beside it, the note on subscriptions
    bought without an account, and the origins its forms go on to, for the
-   page's form-action, each only when its form is there. */
-export async function billingPanel(env, who, onPlan) {
+   page's form-action, each only when its form is there. error: why a
+   Manage billing just sent did not open (billingPost()), said in the
+   plan's card, with Stripe's own login as the way round when `fallback`
+   and the step-up at the top when `stepup` and the page has none. */
+export async function billingPanel(env, who, onPlan, { error = "", stepup = false, fallback = false } = {}) {
   const org = who.org;
   const name = escape(org.name);
   const manager = canManage(org);
@@ -271,23 +274,29 @@ export async function billingPanel(env, who, onPlan) {
       ${choices(who, await orgToken(env, who, "upgrade"))}
       <p class="hint">What each plan adds is below, and on <a href="/upgrade">the upgrade page</a>.</p>`;
     }
-    side = `<section class="card c5" id="upgrade">
+    side = `<section class="card" id="upgrade">
     <header class="card-head"><h2>${icon("spark")}Upgrade to Plus</h2></header>
     ${body}</section>`;
   } else if (shown.length && manager) {
-    side = `<section class="card c5" id="billing-email">
+    side = `<section class="card" id="billing-email">
     <header class="card-head"><h2>${icon("mail")}Billing email</h2></header>
-    <p>Stripe's billing page also opens, from ranwhat.com/api/billing, for whoever reads ${name}'s billing email,
-       to which Stripe mails a link.</p>
-    <p class="hint">That is the owner's address unless an owner or an admin changes it on that page, and whenever an
-       owner or an admin leaves, is removed, is made a member or hands on ownership,
-       it goes back to the owner's address, unless it is the address of someone who is still an owner or an admin
-       here and did not just hand ownership on.</p></section>`;
+    <p>Stripe's billing page also opens from ranwhat.com/api/billing, by a link Stripe mails to ${name}'s
+       billing email.</p>
+    <ul class="notes">
+      <li>That email is the owner's address to begin with.</li>
+      <li>An owner or an admin can change it on Stripe's billing page.</li>
+      <li>When an owner or an admin leaves, is removed, is made a member or hands on ownership, it
+        goes back to the owner's address, unless it is the address of an owner or an admin still here who did not
+        just hand ownership on.</li>
+    </ul></section>`;
   }
 
-  const current = `<section class="card${side ? " c7" : ""}" id="billing">
+  const fellBack = fallback ? `<p>Try again in a minute, or sign in to Stripe's billing page with your billing email at
+       <a href="https://ranwhat.com/api/billing">ranwhat.com/api/billing</a>.</p>` : "";
+  const current = `<section class="card" id="billing">
     <header class="card-head"><h2>${icon("billing")}Current plan</h2>${pill(PLAN_NAMES[onPlan], onPlan === "free" ? "" : "brand")}</header>
     <div class="plan-now"><b>${PLAN_NAMES[onPlan]}</b><span>${tagline}</span></div>
+    ${problem(error)}${fellBack}
     ${standing}
     ${onFree}
     ${items.length ? `<div class="subs">
@@ -309,8 +318,10 @@ export async function billingPanel(env, who, onPlan) {
     manageNeedsCode && `Manage billing needs an emailed code typed in the last ${codeAge}`,
     checkoutNeedsCode && `${manageNeedsCode ? "and so does opening checkout" : `Opening checkout needs an emailed code typed in the last ${codeAge}`}, as Stripe holds billing details for ${name} already`,
   ].filter(Boolean).join(", ");
-  const top = `${twice}${needs ? confirmCallout(`${needs}.`, who.email,
-    stepupForm(await formToken(env, who.id, "stepup"), "/billing")) : ""}`;
+  const confirm = needs ? confirmCallout(`${needs}.`, who.email, stepupForm(await formToken(env, who.id, "stepup"), "/billing"))
+    : stepup ? confirmCallout(`Manage billing needs an emailed code typed in the last ${codeAge}.`, who.email,
+      stepupForm(await formToken(env, who.id, "stepup"), "/billing")) : "";
+  const top = `${twice}${confirm}`;
 
   const notes = onPlan === "free" && manager ? `<section class="card" id="moving">
     <header class="card-head"><h2>${icon("info")}Bought Plus without an account?</h2></header>
@@ -560,14 +571,13 @@ export async function billingEmailsDue(env) {
 
 /* ---------- Manage billing ---------- */
 
-async function billingProblem(env, who, status, text, { stepup = false, fallback = false } = {}) {
-  return page("Billing", `<h1>Billing did not open.</h1>
-    ${problem(text)}
-    ${fallback ? `<p>Try again in a minute, or sign in to Stripe's billing page with your billing email at
-       <a href="https://ranwhat.com/api/billing">ranwhat.com/api/billing</a>.</p>` : ""}
-    ${stepup ? `<div class="actions">${stepupForm(await formToken(env, who.id, "stepup"), "/billing")}</div>` : ""}
-    ${backToBilling}`, { status, icon: "alert", tone: "warn" });
-}
+/* Why Manage billing did not open. Not a page: dashboard.js draws the
+   Billing page again with it (its drawnAgain()), the sentence in the
+   plan's card, Stripe's own login as the way round when `fallback`, and
+   the step-up at the top when a fresh code is what it needed. env and who
+   are taken for the callers' sake. */
+const billingProblem = (env, who, status, text, { stepup = false, fallback = false } = {}) =>
+  ({ trouble: { status, text, stepup, fallback } });
 
 /* POST /billing: Stripe's billing portal for the customer of a
    subscription linked to the organisation the form was drawn for, which

@@ -1119,7 +1119,7 @@ test("changing the password needs the current one, and ends every other session"
   await withPassword(other, "ana@example.com", ANA_PASSWORD);
   const home = await b.get("/security");
   assert.match(home.text, /<h2 class="label section-label">Ways to sign in<\/h2>/);
-  assert.deepEqual(method(home.text, "password"), ["Password", "set"]);
+  assert.deepEqual(method(home.text, "password"), ["Password", "Set"]);
   const token = tokenFor(home.text, "/password");
   const NEW = "a brand new passphrase";
 
@@ -1220,12 +1220,12 @@ test("the sign-in methods: the code always, a password added with a fresh code a
   await typeCode(b, codeIn(s.emails.at(-1)));
   let home = await b.get("/security");
   assert.doesNotMatch(home.text, /<script|\son[a-z]+=/i);
-  assert.deepEqual(method(home.text, "code"), ["Emailed code", "always on"]);
-  assert.deepEqual(method(home.text, "password"), ["Password", "not set"]);
+  assert.deepEqual(method(home.text, "code"), ["Emailed code", "Always on"]);
+  assert.deepEqual(method(home.text, "password"), ["Password", "Not set"]);
   for (const [key, name] of [["google", "Google"], ["github", "GitHub"]]) {
-    assert.deepEqual(method(home.text, key), [name, "coming"]);
+    assert.deepEqual(method(home.text, key), [name, "Coming"]);
   }
-  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "none added"]);
+  assert.deepEqual(method(home.text, "passkeys"), ["Passkeys", "None added"]);
   assert.doesNotMatch(home.text, /action="\/password\/remove"/);
 
   const added = await b.post("/password", { form: tokenFor(home.text, "/password"), password: ANA_PASSWORD });
@@ -1233,7 +1233,7 @@ test("the sign-in methods: the code always, a password added with a fresh code a
   assert.equal(await verifyPassword(passwordOf(e, "ana@example.com"), ANA_PASSWORD), true);
   assert.equal(eventsOf(e, "ana@example.com").at(-1), "password_added");
   home = await b.get("/security");
-  assert.deepEqual(method(home.text, "password"), ["Password", "set"]);
+  assert.deepEqual(method(home.text, "password"), ["Password", "Set"]);
   assert.match(home.text, /action="\/password\/remove"/);
 
   later(FRESH_FOR + 1);
@@ -1251,8 +1251,9 @@ test("the sign-in methods: the code always, a password added with a fresh code a
 
   /* Without a password and without a fresh code, adding one needs the code. */
   home = await b.get("/security");
-  assert.deepEqual(method(home.text, "password"), ["Password", "not set"]);
-  assert.match(home.text, /Adding one needs an emailed code typed in the last 15 minutes/);
+  assert.deepEqual(method(home.text, "password"), ["Password", "Not set"]);
+  assert.match(home.text, /<div class="callout warn" id="confirm">[^]*?[Aa]dding a password[^.]* needs? an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /data-method="password">\s*<header class="card-head"><h3>[^]*?<\/h3><span class="pill">Not set<\/span><span class="pill warn">Needs a code<\/span>/);
   assert.doesNotMatch(home.text, /action="\/password"/);
   assert.match(home.text, /action="\/stepup"/);
   const late = await b.post("/password", { form: await formToken(e, sha256(b.jar.get(SESSION)), "password"),

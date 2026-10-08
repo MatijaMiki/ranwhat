@@ -301,7 +301,7 @@ test("a provider switched off after an account linked it still lists that link, 
   delete e.GITHUB_CLIENT_SECRET;
 
   let home = await ana.get("/security");
-  assert.deepEqual(method(home.text, "github"), ["GitHub", "not offered now"]);
+  assert.deepEqual(method(home.text, "github"), ["GitHub", "Not offered now"]);
   assert.match(home.text, /name="subject" value="9001"/);
   assert.doesNotMatch(home.text, /action="\/auth\/github"/, "nothing new links");
   await onNoPage(ana, /action="\/auth\/github"/, { csp: /github\.com/, why: "linking GitHub while it is off" });
@@ -312,7 +312,9 @@ test("a provider switched off after an account linked it still lists that link, 
   home = await ana.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/github\/unlink"/);
   await onNoPage(ana, /action="\/auth\//, { csp: /accounts\.google\.com|github\.com/, why: "linking or unlinking without a fresh code" });
-  assert.match(home.text, /Unlinking GitHub needs an emailed code/);
+  /* Said once, at the top, with the way to a code; the card says it needs one. */
+  assert.match(home.text, /<div class="callout warn" id="confirm">[^]*?[Uu]nlinking GitHub[^.]* needs? an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /data-method="github">\s*<header class="card-head"><h3>[^]*?<\/h3><span class="pill warn">Not offered now<\/span><span class="pill warn">Needs a code<\/span>/);
   assert.equal((await ana.post("/auth/github/unlink", { form: unlink, subject: "9001" })).status, 403);
   assert.equal(identities(e).filter((i) => i.provider === "github").length, 1);
   /* Fresh again: it goes, and GitHub is shown as coming. */
@@ -324,7 +326,7 @@ test("a provider switched off after an account linked it still lists that link, 
   assert.equal(done.status, 303);
   assert.deepEqual(identities(e).filter((i) => i.user_id === user).map((i) => i.provider), ["email"]);
   assert.equal(eventsOf(e, user).at(-1), "unlinked_github");
-  assert.deepEqual(method((await ana.get("/security")).text, "github"), ["GitHub", "coming"]);
+  assert.deepEqual(method((await ana.get("/security")).text, "github"), ["GitHub", "Coming"]);
 });
 
 test("the sign-in page offers both as plain links, with no script of ours and no change to its policy", async () => {
@@ -396,8 +398,9 @@ test("Google: PKCE, state and nonce leave with the browser, only their hashes st
   const home = await b.get("/");
   assert.match(home.text, /Account made, with Google/);
   const security = (await b.get("/security")).text;
-  assert.deepEqual(method(security, "google"), ["Google", "linked"]);
-  assert.match(security, /Linking or unlinking Google needs an emailed code/);
+  assert.deepEqual(method(security, "google"), ["Google", "Linked"]);
+  assert.match(security, /<div class="callout warn" id="confirm">[^]*?[Ll]inking or unlinking Google[^.]* needs? an emailed code/);
+  assert.match(security, /data-method="google">\s*<header class="card-head"><h3>[^]*?<\/h3><span class="pill ok">Linked<\/span><span class="pill warn">Needs a code<\/span>/);
   assert.equal(rows(e, "SELECT used_at FROM oauth_flows")[0].used_at > 0, true);
 });
 
@@ -756,7 +759,7 @@ test("signed in with a fresh code, a person links GitHub with another verified a
   await signInByCode(ana, s, "ana@example.com");
   const user = userOf(e, "ana@example.com");
   let home = await ana.get("/security");
-  assert.deepEqual(method(home.text, "github"), ["GitHub", "not linked"]);
+  assert.deepEqual(method(home.text, "github"), ["GitHub", "Not linked"]);
   assert.match(home.text, /<form method="post" action="\/auth\/github">/);
   assert.match(home.headers.get("content-security-policy"),
                /form-action 'self' https:\/\/accounts\.google\.com https:\/\/github\.com; /);
@@ -773,7 +776,7 @@ test("signed in with a fresh code, a person links GitHub with another verified a
                    [{ provider: "github", provider_subject: "9001", user_id: user, verified_email: "ana@work.example" }]);
   assert.equal(eventsOf(e, user).at(-1), "linked_github");
   home = await ana.get("/security");
-  assert.deepEqual(method(home.text, "github"), ["GitHub", "linked"]);
+  assert.deepEqual(method(home.text, "github"), ["GitHub", "Linked"]);
   assert.match(home.text, /ana@work\.example, linked/);
   assert.match((await ana.get("/")).text, /GitHub account linked/);
 
@@ -789,7 +792,8 @@ test("signed in with a fresh code, a person links GitHub with another verified a
   later(FRESH_FOR + 1);
   home = await ana.get("/security");
   assert.doesNotMatch(home.text, /action="\/auth\/google"/);
-  assert.match(home.text, /Linking or unlinking Google needs an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /<div class="callout warn" id="confirm">[^]*?[Ll]inking or unlinking Google[^.]* needs? an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /data-method="google">\s*<header class="card-head"><h3>[^]*?<\/h3><span class="pill">Not linked<\/span><span class="pill warn">Needs a code<\/span>/);
   assert.match(home.headers.get("content-security-policy"), /form-action 'self'; /);
   await onNoPage(ana, /action="\/auth\//, { csp: /accounts\.google\.com|github\.com/, why: "linking or unlinking without a fresh code" });
   const flows = count(e, "oauth_flows");
@@ -1064,14 +1068,15 @@ test("signing out everywhere can take every Google, GitHub and passkey way in wi
   assert.equal((await viaProvider(elsewhere, s, "github", { user: { id: 777 } })).res.status, 303);
 
   home = await ana.get("/security");
-  assert.match(home.text, /<button type="submit" class="danger">Sign out everywhere and remove every other way in<\/button>/);
+  assert.match(home.text, /<button type="submit" class="danger"><svg class="i"[^>]*>[^]*?<\/svg>Sign out everywhere and remove every other way in<\/button>/);
   assert.match(home.text, /leaving the emailed code\./);
   const token = tokenFor(home.text, "/signout-all");
   /* Not fresh: refused, and nothing changes, not even the sessions. */
   later(FRESH_FOR + 1);
   home = await ana.get("/security");
   assert.doesNotMatch(home.text, /<button type="submit"[^>]*>Sign out everywhere and remove/);
-  assert.match(home.text, /confirm with an\s+emailed code first/);
+  assert.match(home.text, /<div class="callout warn" id="confirm">[^]*?and removing every other way in need an emailed code typed in the last 15 minutes/);
+  assert.match(home.text, /id="remove-ways">\s*<header class="card-head"><h2>[^]*?<\/h2><span class="pill warn">Needs a code<\/span>/);
   const stale = await ana.post("/signout-all", { form: token, ways: "remove" });
   assert.equal(stale.status, 403);
   assert.match(stale.text, /so nothing was done/);

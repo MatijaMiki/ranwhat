@@ -13,7 +13,9 @@
  *       Writes <dir>/<scenario>--<page>--<width>-<theme>.png for every
  *       scenario's pages, at 1440 and 390 pixels wide (or --widths), light and dark,
  *       and reports anything the browser's console says (a CSP refusal,
- *       say) and any page wider than the window. --only: scenarios whose
+ *       say) and any page wider than the window (the scenarios long-plus
+ *       and long-free, with 80-character names, long addresses and many
+ *       machines, are there to find one). --only: scenarios whose
  *       names start with these. The pages only a form's answer draws (a
  *       code to type, a terminal to approve, a CI token, an error) are the
  *       scenario "posted", each made afresh by the requests that lead to
@@ -167,6 +169,39 @@ machine(lia.org, max.user, "device", "", { days: 3, used: null });
 events(lia.org, lia.user, [["signup", 60 * DAY], ["upgrade_started", 50 * DAY + 300], ["plus_linked", 50 * DAY],
   ["member_invited", 21 * DAY], ["machine_linked", 45 * DAY], ["billing_opened", 2 * DAY], ["signin", 600]]);
 
+/* LONG: an 80-character organisation name, long emails, many machines,
+   two organisations, many events. Owner on Plus (grant), fresh; and a
+   Free owner with the long name, not fresh. */
+const LONGNAME = "Featherstonehaugh-Worthington International Robotics and Autonomy Research Lab";
+const LONGNAME2 = "Zyxwvutsrqponmlkjihgfedcbazyxwvutsrqponmlkjihgfedcbazyxwvutsrqponmlkjihgfedcbaz";
+const longOwner = await person("maximilian.alexander.featherstonehaugh-worthington@engineering.subsidiary.example.co.uk");
+run("UPDATE orgs SET name = ?, personal = 0 WHERE id = ?", LONGNAME, longOwner.org);
+run("INSERT INTO grants (org_id, plan, starts_at, until, note, created_at) VALUES (?, 'plus', ?, NULL, 'preview', ?)",
+  longOwner.org, now() - 40 * DAY, now() - 40 * DAY);
+/* A second organisation for the switcher, kept apart from the others' scenarios. */
+const longOther = await person("someone.else.entirely@another.long.example.org");
+run("UPDATE orgs SET name = ?, personal = 0 WHERE id = ?", `${LONGNAME} (second office)`, longOther.org);
+run("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'admin', ?)", longOther.org, longOwner.user, now() - 30 * DAY);
+for (let i = 0; i < 6; i++) {
+  const p = await person(`team.member.number.${i}.with.a.rather.long.address@departments.subsidiary.example.co.uk`);
+  run("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?)", longOwner.org, p.user, i ? "member" : "admin", now() - i * DAY);
+}
+for (let i = 0; i < 24; i++) {
+  machine(longOwner.org, longOwner.user, i % 4 === 0 ? "ci" : "device",
+    i % 3 === 0 ? `build-runner-${i}-with-an-extremely-long-hostname-that-keeps-going-on-${i}` : `Workstation ${i} in the long corridor of the third floor east wing`,
+    { days: 1 + i, used: i % 5 ? i : null });
+}
+for (let i = 0; i < 5; i++) {
+  run(`INSERT INTO invites (id, org_id, email, role, token_hash, invited_by, created_at, expires_at)
+     VALUES (?, ?, ?, 'member', ?, ?, ?, ?)`, randomUUID(), longOwner.org, `invited.person.${i}.with.long.address@contractors.subsidiary.example.co.uk`,
+  sha(randomBytes(32).toString("base64url")), longOwner.user, now() - DAY, now() + 6 * DAY);
+}
+events(longOwner.org, longOwner.user, Array.from({ length: 40 }, (_, i) => [["signin", "machine_linked", "org_renamed", "member_invited", "ci_token_created"][i % 5], i * 7200 + 60]));
+const longFree = await person("someone.with.a.very.very.long.email.address.indeed@subdomain.of.a.long.domain.example.org");
+run("UPDATE orgs SET name = ?, personal = 0 WHERE id = ?", LONGNAME2, longFree.org);
+machine(longFree.org, longFree.user, "device", "x".repeat(60), { days: 3, used: 1 });
+events(longFree.org, longFree.user, [["signup", 20 * DAY]]);
+
 const SCENARIOS = {
   "free-owner": { cookie: await session(ana.user, ana.org), paths: [...SIGNED_IN, "/upgrade", "/device"] },
   "new-account": { cookie: await session(bo.user, bo.org, { fresh: true }), paths: ["/", "/security", "/machines", "/members", "/billing", "/activity"] },
@@ -175,6 +210,8 @@ const SCENARIOS = {
   "plus-owner": { cookie: await session(owner.user, owner.org, { fresh: true }), paths: ["/members", "/billing"] },
   "plus-member": { cookie: await session(eve, owner.org), paths: SIGNED_IN },
   "paid-owner": { cookie: await session(lia.user, lia.org, { fresh: true }), paths: SIGNED_IN },
+  "long-plus": { cookie: await session(longOwner.user, longOwner.org, { fresh: true }), paths: SIGNED_IN },
+  "long-free": { cookie: await session(longFree.user, longFree.org), paths: SIGNED_IN },
   "invitee": { cookie: await session(gus.user, gus.org, { fresh: true }), paths: [`/invite/${inviteToken}`] },
   "signed-out": { cookie: "", paths: ["/signin", "/signup", "/signin/password", "/reset", "/signin/passkey", "/nowhere",
     `/invite/${inviteToken}`, "/invite"] },

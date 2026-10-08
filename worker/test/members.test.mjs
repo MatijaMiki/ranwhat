@@ -240,7 +240,7 @@ const panel = (html) => {
 
 /* A person's row in the members table: their address, then their role. */
 const memberRow = (email, role, you = false) => new RegExp(`<tr data-member="[^"]+"><td class="cell-main"><strong>${
-  email.replace(/[.]/g, "\\.")}</strong>${you ? ' <span class="pill">you</span>' : ""}</td><td data-label="Role"><span class="pill[^"]*">${role}</span></td>`);
+  email.replace(/[.]/g, "\\.")}</strong>${you ? ' <span class="pill">You</span>' : ""}</td><td data-label="Role"><span class="pill[^"]*">${role}</span></td>`);
 
 /* ---------- the feed host and terminals ---------- */
 
@@ -434,7 +434,7 @@ test("an invite: mailed with a 256-bit link kept only as its hash; GET shows it,
     assert.match(panel(boHome).html, memberRow("ana@example.com", "Owner"));
     await linkTerminal(e, ana, "Ana laptop");
     assert.match((await bo.get("/machines")).text,
-      /<strong>Ana laptop<\/strong><\/td><td data-label="Kind"><span class="pill">terminal<\/span><\/td><td data-label="Added by">ana@example\.com<\/td>/);
+      /<strong>Ana laptop<\/strong><\/td><td data-label="Kind"><span class="pill">Terminal<\/span><\/td><td data-label="Added by">ana@example\.com<\/td>/);
 
     home = (await ana.get("/members")).text;
     assert.match(panel(home).html, memberRow("bo@example.com", "Member"));
@@ -847,6 +847,60 @@ test("the owner is never left out: cannot leave, be removed or be demoted; owner
   /* Ana, an admin now, may leave. */
   assert.equal((await submit(ana, "/members/leave")).status, 303);
   assert.equal(roleIn(e, acme, "ana@example.com"), null);
+});
+
+test("a members form that does nothing draws Members again, with why in the card whose form it was", async () => {
+  const s = services();
+  const e = env();
+  const { ana, acme } = await acmeOwner(e, s);
+  const bo = await inOrg(e, s, acme, "bo@example.com");
+  const boId = userId(e, "bo@example.com");
+  const cardOf = (html, id) => {
+    const m = html.match(new RegExp(`<section class="card[^"]*" id="${id}"[^>]*>([\\s\\S]*?)</section>`));
+    assert.ok(m, `no ${id} card`);
+    return m[1];
+  };
+  const onMembers = (r) => assert.match(r.text, /<a href="\/members" aria-current="page">/, "the Members page, in its shell");
+
+  /* An invite to someone already in: said in the invite card. */
+  let r = await invite(ana, "bo@example.com");
+  assert.equal(r.status, 409);
+  onMembers(r);
+  assert.match(cardOf(r.text, "invite"), /<p class="bad">bo@example\.com is in Acme already\.<\/p>/);
+  assert.doesNotMatch(cardOf(r.text, "members"), /class="bad"/);
+  assert.equal(invitesOf(e, acme).length, 0);
+
+  /* Removing someone who is not in it: above the members table. */
+  r = await forged(e, ana, "/members/remove", acme, { user: randomUUID() });
+  assert.equal(r.status, 404);
+  onMembers(r);
+  assert.match(cardOf(r.text, "members"), /<p class="bad">That person is not in Acme, so nothing was done\.<\/p>/);
+
+  /* A form drawn for another organisation: at the top of the page this session looks at. */
+  r = await forged(e, ana, "/members/leave", randomUUID());
+  assert.equal(r.status, 409);
+  onMembers(r);
+  assert.match(r.text, /<div class="grid">\s*<p class="bad">That form was for another of your organisations/);
+
+  /* Without a fresh code: why, in the card, and the way to a code once, at the top. */
+  later(FRESH_FOR + 1);
+  r = await forged(e, ana, "/members/role", acme, { user: boId, role: "admin" });
+  assert.equal(r.status, 403);
+  onMembers(r);
+  assert.match(cardOf(r.text, "members"), /Changing a role needs an emailed code typed in the last 15 minutes, so nothing was done/);
+  assert.equal(forms(r.text, "/stepup").length, 1);
+  assert.match(r.text, /<div class="callout warn" id="confirm">[\s\S]*?<input type="hidden" name="next" value="\/members">/);
+  assert.equal(forms(r.text, "/members/role").length, 0, "and no form the session may not use");
+  assert.equal(roleIn(e, acme, "bo@example.com"), "member");
+
+  /* A member refused: Members drawn for him, with no admin's form on it. */
+  r = await forged(e, bo, "/members/invite", acme, { email: "new@example.com" });
+  assert.equal(r.status, 403);
+  onMembers(r);
+  assert.match(cardOf(r.text, "invite"), /Only an owner or an admin of Acme can invite people, so nobody was invited/);
+  for (const action of ["/members/invite", "/invites/revoke", "/members/role", "/members/remove", "/members/transfer"]) {
+    assert.equal(forms(r.text, action).length, 0, action);
+  }
 });
 
 test("a member is refused every admin action, and an admin every owner action", async () => {

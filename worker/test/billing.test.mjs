@@ -769,6 +769,55 @@ test("Manage billing opens the portal for the organisation's own customer, with 
   assert.equal(portals(s).length, n);
 });
 
+test("Manage billing that does not open draws Billing again, with why in the plan's card", async () => {
+  const s = services();
+  const e = env();
+  const ana = new Browser(e);
+  await signIn(ana, s);
+  const org = orgOf(e, "ana@example.com");
+  const { sub } = await upgraded(ana, s, e);
+  const planCard = (html) => {
+    const m = html.match(/<section class="card" id="billing">([\s\S]*?)<\/section>/);
+    assert.ok(m, "no plan card");
+    return m[1];
+  };
+  const onBilling = (r) => assert.match(r.text, /<a href="\/billing" aria-current="page">/, "the Billing page, in its shell");
+  const page = await ana.get("/billing");
+
+  /* Stripe's portal down: the sentence in the plan's card, with Stripe's own login as the way round. */
+  s.fail["POST /v1/billing_portal/sessions"] = [403, { error: { type: "invalid_request_error" } }];
+  const down = await ana.post("/billing", hidden(page.text, "/billing"));
+  delete s.fail["POST /v1/billing_portal/sessions"];
+  assert.equal(down.status, 502);
+  onBilling(down);
+  assert.match(planCard(down.text), /<p class="bad">Stripe's billing page did not open\.<\/p>/);
+  assert.match(planCard(down.text), /<a href="https:\/\/ranwhat\.com\/api\/billing">ranwhat\.com\/api\/billing<\/a>/);
+
+  /* A member: Billing drawn for them, with no Manage billing on it and nothing of Stripe in its policy. */
+  const bo = new Browser(e, { ip: "203.0.113.33" });
+  await signIn(bo, s, "bo@example.com");
+  join(e, "bo@example.com", org, "member");
+  const tried = await bo.post("/billing", { ...await bound(e, bo, "billing", org), subscription: sub.id });
+  assert.equal(tried.status, 403);
+  onBilling(tried);
+  assert.match(planCard(tried.text), /Only an owner or an admin of Personal can open its billing\./);
+  assert.doesNotMatch(tried.text, /action="\/billing"/);
+  assert.doesNotMatch(tried.headers.get("content-security-policy"), /stripe/);
+
+  /* Without a fresh code: why, and the way to a code once, at the top; no form to Stripe. */
+  later(FRESH_FOR + 1);
+  const n = portals(s).length;
+  const stale = await ana.post("/billing", hidden(page.text, "/billing"));
+  assert.equal(stale.status, 403);
+  onBilling(stale);
+  assert.match(planCard(stale.text), /Opening billing needs an emailed code typed in the last 15 minutes, so it did not open\./);
+  assert.equal(formsOf(stale.text, "/stepup").length, 1);
+  assert.match(stale.text, /<div class="callout warn" id="confirm">[\s\S]*?<input type="hidden" name="next" value="\/billing">/);
+  assert.doesNotMatch(stale.text, /action="\/billing"/);
+  assert.doesNotMatch(stale.headers.get("content-security-policy"), /stripe/);
+  assert.equal(portals(s).length, n);
+});
+
 test("a portal session is only for a subscription linked to the organisation", async () => {
   const s = services();
   const e = env();

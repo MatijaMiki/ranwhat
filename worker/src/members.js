@@ -90,8 +90,8 @@ import {
   nextPath, orgFormOk, randomToken, readCookie, setCookie, unbump,
 } from "./session.js";
 import {
-  actions, back as backTo, card, cell, confirmCallout, dayStamp, fields, form, icon, lockBadge, page, pill, redirect,
-  refused, shownAddress, stamp, stepupForm, table,
+  actions, back as backTo, card, cell, confirmCallout, dangerButton, dayStamp, fields, form, icon, lockBadge, page, pill,
+  redirect, refused, shownAddress, stamp, stepupForm, table,
 } from "./ui.js";
 import { billingEmailDue, billingEmailFollows } from "./billing.js";
 
@@ -107,7 +107,9 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;        // 32 random bytes, base64url
 
 const ROLES = Object.freeze({ owner: "Owner", admin: "Admin", member: "Member" });
-const ROLE_TONE = Object.freeze({ owner: "brand", admin: "info", member: "" });
+/* The owner in blue, apart from the brand's colour, which is the plan's
+   and the upgrade's (and, in the dark theme, a danger button's too). */
+const ROLE_TONE = Object.freeze({ owner: "info", admin: "", member: "" });
 const plural = (count, one) => `${count} ${one}${count === 1 ? "" : "s"}`;
 const BY_ROLE = "CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END";
 
@@ -148,7 +150,6 @@ const ORG_ACTIVITY = Object.freeze({
 
 const problem = (text) => (text ? `<p class="bad">${escape(text)}</p>` : "");
 const back = backTo("/", "Your account");
-const backToMembers = backTo("/members", "Back to Members");
 const codeAge = `${FRESH_FOR / 60} minutes`;
 
 /* Whom someone in `role` may remove: the owner anyone but themselves, an
@@ -226,19 +227,21 @@ async function orgActivity(env, orgId, since) {
 
 /* The organisation switcher, for someone in more than one: nothing for
    anyone else. next: where to go once switched (the account page it is
-   on, or the page that approves a terminal, device.js). compact: the
-   sidebar's, a select and a small button on one line. */
+   on, or the page that approves a terminal, device.js). compact: folded
+   away behind "Switch organisation" (a <details>, so no script), for the
+   sidebar and the terminal page, where the organisation is named already. */
 export async function switcher(env, who, next = "/", { compact = false } = {}) {
   const orgs = await orgsOf(env, who.user);
   if (orgs.length < 2) return "";
   const options = orgs.map((o) => `<option value="${escape(o.id)}"${o.id === who.org.id ? " selected" : ""}>` +
     `${escape(o.name)} (${ROLES[o.role].toLowerCase()})</option>`).join("");
-  const choose = `<select id="org-switch" name="org">${options}</select>
-      <button type="submit"${compact ? ' class="compact"' : ""}>Switch</button>`;
-  return form("/org/switch", await formToken(env, who.id, "org-switch"), `
+  const switching = form("/org/switch", await formToken(env, who.id, "org-switch"), `
       <input type="hidden" name="next" value="${escape(nextPath(next))}">
       <label for="org-switch">Your organisations</label>
-      ${compact ? `<span class="switch-row">${choose}</span>` : choose}`, compact ? "switch" : "");
+      <select id="org-switch" name="org">${options}</select>
+      <button type="submit"${compact ? ' class="compact"' : ""}>Switch</button>`);
+  return compact ? `<details class="switch"><summary class="toggle">${icon("swap")}Switch organisation</summary>
+      ${switching}</details>` : switching;
 }
 
 /* Members, for dashboard.js's Members page, as { top, main, side, action }:
@@ -251,8 +254,16 @@ export async function switcher(env, who, next = "/", { compact = false } = {}) {
    on any plan); the organisation's own record for its owner and admins;
    and, apart, Leave for anyone but the owner, and for the owner the way to
    hand the organisation on. */
-export async function membersPanel(env, who, onPlan) {
+export async function membersPanel(env, who, onPlan, { error = "", at = "", stepup = false } = {}) {
   const org = who.org;
+  /* What went wrong, in the card whose form it was (`at`), when that card
+     is drawn: said.done says whether it was. */
+  const said = { done: false };
+  const say = (where) => {
+    if (!error || at !== where) return "";
+    said.done = true;
+    return problem(error);
+  };
   const name = escape(org.name);
   const feature = FEATURES.members;
   const needs = PLAN_NAMES[feature.plan];
@@ -271,6 +282,7 @@ export async function membersPanel(env, who, onPlan) {
         title: feature.name, mark: lockBadge(), cls: "locked", attributes: 'id="members" data-feature="members"',
         aside: pill(`Needs ${needs}`, "brand"),
         body: `<p>Invite your team: in ${needs}, one price however many people.</p>
+      ${say("members")}${say("invite")}
       <ul class="checks">
         <li>${icon("mail")}<div><strong>Invites by email</strong><p>Each person joins as a member, signed in as the address
           invited.</p></div></li>
@@ -280,6 +292,8 @@ export async function membersPanel(env, who, onPlan) {
       </ul>
       ${upgrade}`,
       }),
+      error: said.done ? "" : problem(error),
+      stepupNeeded: stepup,
     };
   }
 
@@ -300,9 +314,9 @@ export async function membersPanel(env, who, onPlan) {
     }
     if (!me && removeToken && mayRemove(org.role, p.role)) {
       forms.push(form("/members/remove", removeToken, `${target}
-          <button type="submit" class="danger compact">Remove</button>`));
+          ${dangerButton("Remove", "compact")}`));
     }
-    return `<tr data-member="${uid}">${cell("", `<strong>${escape(p.email)}</strong>${me ? ` ${pill("you")}` : ""}`, "cell-main")}` +
+    return `<tr data-member="${uid}">${cell("", `<strong>${escape(p.email)}</strong>${me ? ` ${pill("You")}` : ""}`, "cell-main")}` +
       `${cell("Role", pill(ROLES[p.role], ROLE_TONE[p.role]))}${cell("Joined", dayStamp(p.created_at))}${cell("", actions(forms), "act")}</tr>`;
   });
   const count = (role) => people.filter((p) => p.role === role).length;
@@ -311,7 +325,8 @@ export async function membersPanel(env, who, onPlan) {
   const everyone = card({
     title: `Everyone in ${org.name}`, icon: "members", attributes: 'id="members" data-feature="members"',
     aside: `<span class="counts">${roles}</span>`,
-    body: `${table([["Member"], ["Role"], ["Joined"], ["Actions", "act"]], rows, { label: `Everyone in ${org.name}` })}
+    body: `${say("members")}
+      ${table([["Member"], ["Role"], ["Joined"], ["Actions", "act"]], rows, { label: `Everyone in ${org.name}` })}
       ${manager && people.length > 1 ? `<p class="hint">Removing someone revokes the terminals they linked to ${name}.
          CI tokens they made stay, under Machines, until revoked there.</p>` : ""}`,
   });
@@ -321,7 +336,7 @@ export async function membersPanel(env, who, onPlan) {
     const revokeToken = await formToken(env, who.id, `invite-revoke:${org.id}`);
     pending = card({
       title: "Invites waiting", icon: "mail", attributes: 'id="invites"', aside: pill(String(invites.length)),
-      body: table([["Email"], ["Sent"], ["Works until"], ["Actions", "act"]], invites.map((i) =>
+      body: say("invites") + table([["Email"], ["Sent"], ["Works until"], ["Actions", "act"]], invites.map((i) =>
         `<tr data-invite="${escape(i.id)}">${cell("", `<strong>${escape(i.email)}</strong>`, "cell-main")}` +
         `${cell("Sent", dayStamp(i.created_at))}${cell("Works until", dayStamp(i.expires_at))}` +
         `${cell("", actions([form("/invites/revoke", revokeToken, `
@@ -345,7 +360,8 @@ export async function membersPanel(env, who, onPlan) {
   } else if (!open) {
     invite = `<p>Inviting people needs ${needs}: one price however many people.</p>${upgrade}`;
   } else if (!confirmed) {
-    invite = `<p>Inviting someone needs an emailed code typed in the last ${codeAge}: <a href="#confirm">Email me a code</a>.</p>`;
+    invite = `<p>Invite people by email; they join as members. The form is here once you confirm it is you, at the top
+       of this page.</p>`;
   } else {
     invite = form("/members/invite", await formToken(env, who.id, `member-invite:${org.id}`), `${orgField}
       <label for="invite-email">Email address</label>
@@ -357,7 +373,8 @@ export async function membersPanel(env, who, onPlan) {
   }
   const inviteCard = card({
     title: "Invite someone", icon: "mail", attributes: 'id="invite"',
-    aside: !open ? pill(`Needs ${needs}`, "brand") : "", body: invite,
+    aside: !open ? pill(`Needs ${needs}`, "brand") : manager && !confirmed ? pill("Needs a code", "warn") : "",
+    body: `${say("invite")}${invite}`,
   });
 
   let leave = "";
@@ -366,22 +383,25 @@ export async function membersPanel(env, who, onPlan) {
       title: "Leave", icon: "exit", cls: "danger-zone", attributes: 'id="leave"',
       body: `<p>Leaving revokes the terminals you linked to ${name}.${org.role === "admin"
         ? ` CI tokens you made are ${name}'s, and keep working until an owner or an admin revokes them.` : ""}</p>
+      ${say("leave")}
       ${form("/members/leave", await formToken(env, who.id, `member-leave:${org.id}`), `${orgField}
-      <button type="submit" class="danger">Leave ${name}</button>`)}`,
+      ${dangerButton(`Leave ${name}`)}`)}`,
     });
   } else if (people.length > 1) {
     const admins = people.filter((p) => p.role === "admin");
     const hand = !transferToken
-      ? `<p class="hint">Making someone else the owner needs an emailed code typed in the last ${codeAge}:
-         <a href="#confirm">Email me a code</a>.</p>`
+      ? `<p class="hint">Each admin is listed here to make the owner once you confirm it is you, at the top of this
+         page.</p>`
       : !admins.length ? `<p class="hint">Only an admin can be made the owner: make someone an admin first.</p>`
         : `<ul>${admins.map((p) => `<li class="danger-row"><span>${shownAddress(p.email)}</span>${form("/members/transfer", transferToken, `
           <input type="hidden" name="user" value="${escape(p.user_id)}">${orgField}
-          <button type="submit" class="danger compact">Make the owner</button>`)}</li>`).join("")}</ul>`;
+          ${dangerButton("Make the owner", "compact")}`)}</li>`).join("")}</ul>`;
     leave = card({
       title: "Hand on ownership", icon: "alert", cls: "danger-zone", attributes: 'id="ownership"',
+      aside: transferToken ? "" : pill("Needs a code", "warn"),
       body: `<p>As its owner you cannot leave ${name}: make one of its admins the owner first. You stay in it as an
          admin, and the next page asks before anything changes.</p>
+      ${say("leave")}
       ${hand}`,
     });
   }
@@ -404,6 +424,8 @@ export async function membersPanel(env, who, onPlan) {
     main: `${everyone}${pending}${record}`,
     side: `${inviteCard}${leave}`,
     action: manager && open ? `<a class="btn primary" href="#invite">${icon("plus")}Invite someone</a>` : "",
+    error: said.done ? "" : problem(error),
+    stepupNeeded: stepup && !top,
   };
 }
 
@@ -412,14 +434,11 @@ export async function membersPanel(env, who, onPlan) {
 const signedOut = (request) =>
   redirect("/signin", readCookie(request, SESSION_COOKIE) ? [clearCookie(SESSION_COOKIE)] : []);
 
-/* Why a members form did nothing, with the way to a fresh code when that
-   is what it needed. */
-async function trouble(env, who, status, text, { stepup = false } = {}) {
-  return page("Members", `<h1>Nothing was done.</h1>
-    ${problem(text)}
-    ${stepup ? `<div class="actions">${stepupForm(await formToken(env, who.id, "stepup"), "/members")}</div>` : ""}
-    ${backToMembers}`, { status, icon: "alert", tone: "warn" });
-}
+/* Why a members form did nothing. Not a page: dashboard.js draws the
+   Members page again with it (its drawnAgain()), the sentence in the card
+   whose form it was or, with `top`, at the top of the page, and the
+   step-up at the top when a fresh code is what it needed. */
+const trouble = (env, who, status, text, { stepup = false, top = false } = {}) => ({ trouble: { status, text, stepup, top } });
 
 const needsCode = (env, who, what) =>
   trouble(env, who, 403, `${what} needs an emailed code typed in the last ${codeAge}, so nothing was done.`,
@@ -436,7 +455,8 @@ async function posted(request, env, action) {
   if (bound === "refused") return { response: refused() };
   if (bound === "elsewhere") {
     return { response: trouble(env, who, 409,
-      "That form was for another of your organisations than the one this page is looking at now, so nothing was done. Reload your account page and try again.") };
+      "That form was for another of your organisations than the one this page is looking at now, so nothing was done. Reload your account page and try again.",
+      { top: true }) };
   }
   return { who, f };
 }
@@ -635,10 +655,10 @@ function unusable(inv, t = now()) {
   return null;
 }
 
-const gone = ([status, text]) => page("Invite", `<h1>This invite cannot be used.</h1>
+const gone = ([status, text]) => page("Invite", `<h1>This invite cannot be used</h1>
   ${problem(text)}${back}`, { status, cookies: [clearCookie(INVITE_COOKIE)], icon: "mail", tone: "warn" });
 
-const lapsed = (inv) => page("Invite", `<h1>This invite cannot be used just now.</h1>
+const lapsed = (inv) => page("Invite", `<h1>This invite cannot be used just now</h1>
   ${problem(`${inv.org_name} is not on ${PLAN_NAMES[FEATURES.members.plan]} at the moment, so it cannot take new members. Ask whoever invited you.`)}
   ${back}`, { status: 403, icon: "mail", tone: "warn" });
 
@@ -675,7 +695,7 @@ async function invitation(request, env, token) {
     <div class="alt">${back}</div>`, { status: 403, cookies: keep, ...icon });
   }
   if (await memberIn(env, inv.org_id, who.user)) {
-    return page("Join an organisation", `<h1>You are in ${name} already.</h1>
+    return page("Join an organisation", `<h1>You are in ${name} already</h1>
     <p class="lead">Switch to it on your account page.</p>${back}`,
     { cookies: [clearCookie(INVITE_COOKIE)], icon: "check", tone: "ok" });
   }
@@ -696,7 +716,7 @@ export const invitePage = (request, env, token) => invitation(request, env, toke
 export async function inviteAgain(request, env) {
   const token = readCookie(request, INVITE_COOKIE);
   if (!token) {
-    return page("Invite", `<h1>Open the link from your invite again.</h1>
+    return page("Invite", `<h1>Open the link from your invite again</h1>
       <p class="lead">This page shows an invite only when you come to it from the link in the email.</p>${back}`,
     { status: 404, icon: "mail", tone: "info" });
   }
@@ -726,7 +746,7 @@ export async function acceptPost(request, env) {
   const no = unusable(inv);
   if (no) return gone(no);
   if (!forThem(who, inv)) {
-    return page("Join an organisation", `<h1>Not joined.</h1>
+    return page("Join an organisation", `<h1>Not joined</h1>
     ${problem(`This invite was sent to another address than ${who.email}, the one you are signed in with, so nobody joined.`)}
     ${back}`, { status: 403, icon: "alert", tone: "warn" });
   }
@@ -950,6 +970,11 @@ export async function transferPost(request, env, ctx) {
 
 /* ---------- switching ---------- */
 
+/* The switcher is on every account page and the terminal's, so a switch
+   that did nothing says so on a page of its own. */
+const notSwitched = (status, text) => page("Not switched", `<h1>Nothing was changed</h1>
+  ${problem(text)}${back}`, { status, icon: "alert", tone: "warn" });
+
 /* POST /org/switch: the session looks at another organisation its person
    is in, and goes on to `next`. Switching to the one it looks at already
    writes nothing, and an account switches SWITCHES_PER_DAY times a day at
@@ -968,10 +993,10 @@ export async function switchPost(request, env) {
   const wanted = f.get("org");
   const row = typeof wanted === "string" && wanted.length <= 100 ? await env.LIST.prepare(
     "SELECT org_id FROM memberships WHERE org_id = ? AND user_id = ?").bind(wanted, who.user).first() : null;
-  if (!row) return trouble(env, who, 404, "You are not in that organisation, so nothing was changed.");
+  if (!row) return notSwitched(404, "You are not in that organisation, so nothing was changed.");
   if (row.org_id === who.org.id) return redirect(nextPath(f.get("next")));
   if (!await countWithin(env, "switch-user", who.user, DAY, SWITCHES_PER_DAY)) {
-    return trouble(env, who, 429,
+    return notSwitched(429,
       `You have switched organisation ${SWITCHES_PER_DAY} times today, the most one account can in a day, so nothing was changed. Try again tomorrow.`);
   }
   const db = env.LIST;
