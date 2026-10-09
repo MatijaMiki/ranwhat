@@ -524,8 +524,11 @@ class EveryCopyOfASecretIsCheap(unittest.TestCase):
                      "clean.scan_file(path, apply=True)",
                      then="text = open(path, encoding='utf-8').read()\n"
                           "assert not any(p in text for p in pws)")),
-            lambda bare, held: held < 3 * bare)
-        self.assertLess(held, 3 * bare)
+            lambda bare, held: held < 5 * bare)
+        # The bare run is under 0.1s, so a shared runner's noise moves the
+        # ratio by tens of percent (3.27 on macOS CI). The quadratic this
+        # guards against ran hundreds of times slower, so 5 still catches it.
+        self.assertLess(held, 5 * bare)
 
 
 # A .env read whose one value repeats a short run, and 400 deletions whose
