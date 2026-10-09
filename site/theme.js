@@ -1,5 +1,5 @@
 /* Light or dark, the visitor's choice, the header's phone menu, and which
- * section of /commands its sidebar marks.
+ * section of /commands, or which guide, its sidebar marks.
  *
  * The stylesheet follows the system setting on its own; this only adds a
  * manual override, kept in localStorage. It loads in <head> without defer,
@@ -85,7 +85,7 @@
     });
   });
 
-  // The commands sidebar. On a page whose own sections it links to
+  // The docs sidebar (commands and guides). On a page whose own sections it links to
   // (/commands), it marks the section being read rather than the page: the
   // last one whose top has passed under the header. Without script the
   // page's own link stays marked. On a phone the sidebar is one row of

@@ -577,7 +577,7 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 .form .act[disabled]:hover{background:transparent;color:var(--ink)}
 
 /* ---------- commands: the section's sidebar ----------
-   Install, watch, clean, scan and /commands share it. On a desktop it runs
+   Install, watch, clean, scan, /commands and the guides share it. On a desktop it runs
    down the left of the page under the header; under 860px it is one row of
    links under the header, scrolled sideways, so it never pushes the page
    down. The header's Commands link is lit on every page of the section. */
@@ -597,7 +597,7 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
 .docnav li a.cmdname{font-family:"IBM Plex Mono",monospace;font-size:14px}
 .docnav li a:hover{color:var(--ink)}
 .docnav li a[aria-current]{color:var(--ink);font-weight:600;border-left-color:var(--brand)}
-.in-commands .nav nav a[href="/commands"]{color:var(--ink)}
+.in-commands .nav nav a[href="/commands"],.in-guides .nav nav a[href="/guides"]{color:var(--ink)}
 @media(max-width:860px){
   .docs{display:block}
   .docmain{border-left:0}
@@ -610,7 +610,7 @@ footer{border-top:1px solid var(--rule);background:var(--surface)}
     border-radius:999px;font-size:14px}
   .docnav li a[aria-current]{border-color:var(--ink);background:var(--surface)}
 }
-@media(max-width:760px){html.js .in-commands .nav nav a[href="/commands"]{font-weight:600}}
+@media(max-width:760px){html.js .in-commands .nav nav a[href="/commands"],html.js .in-guides .nav nav a[href="/guides"]{font-weight:600}}
 /* /commands: what follows a command's example, and the flags it takes */
 .cmdnote{margin:18px 0 0;font-size:15px;color:var(--muted);max-width:68ch}
 .flaglist{margin:14px 0 0;font-size:14px;color:var(--muted)}
