@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI coding agent history: where each one stores it | ranwhat</title>
+<meta name="description" content="Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.">
+<link rel="canonical" href="https://ranwhat.com/guides/ai-coding-agent-history-locations">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/ai-coding-agent-history-locations">
+<meta property="og:title" content="AI coding agent history: where each one stores it | ranwhat">
+<meta property="og:description" content="Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="AI coding agent history: where each one stores it | ranwhat">
+<meta name="twitter:description" content="Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Where each AI coding agent keeps your conversation history","description":"Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.","datePublished":"2026-10-09","dateModified":"2026-10-09","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-history-locations","about":[{"@type":"Thing","name":"AI coding agents"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent history locations","item":"https://ranwhat.com/guides/ai-coding-agent-history-locations"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations" aria-current="page">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Agent history locations</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Where each AI coding agent keeps your conversation history</h1>
+    <p class="lede">
+      Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf,
+      Cline and Continue all record your sessions on your own disk. Where each
+      one puts them, what format they are in, how long they stay, and how to
+      see how much you have.
+    </p>
+    <div class="cmdrow" style="margin-top:26px">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-text">uvx ranwhat sources</span>
+        <button class="copy" data-copy="#cmd-text">Copy</button>
+      </div>
+    </div>
+    <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
+      Paths are the ones ranwhat reads, checked against vendor documentation where it exists (see Sources). Published <time datetime="2026-10-09">9 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Where</div>
+    <div>
+      <h2>Where each agent keeps its sessions</h2>
+      <p class="lede">
+        Most terminal agents write one file per session under a dot folder in
+        your home directory. Editor-based agents tend to use a database inside
+        the editor's own data folder. On Windows, <span class="icode">~</span>
+        is <span class="icode">%USERPROFILE%</span>.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Agent</th><th>Where</th><th>Format</th><th>Retention</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Claude Code</strong></td>
+              <td data-label="Where"><code>~/.claude/<wbr>projects/<wbr>&lt;project&gt;/<wbr>&lt;session-id&gt;.jsonl</code></td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Retention">30 days by default. <a href="/guides/claude-code-history">Full guide</a></td></tr>
+          <tr><td><strong>Codex</strong> (CLI, IDE extension, desktop app)</td>
+              <td data-label="Where"><code>~/.codex/<wbr>sessions/<wbr>YYYY/MM/DD/<wbr>rollout-*.jsonl</code>, <code>archived_sessions/</code> and <code>history.jsonl</code>, or under <code>$CODEX_HOME</code></td>
+              <td data-label="Format">JSONL, one thread per file; <code>.jsonl.zst</code> once a thread has been idle for a week</td>
+              <td data-label="Retention">None documented for sessions. <code>history.max_bytes</code> caps the file the docs name</td></tr>
+          <tr><td><strong>Gemini CLI</strong></td>
+              <td data-label="Where"><code>~/.gemini/<wbr>tmp/<wbr>&lt;project&gt;/<wbr>chats/</code>, or under <code>$GEMINI_CLI_HOME</code></td>
+              <td data-label="Format">JSONL (v0.39.0 and later), JSON before that</td>
+              <td data-label="Retention">30 days by default (<code>general.sessionRetention</code>)</td></tr>
+          <tr><td><strong>GitHub Copilot CLI</strong></td>
+              <td data-label="Where"><code>~/.copilot/<wbr>session-state/<wbr>&lt;session-id&gt;/<wbr>events.jsonl</code>, or under <code>$COPILOT_HOME</code></td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Retention">None documented; removal is manual</td></tr>
+          <tr><td><strong>Cursor</strong> (editor and <code>cursor-agent</code>)</td>
+              <td data-label="Where"><code>Cursor/User/<wbr>globalStorage/<wbr>state.vscdb</code> under <code>~/Library/Application Support</code> (macOS), <code>~/.config</code> (Linux) or <code>%APPDATA%</code> (Windows); and <code>~/.cursor/<wbr>chats/*/*/<wbr>store.db</code></td>
+              <td data-label="Format">SQLite, undocumented</td>
+              <td data-label="Retention">None documented</td></tr>
+          <tr><td><strong>Windsurf</strong></td>
+              <td data-label="Where"><code>~/.codeium/<wbr>windsurf/<wbr>cascade/*.pb</code>, and <code>~/.windsurf/<wbr>transcripts/*.jsonl</code> when its transcript hook is on</td>
+              <td data-label="Format">Encrypted protobuf; JSONL for the hook copy</td>
+              <td data-label="Retention">The hook copy keeps the newest 100 files</td></tr>
+          <tr><td><strong>Cline</strong></td>
+              <td data-label="Where"><code>&lt;editor&gt;/User/<wbr>globalStorage/<wbr>saoudrizwan.claude-dev/<wbr>tasks/&lt;task&gt;/</code>, and <code>~/.cline/data</code></td>
+              <td data-label="Format">JSON</td>
+              <td data-label="Retention">None documented</td></tr>
+          <tr><td><strong>Roo Code</strong></td>
+              <td data-label="Where"><code>&lt;editor&gt;/User/<wbr>globalStorage/<wbr>rooveterinaryinc.roo-cline/<wbr>tasks/&lt;task&gt;/</code></td>
+              <td data-label="Format">JSON, text</td>
+              <td data-label="Retention">None documented</td></tr>
+          <tr><td><strong>Continue</strong> (IDE and <code>cn</code>)</td>
+              <td data-label="Where"><code>~/.continue/<wbr>sessions/<wbr>&lt;session&gt;.json</code>, or under <code>$CONTINUE_GLOBAL_DIR</code></td>
+              <td data-label="Format">JSON</td>
+              <td data-label="Retention">None documented</td></tr>
+          <tr><td><strong>Aider</strong></td>
+              <td data-label="Where"><code>.aider.chat.history.md</code> and <code>.aider.input.history</code> in the repository you ran it in, or the folder you ran it from</td>
+              <td data-label="Format">Markdown, plain text</td>
+              <td data-label="Retention">None; every session is appended to the same file</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        <code>&lt;editor&gt;</code> is the editor's data folder, such as
+        <span class="icode">Code</span> for VS Code, under the same parent as
+        Cursor's above. <strong>None documented</strong> means the vendor
+        publishes no retention period that ranwhat or this page could find,
+        not that nothing is ever deleted. Cursor, Windsurf and Cline publish
+        no storage format, so what ranwhat reads there was worked out from
+        open-source readers and real dumps, and can change with an update.
+      </p>
+      <p style="font-size:14.5px;color:var(--muted)">
+        ranwhat also reads OpenCode, Goose, Qwen Code, Grok Build, Droid, Kimi
+        Code, Kimi CLI, Pi, Muse Code and OpenClaw. The
+        <a href="https://github.com/MatijaMiki/ranwhat#ranwhat-watch-audit-what-claude-code-and-your-other-agents-ran">README</a>
+        has each path. Copilot Chat inside VS Code keeps its own history, which
+        ranwhat does not read, so this page does not cover it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Contents</div>
+    <div>
+      <h2>What is in them</h2>
+      <p class="lede">
+        More than the chat. A session file is a record of everything the agent
+        saw and did: your prompts, the contents of every file it opened, the
+        output of every command it ran, and anything you pasted. If the agent
+        ran <span class="icode">cat .env</span>, the values are in the file.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Prompts</span>
+          <span class="v">What you typed, with timestamps. Codex also keeps typed prompts in <span class="icode">history.jsonl</span>, and Aider in <span class="icode">.aider.input.history</span>.</span></div>
+        <div class="row"><span class="k">Files read</span>
+          <span class="v">Tool results hold file contents. Windsurf's transcript steps record the content of each file viewed and the before and after text of each edit.</span></div>
+        <div class="row"><span class="k">Command output</span>
+          <span class="v">Shell output is stored with the call that ran it. Large outputs can spill to separate files: Copilot CLI and Roo Code both do this.</span></div>
+        <div class="row"><span class="k">Secrets</span>
+          <span class="v">Anything in the three above that was a credential. A key you pasted to ask for help is in the file the same way as one printed by a command.</span></div>
+        <div class="row"><span class="k">Codex extras</span>
+          <span class="v">A snapshot of your shell's exported variables under <span class="icode">shell_snapshots/</span>, and a SQLite index of threads.</span></div>
+      </div>
+      <h3 style="margin-top:34px">Why plaintext matters</h3>
+      <p style="color:var(--muted);font-size:15px">
+        Apart from Windsurf's Cascade files, which are encrypted, ranwhat reads
+        every store in the table as plain JSON, text or SQLite, so file
+        permissions are the only protection.
+        Anything that runs as you can read them, and so can whatever backs up or
+        syncs your home folder. Aider is the odd one out: its history sits in
+        the repository, so a careless <span class="icode">git add .</span> can
+        commit it. A secret printed once by a tool can sit in several of these
+        files, for as long as the tool keeps them. For what infostealers now
+        collect, see <a href="/guides/claude-code-history">the Claude Code
+        history guide</a>, and for the wider habits,
+        <a href="/guides/developer-opsec">Developer OPSEC</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Size</div>
+    <div>
+      <h2>How much you have on your machine</h2>
+      <p class="lede">
+        A folder that does not exist means that agent is not on this machine,
+        or keeps its history somewhere else. Each command below prints a size.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre><span class="c-mut"># Claude Code, Codex, Gemini CLI, Copilot CLI, Continue</span>
+du -sh ~/.claude/projects
+du -sh ~/.codex/sessions ~/.codex/archived_sessions ~/.codex/history.jsonl
+du -sh ~/.gemini/tmp/*/chats
+du -sh ~/.copilot/session-state
+du -sh ~/.continue/sessions
+
+<span class="c-mut"># Windsurf</span>
+du -sh ~/.codeium/windsurf/cascade ~/.windsurf/transcripts
+
+<span class="c-mut"># Cursor on macOS (Linux: ~/.config/Cursor/User/globalStorage)</span>
+du -sh ~/Library/Application\ Support/Cursor/User/globalStorage/state.vscdb ~/.cursor/chats
+
+<span class="c-mut"># Cline and Roo Code in VS Code on macOS (Linux: ~/.config/Code/User/globalStorage)</span>
+du -sh ~/Library/Application\ Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks
+du -sh ~/Library/Application\ Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks
+
+<span class="c-mut"># Aider leaves its files in each repository, so look for them</span>
+find ~ -maxdepth 4 -name '.aider*history*' 2&gt;/dev/null</pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        <span class="icode">ls -lt</span> on a folder shows the newest first.
+        On Windows, use the same folders under <span class="icode">%USERPROFILE%</span>
+        and <span class="icode">%APPDATA%</span>. Cursor's database holds every
+        chat in one file, so its size is the total, not one project's.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Limit</div>
+    <div>
+      <h2>How to limit or delete them</h2>
+      <p class="lede">
+        Only some of these agents give you a setting. For the rest, the
+        history is a file or a database you delete yourself.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Claude Code</span>
+          <span class="v"><span class="icode">cleanupPeriodDays</span>, and <span class="icode">claude project purge</span>. Both are in <a href="/guides/claude-code-history">the Claude Code history guide</a>.</span></div>
+        <div class="row"><span class="k">Gemini CLI</span>
+          <span class="v">Set <span class="icode">general.sessionRetention</span> in <span class="icode">settings.json</span>: <span class="icode">enabled</span>, <span class="icode">maxAge</span> (default <span class="icode">"30d"</span>), <span class="icode">maxCount</span> and <span class="icode">minRetention</span> (default <span class="icode">"1d"</span>). Deleting a session removes its tool outputs and logs too.</span></div>
+        <div class="row"><span class="k">Codex</span>
+          <span class="v">The docs give <span class="icode">[history] persistence = "none"</span> in <span class="icode">config.toml</span> to stop saving history, and <span class="icode">history.max_bytes</span> to cap it. They do not say whether the rollout files under <span class="icode">sessions/</span> follow it, so check the folder after a new session. To delete, remove the files.</span></div>
+        <div class="row"><span class="k">Copilot CLI</span>
+          <span class="v">Deleting <span class="icode">~/.copilot/session-state/</span> removes the history and you can no longer resume those sessions. Synced sessions are stored separately: delete or hide them on GitHub.com.</span></div>
+        <div class="row"><span class="k">Cursor</span>
+          <span class="v">Delete the chat in Cursor. ranwhat reads these databases and never writes to them.</span></div>
+        <div class="row"><span class="k">Windsurf</span>
+          <span class="v">Remove <span class="icode">~/.windsurf/transcripts/</span> and turn the hook off. The encrypted Cascade files are Windsurf's own.</span></div>
+        <div class="row"><span class="k">Cline, Roo, Continue</span>
+          <span class="v">Delete the task folders or session files you no longer need.</span></div>
+        <div class="row"><span class="k">Aider</span>
+          <span class="v">Delete <span class="icode">.aider.chat.history.md</span> and <span class="icode">.aider.input.history</span>. <span class="icode">AIDER_CHAT_HISTORY_FILE</span> and <span class="icode">AIDER_INPUT_HISTORY_FILE</span> move them.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        Deleting a file removes your local copy and nothing else. What the
+        model provider kept is governed by your account's terms with that
+        provider. If a session held a credential, rotate it first, then
+        decide whether to delete or mask.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / ranwhat</div>
+    <div>
+      <h2>Let ranwhat list what it can find</h2>
+      <p class="lede">
+        <span class="icode">sources</span> prints every agent ranwhat reads,
+        the folders it checked on this machine, and whether it found any
+        history there. It changes nothing and does not read the contents.
+      </p>
+      <div class="cmdrow" style="margin-top:22px">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="cmd-sources">uvx ranwhat sources</span>
+          <button class="copy" data-copy="#cmd-sources">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+      <p style="margin-top:22px">
+        To see what is inside, run <span class="icode">uvx ranwhat check</span>.
+        It reads the sessions of every agent it finds and lists the risky
+        actions and the credentials sitting in the files, each with the agent
+        and project. It reads files, and rewrites nothing unless you then run
+        <a href="/clean">ranwhat clean</a> with <span class="icode">--apply</span>.
+        <span class="icode">clean</span> masks a value only in a plain JSONL,
+        JSON or text file; for the databases (Cursor, OpenCode, Goose and
+        others) it reports and leaves them untouched.
+      </p>
+      <div class="term" style="margin-top:6px">
+        <div class="term-body"><pre>ranwhat sources                   <span class="c-mut">where it looked, what it found</span>
+ranwhat check                     <span class="c-mut">actions and secrets, nothing changed</span>
+ranwhat check --source codex      <span class="c-mut">one agent (repeatable)</span>
+ranwhat check --path codex=~/work/.codex   <span class="c-mut">history kept somewhere else</span></pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        The default window is 30 days (<span class="icode">--days</span>).
+        Zero found is not a clean machine: <span class="icode">sources</span>
+        tells you whether the folder was missing or empty.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">06 / Next</div>
+    <div>
+      <h2>Next</h2>
+      <ul class="follow">
+        <li><a href="/guides/claude-code-history">Claude Code history<span>the full detail for the first row of the table</span></a></li>
+        <li><a href="/guides/claude-code-env-secrets">Claude Code and .env secrets<span>keeping credentials out of transcripts</span></a></li>
+        <li><a href="/guides/developer-opsec">Developer OPSEC<span>the rest of your laptop</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the wider checklist</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">07 / Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <p class="lede">
+        Paths and formats are as ranwhat reads them, from its source. Where a
+        vendor documents a location or setting, that page is listed. Cursor,
+        Cline, Roo Code, Continue and Windsurf's encrypted files have no
+        vendor page for storage, so no retention is claimed for them.
+      </p>
+      <ul class="follow">
+        <li><a href="https://geminicli.com/docs/cli/session-management/">Gemini CLI: session management<span>chats folder, general.sessionRetention and its defaults</span></a></li>
+        <li><a href="https://learn.chatgpt.com/docs/config-file/config-advanced">Codex: advanced configuration<span>CODEX_HOME, history persistence, history.max_bytes</span></a></li>
+        <li><a href="https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference">Copilot CLI: config directory reference<span>session-state, COPILOT_HOME, deletion and synced sessions</span></a></li>
+        <li><a href="https://aider.chat/docs/config/options.html">Aider: options reference<span>history file names and their environment variables</span></a></li>
+        <li><a href="https://docs.devin.ai/desktop/cascade/hooks">Windsurf: Cascade hooks<span>transcript path, JSONL, 0600, 100 file cap</span></a></li>
+        <li><a href="https://docs.continue.dev/faqs">Continue: FAQs<span>the ~/.continue data folder</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat#ranwhat-watch-audit-what-claude-code-and-your-other-agents-ran">ranwhat README<span>the table of agents, paths and formats</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/cursor.py">cursor.py<span>Cursor databases and how they were checked</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/codex.py">codex.py<span>rollout files, .zst, history.jsonl, SQLite</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/gemini.py">gemini.py<span>JSONL and JSON layouts, 30 day default</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/copilot_cli.py">copilot_cli.py<span>events.jsonl and tool output files</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/windsurf.py">windsurf.py<span>encrypted Cascade files, hook transcripts</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/cline.py">cline.py<span>task folders and the Cline data folder</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/roo.py">roo.py<span>Roo Code task folders, command output files</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/continue_dev.py">continue_dev.py<span>session files and CONTINUE_GLOBAL_DIR</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/aider.py">aider.py<span>history file locations and format</span></a></li>
+      </ul>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides/claude-code-history">Claude Code history<span>location, retention, deletion</span></a></li>
+        <li><a href="/guides/claude-code-env-secrets">Claude Code and .env secrets<span>keeping credentials out of transcripts</span></a></li>
+        <li><a href="/guides/developer-opsec">Developer OPSEC<span>the laptop around the agent</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the wider picture</span></a></li>
+        <li><a href="/guides">All guides<span>everything in this section</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

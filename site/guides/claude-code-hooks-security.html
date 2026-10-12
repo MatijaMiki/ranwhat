@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code hooks for security: block risky calls | ranwhat</title>
+<meta name="description" content="Block rm -rf, force pushes and .env reads before Claude Code runs them: PreToolUse hooks, deny rules, exit 2 versus JSON, and where hooks stop working.">
+<link rel="canonical" href="https://ranwhat.com/guides/claude-code-hooks-security">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/claude-code-hooks-security">
+<meta property="og:title" content="Claude Code hooks for security: block risky calls | ranwhat">
+<meta property="og:description" content="Block rm -rf, force pushes and .env reads before Claude Code runs them: PreToolUse hooks, deny rules, exit 2 versus JSON, and where hooks stop working.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Claude Code hooks for security: block risky calls | ranwhat">
+<meta name="twitter:description" content="Block rm -rf, force pushes and .env reads before Claude Code runs them: PreToolUse hooks, deny rules, exit 2 versus JSON, and where hooks stop working.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Claude Code hooks for security: block risky tool calls","description":"Block rm -rf, force pushes and .env reads before Claude Code runs them: PreToolUse hooks, deny rules, exit 2 versus JSON, and where hooks stop working.","datePublished":"2026-10-09","dateModified":"2026-10-09","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-hooks-security","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Hooks"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code hooks for security","item":"https://ranwhat.com/guides/claude-code-hooks-security"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security" aria-current="page">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Claude Code hooks for security</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Claude Code hooks for security: block risky tool calls</h1>
+    <p class="lede">
+      A PreToolUse hook sees every tool call before it runs and can refuse it.
+      Here is how to block <span class="icode">rm -rf</span>, force pushes and
+      reads of <span class="icode">.env</span>, ~/.ssh and ~/.aws, and where the
+      hook stops protecting you.
+    </p>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against Claude Code's hooks and permissions documentation under
+      Sources, and ranwhat's source. Published <time datetime="2026-10-09">9 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Layers</div>
+    <div>
+      <h2>Three layers, and what each one is for</h2>
+      <p class="lede">
+        Claude Code can stop a risky call in three different places. They fail
+        in different ways, so most setups use more than one.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Deny rules</span>
+          <span class="v"><span class="icode">permissions.deny</span> in settings, such as <span class="icode">Read(./.env)</span> or <span class="icode">Bash(git push *)</span>. Rules are checked deny first, then ask, then allow, and the first match wins, so no allow rule can carve an exception out of a deny. Declarative, nothing to maintain.</span></div>
+        <div class="row"><span class="k">Hooks</span>
+          <span class="v">Your own code, run before the tool does. A <span class="icode">PreToolUse</span> hook receives the full tool input as JSON and can deny the call, ask you, or say nothing. Use one when a pattern is too specific for a rule, or when you want a custom message back to the agent.</span></div>
+        <div class="row"><span class="k">Sandbox</span>
+          <span class="v">OS-level limits on what a shell command and its child processes can touch. It does not depend on the command text, which is the property the other two lack. Claude Code's own documentation recommends it when a restriction has to hold.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        Hooks and rules combine in a fixed way. A hook's
+        <span class="icode">"allow"</span> skips the permission prompt but does
+        not override a matching deny or ask rule, including one in managed
+        settings. A hook that exits with code 2 stops the call before permission
+        rules are evaluated, even if an allow rule would have approved it. So a
+        hook can only make Claude Code stricter than your rules, never looser.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Bash</div>
+    <div>
+      <h2>Block rm -rf and git push --force</h2>
+      <p class="lede">
+        One script handles every case in this guide. Save it to
+        <span class="icode">~/.claude/hooks/guard.py</span>. It reads the hook
+        input from stdin, checks the Bash command, and prints a deny decision
+        when a pattern matches.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/hooks/guard.py</span></div>
+        <div class="term-body"><pre>#!/usr/bin/env python3
+import json, os, re, sys
+
+event = json.load(sys.stdin)
+tool = event.get("tool_name", "")
+args = event.get("tool_input", {})
+
+BASH_RULES = [
+    (r"\brm\s+(-\S*\s+)*-\S*[rR]", "recursive rm"),
+    (r"\bgit\b.*\bpush\b.*(\s--force|\s-f\b)", "force push"),
+    (r"\bgit\s+reset\s+--hard", "git reset --hard"),
+]
+SECRET = r"(^|[\s/'\"=])\.env(\.(?!example|sample)\w+)?($|[\s'\";|&])|\.ssh/|\.aws/"
+
+def deny(reason):
+    json.dump({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason}}, sys.stdout)
+    sys.exit(0)
+
+if tool == "Bash":
+    cmd = args.get("command", "")
+    for pattern, name in BASH_RULES:
+        if re.search(pattern, cmd):
+            deny("Blocked by guard.py: " + name)
+    if re.search(SECRET, cmd):
+        deny("Blocked by guard.py: command names a secrets path")
+elif tool == "Read":
+    path = os.path.realpath(args.get("file_path", ""))
+    if re.search(SECRET, path):
+        deny("Blocked by guard.py: secrets path")
+sys.exit(0)</pre></div>
+      </div>
+      <p style="margin-top:22px">
+        Register it in <span class="icode">~/.claude/settings.json</span>. If the
+        file already has a <span class="icode">hooks</span> key, merge into it.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/guard.py\""
+          }
+        ]
+      }
+    ]
+  }
+}</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Input</span>
+          <span class="v">The hook gets <span class="icode">tool_name</span>, <span class="icode">tool_input</span> and <span class="icode">tool_use_id</span> on stdin, plus <span class="icode">session_id</span>, <span class="icode">cwd</span> and <span class="icode">hook_event_name</span>. For Bash, <span class="icode">tool_input.command</span> is the text. For Read, <span class="icode">tool_input.file_path</span> is always absolute, and Claude Code expands <span class="icode">~</span> and relative paths before the hook runs.</span></div>
+        <div class="row"><span class="k">Matcher</span>
+          <span class="v">A matcher of letters, digits, <span class="icode">_</span>, <span class="icode">|</span> and commas is an exact tool name or a list of names. Anything else is a regular expression. <span class="icode">Bash|Read</span> is a list, so it matches those two tools and nothing else, such as <span class="icode">Grep</span>.</span></div>
+        <div class="row"><span class="k">Patterns</span>
+          <span class="v">These regular expressions are a starting point. They also fire on <span class="icode">git push -f</span> inside a longer command and on any command that merely mentions <span class="icode">.ssh/</span>, so expect some false blocks. <span class="icode">--force-with-lease</span> matches too, because it starts with <span class="icode">--force</span>. Remove that if you want it allowed.</span></div>
+        <div class="row"><span class="k">Why not a rule</span>
+          <span class="v">A deny rule is simpler for a fixed prefix, and the next section uses them. Claude Code's documentation lists what <span class="icode">Bash(rm *)</span> misses: <span class="icode">/bin/rm -rf build/</span> and <span class="icode">bash -c 'rm -rf build/'</span>. Your own script can match those forms, and, as section 06 shows, can still miss others.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Secrets</div>
+    <div>
+      <h2>Block reads of .env, ~/.ssh and ~/.aws</h2>
+      <p class="lede">
+        The script above already refuses a Read of those paths, and a Bash
+        command that names them. The first thing to add is plain deny rules,
+        which need no code.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)"
+    ]
+  }
+}</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">What Read covers</span>
+          <span class="v">Read and Edit deny rules apply to Claude's built-in file tools, and to file commands Claude Code recognises in Bash, such as <span class="icode">cat</span>, <span class="icode">head</span>, <span class="icode">tail</span> and <span class="icode">sed</span>, and to the targets of redirections. For Grep and Glob, Claude Code makes a best-effort attempt.</span></div>
+        <div class="row"><span class="k">What it misses</span>
+          <span class="v">A command that reads files without naming them, such as <span class="icode">grep -r pattern .</span> run from the directory that holds the file, and a Python or Node script that opens the file itself. For OS-level enforcement that blocks every process from a path, the documentation points to the sandbox.</span></div>
+        <div class="row"><span class="k">Path forms</span>
+          <span class="v"><span class="icode">~/path</span> is your home directory, <span class="icode">//path</span> is an absolute path from the filesystem root, and a bare filename follows gitignore rules, so <span class="icode">Read(.env)</span> and <span class="icode">Read(**/.env)</span> are equivalent. A deny rule also applies to the file a symlink resolves to.</span></div>
+        <div class="row"><span class="k">Why both</span>
+          <span class="v">The rule is exact and survives a bug in your script. The hook adds a message of your choosing, and a check on the text of commands the rule does not recognise.</span></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The <a href="/guides/claude-code-env-secrets">Claude Code and .env
+        guide</a> covers what these rules do not catch, including values that
+        are already in a transcript.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Output</div>
+    <div>
+      <h2>Exit code 2 or a JSON decision</h2>
+      <p class="lede">
+        A hook can refuse a call in two ways. Pick one per hook, because Claude
+        Code's guide says to choose one approach and the reference describes
+        what happens when you mix them.
+      </p>
+      <h3>Exit code 2</h3>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/hooks/no-force-push.sh</span></div>
+        <div class="term-body"><pre>#!/bin/bash
+cmd=$(jq -r '.tool_input.command // empty')
+if [[ "$cmd" == *"git push --force"* ]]; then
+  echo "Force pushes are blocked. Ask the user." &gt;&amp;2
+  exit 2
+fi
+exit 0</pre></div>
+      </div>
+      <p style="margin-top:22px">
+        Exit 2 is a blocking error. For PreToolUse it cancels the call, and the
+        text on stderr is the reason Claude sees. It wins even over a JSON
+        <span class="icode">"allow"</span>.
+      </p>
+      <h3 style="margin-top:34px">Exit 0 with JSON</h3>
+      <p>
+        The script in section 02 prints this and exits 0, which gives you three
+        outcomes instead of one:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "Writes to src/generated/ are not allowed."
+  }
+}</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">deny</span>
+          <span class="v">Cancels the call and sends <span class="icode">permissionDecisionReason</span> to Claude.</span></div>
+        <div class="row"><span class="k">ask</span>
+          <span class="v">Shows the normal permission prompt, with your reason in it. It also forces a prompt in auto mode, so the classifier cannot approve the call silently.</span></div>
+        <div class="row"><span class="k">allow</span>
+          <span class="v">Skips the prompt, but deny and ask rules still apply. Print it rarely. Printing nothing is safer: exit 0 with no output means the hook has no opinion and the call goes through the normal permission flow.</span></div>
+        <div class="row"><span class="k">Several hooks</span>
+          <span class="v">When hooks disagree, <span class="icode">deny</span> beats <span class="icode">defer</span>, which beats <span class="icode">ask</span>, which beats <span class="icode">allow</span>. A fourth value, <span class="icode">defer</span>, works only in non-interactive <span class="icode">-p</span> mode.</span></div>
+      </div>
+      <p style="margin-top:22px">
+        <strong>A crash lets the call through.</strong> Any other exit code, 1
+        included, is a non-blocking error: the action proceeds, and Claude Code
+        shows only a notice with the first line of stderr. An uncaught Python
+        exception exits 1. A timed-out PreToolUse command hook does not block
+        either. For a security hook, wrap the check so that the failure path
+        exits 2 if you would rather fail closed.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Where</div>
+    <div>
+      <h2>Where hooks live and who wins</h2>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Location</th><th>Scope</th><th>Shared</th></tr></thead>
+        <tbody>
+          <tr><td><span class="icode">~/.claude/settings.json</span></td><td data-label="Scope">All your projects</td><td data-label="Shared">No</td></tr>
+          <tr><td><span class="icode">.claude/settings.json</span></td><td data-label="Scope">One project</td><td data-label="Shared">Yes, committed to the repository</td></tr>
+          <tr><td><span class="icode">.claude/settings.local.json</span></td><td data-label="Scope">One project</td><td data-label="Shared">No, gitignored</td></tr>
+          <tr><td>Managed policy settings</td><td data-label="Scope">Organisation</td><td data-label="Shared">Yes, set by an administrator</td></tr>
+          <tr><td>Plugin <span class="icode">hooks/hooks.json</span>, skill and subagent frontmatter</td><td data-label="Scope">While the plugin, skill or subagent is active</td><td data-label="Shared">Yes</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Merging</span>
+          <span class="v">Hook entries from different levels merge rather than replace each other, so your user hook and a project's hook both run, in parallel.</span></div>
+        <div class="row"><span class="k">Settings keys</span>
+          <span class="v">For a single key set in several places, the order from highest is managed settings, <span class="icode">--settings</span> on the command line, <span class="icode">.claude/settings.local.json</span>, <span class="icode">.claude/settings.json</span>, then <span class="icode">~/.claude/settings.json</span>.</span></div>
+        <div class="row"><span class="k">Managed</span>
+          <span class="v">An administrator can set <span class="icode">allowManagedHooksOnly</span> in managed settings. User, project, local and plugin hooks are then blocked, apart from plugins force-enabled in managed <span class="icode">enabledPlugins</span>.</span></div>
+        <div class="row"><span class="k">See them</span>
+          <span class="v"><span class="icode">/hooks</span> in Claude Code lists every configured hook, grouped by event.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">06 / Limits</div>
+    <div>
+      <h2>What a hook cannot do</h2>
+      <p class="lede">
+        A hook is a script that reads text. It is useful, and it is not a
+        sandbox.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Text, not behaviour</span>
+          <span class="v">The hook sees the command string, not what it does. Try the secrets check against <span class="icode">python3 -c "print(open('.en'+'v').read())"</span>: the guard script above lets it through, and a Read deny rule does not apply to a script that opens files itself. Aliases, encoded payloads and a script the agent wrote a moment earlier all look the same way. Pattern lists shrink the risk. They do not close it.</span></div>
+        <div class="row"><span class="k">Your privileges</span>
+          <span class="v">Claude Code's documentation says command hooks run with your full user permissions and can modify, delete or access any file your account can. A hook that is wrong, or edited by something else, has that reach too.</span></div>
+        <div class="row"><span class="k">Fails open</span>
+          <span class="v">A crash, a missing interpreter, a non-zero exit other than 2 and a timeout all let the call proceed. Test the hook so you know it runs at all (next section).</span></div>
+        <div class="row"><span class="k">Off switch</span>
+          <span class="v"><span class="icode">"disableAllHooks": true</span> in any settings file turns hooks off, and Claude Code reads the value left after precedence applies. A <span class="icode">false</span> in a project's <span class="icode">.claude/settings.json</span> overrides a <span class="icode">true</span> in your user settings. Managed hooks keep running unless <span class="icode">disableAllHooks</span> is set in managed settings too.</span></div>
+        <div class="row"><span class="k">A project's hooks</span>
+          <span class="v">Hooks in a repository's <span class="icode">.claude/settings.json</span> are code that runs on your machine when you open it. In an interactive session Claude Code holds back hooks from every settings file, yours included, until you accept the workspace trust dialog for that folder. With <span class="icode">-p</span> or the SDK there is no dialog and the folder is treated as trusted, so a hook committed to a repository you never opened runs. Before scripting <span class="icode">claude -p</span> over code you did not write, read its <span class="icode">.claude/</span> files, or run with <span class="icode">--settings '{"disableAllHooks": true}'</span>.</span></div>
+        <div class="row"><span class="k">Config changes</span>
+          <span class="v">A <span class="icode">ConfigChange</span> hook can block a change to a settings file taking effect, but not a change to managed policy settings, and a blocked change shows no message to you or Claude. Only the debug log records it.</span></div>
+        <div class="row"><span class="k">Coverage</span>
+          <span class="v">A matcher of <span class="icode">Bash</span> does not see a <span class="icode">PowerShell</span> call, or an MCP tool, which is named <span class="icode">mcp__&lt;server&gt;__&lt;tool&gt;</span>. List every tool you mean to guard.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        When the restriction has to hold, add the sandbox, and keep the hook for
+        the message and for the calls the sandbox does not cover.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">07 / Test</div>
+    <div>
+      <h2>Test a hook before you trust it</h2>
+      <p class="lede">
+        A hook is a program that reads JSON and writes JSON. Test it as one,
+        outside Claude Code first.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf build"}}' \
+  | python3 ~/.claude/hooks/guard.py
+<span class="c-mut"># expect the deny JSON</span>
+
+echo '{"tool_name":"Bash","tool_input":{"command":"npm test"}}' \
+  | python3 ~/.claude/hooks/guard.py; echo "exit $?"
+<span class="c-mut"># expect no output, exit 0</span>
+
+echo '{"tool_name":"Read","tool_input":{"file_path":"/Users/you/app/.env"}}' \
+  | python3 ~/.claude/hooks/guard.py
+<span class="c-mut"># expect the deny JSON</span></pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Registered?</span>
+          <span class="v">Run <span class="icode">/hooks</span> and look for the entry under <span class="icode">PreToolUse</span>.</span></div>
+        <div class="row"><span class="k">Real call</span>
+          <span class="v">Ask Claude to read your <span class="icode">.env</span>, or to run <span class="icode">rm -rf</span> on a scratch directory. The call should be refused and the agent should quote your reason.</span></div>
+        <div class="row"><span class="k">Debug log</span>
+          <span class="v"><span class="icode">claude --debug-file &lt;path&gt;</span> writes hook execution details to a known file. <span class="icode">claude --debug</span> writes them to <span class="icode">~/.claude/debug/&lt;session-id&gt;.txt</span> and prints nothing to the terminal.</span></div>
+        <div class="row"><span class="k">Negative tests</span>
+          <span class="v">Run the bypasses on purpose: <span class="icode">/bin/rm -rf x</span>, <span class="icode">bash -c 'rm -rf x'</span>, a Python one-liner. Write down which ones get through, so you know what the hook does not cover.</span></div>
+        <div class="row"><span class="k">Executable</span>
+          <span class="v">Claude Code's guide says hook scripts must be executable on macOS and Linux. If you call the script through <span class="icode">python3</span> as above, it is not needed; for a bare script path, run <span class="icode">chmod +x</span>.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">08 / ranwhat</div>
+    <div>
+      <h2>If you would rather not write the patterns</h2>
+      <p>
+        <span class="icode">ranwhat hook install</span> is an opt-in PreToolUse
+        hook. From the next session, a tool call that ranwhat's
+        <a href="/watch">watch</a> rules rate high or critical waits for your
+        yes. It judges calls on your machine and sends nothing anywhere. A call
+        no rule rates that high gets no answer from it, so Claude Code decides
+        as it would have without the hook. It fails open, as any hook does, and
+        <span class="icode">RANWHAT_HOOK=0</span> in Claude Code's environment
+        lets every call through. <span class="icode">--mode deny</span> refuses
+        critical calls outright. It needs a real install, not
+        <span class="icode">uvx</span>. To see what it would have asked about,
+        run the check below, which reads what the agent already did and changes
+        nothing.
+      </p>
+      <div class="cmdrow" style="margin-top:22px">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="cmd-check">uvx ranwhat check</span>
+          <button class="copy" data-copy="#cmd-check">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">09 / Next</div>
+    <div>
+      <h2>Next</h2>
+      <p>
+        A hook logs and blocks from now on. To see what already ran, start with
+        the <a href="/guides/claude-code-audit-log">Claude Code audit log</a>.
+        If a command did delete something, read
+        <a href="/guides/claude-code-deleted-files">files Claude Code
+        deleted</a>. For secrets the agent has already read, see
+        <a href="/guides/claude-code-env-secrets">Claude Code and .env</a>, and
+        for the full list of controls, the
+        <a href="/guides/ai-coding-agent-security">AI coding agent security
+        checklist</a>. A hook is one gate among several: the
+        <a href="/guides/secure-by-default-ai-coding-agent-setup">secure-by-default
+        setup</a> shows where it fits, and
+        <a href="/guides/check-ai-agent-code-is-secure">checking AI-written
+        code</a> covers the gates that run in CI. The rest of the
+        <a href="/guides">guides</a> are listed here.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/hooks">Hooks reference<span>PreToolUse input, exit codes, permissionDecision, matchers, workspace trust, disableAllHooks, security</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/hooks-guide">Hooks guide<span>blocking example, hook locations, /hooks, debug log, matcher notes</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/permissions">Configure permissions<span>deny, ask, allow order, Read rules, what a Bash rule does not match, hooks versus rules, sandbox</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings">Settings files and precedence<span>the order of managed, command line, local, project and user</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings-reference">Settings reference<span>disableAllHooks, allowManagedHooksOnly, permissions.deny</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/README.md">ranwhat README<span>what ranwhat hook install does and does not do</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

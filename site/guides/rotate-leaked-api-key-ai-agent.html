@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotate a leaked API key from an AI agent | ranwhat</title>
+<meta name="description" content="An AI agent read or printed your API key. Rotate it at the provider first, check its logs, then mask the transcript and clean git history if needed.">
+<link rel="canonical" href="https://ranwhat.com/guides/rotate-leaked-api-key-ai-agent">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="article:published_time" content="2026-10-09">
+<meta property="article:modified_time" content="2026-10-09">
+<meta property="og:url" content="https://ranwhat.com/guides/rotate-leaked-api-key-ai-agent">
+<meta property="og:title" content="Rotate a leaked API key from an AI agent | ranwhat">
+<meta property="og:description" content="An AI agent read or printed your API key. Rotate it at the provider first, check its logs, then mask the transcript and clean git history if needed.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Rotate a leaked API key from an AI agent | ranwhat">
+<meta name="twitter:description" content="An AI agent read or printed your API key. Rotate it at the provider first, check its logs, then mask the transcript and clean git history if needed.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"An AI agent saw my API key. What now?","description":"An AI agent read or printed your API key. Rotate it at the provider first, check its logs, then mask the transcript and clean git history if needed.","datePublished":"2026-10-09","dateModified":"2026-10-09","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/rotate-leaked-api-key-ai-agent","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Secrets management"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Rotate a leaked key","item":"https://ranwhat.com/guides/rotate-leaked-api-key-ai-agent"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent" aria-current="page">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Rotate a leaked key</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>An AI agent saw my API key. What now?</h1>
+    <p class="lede">
+      Rotate it at the provider first. Cleaning the transcript, the logs and
+      git comes second, and none of it brings the key back.
+    </p>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against the provider documentation and the ranwhat source listed under Sources. Published <time datetime="2026-10-09">9 October 2026</time>.
+    </p>
+    <div class="rows" style="margin-top:30px">
+      <div class="row"><span class="k">First</span>
+        <span class="v">Revoke or replace the key at the provider that issued it. Do this before you delete anything.</span></div>
+      <div class="row"><span class="k">Then</span>
+        <span class="v">Read the provider's log for use you do not recognise, mask the local transcripts, and clean git only if the key was committed.</span></div>
+      <div class="row"><span class="k">Never</span>
+        <span class="v">Treat masking a transcript or rewriting history as the fix. Both leave a working key somewhere.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Scope</div>
+    <div>
+      <h2>Work out where the key went.</h2>
+      <p class="lede">
+        An agent that reads a key sends it to the model as part of the
+        conversation, and Claude Code also writes it to disk. Those are two
+        copies, and a third and fourth appear if the key was committed or
+        printed in CI.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Transcript</span>
+          <span class="v">Every tool result is saved in plaintext at <span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session&gt;.jsonl</span>, for 30 days by default. Large outputs go to <span class="icode">&lt;session&gt;/tool-results/</span> beside it.</span></div>
+        <div class="row"><span class="k">The model provider</span>
+          <span class="v">Claude Code sends prompts and tool output to the model. Anthropic's data usage page gives 30 days of retention for Team, Enterprise and API use, with zero data retention for qualified accounts. For Free, Pro and Max it is 30 days, or 5 years if you allow your data to be used for model improvement. A transcript you share with <span class="icode">/feedback</span> is kept 5 years. Other agents have their own terms; read them.</span></div>
+        <div class="row"><span class="k">Git</span>
+          <span class="v">A key in a file the agent wrote, or that you committed after it did, is in history. A pushed commit is also on the remote and in every clone and fork.</span></div>
+        <div class="row"><span class="k">Logs</span>
+          <span class="v">CI output, shell history, a pasted bug report, a screenshot, a terminal scrollback. An agent that ran <span class="icode">env</span> or <span class="icode">cat .env</span> printed the key into whatever captured its output.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        To find which transcripts hold it without installing anything, search
+        for a name or the first characters of the value:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>grep -rl 'STRIPE_SECRET_KEY' ~/.claude/projects
+grep -rl 'sk_live_' ~/.claude/projects
+git log --all -S'sk_live_' --oneline        <span class="c-mut">commits whose diff adds or removes it</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        This guide is written for Claude Code, whose files it describes.
+        Other agents keep their own history, and the steps from section 02 on
+        are the same.
+        Reading the transcripts by hand is covered in
+        <a href="/guides/claude-code-history">Claude Code history</a>, and how
+        the file got read in the first place in
+        <a href="/guides/claude-code-env-secrets">Blocking .env reads</a>.
+      </p>
+      <div class="note" style="margin-top:26px">
+        <h3>Assume the key is known</h3>
+        <p>You cannot prove who has read a copy you do not control, and a
+           retention window is not a deletion you can check. Treat any value
+           an agent has seen as exposed, and decide what to do about it by what
+           the key can reach, not by how likely a leak seems.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Rotate</div>
+    <div>
+      <h2>Rotate before you clean.</h2>
+      <p class="lede">
+        A revoked key is worthless to everyone who holds a copy. Every other
+        step in this guide only shrinks the number of copies.
+      </p>
+      <p>
+        GitHub's own guidance on leaked secrets says the same: revoke or
+        rotate the secret first, and that alone may solve the problem. Cleaning
+        first costs you time you may not have, and the key keeps working while
+        you do it.
+      </p>
+      <h3>Replace, then revoke, unless it is already abused</h3>
+      <p>
+        Most providers let you create a second key while the first still works,
+        so you can move your applications and switch the old one off without an
+        outage. That is the right order when nothing looks wrong. If the key
+        may already be in someone else's hands, skip the migration: revoke at
+        once, accept the downtime, and put the new key in afterwards.
+        A grace period that keeps the old key alive is also a grace period for
+        whoever else has it.
+      </p>
+      <h3 style="margin-top:34px">Give the new key a safer path</h3>
+      <p>
+        Do not paste the replacement into the same chat, and do not leave it in
+        a file the agent can read. Put it in your platform's secret store or an
+        environment variable that is set outside the agent's session, and
+        scope it as narrowly as the provider allows. The
+        <a href="/guides/ai-agent-token-scopes">token scopes guide</a> shows
+        how to find out what a given token can do.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Providers</div>
+    <div>
+      <h2>Revoke it at the provider.</h2>
+      <p class="lede">
+        The steps below come from each provider's current documentation. Menu
+        names move, so if one has changed, the page under Sources will have
+        the new one.
+      </p>
+
+      <h3>GitHub</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Personal access token</span>
+          <span class="v">Profile picture, <strong>Settings</strong>, <strong>Developer settings</strong>, then under Personal access tokens choose <strong>Fine-grained tokens</strong> or <strong>Tokens (classic)</strong>, and click <strong>Delete</strong> beside the token. Deleting a token that created a deploy key deletes that deploy key too. GitHub's page describes no regenerate step: create a new token, then delete the old one.</span></div>
+        <div class="row"><span class="k">OAuth app you authorised</span>
+          <span class="v">Settings, <strong>Applications</strong>, the <strong>Authorized OAuth Apps</strong> tab, the app's three-dot menu, then <strong>Revoke</strong>. <strong>Revoke all</strong> removes every token for it.</span></div>
+        <div class="row"><span class="k">OAuth app you own</span>
+          <span class="v">The REST API revokes one of its tokens with <span class="icode">DELETE /applications/{client_id}/token</span>, or every token a user granted with <span class="icode">DELETE /applications/{client_id}/grant</span>. Both authenticate as the app. GitHub's pages do not say where to regenerate a client secret, so this guide does not either.</span></div>
+      </div>
+
+      <h3 style="margin-top:34px">AWS access keys</h3>
+      <p>
+        AWS recommends deactivating before deleting, so you can switch the key
+        back on if something breaks. For a leaked key, do the first two now and
+        the third once you have read the logs in section 04.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>aws iam</span></div>
+        <div class="term-body"><pre>aws iam update-access-key --access-key-id OLD_KEY_ID --status Inactive --user-name NAME
+aws iam create-access-key --user-name NAME      <span class="c-mut">the new key, active at once</span>
+aws iam delete-access-key --access-key-id OLD_KEY_ID --user-name NAME</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        In the console: IAM, <strong>Users</strong>, the user,
+        <strong>Security credentials</strong>, then under Access keys choose
+        <strong>Actions</strong> and <strong>Deactivate</strong>. A user holds
+        at most two keys. If the leaked value starts with
+        <span class="icode">ASIA</span> it is a temporary credential that
+        expires by itself, but its session can still act until it does, so look
+        at what it did.
+      </p>
+
+      <h3 style="margin-top:34px">Google Cloud API keys</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Rotate</span>
+          <span class="v">Console, the <strong>Credentials</strong> page, the key's name, <strong>Rotate key</strong>. Name the new key, confirm its restrictions, click <strong>Create</strong>, update your applications, then on the new key's page use <strong>Delete the previous key</strong> in the Previous key section. Rotation exists only in the console.</span></div>
+        <div class="row"><span class="k">Delete</span>
+          <span class="v"><span class="icode">gcloud services api-keys delete KEY_ID</span>, with the ID from <span class="icode">gcloud services api-keys list</span>. A deleted key can be restored for 30 days, and anyone holding the string can use it again then. Check the list of deleted keys for one you did not delete.</span></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        This covers API keys. A service account key file is a different
+        credential with its own steps, which this guide does not cover.
+      </p>
+
+      <h3 style="margin-top:34px">Slack</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Bot token</span>
+          <span class="v"><span class="icode">auth.revoke</span> revokes a token and needs no scopes. Pass the token itself, as an <span class="icode">Authorization</span> header or a POST parameter. For a bot token it deactivates the bot user and removes its channel memberships, but does not uninstall the app. Run the OAuth flow again for a new one.</span></div>
+        <div class="row"><span class="k">Token rotation</span>
+          <span class="v">Slack's app-level tokens do not expire by default, so a leaked one stays valid until you act. Token rotation, available to granular bot apps, makes access tokens short-lived. Slack's page does not say that turning it on revokes a token that has already leaked, so revoke that one yourself.</span></div>
+      </div>
+
+      <h3 style="margin-top:34px">Stripe</h3>
+      <p>
+        Dashboard, <strong>API keys</strong>, the key's overflow menu,
+        <strong>Rotate key</strong>. The old key keeps working for up to 7 days
+        unless you set <strong>Expiration</strong> to <strong>Now</strong>,
+        which deletes it at once. For a leaked key choose Now. If you would
+        rather have no replacement yet, <strong>Expire key</strong> stops the
+        key and creates nothing. Use <strong>View request logs</strong> on the
+        same menu before you rotate, so you can see what the key did.
+      </p>
+
+      <h3 style="margin-top:34px">OpenAI and Anthropic</h3>
+      <div class="rows">
+        <div class="row"><span class="k">Anthropic</span>
+          <span class="v">Claude Console, the <strong>API keys</strong> page from the profile menu, the three-dot menu beside the key, <strong>Delete API Key</strong>. Anthropic's support article recommends revoking a suspected key immediately. It also says GitHub scans public repositories for Claude API keys and that Anthropic deactivates a key GitHub reports, which helps only if the key reached a public repository.</span></div>
+        <div class="row"><span class="k">Admin API</span>
+          <span class="v">An organisation admin can deactivate a key without deleting it by updating its status to <span class="icode">inactive</span> in the Admin API.</span></div>
+        <div class="row"><span class="k">OpenAI</span>
+          <span class="v">The API keys page of the dashboard, then delete the key. OpenAI's help article describes the delete control on that page as a trash can icon, and says a deleted key cannot be used. Keys tied to a project are listed under that project.</span></div>
+      </div>
+
+      <h3 style="margin-top:34px">Anything else</h3>
+      <p>
+        Use the issuing provider's own console and its own documentation. If
+        you are not sure which provider a value belongs to, section 05 shows how
+        <span class="icode">ranwhat clean</span> labels what it finds.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Audit</div>
+    <div>
+      <h2>Check whether someone else used it.</h2>
+      <p class="lede">
+        Revoking stops the next request. It does not tell you about the ones
+        before. Ask the provider for its record of the key, starting at the
+        time the agent read it.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">AWS</span>
+          <span class="v">Last-used data first, then CloudTrail. Event history keeps 90 days of management events per Region, free, and a lookup can filter on an access key ID. It shows management events only, not data events such as S3 object reads, and a search covers one Region at a time, so run it in each Region you use.</span></div>
+        <div class="row"><span class="k">GitHub</span>
+          <span class="v">Settings, <strong>Security log</strong>, in the Archives section. It lists 90 days of activity, and fine-grained token activity falls under <span class="icode">personal_access_token</span> and OAuth under <span class="icode">oauth_access</span>. You can export results as JSON or CSV. GitHub's page does not say where to see when a classic token was last used.</span></div>
+        <div class="row"><span class="k">Stripe</span>
+          <span class="v"><strong>View request logs</strong> on the key's menu opens Workbench's request logs for that key. Look for calls you did not make, such as refunds, payouts, new keys or new webhook endpoints.</span></div>
+        <div class="row"><span class="k">Others</span>
+          <span class="v">Usage dashboards for OpenAI and Anthropic show spend and requests per key or project. Look for a spike, or traffic from a model or region you do not use. This guide has not verified an audit-log feature for Google Cloud API keys or for Slack tokens, so check those providers' documentation for one.</span></div>
+      </div>
+      <div class="term" style="margin-top:26px">
+        <div class="term-bar"><span>aws</span></div>
+        <div class="term-body"><pre>aws iam get-access-key-last-used --access-key-id OLD_KEY_ID
+aws cloudtrail lookup-events --region us-east-1 \
+  --lookup-attributes AttributeKey=AccessKeyId,AttributeValue=OLD_KEY_ID</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The last-used call reports the date, service and Region of the most
+        recent request. It is a hint, not a full history, so read the
+        CloudTrail events for the whole picture. If you find use you cannot
+        explain, the problem is bigger than a key: look for what it created,
+        such as new users, keys, roles, instances and webhooks, and remove
+        those too.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Mask</div>
+    <div>
+      <h2>Mask the key in the local transcripts.</h2>
+      <p class="lede">
+        With the key dead, remove the plaintext copy so an infostealer, a
+        backup or the next agent does not find it.
+      </p>
+      <p>
+        <a href="/clean">ranwhat clean</a> reads the transcripts for secrets
+        and reports each distinct one with the project it was in and, when the
+        transcript names it, the file it came from. A bare run changes nothing,
+        and opens a review session where
+        <span class="icode">rotate</span> lists what to rotate, grouped by provider.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="cmd-clean">uvx ranwhat clean</span>
+        <button class="copy" data-copy="#cmd-clean">Copy</button>
+      </div>
+      <p style="margin-top:22px">
+        When the list looks right, mask it. <span class="icode">--apply</span>
+        masks everything it found without asking, and
+        <span class="icode">mask 3</span> in the review masks one finding.
+        <span class="icode">--days N</span> widens the window past the default
+        30 days.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>uvx ranwhat clean --apply            <span class="c-mut">mask what it found, backups first</span>
+uvx ranwhat clean --apply --days 90  <span class="c-mut">look back further</span></pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Backups</span>
+          <span class="v">Before it rewrites a transcript, clean copies the original to <span class="icode">~/.ranwhat/backups</span>, readable by you alone. Those copies still hold the key. Delete the folder once the result looks right.</span></div>
+        <div class="row"><span class="k">Safe write</span>
+          <span class="v">It parses the rewritten file back before replacing the original. It leaves a file alone if something wrote to it in the last two minutes, so close the session first and run it again if one is skipped.</span></div>
+        <div class="row"><span class="k">Not read</span>
+          <span class="v">It does not read the <span class="icode">tool-results/</span> folders yet, so search them yourself with <span class="icode">grep -rl</span> and delete or edit the files by hand.</span></div>
+      </div>
+      <div class="note" style="margin-top:26px">
+        <h3>Masking is not remediation</h3>
+        <p>ranwhat clean does not revoke the key. It does not touch what the
+           model provider kept, your git history, a CI log or a clipboard.
+           It only stops the transcript on this machine from leaking the
+           value a second time. That is useful, and it is the smallest step
+           in this guide.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">06 / Git</div>
+    <div>
+      <h2>Clean git only if it was committed.</h2>
+      <p class="lede">
+        If the key never reached a commit, skip this section. If it did,
+        rotation is still what protects you, and a rewrite is housekeeping.
+      </p>
+      <div class="note">
+        <h3>History rewriting does not un-leak a pushed secret</h3>
+        <p>GitHub's documentation says that if you only rewrite history and
+           force-push, the commits with the sensitive data may still be
+           accessible elsewhere: in clones, in forks, in cached views and
+           through pull requests that reference them. Once a commit has been
+           pushed, assume someone has it.</p>
+      </div>
+      <h3 style="margin-top:34px">Find it</h3>
+      <div class="term">
+        <div class="term-body"><pre>git log --all -S'THE_KEY_VALUE' --oneline   <span class="c-mut">commits that add or remove the string</span>
+git log --all --oneline -- path/to/.env       <span class="c-mut">commits that touched a file</span></pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The first command puts the full key in your shell history. Search
+        for a prefix instead if that matters.
+      </p>
+      <h3 style="margin-top:34px">Rewrite it</h3>
+      <p>
+        GitHub documents <span class="icode">git filter-repo</span>, version 2.47
+        or later, with its <span class="icode">--sensitive-data-removal</span>
+        flag. Run it in a fresh clone:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>git-filter-repo --sensitive-data-removal --invert-paths --path PATH-TO-FILE
+git-filter-repo --sensitive-data-removal --replace-text ../passwords.txt
+git push --force --mirror origin</pre></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        The first removes a file from all history, using its full path and
+        again for each old location if it was moved. The second replaces the
+        text listed in a file. Pushes to <span class="icode">refs/pull/*</span>
+        fail, because GitHub treats those refs as read-only.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Clones</span>
+          <span class="v">You cannot clean your colleagues' clones. Send them instructions to rebase rather than merge, since a merge can bring the old history back.</span></div>
+        <div class="row"><span class="k">Forks</span>
+          <span class="v">Commits stay reachable in forks. You have to ask each owner to remove them or delete the fork.</span></div>
+        <div class="row"><span class="k">GitHub Support</span>
+          <span class="v">Support can dereference or delete affected pull requests, remove cached views and references, and run server-side garbage collection. GitHub says it helps with sensitive data only when the risk cannot be mitigated by rotating the credentials, which is one more reason to rotate first.</span></div>
+        <div class="row"><span class="k">Cost</span>
+          <span class="v">Every commit hash changes, signatures are lost and open pull requests can break. Merge or close them first.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">07 / Prevent</div>
+    <div>
+      <h2>Make a repeat harmless.</h2>
+      <p class="lede">
+        Keep the key out of the agent's reach, catch it before it is pushed,
+        and make it short-lived so a leak expires.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Deny rules</span>
+          <span class="v"><span class="icode">Read(./.env)</span> style rules keep the agent's file tools and the common file commands away from a secrets file. They do not stop <span class="icode">grep -r</span> or a script that opens the file itself. The sandbox closes that gap. <a href="/guides/claude-code-env-secrets">Blocking .env reads</a> has the rules and the sandbox settings.</span></div>
+        <div class="row"><span class="k">Secret scanning</span>
+          <span class="v">On GitHub, secret scanning runs automatically and for free on public repositories. It scans history on all branches, plus issues, pull requests, discussions and wikis, and raises an alert that says to rotate. Push protection blocks a push that contains a secret before it reaches the repository; the repository-level version needs GitHub Secret Protection.</span></div>
+        <div class="row"><span class="k">Short-lived credentials</span>
+          <span class="v">Give an agent a token that expires, not a key that lives for years. Stripe restricted keys, AWS temporary credentials and Slack token rotation all shrink what a stolen copy is worth. Stripe also lets you attach an access policy that limits a key to known IP addresses, so a copy used from elsewhere is blocked.</span></div>
+        <div class="row"><span class="k">Narrow scope</span>
+          <span class="v">A key that can only read one thing is a smaller incident. <a href="/guides/ai-agent-token-scopes">Token scopes</a> covers how to give an agent less.</span></div>
+        <div class="row"><span class="k">Less on disk</span>
+          <span class="v">Lower <span class="icode">cleanupPeriodDays</span> so mistakes age out sooner, and check your machine as a whole with the <a href="/guides/developer-opsec">developer OPSEC guide</a>.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        <span class="icode">uvx ranwhat check</span> runs the secret search and
+        the action log together and changes nothing, so you can run it after
+        each long session. The rest of the checklist is in
+        <a href="/guides/ai-coding-agent-security">AI coding agent security</a>.
+      </p>
+
+      <ul class="follow" style="margin-top:30px">
+        <li><a href="/guides/claude-code-env-secrets">Blocking .env reads<span>deny rules, the sandbox, and what to rotate</span></a></li>
+        <li><a href="/guides/claude-code-history">Claude Code history<span>what ~/.claude keeps, and for how long</span></a></li>
+        <li><a href="/guides/ai-agent-token-scopes">Token scopes<span>give a key less to lose</span></a></li>
+        <li><a href="/guides/developer-opsec">Developer OPSEC<span>the rest of the laptop</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the full checklist</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Where each claim comes from.</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/data-usage">Claude Code data usage<span>retention by plan, zero data retention, /feedback</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/claude-directory">Explore the .claude directory<span>where transcripts live, 30-day default</span></a></li>
+        <li><a href="https://support.claude.com/en/articles/9767949-api-key-best-practices-keeping-your-keys-safe-and-secure">Anthropic: API key best practices<span>Console steps to delete a key, GitHub scanning</span></a></li>
+        <li><a href="https://platform.claude.com/docs/en/manage-claude/admin-api">Anthropic Admin API<span>setting a key's status to inactive</span></a></li>
+        <li><a href="https://help.openai.com/en/articles/9047852-how-can-i-delete-my-api-key">OpenAI: how can I delete my API key<span>delete from the API keys page</span></a></li>
+        <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">GitHub: managing personal access tokens<span>deleting classic and fine-grained tokens</span></a></li>
+        <li><a href="https://docs.github.com/en/apps/oauth-apps/using-oauth-apps/reviewing-your-authorized-oauth-apps">GitHub: reviewing your authorized OAuth apps<span>Revoke, Revoke all</span></a></li>
+        <li><a href="https://docs.github.com/en/rest/apps/oauth-applications">GitHub: REST API for OAuth apps<span>token and grant deletion endpoints</span></a></li>
+        <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/reviewing-your-security-log">GitHub: reviewing your security log<span>90 days, personal_access_token, oauth_access</span></a></li>
+        <li><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository">GitHub: removing sensitive data from a repository<span>rotate first, git-filter-repo, forks, Support</span></a></li>
+        <li><a href="https://docs.github.com/en/code-security/secret-scanning/introduction/about-secret-scanning">GitHub: about secret scanning<span>free for public repositories, scope of the scan</span></a></li>
+        <li><a href="https://docs.github.com/en/code-security/secret-scanning/introduction/about-push-protection">GitHub: about push protection<span>blocks a push before it lands</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id-credentials-access-keys-update.html">AWS: update access keys<span>deactivate, last used, delete</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events.html">AWS: CloudTrail event history<span>90 days, management events, one Region</span></a></li>
+        <li><a href="https://docs.aws.amazon.com/cli/latest/reference/cloudtrail/lookup-events.html">aws cloudtrail lookup-events<span>the AccessKeyId lookup attribute</span></a></li>
+        <li><a href="https://docs.cloud.google.com/docs/authentication/api-keys">Google Cloud: manage API keys<span>Rotate key, 30-day undelete</span></a></li>
+        <li><a href="https://docs.cloud.google.com/sdk/gcloud/reference/services/api-keys/delete">gcloud services api-keys delete<span>the delete command</span></a></li>
+        <li><a href="https://docs.slack.dev/reference/methods/auth.revoke">Slack: auth.revoke<span>what it revokes, parameters</span></a></li>
+        <li><a href="https://docs.slack.dev/authentication/tokens">Slack: tokens<span>app-level tokens do not expire, token rotation</span></a></li>
+        <li><a href="https://docs.stripe.com/keys">Stripe: API keys<span>Rotate key, Expiration, request logs, access policies</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/clean.py">ranwhat/clean.py<span>masking, backups, what it reads</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>
