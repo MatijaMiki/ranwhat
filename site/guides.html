@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guides to AI agent security and OPSEC | ranwhat</title>
-<meta name="description" content="Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<meta name="description" content="AI agent security and developer OPSEC: Claude Code history, hooks and .env, MCP servers, prompt injection, token scopes and rotating a leaked key.">
 <link rel="canonical" href="https://ranwhat.com/guides">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides">
 <meta property="og:title" content="Guides to AI agent security and OPSEC | ranwhat">
-<meta property="og:description" content="Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<meta property="og:description" content="AI agent security and developer OPSEC: Claude Code history, hooks and .env, MCP servers, prompt injection, token scopes and rotating a leaked key.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,13 +28,13 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="Guides to AI agent security and OPSEC | ranwhat">
-<meta name="twitter:description" content="Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.">
+<meta name="twitter:description" content="AI agent security and developer OPSEC: Claude Code history, hooks and .env, MCP servers, prompt injection, token scopes and rotating a leaked key.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"CollectionPage","@id":"https://ranwhat.com/guides#page","name":"Guides to AI coding agent security","description":"Practical AI agent security and developer OPSEC: where Claude Code keeps its history, blocking .env reads, audit logs, deleted files and token scopes.","url":"https://ranwhat.com/guides","isPartOf":{"@id":"https://ranwhat.com/#website"},"mainEntity":{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"https://ranwhat.com/guides/ai-coding-agent-security","name":"AI coding agent security: a checklist for your own machine"},{"@type":"ListItem","position":2,"url":"https://ranwhat.com/guides/claude-code-history","name":"Where Claude Code keeps your conversation history"},{"@type":"ListItem","position":3,"url":"https://ranwhat.com/guides/claude-code-env-secrets","name":"How to stop Claude Code reading your .env file"},{"@type":"ListItem","position":4,"url":"https://ranwhat.com/guides/claude-code-audit-log","name":"A Claude Code audit log from what is already on disk"},{"@type":"ListItem","position":5,"url":"https://ranwhat.com/guides/claude-code-deleted-files","name":"Claude Code deleted my files. What now?"},{"@type":"ListItem","position":6,"url":"https://ranwhat.com/guides/ai-agent-token-scopes","name":"Check what the tokens your AI agent holds can do"},{"@type":"ListItem","position":7,"url":"https://ranwhat.com/guides/developer-opsec","name":"Developer OPSEC: what your laptop and your AI agents give away"}]}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"CollectionPage","@id":"https://ranwhat.com/guides#page","name":"Guides to AI coding agent security","description":"AI agent security and developer OPSEC: Claude Code history, hooks and .env, MCP servers, prompt injection, token scopes and rotating a leaked key.","url":"https://ranwhat.com/guides","isPartOf":{"@id":"https://ranwhat.com/#website"},"mainEntity":{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"https://ranwhat.com/guides/ai-coding-agent-security","name":"AI coding agent security: a checklist for your own machine"},{"@type":"ListItem","position":2,"url":"https://ranwhat.com/guides/claude-code-history","name":"Where Claude Code keeps your conversation history"},{"@type":"ListItem","position":3,"url":"https://ranwhat.com/guides/claude-code-env-secrets","name":"How to stop Claude Code reading your .env file"},{"@type":"ListItem","position":4,"url":"https://ranwhat.com/guides/claude-code-audit-log","name":"A Claude Code audit log from what is already on disk"},{"@type":"ListItem","position":5,"url":"https://ranwhat.com/guides/claude-code-deleted-files","name":"Claude Code deleted my files. What now?"},{"@type":"ListItem","position":6,"url":"https://ranwhat.com/guides/claude-code-hooks-security","name":"Claude Code hooks for security: block risky tool calls"},{"@type":"ListItem","position":7,"url":"https://ranwhat.com/guides/ai-coding-agent-history-locations","name":"Where each AI coding agent keeps your conversation history"},{"@type":"ListItem","position":8,"url":"https://ranwhat.com/guides/mcp-server-security-coding-agents","name":"Securing MCP servers for coding agents"},{"@type":"ListItem","position":9,"url":"https://ranwhat.com/guides/prompt-injection-coding-agents","name":"Prompt injection in coding agents"},{"@type":"ListItem","position":10,"url":"https://ranwhat.com/guides/check-ai-agent-code-is-secure","name":"How to check that AI-written code is secure"},{"@type":"ListItem","position":11,"url":"https://ranwhat.com/guides/secure-by-default-ai-coding-agent-setup","name":"A secure-by-default AI coding agent setup"},{"@type":"ListItem","position":12,"url":"https://ranwhat.com/guides/ai-agent-token-scopes","name":"Check what the tokens your AI agent holds can do"},{"@type":"ListItem","position":13,"url":"https://ranwhat.com/guides/rotate-leaked-api-key-ai-agent","name":"An AI agent saw my API key. What now?"},{"@type":"ListItem","position":14,"url":"https://ranwhat.com/guides/developer-opsec","name":"Developer OPSEC: what your laptop and your AI agents give away"}]}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -76,10 +76,20 @@
     <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
   </ul>
   <p class="docnav-h">Tokens</p>
   <ul>
     <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
   </ul>
   <p class="docnav-h">Laptop</p>
   <ul>
@@ -130,8 +140,8 @@
       <h2>What Claude Code keeps, reads and runs.</h2>
       <p class="lede">
         Claude Code writes every session to a plaintext transcript under
-        <span class="icode">~/.claude/projects</span>. These four guides cover
-        what is in those files and what to do about it.
+        <span class="icode">~/.claude/projects</span>. These five guides cover
+        what is in those files, what to do about it, and how to block a risky call.
       </p>
       <div class="grid2">
         <div class="cell">
@@ -158,6 +168,10 @@
              was deleted and when, restore from git or a backup, and block a
              repeat.</p>
         </div>
+        <div class="cell" style="grid-column:1/-1">
+          <h3><a href="/guides/claude-code-hooks-security">Claude Code hooks for security: block risky tool calls</a></h3>
+          <p>Block <span class="icode">rm -rf</span>, force pushes and <span class="icode">.env</span> reads before they run with PreToolUse hooks and deny rules, and learn where hooks stop working.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -165,19 +179,34 @@
 
 <section class="mark-3">
   <div class="shell band split">
-    <div class="marginal">03 / Tokens</div>
+    <div class="marginal">03 / Agents</div>
     <div>
-      <h2>What an agent's tokens allow.</h2>
+      <h2>Beyond one agent.</h2>
       <p class="lede">
-        Permission prompts decide which commands run. The token decides what
-        a command can do once it reaches the provider.
+        Claude Code is one of many. These guides cover where the others keep
+        their history, what an MCP server can reach, and how text in a
+        repository becomes a command.
       </p>
       <div class="grid2">
+        <div class="cell">
+          <h3><a href="/guides/ai-coding-agent-history-locations">Where each AI coding agent keeps your conversation history</a></h3>
+          <p>Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.</p>
+        </div>
+        <div class="cell">
+          <h3><a href="/guides/mcp-server-security-coding-agents">Securing MCP servers for coding agents</a></h3>
+          <p>An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope it in Claude Code.</p>
+        </div>
+        <div class="cell">
+          <h3><a href="/guides/prompt-injection-coding-agents">Prompt injection in coding agents</a></h3>
+          <p>Text in a README, issue or tool result can become a shell command. The documented attack chains, why a prompt cannot fix it, and what limits the damage.</p>
+        </div>
+        <div class="cell">
+          <h3><a href="/guides/check-ai-agent-code-is-secure">How to check that AI-written code is secure</a></h3>
+          <p>Tests, scanners and CI gates that check AI-written code without asking the model, and where the agent's own review stops being evidence.</p>
+        </div>
         <div class="cell" style="grid-column:1/-1">
-          <h3><a href="/guides/ai-agent-token-scopes">Check what the tokens your AI agent holds can do</a></h3>
-          <p>Check what GitHub, Google, Slack, Stripe and AWS credentials allow
-             with each provider's own tools, see which grants were ever used,
-             then cut them down to least privilege.</p>
+          <h3><a href="/guides/secure-by-default-ai-coding-agent-setup">A secure-by-default AI coding agent setup</a></h3>
+          <p>One settings file and five habits that decide what a coding agent can reach before anything goes wrong: sandbox, deny rules, scoped tokens, reviewed tools and a record.</p>
         </div>
       </div>
     </div>
@@ -186,7 +215,32 @@
 
 <section class="mark-4">
   <div class="shell band split">
-    <div class="marginal">04 / Laptop</div>
+    <div class="marginal">04 / Tokens</div>
+    <div>
+      <h2>What an agent's tokens allow.</h2>
+      <p class="lede">
+        Permission prompts decide which commands run. The token decides what
+        a command can do once it reaches the provider.
+      </p>
+      <div class="grid2">
+        <div class="cell">
+          <h3><a href="/guides/ai-agent-token-scopes">Check what the tokens your AI agent holds can do</a></h3>
+          <p>Check what GitHub, Google, Slack, Stripe and AWS credentials allow
+             with each provider's own tools, see which grants were ever used,
+             then cut them down to least privilege.</p>
+        </div>
+        <div class="cell">
+          <h3><a href="/guides/rotate-leaked-api-key-ai-agent">An AI agent saw my API key. What now?</a></h3>
+          <p>An agent read or printed your key. Rotate it at the provider first, check its logs, then mask the transcript and handle git history if needed.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Laptop</div>
     <div>
       <h2>What the rest of the laptop gives away.</h2>
       <p class="lede">
@@ -208,7 +262,7 @@
 
 <section class="mark-5">
   <div class="shell band split">
-    <div class="marginal">05 / Check now</div>
+    <div class="marginal">06 / Check now</div>
     <div>
       <h2>Or check your own machine now.</h2>
       <p class="lede">
@@ -280,6 +334,13 @@
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
         </ul>
       </div>
       <div>

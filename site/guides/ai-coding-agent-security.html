@@ -76,10 +76,20 @@
     <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
   </ul>
   <p class="docnav-h">Tokens</p>
   <ul>
     <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
   </ul>
   <p class="docnav-h">Laptop</p>
   <ul>
@@ -99,6 +109,14 @@
       check what it did, and how to shrink what it could do next. This
       checklist covers each, with Claude Code as the worked example.
     </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-hero">uvx ranwhat check</span>
+        <button class="copy" data-copy="#cmd-hero">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
     <p style="margin:18px 0 0;font-size:14px;color:var(--muted)">
       Checked against the Claude Code, GitHub, Stripe, AWS and MCP
       documentation, and the advisories and research under Sources.
@@ -620,6 +638,14 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
         </div>
         <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
       </div>
+      <p style="margin-top:26px;font-size:14.5px;color:var(--muted)">
+        Related: the <a href="/guides/secure-by-default-ai-coding-agent-setup">secure-by-default
+        setup</a> gathers the settings above into one file,
+        <a href="/guides/check-ai-agent-code-is-secure">how to check AI-written
+        code</a> covers the review step, and
+        <a href="/guides/prompt-injection-coding-agents">prompt injection in
+        coding agents</a> explains why the boundary matters.
+      </p>
     </div>
   </div>
 </section>
@@ -711,6 +737,13 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
         </ul>
       </div>
       <div>

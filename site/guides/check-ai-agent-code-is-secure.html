@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to check that AI-written code is secure | ranwhat</title>
+<meta name="description" content="An agent's own review is an opinion, not a check. Use tests, scanners, CI gates and diff review, and see what ranwhat does and does not cover.">
+<link rel="canonical" href="https://ranwhat.com/guides/check-ai-agent-code-is-secure">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/check-ai-agent-code-is-secure">
+<meta property="og:title" content="How to check that AI-written code is secure | ranwhat">
+<meta property="og:description" content="An agent's own review is an opinion, not a check. Use tests, scanners, CI gates and diff review, and see what ranwhat does and does not cover.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="How to check that AI-written code is secure | ranwhat">
+<meta name="twitter:description" content="An agent's own review is an opinion, not a check. Use tests, scanners, CI gates and diff review, and see what ranwhat does and does not cover.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"How to check that AI-written code is secure","description":"An agent's own review is an opinion, not a check. Use tests, scanners, CI gates and diff review, and see what ranwhat does and does not cover.","datePublished":"2026-10-13","dateModified":"2026-10-13","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/check-ai-agent-code-is-secure","about":[{"@type": "Thing", "name": "Code review"}, {"@type": "Thing", "name": "AI coding agents"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"How to check that AI-written code is secure","item":"https://ranwhat.com/guides/check-ai-agent-code-is-secure"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure" aria-current="page">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">How to check that AI-written code is secure</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>How to check that AI-written code is secure</h1>
+    <p class="lede">
+      An agent can tell you its code is secure. That is an opinion from the same model that wrote it. This guide covers the checks that do not ask the model, where to run them, and what to read in the diff.
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-hero">uvx ranwhat check</span>
+        <button class="copy" data-copy="#cmd-hero">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against Claude Code's documentation under Sources and ranwhat's source. Published <time datetime="2026-10-13">13 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Opinion</div>
+    <div>
+      <h2>Why the agent cannot check itself</h2>
+      <p class="lede">
+        Ask an agent whether the code it just wrote is secure and it answers
+        from the same context, with the same gaps, that produced the code. If
+        it missed an injection hole while writing, it is likely to miss it
+        while reviewing. The answer is useful as a prompt to look harder. It
+        is not evidence.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Same blind spots</span>
+          <span class="v">The review comes from the model that wrote the change, so a wrong assumption in the first pass tends to survive the second.</span></div>
+        <div class="row"><span class="k">A confident tone</span>
+          <span class="v">A model states a guess and a fact in the same voice. Nothing in the answer marks which one you got.</span></div>
+        <div class="row"><span class="k">Not repeatable</span>
+          <span class="v">Run the same review twice and the findings can differ. A check you cannot repeat cannot gate anything.</span></div>
+        <div class="row"><span class="k">It can be steered</span>
+          <span class="v">Text the agent read while working can change what it reports. See <a href="/guides/prompt-injection-coding-agents">prompt injection in coding agents</a>.</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Checks</div>
+    <div>
+      <h2>The checks that do not ask the model</h2>
+      <p class="lede">
+        A deterministic check gives the same answer for the same input and
+        does not care who wrote the code. Run several, because each one sees a
+        different kind of problem.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Check</th><th>What it catches</th><th>What it misses</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Tests</strong></td><td data-label="What it catches">Behaviour that no longer works, including a test for the abuse case you thought of</td><td data-label="What it misses">Anything nobody wrote a test for, and tests the agent edited to pass</td></tr>
+          <tr><td><strong>Type checker and linter</strong></td><td data-label="What it catches">Whole classes of bug, such as unchecked values and unsafe calls the linter has a rule for</td><td data-label="What it misses">Logic errors and anything outside its rule set</td></tr>
+          <tr><td><strong>Secret scanner on the diff</strong></td><td data-label="What it catches">A key or token written into a file that is about to be committed</td><td data-label="What it misses">A secret that only lives in a transcript or in the environment</td></tr>
+          <tr><td><strong>Dependency audit</strong></td><td data-label="What it catches">A newly added package with a known vulnerability</td><td data-label="What it misses">A package with no advisory yet, or a name that is merely a lookalike</td></tr>
+          <tr><td><strong>Static analysis</strong></td><td data-label="What it catches">Known insecure patterns such as injection sinks and weak crypto, using tools like Semgrep or CodeQL</td><td data-label="What it misses">Design flaws, missing authorisation checks, business logic</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        None of these proves the code is secure. Together they remove the
+        mistakes that machines can find, so that your review time goes to the
+        ones they cannot.
+      </p>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Where</div>
+    <div>
+      <h2>Run them where the agent cannot skip them</h2>
+      <p class="lede">
+        A check that the agent decides to run is a check it can decide not to
+        run, or edit. Put the gate outside its choices.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">CI on the pull request</span>
+          <span class="v">Run tests, the linter, the scanner and the audit as required status checks, with branch protection so that a failing check blocks the merge. The agent can open the pull request. It cannot approve its own.</span></div>
+        <div class="row"><span class="k">A pre-commit hook</span>
+          <span class="v">Runs on your machine before a commit is made. Quick and local, and a person can bypass it, so treat it as a courtesy and let CI be the gate.</span></div>
+        <div class="row"><span class="k">A Claude Code hook</span>
+          <span class="v">A hook runs a command you wrote at fixed points, such as after an edit, outside the model's decision. It can run the linter after every file change, or refuse a risky call. See <a href="/guides/claude-code-hooks-security">Claude Code hooks for security</a>. A hook runs with your full access and the sandbox does not cover it, so keep hook scripts in a place the agent cannot edit.</span></div>
+        <div class="row"><span class="k">Protect the checks</span>
+          <span class="v">Treat the test files, the CI workflow, <span class="icode">.claude/settings.json</span> and any hook scripts as sensitive. A change to one of them in a diff deserves a closer look than the feature it came with.</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Diff</div>
+    <div>
+      <h2>Read the diff, not the summary</h2>
+      <p class="lede">
+        The agent's summary says what it meant to do. The diff says what it
+        did. Claude Code's own guidance is to review the changes it proposes
+        before you approve them.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">New dependencies</span>
+          <span class="v">A package you did not ask for, or a name one letter off a popular one. Open the manifest and the lockfile changes first.</span></div>
+        <div class="row"><span class="k">Network calls</span>
+          <span class="v">A new request to a host you do not recognise, or data sent out that the feature has no need to send.</span></div>
+        <div class="row"><span class="k">Credentials</span>
+          <span class="v">A key in a file, a token in a log line, or a value read from the environment and written somewhere else.</span></div>
+        <div class="row"><span class="k">Changes to the guardrails</span>
+          <span class="v">Edited tests, loosened lint rules, a skipped check, a new line in a workflow file, or a hook or setting that widens what the agent may do.</span></div>
+        <div class="row"><span class="k">Authorisation</span>
+          <span class="v">Whether each new route or function checks who is asking. Scanners find this rarely, and models forget it often, so look for it yourself.</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / ranwhat</div>
+    <div>
+      <h2>What ranwhat does here, and what it does not</h2>
+      <p class="lede">
+        ranwhat does not review code. It reads the history your agents already
+        keep, and it looks at what the agent did and what it left behind.
+      </p>
+      <div class="cmdrow">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="cmd-check">uvx ranwhat check</span>
+          <button class="copy" data-copy="#cmd-check">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+      <p style="margin-top:22px">
+        <span class="icode">check</span> and <span class="icode">watch</span>
+        flag risky actions in the history, such as a credential read, a local
+        file sent to the network, a publish, or a destructive command.
+        <span class="icode">clean</span> finds secrets that ended up in
+        transcripts on disk. None of that says whether the code is correct or
+        secure, so it sits beside your tests and scanners and does not replace
+        them. It also blocks nothing unless you install its Claude Code hook.
+      </p>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">06 / Next</div>
+    <div>
+      <h2>Where to go from here</h2>
+      <p>
+        Set up the boundary before the review: the
+        <a href="/guides/secure-by-default-ai-coding-agent-setup">secure-by-default
+        setup</a> lists the settings that limit what an agent can do in the first
+        place. For a gate in the agent's own loop, read
+        <a href="/guides/claude-code-hooks-security">Claude Code hooks for
+        security</a>. The full list is on the <a href="/guides">guides</a> page.
+      </p>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/security">Claude Code security<span>safeguards, no system immune, review before approving</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/sandboxing">Claude Code sandboxing<span>what the sandbox does not cover, including hooks</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/permissions">Claude Code permissions<span>deny, ask, allow order and what a rule matches</span></a></li>
+        <li><a href="https://genai.owasp.org/llmrisk/llm01-prompt-injection/">OWASP LLM01: Prompt Injection<span>human approval for high-risk actions, least privilege</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/README.md">ranwhat README<span>what check, watch and clean read and flag</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

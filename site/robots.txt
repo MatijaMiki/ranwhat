@@ -5,5 +5,9 @@
 User-agent: *
 Allow: /
 Disallow: /api/
+# Cloudflare's email-address obfuscation links here; it errors for crawlers.
+Disallow: /cdn-cgi/
+# The same page again, with a topic preselected (canonical is /contact).
+Disallow: /contact?
 
 Sitemap: https://ranwhat.com/sitemap.xml

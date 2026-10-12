@@ -7,6 +7,17 @@
 # build. Keep it here rather than inline in either, so the two cannot drift.
 set -euo pipefail
 
+# Minify first, so the hash below is of what is served. Only where the build
+# runs on a throwaway checkout (CI, Cloudflare Pages): running this on your own
+# machine would overwrite the readable sources. esbuild is pinned.
+if [ -n "${CI:-}${CF_PAGES:-}" ]; then
+  for asset in styles.css copy.js contact.js consent.js theme.js subscribe.js; do
+    [ -f "site/$asset" ] || continue
+    npx --yes esbuild@0.25.10 "site/$asset" --minify --log-level=warning --allow-overwrite --outfile="site/$asset"
+  done
+  echo "--- minified"
+fi
+
 for asset in styles.css copy.js contact.js consent.js theme.js subscribe.js; do
   [ -f "site/$asset" ] || continue
   hash=$(sha256sum "site/$asset" | cut -c1-10)
