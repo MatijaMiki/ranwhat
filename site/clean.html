@@ -168,12 +168,15 @@ them leaking again. It does not make them safe.</span>
 <span class="c-mut">ranwhat&gt;</span> mask 3         <span class="c-mut">mask just that one</span>
 <span class="c-mut">ranwhat&gt;</span> mask all       <span class="c-mut">mask everything listed</span>
 <span class="c-mut">ranwhat&gt;</span> keep 3         <span class="c-mut">leave it alone, and do not report it again</span>
-<span class="c-mut">ranwhat&gt;</span> rotate         <span class="c-mut">grouped by provider</span></pre></div>
+<span class="c-mut">ranwhat&gt;</span> rotate         <span class="c-mut">grouped by provider, with each page</span>
+<span class="c-mut">ranwhat&gt;</span> open           <span class="c-mut">open those pages in your browser</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         <span class="icode">rotate</span> names the place to roll each one, whether that’s the IAM
         console, Stripe’s API keys page or BotFather, rather than leaving you to work
-        out where a 64-character string came from.
+        out where a 64-character string came from. <span class="icode">open</span> opens
+        each of those pages in your browser, or <span class="icode">open 3</span> just that
+        one&rsquo;s. Over SSH, or with no browser, it lists them instead.
       </p>
       <div class="term" style="margin-top:22px">
         <div class="term-body"><pre>ranwhat clean                   <span class="c-mut">report, then open the review</span>
