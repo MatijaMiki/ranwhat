@@ -79,6 +79,7 @@
     <li><a class="cmdname" href="/commands#reach">reach</a></li>
     <li><a class="cmdname" href="/scan">scan</a></li>
     <li><a class="cmdname" href="/commands#live">live</a></li>
+    <li><a class="cmdname" href="/commands#callers">callers</a></li>
     <li><a class="cmdname" href="/commands#demo">demo</a></li>
     <li><a class="cmdname" href="/commands#update">update</a></li>
     <li><a class="cmdname" href="/commands#login">login</a></li>
@@ -96,10 +97,10 @@
     <p class="eyebrow">Commands</p>
     <h1>Every ranwhat command</h1>
     <p class="lede">
-      Thirteen commands in one tool. Only <span class="icode">login</span>,
+      Fourteen commands in one tool. Only <span class="icode">login</span>,
       <span class="icode">whoami</span> and <span class="icode">logout</span> work with
       an account, <span class="icode">update</span> needs a Plus token, and the other
-      nine need neither.
+      ten need neither.
       Start with <span class="icode">check</span>: it reads what your agents ran and what they
       left on disk, and changes nothing.
     </p>
@@ -113,7 +114,7 @@
       <h2>A bare ranwhat lists them all.</h2>
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
-        page of their own. The other ten are below, and every flag is at the end.
+        page of their own. The other eleven are below, and every flag is at the end.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -126,6 +127,7 @@
   <span class="c-b">reach</span>    MCP servers and credential files your agents can reach
   <span class="c-b">scan</span>     the authority a set of credentials carries
   <span class="c-b">live</span>     the same, asked of each token's own provider
+  <span class="c-b">callers</span>  who used a key, from the provider's own log
   <span class="c-b">demo</span>     see the output without setting anything up
   <span class="c-b">update</span>   refresh the capability catalogue (needs Plus)
   <span class="c-b">login</span>    link this machine to your ranwhat.com account
@@ -137,9 +139,9 @@
     uvx ranwhat check
     uvx ranwhat demo
 
-<span class="c-mut">  No account needed. live and --pull-usage ask only the provider that
-  issued each token, and update, login, whoami and logout talk only to
-  ranwhat.com. Everything else reads locally and sends nothing.
+<span class="c-mut">  No account needed. live, callers and --pull-usage ask only the provider
+  that issued each token, and update, login, whoami and logout talk only
+  to ranwhat.com. Everything else reads locally and sends nothing.
   Full options: uvx ranwhat --help</span></pre></div>
       </div>
     </div>
@@ -325,9 +327,44 @@
   </div>
 </section>
 
-<section class="mark-1" id="demo">
+<section class="mark-1" id="callers">
   <div class="shell band split">
-    <div class="marginal">06 / demo</div>
+    <div class="marginal">06 / callers</div>
+    <div>
+      <h2>callers: was the key used by someone else?</h2>
+      <p class="lede">
+        <a href="/clean">clean</a> says a key leaked. Only the provider can say
+        whether anyone used it. <span class="icode">callers</span> asks the
+        provider's own log for the calls made with one key and groups them by
+        where they came from. Read-only.
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="run-callers">uvx ranwhat callers --mine 198.51.100.0/24</span>
+        <button class="copy" data-copy="#run-callers">Copy</button>
+      </div>
+      <div class="rows" style="margin-top:22px">
+        <div class="row"><span class="k">AWS</span>
+          <span class="v">CloudTrail, by access key ID, through the <span class="icode">aws</span> CLI: each call's address, client and action, for the last 90 days. Management events only, unless a trail also records data events. It needs <span class="icode">cloudtrail:LookupEvents</span>.</span></div>
+        <div class="row"><span class="k">GitHub</span>
+          <span class="v">An organisation's audit log, searched by the token's hash, with <span class="icode">--github-org</span>. It needs GitHub Enterprise Cloud, and shows addresses only where the enterprise has turned on IP disclosure.</span></div>
+        <div class="row"><span class="k">Stripe, Google, Slack</span>
+          <span class="v">No caller log ranwhat can read. It says so, and where the provider shows one to a person instead.</span></div>
+        <div class="row"><span class="k">Yours</span>
+          <span class="v">Give your addresses or ranges with <span class="icode">--mine</span>, for an office, a VPN or CI. Callers outside them are flagged. Without it nothing is called foreign, since ranwhat does not look up your address: that would mean asking someone else.</span></div>
+      </div>
+      <p class="cmdnote">
+        No calls in the window means none that log recorded, not none at all.
+        If a caller is not yours, rotate the key at the provider first.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-aws-key-id"><span class="icode">--aws-key-id ID</span></a>, <a href="#flag-aws-profile"><span class="icode">--aws-profile NAME</span></a>, <a href="#flag-aws-region"><span class="icode">--aws-region REGION</span></a>, <a href="#flag-github-org"><span class="icode">--github-org ORG</span></a>, <a href="#flag-mine"><span class="icode">--mine CIDR</span></a>, <a href="#flag-window-days"><span class="icode">--window-days N</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2" id="demo">
+  <div class="shell band split">
+    <div class="marginal">07 / demo</div>
     <div>
       <h2>demo: a whole report, with nothing to set up.</h2>
       <p class="lede">
@@ -353,7 +390,7 @@
 
 <section class="mark-2" id="update">
   <div class="shell band split">
-    <div class="marginal">07 / update</div>
+    <div class="marginal">08 / update</div>
     <div>
       <h2>update: a newer capability catalogue.</h2>
       <p class="lede">
@@ -390,7 +427,7 @@
 
 <section class="mark-3" id="login">
   <div class="shell band split">
-    <div class="marginal">08 / login</div>
+    <div class="marginal">09 / login</div>
     <div>
       <h2>login, whoami, logout: link a machine to an account.</h2>
       <p class="lede">
@@ -438,7 +475,7 @@
 
 <section class="mark-4" id="hook">
   <div class="shell band split">
-    <div class="marginal">09 / hook</div>
+    <div class="marginal">10 / hook</div>
     <div>
       <h2>hook: ask before the call, not after.</h2>
       <p class="lede">
@@ -480,7 +517,7 @@
 
 <section class="mark-5" id="flags">
   <div class="shell band split">
-    <div class="marginal">10 / Flags</div>
+    <div class="marginal">11 / Flags</div>
     <div>
       <h2>Every flag, and the commands that take it.</h2>
       <p class="lede">
@@ -527,14 +564,23 @@
               <td data-label="Commands">scan, live</td>
               <td data-label="What it does">Read which grants were used from each provider's own record, read only: AWS, GitHub, Google and Stripe. Slack has no usage pull.</td></tr>
           <tr><td><code id="flag-aws-profile">--aws-profile NAME</code></td>
-              <td data-label="Commands">scan, <span class="nowrap">with --pull-usage</span></td>
-              <td data-label="What it does">The AWS CLI profile to read usage with. It needs the <span class="icode">aws</span> command on your PATH.</td></tr>
+              <td data-label="Commands">scan, <span class="nowrap">with --pull-usage</span>; callers</td>
+              <td data-label="What it does">The AWS CLI profile to read usage or CloudTrail with. It needs the <span class="icode">aws</span> command on your PATH.</td></tr>
           <tr><td><code id="flag-github-org">--github-org ORG</code></td>
-              <td data-label="Commands">scan and live, <span class="nowrap">with --pull-usage</span></td>
-              <td data-label="What it does">The GitHub organisation whose audit log holds the usage. GitHub's pull needs it.</td></tr>
+              <td data-label="Commands">scan and live, <span class="nowrap">with --pull-usage</span>; callers</td>
+              <td data-label="What it does">The GitHub organisation whose audit log holds the usage, or the calls made with a token. GitHub needs it.</td></tr>
           <tr><td><code id="flag-window-days">--window-days N</code></td>
-              <td data-label="Commands">scan and live, <span class="nowrap">with --pull-usage</span></td>
-              <td data-label="What it does">How far back to read usage, in days. 90 by default.</td></tr>
+              <td data-label="Commands">scan and live, <span class="nowrap">with --pull-usage</span>; callers</td>
+              <td data-label="What it does">How far back to read usage or calls, in days. 90 by default; CloudTrail keeps 90 at most.</td></tr>
+          <tr><td><code id="flag-aws-key-id">--aws-key-id ID</code></td>
+              <td data-label="Commands">callers</td>
+              <td data-label="What it does">The AWS access key ID to look up, by default the one <span class="icode">--aws-profile</span> signs with. The ID names the key; it is not the secret.</td></tr>
+          <tr><td><code id="flag-aws-region">--aws-region REGION</code></td>
+              <td data-label="Commands">callers</td>
+              <td data-label="What it does">A region to read CloudTrail in. Repeatable. <span class="icode">us-east-1</span> is always read as well, since IAM and STS calls are logged there.</td></tr>
+          <tr><td><code id="flag-mine">--mine CIDR</code></td>
+              <td data-label="Commands">callers</td>
+              <td data-label="What it does">An address or range that is yours. Repeatable, or comma-separated. Callers outside every one are flagged.</td></tr>
           <tr><td><code id="flag-github">--github, --google, --slack, --stripe TOKEN</code></td>
               <td data-label="Commands">live, <span class="nowrap">and --pull-usage</span></td>
               <td data-label="What it does">A token for that provider. Prefer <span class="icode">RANWHAT_GITHUB_TOKEN</span> and the like: a value given as a flag is visible to every user on the machine through <span class="icode">ps</span>, and lands in your shell history.</td></tr>

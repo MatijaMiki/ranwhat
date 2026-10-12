@@ -375,6 +375,7 @@ ranwhat scan profile.json --html report.html
 read -rs RANWHAT_GITHUB_TOKEN                # paste it: not echoed, not saved to history
 export RANWHAT_GITHUB_TOKEN
 ranwhat live                                # read-only introspection
+ranwhat callers --mine 198.51.100.0/24      # who used a key, from the provider's log
 
 read -rs RANWHAT_STRIPE_TOKEN
 export RANWHAT_STRIPE_TOKEN
@@ -511,7 +512,7 @@ agent's entire authority surface, which is useful to somebody other than you.
 
 ## What goes online
 
-No account needed. live and --pull-usage ask only the provider that issued
+No account needed. live, callers and --pull-usage ask only the provider that issued
 each token, and update, login, whoami and logout talk only to ranwhat.com.
 Everything else reads locally and sends nothing.
 
