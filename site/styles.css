@@ -773,3 +773,25 @@ ul.listed li.on-dark{background:#151B21}
   html.js .nav nav a:first-child{border-top:0}
   html.js .nav nav a[aria-current]{color:var(--ink);font-weight:600}
 }
+
+/* Links in running text: a fine underline that firms up on hover. Colour is
+   left to the surrounding rule, so a link in a card keeps its own. */
+main p a:not([class]),main td a:not([class]),main .v a:not([class]){
+  text-decoration-line:underline;text-decoration-thickness:1px;text-underline-offset:3px;
+  text-decoration-color:color-mix(in srgb,currentColor 38%,transparent);
+  transition:text-decoration-color .15s,color .15s}
+main p a:not([class]):hover,main td a:not([class]):hover,main .v a:not([class]):hover{
+  text-decoration-color:currentColor}
+/* A card whose title is a link: the whole card is the target, with an arrow
+   that moves on hover. Links inside its text stay clickable above that. */
+.cell{position:relative;transition:background .15s}
+.cell:has(>h3>a):hover{background:var(--raise)}
+.cell h3 a{color:var(--ink);text-decoration:none}
+.cell h3 a::before{content:"";position:absolute;inset:0}
+.cell h3 a::after{content:"\2192";display:inline-block;margin-left:8px;color:var(--faint);
+  transition:transform .15s,color .15s}
+.cell h3 a:hover{color:var(--mark,var(--brand))}
+.cell h3 a:hover::after{transform:translateX(3px);color:currentColor}
+.cell p a{position:relative;z-index:1}
+@media(prefers-reduced-motion:reduce){.cell h3 a::after{transition:none}}
+.hero .lede+.cmdrow{margin-top:24px}

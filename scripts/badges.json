@@ -1,6 +1,13 @@
 {
   "badges": [
     {
+      "name": "SaaSHub",
+      "added": "2026-10-12",
+      "snippet": "<a href='https://www.saashub.com/ranwhat?utm_source=badge&utm_campaign=badge&utm_content=ranwhat&badge_variant=color&badge_kind=approved' target='_blank'><img src=\"https://cdn-b.saashub.com/img/badges/approved-color.png?v=1\" alt=\"ranwhat badge\" style=\"max-width: 150px;\"/></a>",
+      "sha256": "cb0b7c7c620b008a5e67fc31b9d78c48a4db2d2ed4ae22be4deec2cfa8af1ceb",
+      "checked": "2026-10-12"
+    },
+    {
       "name": "ScrollLaunch",
       "added": "2026-10-07",
       "snippet": "<a href=\"https://www.scrolllaunch.com/products/ranwhat?ref=badge\" target=\"_blank\">\n  <img src=\"https://www.scrolllaunch.com/api/badge/ranwhat?variant=featured&theme=light\"\n       alt=\"ranwhat - Featured on ScrollLaunch\"\n       width=\"220\" height=\"48\" />\n</a>",

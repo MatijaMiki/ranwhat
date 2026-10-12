@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP server security for coding agents: what they reach | ranwhat</title>
+<meta name="description" content="An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.">
+<link rel="canonical" href="https://ranwhat.com/guides/mcp-server-security-coding-agents">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/mcp-server-security-coding-agents">
+<meta property="og:title" content="MCP server security for coding agents: what they reach | ranwhat">
+<meta property="og:description" content="An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="MCP server security for coding agents: what they reach | ranwhat">
+<meta name="twitter:description" content="An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"Securing MCP servers for coding agents","description":"An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.","datePublished":"2026-10-09","dateModified":"2026-10-09","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/mcp-server-security-coding-agents","about":[{"@type":"Thing","name":"Model Context Protocol"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"MCP server security","item":"https://ranwhat.com/guides/mcp-server-security-coding-agents"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents" aria-current="page">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">MCP server security</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Securing MCP servers for coding agents</h1>
+    <p class="lede">
+      An MCP server is code you run, or an account you hand over, and the
+      agent decides when to call it. Know what each one can reach before you
+      approve it.
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-hero">uvx ranwhat reach</span>
+        <button class="copy" data-copy="#cmd-hero">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against Claude Code's documentation, the MCP specification's
+      security guidance, the research under Sources, and ranwhat's source.
+      Published <time datetime="2026-10-09">9 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Reach</div>
+    <div>
+      <h2>What an MCP server can reach</h2>
+      <p class="lede">
+        Claude Code does not sandbox an MCP server for you. Anthropic reviews
+        connectors against its listing criteria before they appear in its
+        directory, but does not security-audit or manage any MCP server, and
+        says so on its security page.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Local (stdio)</span>
+          <span class="v">Claude Code starts a command you configured, such as <span class="icode">npx</span> or <span class="icode">uvx</span> plus a package, and talks to it over standard input and output. The MCP specification's security guidance says plainly that a local server can run any command with the client's privileges. In practice that means your files, your shell environment and your network.</span></div>
+        <div class="row"><span class="k">Remote (HTTP)</span>
+          <span class="v">Claude Code connects to a URL. The server runs elsewhere, but it acts on a service with an OAuth grant or header you gave it, and it receives whatever the agent sends in a tool call. Claude Code stores OAuth sign-ins per endpoint, and <span class="icode">claude mcp remove</span> deletes the tokens for that server.</span></div>
+        <div class="row"><span class="k">Its environment</span>
+          <span class="v">A server's <span class="icode">env</span> block is whatever you put in it. A token with write access to every repository you own is what that server holds, whether or not it ever needs it.</span></div>
+        <div class="row"><span class="k">Its words</span>
+          <span class="v">The server also supplies the text the model reads: tool names, tool descriptions and every result. The model treats it as context, and you rarely see all of it.</span></div>
+      </div>
+      <p style="margin-top:26px;font-size:14.5px;color:var(--muted)">
+        The permission prompt for a tool call is a check on each call, not on
+        the code behind it. A server you approved once keeps the access you
+        gave it. For the same reasoning applied to the credentials themselves,
+        see <a href="/guides/ai-agent-token-scopes">token scopes for AI agents</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Risks</div>
+    <div>
+      <h2>The risks that are documented</h2>
+      <div class="rows">
+        <div class="row"><span class="k">Tool poisoning</span>
+          <span class="v">Invariant Labs named this in April 2025: instructions hidden in a tool's description that the model reads and you usually do not. In its demonstration against Cursor, a tool that claimed to add two numbers told the agent to read <span class="icode">~/.cursor/mcp.json</span> and an SSH private key and pass them as an argument. The confirmation dialog showed a shortened tool name, not the full input. The authors said any client that does not show and validate descriptions could be affected.</span></div>
+        <div class="row"><span class="k">Changed later</span>
+          <span class="v">Invariant also described a rug pull: a server alters a tool's description after you approved it. With a remote server this needs no release on your side. Approving a server is not approving the text it will serve next week.</span></div>
+        <div class="row"><span class="k">Shadowing</span>
+          <span class="v">In a second experiment, one server's tool description changed how the agent used a different, trusted server's email tool, so mail went to the attacker's address. The agent's own log did not say so. The cause is two servers in one context. Keep a server that touches sensitive data away from one you do not trust.</span></div>
+        <div class="row"><span class="k">Output</span>
+          <span class="v">Claude Code's MCP documentation warns that servers which fetch external content can expose you to prompt injection. A tool that reads an issue, a web page or an email returns text someone else wrote, and the agent reads it as part of the task.</span></div>
+        <div class="row"><span class="k">A cloned .mcp.json</span>
+          <span class="v">A repository can ship a <span class="icode">.mcp.json</span> that names a command to run. Claude Code asks before it starts those servers, so the prompt is the control. A prompt you accept without reading is not one. The MCP specification lists a malicious startup command in a client configuration as a local compromise path, with the example of a command that posts <span class="icode">~/.ssh/id_rsa</span> to a remote host.</span></div>
+        <div class="row"><span class="k">Plaintext keys</span>
+          <span class="v">A token pasted into <span class="icode">env</span> or a header is stored as you wrote it, in <span class="icode">~/.claude.json</span> or in a <span class="icode">.mcp.json</span> that can be committed. Claude Code keeps its own sign-in in the macOS Keychain where available, but a key you typed into a server definition is a different thing, and the agent can read the file like any other. Invariant's demonstration went after the MCP config file for this reason.</span></div>
+        <div class="row"><span class="k">Config changes</span>
+          <span class="v">Mitiga showed an npm <span class="icode">postinstall</span> script marking clone paths as trusted in <span class="icode">~/.claude.json</span>, after which a hook in a cloned repository re-pointed an OAuth MCP server at a local proxy and read each token. Anthropic ruled it out of scope, Mitiga reports, because the chain depends on consent the user had already given. The lesson is to know what is configured, which is the next section.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Config</div>
+    <div>
+      <h2>Read what is configured</h2>
+      <p class="lede">
+        Servers come from several places, and reviewing a repository's
+        <span class="icode">.mcp.json</span> does not show them all. Plugins
+        can add servers, and so can claude.ai connectors.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead><tr><th>Scope</th><th>Loads in</th><th>Shared</th><th>Stored in</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Local</strong> (default)</td><td data-label="Loads in">That project only</td><td data-label="Shared">No</td><td data-label="Stored in"><span class="icode">~/.claude.json</span>, under the project's path</td></tr>
+          <tr><td><strong>Project</strong></td><td data-label="Loads in">That project only</td><td data-label="Shared">Yes, through version control</td><td data-label="Stored in"><span class="icode">.mcp.json</span> in the project root</td></tr>
+          <tr><td><strong>User</strong></td><td data-label="Loads in">All your projects</td><td data-label="Shared">No</td><td data-label="Stored in"><span class="icode">~/.claude.json</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        When one name is defined twice, the higher scope wins: local, then
+        project, then user, then plugin servers, then claude.ai connectors,
+        and field values are not merged. Local scope is
+        <span class="icode">~/.claude.json</span>, not
+        <span class="icode">.claude/settings.local.json</span>.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>claude mcp list                  <span class="c-mut"># every server and its status</span>
+claude mcp get &lt;name&gt;            <span class="c-mut"># one server's definition</span>
+claude mcp remove &lt;name&gt; --scope user
+claude mcp reset-project-choices <span class="c-mut"># forget your .mcp.json approvals</span>
+/mcp                             <span class="c-mut"># inside a session: status, sign-out, disable</span></pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Status</span>
+          <span class="v"><span class="icode">/mcp</span> shows <span class="icode">Connected</span>, <span class="icode">Needs authentication</span>, <span class="icode">Failed to connect</span>, <span class="icode">Pending approval</span> or <span class="icode">Disabled for this project</span> for each server. Its <strong>Clear authentication</strong> action revokes a remote sign-in, and <strong>Disable</strong> turns a server off for one project without deleting it.</span></div>
+        <div class="row"><span class="k">Secrets in a file</span>
+          <span class="v">In <span class="icode">.mcp.json</span>, write <span class="icode">${VAR}</span> or <span class="icode">${VAR:-default}</span> instead of the value. Expansion works in <span class="icode">command</span>, <span class="icode">args</span>, <span class="icode">env</span>, <span class="icode">url</span> and <span class="icode">headers</span>. An unset variable with no default only produces a warning in <span class="icode">claude mcp list</span> and <span class="icode">/mcp</span>, and the server loads with the literal text.</span></div>
+        <div class="row"><span class="k">Blocked variables</span>
+          <span class="v">In a remote server's <span class="icode">url</span> and <span class="icode">headers</span>, <span class="icode">ANTHROPIC_API_KEY</span>, <span class="icode">ANTHROPIC_AUTH_TOKEN</span> and <span class="icode">AWS_BEARER_TOKEN_BEDROCK</span> read as empty, so a repository's <span class="icode">.mcp.json</span> cannot send those to a server it names. Your other variables expand as written.</span></div>
+        <div class="row"><span class="k">headersHelper</span>
+          <span class="v">A server can set a <span class="icode">headersHelper</span>, which Claude Code runs as an arbitrary shell command. For a project or local server it runs only after you accept the workspace trust dialog for that directory.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Scope</div>
+    <div>
+      <h2>Approve less, allow less</h2>
+      <h3>Project servers from a clone</h3>
+      <p>
+        In an interactive session, Claude Code asks before it uses a server
+        from a project's <span class="icode">.mcp.json</span>. Since v2.1.196, an
+        approval committed to the repository's own
+        <span class="icode">.claude/settings.json</span>
+        (<span class="icode">enableAllProjectMcpServers</span> or
+        <span class="icode">enabledMcpjsonServers</span>) is ignored until you
+        trust the folder, so a clone cannot approve its own servers. Approvals
+        in your <span class="icode">~/.claude/settings.json</span>, in managed
+        settings and in <span class="icode">--settings</span> still apply, so
+        keep <span class="icode">enableAllProjectMcpServers</span> out of your
+        user settings unless you mean it.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">No prompt</span>
+          <span class="v"><strong>In <span class="icode">claude -p</span>, Agent SDK and cloud sessions there is no approval prompt, and project servers load without asking.</strong> To keep one out, add it to <span class="icode">disabledMcpjsonServers</span>, which blocks it in every mode, or start with <span class="icode">--strict-mcp-config</span> or <span class="icode">--setting-sources user</span>.</span></div>
+        <div class="row"><span class="k">Reject</span>
+          <span class="v">A <span class="icode">disabledMcpjsonServers</span> entry in any settings file rejects the server and shows it as <span class="icode">Rejected</span>.</span></div>
+      </div>
+      <h3 style="margin-top:34px">Rules for mcp__server__tool</h3>
+      <p>
+        MCP permission rules use the server name as you configured it, then
+        optionally a tool name.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>.claude/settings.json or ~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "permissions": {
+    "allow": [
+      "mcp__github__get_*"
+    ],
+    "deny": [
+      "mcp__github__delete_repository",
+      "mcp__filesystem"
+    ]
+  }
+}</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Forms</span>
+          <span class="v"><span class="icode">mcp__puppeteer</span> matches every tool from that server. <span class="icode">mcp__puppeteer__*</span> does the same. <span class="icode">mcp__puppeteer__puppeteer_navigate</span> matches one tool.</span></div>
+        <div class="row"><span class="k">Globs</span>
+          <span class="v">An allow rule may use a glob only after a literal <span class="icode">mcp__&lt;server&gt;__</span> prefix, as in <span class="icode">mcp__github__get_*</span>. An unanchored allow such as <span class="icode">mcp__*</span> is skipped with a warning. Deny and ask rules accept <span class="icode">mcp__*</span>, and a tool matched by a bare-name deny is removed from the model's context.</span></div>
+        <div class="row"><span class="k">No arguments</span>
+          <span class="v">A rule cannot match a tool's arguments. Claude Code skips any <span class="icode">mcp__</span> rule that has parentheses and lists it in the invalid-settings dialog and in <span class="icode">claude doctor</span>. Decide per tool, not per argument.</span></div>
+        <div class="row"><span class="k">Order</span>
+          <span class="v">Prefer naming read-only tools in <span class="icode">allow</span> and leaving the rest to prompt. An allow on a whole server turns off the per-call check for every tool it has now and every tool it adds later.</span></div>
+      </div>
+      <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
+        Permissions cover what the agent does with MCP tools. They do not
+        change what the server process can do on your machine. For that, the
+        controls are the token it holds and where it runs.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Limit</div>
+    <div>
+      <h2>Limit what a server holds, and who can add one</h2>
+      <div class="rows">
+        <div class="row"><span class="k">Least privilege</span>
+          <span class="v">Give each server its own credential with the narrowest scope and the shortest life that works: read-only, one repository, one project. The MCP specification's guidance on scope minimization says broad tokens widen the damage from a leak and make revocation disruptive. <a href="/guides/ai-agent-token-scopes">Token scopes for AI agents</a> goes through the common providers.</span></div>
+        <div class="row"><span class="k">Not the shell's</span>
+          <span class="v">Put the key in the server's own <span class="icode">env</span> through <span class="icode">${VAR}</span>, not in the shell you start <span class="icode">claude</span> from, where every Bash command inherits it. The <a href="/guides/claude-code-env-secrets">guide to blocking .env reads</a> covers keeping the agent out of the files.</span></div>
+        <div class="row"><span class="k">Pin versions</span>
+          <span class="v"><span class="icode">npx -y some-server</span> fetches the newest release at each start, so whoever publishes the package chooses what runs with your access. Write the exact version, as in <span class="icode">npx -y some-server@1.4.2</span>, and update it on purpose. This pins code you run locally. It does nothing for a remote server, which can change on its own.</span></div>
+        <div class="row"><span class="k">Remote URLs</span>
+          <span class="v">Use <span class="icode">https</span>. Look at a remote server's tool list again now and then, because nothing tells you when its descriptions change.</span></div>
+        <div class="row"><span class="k">Isolation</span>
+          <span class="v">Claude Code's security page suggests running the whole process in the sandbox runtime or a dev container for extra isolation. Its Bash sandbox covers Bash commands, so do not assume it contains an MCP server you launched.</span></div>
+      </div>
+      <h3 style="margin-top:34px">For an organisation</h3>
+      <p>
+        By default anyone can connect any server. Managed settings change that.
+      </p>
+      <div class="rows" style="margin-top:22px">
+        <div class="row"><span class="k">managed-mcp.json</span>
+          <span class="v">Deployed to <span class="icode">/Library/Application Support/ClaudeCode/</span> on macOS, <span class="icode">/etc/claude-code/</span> on Linux and WSL, or <span class="icode">C:\Program Files\ClaudeCode\</span> on Windows. Users get only those servers and cannot add others. An empty <span class="icode">mcpServers</span> map turns MCP off. Any user on the machine can read the file, so keep keys out of its <span class="icode">env</span>.</span></div>
+        <div class="row"><span class="k">Allow and deny</span>
+          <span class="v"><span class="icode">allowedMcpServers</span> and <span class="icode">deniedMcpServers</span> match by <span class="icode">serverUrl</span>, <span class="icode">serverCommand</span> or <span class="icode">serverName</span>. Setting <span class="icode">allowManagedMcpServersOnly</span> to true makes the managed allowlist the only one. Otherwise users can widen it in their own settings. The denylist always wins.</span></div>
+        <div class="row"><span class="k">Not by name</span>
+          <span class="v">A <span class="icode">serverName</span> is the label a user typed, so anyone can call a server <span class="icode">github</span>. Anthropic's documentation says it is not a security control. Match on <span class="icode">serverUrl</span> or the exact <span class="icode">serverCommand</span>. The command match ignores <span class="icode">env</span>.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">06 / Check</div>
+    <div>
+      <h2>See what this machine has configured</h2>
+      <p class="lede">
+        <a href="/commands">ranwhat reach</a> reads the configuration your
+        agents keep and lists the MCP servers and credential files they can
+        reach. It only reads, and it writes no settings.
+      </p>
+      <div class="cmdrow">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="cmd-reach">uvx ranwhat reach</span>
+          <button class="copy" data-copy="#cmd-reach">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Reads</span>
+          <span class="v">Servers in Claude Code's <span class="icode">~/.claude.json</span> (user scope and each project's local scope), each project's <span class="icode">.mcp.json</span> and <span class="icode">managed-mcp.json</span>, plus the files of Claude Desktop, Cursor, VS Code, Gemini CLI, Qwen Code, GitHub Copilot CLI, Windsurf and Codex.</span></div>
+        <div class="row"><span class="k">Per server</span>
+          <span class="v">What it runs or connects to, and four things worth a look: a secret written inline in <span class="icode">env</span>, an argument, a header or the URL (shown the way <span class="icode">clean</span> shows one, never whole, and <span class="icode">${VAR}</span> references are left alone); a package fetched at its newest version on every start; a remote, plain <span class="icode">http</span> or local URL; and a <span class="icode">.mcp.json</span> whose servers start without asking because <span class="icode">enableAllProjectMcpServers</span> is on.</span></div>
+        <div class="row"><span class="k">Files</span>
+          <span class="v">Credential files an agent could read, such as <span class="icode">.env</span>, private keys, <span class="icode">.npmrc</span> and <span class="icode">~/.aws/credentials</span>, when no Claude Code <span class="icode">Read</span> deny rule covers them. It prints paths, never contents, and ends with a <span class="icode">permissions.deny</span> block to paste.</span></div>
+        <div class="row"><span class="k">Does not</span>
+          <span class="v"><strong>It reads the configuration, not the server.</strong> It does not inspect a server's code or its tool descriptions for poisoning, and it does not tell you whether a package is trustworthy. Read the server's source and its tool list yourself.</span></div>
+      </div>
+      <p style="margin-top:22px">
+        <span class="icode">ranwhat reach ~/code/app</span> checks one project,
+        and <span class="icode">--json</span> prints it as data. To see what
+        agents already did, including MCP calls, run
+        <span class="icode">uvx ranwhat check</span>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">07 / Next</div>
+    <div>
+      <h2>A short routine</h2>
+      <div class="term">
+        <div class="term-body"><pre>claude mcp list                 <span class="c-mut"># do you recognise every server?</span>
+uvx ranwhat reach               <span class="c-mut"># inline secrets, unpinned packages, auto-approved .mcp.json</span>
+/permissions                    <span class="c-mut"># inside Claude Code: which mcp__ rules apply</span></pre></div>
+      </div>
+      <p style="margin-top:22px">
+        Remove what you do not use, move keys to <span class="icode">${VAR}</span>,
+        pin the packages, and replace any whole-server allow with named tools.
+        For the record of what the agent actually called, read the
+        <a href="/guides/claude-code-audit-log">Claude Code audit log guide</a>.
+        For the rest of the controls, the
+        <a href="/guides/ai-coding-agent-security">AI coding agent security
+        checklist</a>, and the other <a href="/guides">guides</a> are listed here.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/mcp">Connect Claude Code to tools via MCP<span>scopes, commands, .mcp.json expansion, project approvals, headersHelper, OAuth storage</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/permissions#mcp">Configure permissions<span>mcp__server__tool rules, globs, parentheses skipped</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/security#mcp-security">Claude Code security<span>MCP security, trust dialog, no audit of servers</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/managed-mcp">Control MCP server access for your organization<span>managed-mcp.json, allow and deny lists, serverName caveat</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings-reference">Settings reference<span>the enable, disable, allow and deny MCP keys and where they can be set</span></a></li>
+        <li><a href="https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices">MCP security best practices<span>local server compromise, startup commands, scope minimization</span></a></li>
+        <li><a href="https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks">Invariant Labs: tool poisoning attacks<span>hidden descriptions, shadowing, rug pulls, the Cursor demonstration</span></a></li>
+        <li><a href="https://www.mitiga.io/blog/claude-code-mcp-token-theft-mitm">Mitiga: stealing MCP tokens in Claude Code<span>the trust and re-pointed server chain, the disclosure</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/reach.py">ranwhat/reach.py<span>what reach reads and reports</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/README.md">ranwhat README<span>the reach command, its files and its limits</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>
