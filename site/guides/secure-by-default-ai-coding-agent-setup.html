@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A secure-by-default AI coding agent setup | ranwhat</title>
+<meta name="description" content="What secure by default means for a coding agent: the Claude Code settings, credential rules and records that limit what it can do before it goes wrong.">
+<link rel="canonical" href="https://ranwhat.com/guides/secure-by-default-ai-coding-agent-setup">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/secure-by-default-ai-coding-agent-setup">
+<meta property="og:title" content="A secure-by-default AI coding agent setup | ranwhat">
+<meta property="og:description" content="What secure by default means for a coding agent: the Claude Code settings, credential rules and records that limit what it can do before it goes wrong.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="A secure-by-default AI coding agent setup | ranwhat">
+<meta name="twitter:description" content="What secure by default means for a coding agent: the Claude Code settings, credential rules and records that limit what it can do before it goes wrong.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"A secure-by-default AI coding agent setup","description":"What secure by default means for a coding agent: the Claude Code settings, credential rules and records that limit what it can do before it goes wrong.","datePublished":"2026-10-13","dateModified":"2026-10-13","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/secure-by-default-ai-coding-agent-setup","about":[{"@type": "Thing", "name": "Secure by default"}, {"@type": "Thing", "name": "AI coding agents"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"A secure-by-default AI coding agent setup","item":"https://ranwhat.com/guides/secure-by-default-ai-coding-agent-setup"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup" aria-current="page">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">A secure-by-default AI coding agent setup</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>A secure-by-default AI coding agent setup</h1>
+    <p class="lede">
+      Secure by default means the safe behaviour is the one you get without doing anything, and the risky one needs a deliberate step. Coding agents do not start that way. This guide lists the settings and habits that move them closer.
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-hero">uvx ranwhat check</span>
+        <button class="copy" data-copy="#cmd-hero">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against Claude Code's documentation under Sources and ranwhat's source. Published <time datetime="2026-10-13">13 October 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Meaning</div>
+    <div>
+      <h2>What secure by default means for an agent</h2>
+      <p class="lede">
+        An agent starts with whatever your account can do: your files, your
+        shell, your tokens. Nothing in that is wrong by itself. The risk is
+        that the agent reads text you did not write and acts on it. OWASP's
+        advice for that is to give the model least privilege, require human
+        approval for high-risk actions, and treat the model as an untrusted
+        user. Secure by default is those three, set up once, so you are not
+        relying on a prompt.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Fail closed</span>
+          <span class="v">Network reach starts empty and you add the few hosts the work needs, rather than starting open and removing the bad ones.</span></div>
+        <div class="row"><span class="k">Hold less</span>
+          <span class="v">The agent gets tokens scoped to its task. What it never holds, a hijacked session cannot use.</span></div>
+        <div class="row"><span class="k">Look afterwards</span>
+          <span class="v">Prevention fails sometimes, so keep a record that you can read back.</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / File</div>
+    <div>
+      <h2>The settings to start from</h2>
+      <p class="lede">
+        This is one <span class="icode">~/.claude/settings.json</span> that
+        combines the deny rules and the sandbox from the
+        <a href="/guides/prompt-injection-coding-agents">prompt injection
+        guide</a>. Adjust the hosts and paths to your own work.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "permissions": {
+    "deny": ["Bash(curl *)", "Bash(wget *)", "Read(./.env)", "Read(~/.aws/**)"],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": ["github.com", "*.npmjs.org"],
+      "strictAllowlist": true
+    }
+  }
+}</pre></div>
+      </div>
+      <div class="rows">
+        <div class="row"><span class="k">Deny rules</span>
+          <span class="v">Rules run deny, then ask, then allow, and the first match wins. A deny cannot be undone by a broader allow. A Bash rule matches the command text Claude writes and is not a boundary around the program, so it complements the sandbox and does not replace it.</span></div>
+        <div class="row"><span class="k">The sandbox</span>
+          <span class="v">Enforced by the operating system, on macOS, Linux and WSL2. It limits which files shell commands can reach and routes their network traffic through a proxy that checks each host against <span class="icode">network.allowedDomains</span>, which starts empty. Native Windows runs commands unsandboxed, so use WSL2.</span></div>
+        <div class="row"><span class="k">What it does not cover</span>
+          <span class="v">The built-in Read, Edit and Write tools follow permission rules and not the sandbox. Hooks and local MCP servers run with your full access.</span></div>
+        <div class="row"><span class="k">Bypass mode</span>
+          <span class="v"><span class="icode">disableBypassPermissionsMode</span> stops the prompt-skipping mode. Use that mode only inside a container or VM that holds nothing you care about.</span></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        The reasoning behind each line is in
+        <a href="/guides/prompt-injection-coding-agents">prompt injection in coding agents</a>
+        and <a href="/guides/claude-code-env-secrets">blocking .env reads</a>.
+      </p>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Credentials</div>
+    <div>
+      <h2>Give it less to steal</h2>
+      <p class="lede">
+        A command the agent runs can use every token in its environment and
+        on disk. Make that set small.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Its own token</span>
+          <span class="v">Create one for the agent, with only the scopes the task needs and an expiry date, instead of lending it your admin key. See <a href="/guides/ai-agent-token-scopes">token scopes for AI agents</a>.</span></div>
+        <div class="row"><span class="k">Keep secrets out of reach</span>
+          <span class="v">Keep <span class="icode">.env</span> files and cloud credentials out of the project the agent works in where you can, and deny the reads you cannot move.</span></div>
+        <div class="row"><span class="k">Assume exposure</span>
+          <span class="v">A secret that entered the agent's context counts as exposed. Rotate it. <a href="/guides/rotate-leaked-api-key-ai-agent">The rotation guide</a> goes provider by provider.</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Tools</div>
+    <div>
+      <h2>Review what you plug in</h2>
+      <p class="lede">
+        Every MCP server and every hook is a program that runs for the agent,
+        and neither one is limited by the sandbox.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">MCP servers</span>
+          <span class="v">Claude Code's security page says Anthropic does not security-audit or manage MCP servers. Read the configuration, approve only the servers you know, and scope their tokens. See <a href="/guides/mcp-server-security-coding-agents">MCP server security</a>.</span></div>
+        <div class="row"><span class="k">Hooks</span>
+          <span class="v">A hook is the one place you can block a call before it runs, and it is also code with your full access. Write them yourself or read them first. See <a href="/guides/claude-code-hooks-security">Claude Code hooks for security</a>.</span></div>
+        <div class="row"><span class="k">Cloned repositories</span>
+          <span class="v">A repository can carry its own settings and hooks. Look at <span class="icode">.claude/</span> in a repository you have just cloned before you open it with an agent.</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Record</div>
+    <div>
+      <h2>Keep a record you can read</h2>
+      <p class="lede">
+        The transcripts your agent writes are already an audit trail, and
+        they expire. Claude Code's are removed after 30 days by default.
+      </p>
+      <p>
+        Run the check on a schedule that suits you, so that a risky action
+        or a leaked secret is something you find in days and not never. The
+        <a href="/guides/claude-code-audit-log">audit log guide</a> covers a
+        hook or OpenTelemetry for a record from now on, and
+        <a href="/guides/ai-coding-agent-history-locations">where each agent
+        keeps its history</a> covers the others.
+      </p>
+      <div class="cmdrow">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="cmd-check">uvx ranwhat check</span>
+          <button class="copy" data-copy="#cmd-check">Copy</button>
+        </div>
+        <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+      </div>
+      <p style="margin-top:22px">
+        ranwhat reads the history locally and flags risky actions and secrets
+        left on disk. It does not enforce any of the settings above, and it
+        blocks nothing unless you install its Claude Code hook. It tells you
+        what already happened.
+      </p>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">06 / Next</div>
+    <div>
+      <h2>Where to go from here</h2>
+      <p>
+        The <a href="/guides/ai-coding-agent-security">AI coding agent
+        security checklist</a> puts these steps in order. To check what an
+        agent wrote, read
+        <a href="/guides/check-ai-agent-code-is-secure">how to check that
+        AI-written code is secure</a>. All guides are on the
+        <a href="/guides">guides</a> page.
+      </p>
+
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/security">Claude Code security<span>safeguards, no system immune, MCP not audited</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/sandboxing">Claude Code sandboxing<span>what the sandbox covers, allowedDomains, unsandboxed retry</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/permissions">Claude Code permissions<span>deny, ask, allow order, Bash rule limits, bypassPermissions</span></a></li>
+        <li><a href="https://genai.owasp.org/llmrisk/llm01-prompt-injection/">OWASP LLM01: Prompt Injection<span>least privilege, human approval, treat the model as untrusted</span></a></li>
+        <li><a href="https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/">Simon Willison: the lethal trifecta<span>private data, untrusted content, a way out</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/README.md">ranwhat README<span>what check reads and flags</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

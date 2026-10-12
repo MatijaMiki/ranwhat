@@ -152,7 +152,41 @@
   </div>
 </section>
 
-<section class="mark-1"  >
+<section class="mark-1" id="compare">
+  <div class="shell band split">
+    <div class="marginal">Compare</div>
+    <div>
+      <h2>Free or Plus: what each one covers.</h2>
+      <p class="lede">
+        If you run agents on one machine, Free is enough. Plus starts to matter
+        when the record has to live somewhere other than that laptop.
+      </p>
+      <div class="scroll">
+      <table class="stack">
+        <thead>
+          <tr><th>What you need</th><th>Free</th><th>Plus</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Read an agent's history and flag risky actions</td><td data-label="Free">Yes, every source and rule</td><td data-label="Plus">Same code, nothing extra needed</td></tr>
+          <tr><td>Find secrets in transcripts and mask them</td><td data-label="Free">Yes</td><td data-label="Plus">Same</td></tr>
+          <tr><td>Score what an agent's tokens allow</td><td data-label="Free">Yes, against the catalogue shipped with your version</td><td data-label="Plus">Against a catalogue kept current as providers add scopes</td></tr>
+          <tr><td>HTML and JSON reports</td><td data-label="Free">Yes</td><td data-label="Plus">Same</td></tr>
+          <tr><td>CI tokens, and teammates invited by email</td><td data-label="Free">No</td><td data-label="Plus">Yes, on your account</td></tr>
+          <tr><td>One view across machines and CI runners</td><td data-label="Free">One report per machine</td><td data-label="Plus">Being built</td></tr>
+          <tr><td>Retention, alerts and drift notices</td><td data-label="Free">Your own backups</td><td data-label="Plus">Being built</td></tr>
+          <tr><td>Price</td><td data-label="Free">Free, forever</td><td data-label="Plus">&euro;12 a month per organisation, or &euro;120 a year</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:18px;font-size:14px;color:var(--muted)">
+        Not sure which you need? Start with Free: <span class="icode">uvx ranwhat check</span>.
+        Nothing is sent to us, and there is no account to make first.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2"  >
   <div class="shell band split">
     <div class="marginal">The rule</div>
     <div>
@@ -303,6 +337,13 @@
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
         </ul>
       </div>
       <div>
