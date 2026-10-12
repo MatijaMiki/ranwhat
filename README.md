@@ -187,7 +187,8 @@ ranwhat> show 3         where it appears, and what to roll it at
 ranwhat> mask 3         mask just that one
 ranwhat> mask all       mask everything listed
 ranwhat> keep 3         leave it alone, and do not report it again
-ranwhat> rotate         what to rotate, grouped by provider
+ranwhat> rotate         what to rotate, grouped by provider, with each page
+ranwhat> open           open those pages in your browser (open 3: just that one)
 ```
 
 `keep` is remembered: a value you keep is neither listed nor counted by

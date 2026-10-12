@@ -3489,6 +3489,7 @@ _COMMANDS = (
     ("mask all", "mask everything listed"),
     ("keep <n>", "leave it alone, and do not report it again"),
     ("rotate", "what to rotate, grouped by provider"),
+    ("open [n]", "open the page to rotate each key, or that one's"),
     ("quit", "leave (nothing is masked unless you asked)"),
 )
 
@@ -3531,6 +3532,62 @@ _PROVIDER = [
     (re.compile(r"jwt|session|cron|app_key|signing", re.I),
      "Application secret: you generate this one; rotating invalidates sessions"),
 ]
+
+
+# The page where each provider's keys are rolled, keyed by the advice above.
+# Only pages that exist for everyone: a provider whose page depends on the
+# account or the app gets its dashboard, and a secret you generate yourself
+# gets none, since there is nowhere to send you.
+_PAGES = {
+    "ranwhat": ["https://account.ranwhat.com/"],
+    "AWS": ["https://console.aws.amazon.com/iam/home#/security_credentials"],
+    "OpenAI / Anthropic": ["https://platform.openai.com/api-keys",
+                           "https://console.anthropic.com/settings/keys"],
+    "Slack": ["https://api.slack.com/apps"],
+    "SendGrid": ["https://app.sendgrid.com/settings/api_keys"],
+    "Stripe": ["https://dashboard.stripe.com/apikeys"],
+    "Twilio": ["https://console.twilio.com/"],
+    "Meta / Pusher": ["https://developers.facebook.com/apps/",
+                      "https://dashboard.pusher.com/"],
+    "GitHub": ["https://github.com/settings/tokens"],
+    "Render": ["https://dashboard.render.com/"],
+    "Cloudflare": ["https://dash.cloudflare.com/"],
+    "Telegram": ["https://t.me/BotFather"],
+}
+
+
+def _pages_for(label):
+    """The pages to rotate the secret a finding names, or none."""
+    return list(_PAGES.get(_provider_for(label).split(":")[0], ()))
+
+
+_SSH = ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
+
+
+def _can_open(stream, environ=None, platform=None):
+    """Whether a browser would open on this screen: a terminal, no SSH, and
+    a display, as login decides it."""
+    import sys as _sys
+    environ = os.environ if environ is None else environ
+    platform = _sys.platform if platform is None else platform
+    try:
+        if not stream.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if any(environ.get(name) for name in _SSH):
+        return False
+    if platform == "darwin" or platform.startswith(("win", "cygwin")):
+        return True
+    return bool(environ.get("DISPLAY") or environ.get("WAYLAND_DISPLAY"))
+
+
+def _open_page(url):
+    try:
+        import webbrowser
+        return bool(webbrowser.open(url, new=2))
+    except Exception:
+        return False
 
 
 def _provider_for(label):
@@ -3628,6 +3685,8 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
             for advice, group in sorted(groups.items()):
                 for line in term.wrap(advice, indent="    ", first="  "):
                     _print(_painted(line, BOLD))
+                for url in _PAGES.get(advice.split(":")[0], ()):
+                    _print("    " + _fit(url, width - 4))
                 labels = [shown(f["label"]) for f in group]
                 pad = max(map(len, labels))
                 seen = ["seen %dx" % f["count"] for f in group]
@@ -3639,6 +3698,39 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
                         _print(DIM("      " + _fit(label, width - 6)))
                         _print(DIM("        " + s))
                 _print()
+            continue
+
+        if cmd == "open":
+            if arg is not None:
+                if not arg.isdigit() or not (1 <= int(arg) <= len(items)):
+                    _print(RED("  need a number from 1 to %d" % len(items)))
+                    continue
+                chosen = [items[int(arg) - 1]]
+            else:
+                chosen = items
+            urls = []
+            for f in chosen:
+                for url in _pages_for(f["label"]):
+                    if url not in urls:
+                        urls.append(url)
+            if not urls:
+                _print(DIM("  No page to open: you generate %s yourself, so "
+                           "roll it where you made it."
+                           % ("this one" if arg else "these")))
+                _print()
+                continue
+            if _can_open(out):
+                opened = [u for u in urls if _open_page(u)]
+                _print(GRN("  Opened %d page%s in your browser."
+                           % (len(opened), "" if len(opened) == 1 else "s")))
+                for url in urls:
+                    if url not in opened:
+                        _print("    could not open " + _fit(url, width - 21))
+            else:
+                _print(DIM("  No browser here, so open these yourself:"))
+                for url in urls:
+                    _print("    " + _fit(url, width - 4))
+            _print()
             continue
 
         if cmd in ("show", "mask", "keep"):
@@ -3663,6 +3755,8 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
                                       indent=" " * 19,
                                       first="      rotate at  : "):
                     _print(DIM(line))
+                for url in _pages_for(target["label"]):
+                    _print(DIM("      page       : ") + _fit(url, width - 19))
                 for origin in sorted(map(shown, target.get("origins") or [])):
                     _print(DIM("      read from  : ")
                            + _fit_path(origin, width - 19))

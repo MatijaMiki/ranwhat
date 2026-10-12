@@ -293,5 +293,65 @@ class NoEmDashInRotationAdvice(unittest.TestCase):
         self.assertNotIn(EM_DASH, clean._provider_for("nothing matches this"))
 
 
+class RotationPages(unittest.TestCase):
+    """The review lists where each key is rolled, and `open` opens those
+    pages: only on a screen that has a browser, and only pages that exist."""
+
+    def test_every_page_belongs_to_a_provider_that_exists(self):
+        names = {advice.split(":")[0] for _pattern, advice in clean._PROVIDER}
+        self.assertLessEqual(set(clean._PAGES), names)
+        for urls in clean._PAGES.values():
+            for url in urls:
+                self.assertTrue(url.startswith("https://"), url)
+
+    def test_rotate_and_show_print_the_page(self):
+        text = _review(FINDINGS, ["rotate", "show 3"], "120")
+        self.assertIn("https://console.aws.amazon.com/iam/home", text)
+        self.assertIn("page       : https://console.aws.amazon.com", text)
+
+    def test_open_without_a_browser_lists_the_pages(self):
+        # A StringIO is no terminal, so nothing may be opened.
+        with mock.patch.object(clean, "_open_page") as opened:
+            text = _review(FINDINGS, ["open"], "120")
+        opened.assert_not_called()
+        self.assertIn("open these yourself", text)
+        self.assertIn("https://platform.openai.com/api-keys", text)
+        self.assertEqual(text.count("https://console.aws.amazon.com/iam"), 1)
+
+    def test_open_on_a_screen_opens_each_page_once(self):
+        with mock.patch.object(clean, "_can_open", return_value=True), \
+                mock.patch.object(clean, "_open_page", return_value=True) as opened:
+            text = _review(FINDINGS, ["open"], "120")
+        urls = [c.args[0] for c in opened.call_args_list]
+        self.assertEqual(len(urls), len(set(urls)))
+        self.assertIn("https://console.aws.amazon.com/iam/home#/security_credentials", urls)
+        self.assertIn("Opened %d pages" % len(urls), text)
+
+    def test_open_one_finding(self):
+        with mock.patch.object(clean, "_can_open", return_value=True), \
+                mock.patch.object(clean, "_open_page", return_value=True) as opened:
+            _review(FINDINGS, ["open 3"], "120")
+        self.assertEqual([c.args[0] for c in opened.call_args_list],
+                         ["https://console.aws.amazon.com/iam/home#/security_credentials"])
+
+    def test_a_secret_you_made_has_no_page(self):
+        with mock.patch.object(clean, "_open_page") as opened:
+            text = _review(FINDINGS, ["open 2"], "120")
+        opened.assert_not_called()
+        self.assertIn("No page to open", text)
+
+    def test_a_bad_number(self):
+        text = _review(FINDINGS, ["open 99"], "120")
+        self.assertIn("need a number from 1 to 5", text)
+
+    def test_no_browser_over_ssh_or_off_a_terminal(self):
+        tty = mock.Mock(isatty=lambda: True)
+        self.assertFalse(clean._can_open(io.StringIO(), {}, "darwin"))
+        self.assertFalse(clean._can_open(tty, {"SSH_TTY": "/dev/ttys1"}, "darwin"))
+        self.assertFalse(clean._can_open(tty, {}, "linux"))
+        self.assertTrue(clean._can_open(tty, {"DISPLAY": ":0"}, "linux"))
+        self.assertTrue(clean._can_open(tty, {}, "darwin"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
