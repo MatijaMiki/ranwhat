@@ -225,7 +225,8 @@ TAGLINE = "Flight recorder and authority scanner for AI agents."
 # which talk to ranwhat's own server (feed.ranwhat.com). site/install.html
 # quotes it word for word, and commands.html, llms.txt and the README say
 # the same.
-NETWORK = ("No account needed. live and --pull-usage ask only the provider "
+NETWORK = ("No account needed. live, callers and --pull-usage ask only the "
+           "provider "
            "that issued each token, and update, login, whoami and logout "
            "talk only to ranwhat.com. Everything else reads locally and "
            "sends nothing.")
@@ -240,6 +241,7 @@ COMMANDS = (
     ("reach", "MCP servers and credential files your agents can reach"),
     ("scan", "the authority a set of credentials carries"),
     ("live", "the same, asked of each token's own provider"),
+    ("callers", "who used a key, from the provider's own log"),
     ("demo", "see the output without setting anything up"),
     ("update", "refresh the capability catalogue (needs Plus)"),
     ("login", "link this machine to your ranwhat.com account"),
@@ -1548,6 +1550,69 @@ def _reach(p, args):
     return 0
 
 
+def _callers(p, args):
+    """ranwhat callers: the calls made with a key, from the provider's own
+    log, grouped by where they came from. Read-only. AWS is read through the
+    AWS CLI (CloudTrail); GitHub through its organisation audit log, with
+    the token from RANWHAT_GITHUB_TOKEN as live takes it."""
+    from . import callers as callers_mod
+    introspect = _module("introspect")
+    try:
+        mine = callers_mod.parse_mine(args.mine)
+    except ValueError as e:
+        p.error(str(e))
+    results, keys, gaps = {}, {}, {}
+
+    key_id = args.aws_key_id
+    if shutil.which("aws"):
+        if not key_id:
+            try:
+                key_id = callers_mod.aws_key_id(args.aws_profile)
+            except introspect.IntrospectionError:
+                key_id = None
+        if key_id:
+            keys["aws"] = callers_mod.hint(key_id)
+            try:
+                results["aws"] = callers_mod.aws_calls(
+                    key_id, profile=args.aws_profile, regions=args.aws_region,
+                    window_days=args.window_days)
+            except introspect.IntrospectionError as e:
+                gaps["aws"] = ("CloudTrail could not be read (%s). It needs "
+                               "cloudtrail:LookupEvents for the profile." % e)
+        else:
+            gaps["aws"] = ("No static access key on this AWS profile. Pass "
+                           "--aws-key-id with the key to look up.")
+    elif key_id:
+        gaps["aws"] = "The aws CLI is not on PATH, and it reads CloudTrail."
+
+    token = _token(args, "github")
+    if token:
+        keys["github"] = "token"
+        try:
+            results["github"] = callers_mod.github_calls(
+                token, org=args.github_org, window_days=args.window_days)
+        except introspect.IntrospectionError as e:
+            gaps["github"] = "The audit log could not be read (%s)." % e
+
+    for provider in ("stripe", "google", "slack"):
+        if getattr(args, provider, None) or os.environ.get(
+                "RANWHAT_%s_TOKEN" % provider.upper()):
+            gaps[provider] = callers_mod.ELSEWHERE[provider]
+
+    if not results and not gaps:
+        print("ranwhat callers: nothing to look up. Give it an AWS key "
+              "(--aws-key-id, or an aws CLI profile with one) or a GitHub "
+              "token in RANWHAT_GITHUB_TOKEN with --github-org.",
+              file=sys.stderr)
+        return 2
+    result = callers_mod.report(results, mine=mine, gaps=gaps)
+    if args.json:
+        print(_json_text(result))
+    else:
+        print(callers_mod.render(result, keys=keys))
+    return 0
+
+
 def _n_files(n):
     return agents_mod.plural(n, "file")
 
@@ -1616,9 +1681,9 @@ def _main(argv=None):
                                        "one-line hints some commands print on "
                                        "a terminal. None is printed with --json.")
     p.add_argument("command", nargs="?",
-                   choices=["check", "demo", "scan", "live", "watch",
-                            "clean", "sources", "reach", "update", "login",
-                            "whoami", "logout", "hook"])
+                   choices=["check", "demo", "scan", "live", "callers",
+                            "watch", "clean", "sources", "reach", "update",
+                            "login", "whoami", "logout", "hook"])
     p.add_argument("profile", nargs="?",
                    help="scan: path to a profile JSON. reach: a project "
                         "directory to look at. hook: install, uninstall or "
@@ -1640,6 +1705,17 @@ def _main(argv=None):
                         "permissions were actually exercised (read-only)")
     p.add_argument("--aws-profile", metavar="NAME", help="AWS CLI profile for usage pull")
     p.add_argument("--github-org", metavar="ORG", help="GitHub org for audit-log usage pull")
+    p.add_argument("--aws-key-id", metavar="ID",
+                   help="callers: the AWS access key ID to look up "
+                        "(default: the one --aws-profile signs with). The ID "
+                        "names the key; it is not the secret")
+    p.add_argument("--aws-region", action="append", metavar="REGION",
+                   help="callers: a region to read CloudTrail in (repeatable; "
+                        "us-east-1 is always read too, for IAM and STS)")
+    p.add_argument("--mine", action="append", metavar="CIDR",
+                   help="callers: an address or range that is yours, such as "
+                        "an office, a VPN or CI (repeatable, or "
+                        "comma-separated). Callers outside them are flagged")
     p.add_argument("--window-days", type=int, default=_DEFAULT_WINDOW_DAYS,
                    help="usage lookback window (default 90)")
     p.add_argument("--days", type=int, default=DEFAULT_DAYS,
@@ -1756,6 +1832,16 @@ def _main(argv=None):
 
     if args.command == "reach":
         return _reach(p, args)
+
+    for flag, value in (("--aws-key-id", args.aws_key_id),
+                        ("--aws-region", args.aws_region),
+                        ("--mine", args.mine)):
+        if value and args.command != "callers":
+            p.error("%s is only for callers" % flag)
+    if args.command == "callers":
+        if args.window_days is not None and args.window_days < 1:
+            p.error("--window-days must be at least 1")
+        return _callers(p, args)
 
     if args.days is not None and args.days < 1:
         p.error("--days must be at least 1")
