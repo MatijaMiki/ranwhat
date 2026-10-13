@@ -14,3 +14,10 @@ import tempfile
 HOME = tempfile.mkdtemp(prefix="ranwhat-home-")
 os.environ["RANWHAT_HOME"] = HOME
 atexit.register(shutil.rmtree, HOME, True)
+
+# The user's own home too: a test that reads "nowhere" must not find the
+# Cursor or OpenClaw data of the machine it runs on (CI has none, a laptop does).
+USER_HOME = tempfile.mkdtemp(prefix="ranwhat-userhome-")
+os.environ["HOME"] = USER_HOME
+os.environ["USERPROFILE"] = USER_HOME
+atexit.register(shutil.rmtree, USER_HOME, True)
