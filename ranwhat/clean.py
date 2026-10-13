@@ -3490,6 +3490,7 @@ _COMMANDS = (
     ("keep <n>", "leave it alone, and do not report it again"),
     ("rotate", "what to rotate, grouped by provider"),
     ("open [n]", "open the page to rotate each key, or that one's"),
+    ("revoke <n>", "revoke that token now (GitHub, Slack, Google)"),
     ("quit", "leave (nothing is masked unless you asked)"),
 )
 
@@ -3730,6 +3731,59 @@ def review(findings, scanned, stream=None, values=None, paths=None, shown=None,
                 _print(DIM("  No browser here, so open these yourself:"))
                 for url in urls:
                     _print("    " + _fit(url, width - 4))
+            _print()
+            continue
+
+        if cmd == "revoke":
+            if not arg or not arg.isdigit() or not (1 <= int(arg) <= len(items)):
+                _print(RED("  need a number from 1 to %d" % len(items)))
+                continue
+            from . import revoke as revoke_mod
+            target = items[int(arg) - 1]
+            value = (values or {}).get(target["fingerprint"])
+            provider = revoke_mod.provider_for(value) if value else None
+            if not value:
+                _print(DIM("  ranwhat does not have this value in hand, so it "
+                           "cannot send it anywhere. Use open %s." % arg))
+                _print()
+                continue
+            if not provider:
+                for line in term.wrap(
+                        "Only GitHub, Slack and Google let a token be revoked "
+                        "with one call, and this is not one of theirs. Roll it "
+                        "in the provider's dashboard: open %s." % arg,
+                        indent="  "):
+                    _print(DIM(line))
+                _print()
+                continue
+            name = revoke_mod.NAMES[provider]
+            warn = ("This sends the token to %s, and to no one else, to revoke "
+                    "it. It stops working at once, everywhere it is used."
+                    % name)
+            if provider == "github":
+                warn += " GitHub also tells the token's owner."
+            for line in term.wrap(warn, indent="  "):
+                _print(YEL(line))
+            try:
+                answer = input("  Type yes to revoke it: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                _print()
+                return changed_total
+            if answer != "yes":
+                _print(DIM("  Not revoked."))
+                _print()
+                continue
+            try:
+                revoke_mod.revoke_token(value)
+            except revoke_mod.RevokeError as e:
+                _print(RED("  Not revoked: %s." % e))
+                _print()
+                continue
+            for line in term.wrap(
+                    "Revoked at %s. Make a new one where you need it, then "
+                    "mask the old copies on disk: mask %s." % (name, arg),
+                    indent="  "):
+                _print(GRN(line))
             _print()
             continue
 

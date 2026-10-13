@@ -80,6 +80,7 @@
     <li><a class="cmdname" href="/scan">scan</a></li>
     <li><a class="cmdname" href="/commands#live">live</a></li>
     <li><a class="cmdname" href="/commands#callers">callers</a></li>
+    <li><a class="cmdname" href="/commands#revoke">revoke</a></li>
     <li><a class="cmdname" href="/commands#demo">demo</a></li>
     <li><a class="cmdname" href="/commands#update">update</a></li>
     <li><a class="cmdname" href="/commands#login">login</a></li>
@@ -97,10 +98,10 @@
     <p class="eyebrow">Commands</p>
     <h1>Every ranwhat command</h1>
     <p class="lede">
-      Fourteen commands in one tool. Only <span class="icode">login</span>,
+      Fifteen commands in one tool. Only <span class="icode">login</span>,
       <span class="icode">whoami</span> and <span class="icode">logout</span> work with
       an account, <span class="icode">update</span> needs a Plus token, and the other
-      ten need neither.
+      eleven need neither.
       Start with <span class="icode">check</span>: it reads what your agents ran and what they
       left on disk, and changes nothing.
     </p>
@@ -114,7 +115,7 @@
       <h2>A bare ranwhat lists them all.</h2>
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
-        page of their own. The other eleven are below, and every flag is at the end.
+        page of their own. The other twelve are below, and every flag is at the end.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -128,6 +129,7 @@
   <span class="c-b">scan</span>     the authority a set of credentials carries
   <span class="c-b">live</span>     the same, asked of each token's own provider
   <span class="c-b">callers</span>  who used a key, from the provider's own log
+  <span class="c-b">revoke</span>   take back what your agents are allowed (asks first)
   <span class="c-b">demo</span>     see the output without setting anything up
   <span class="c-b">update</span>   refresh the capability catalogue (needs Plus)
   <span class="c-b">login</span>    link this machine to your ranwhat.com account
@@ -139,9 +141,10 @@
     uvx ranwhat check
     uvx ranwhat demo
 
-<span class="c-mut">  No account needed. live, callers and --pull-usage ask only the provider
-  that issued each token, and update, login, whoami and logout talk only
-  to ranwhat.com. Everything else reads locally and sends nothing.
+<span class="c-mut">  No account needed. live, callers, --pull-usage and clean's revoke ask
+  only the provider that issued each token, and update, login, whoami and
+  logout talk only to ranwhat.com. Everything else reads locally and sends
+  nothing.
   Full options: uvx ranwhat --help</span></pre></div>
       </div>
     </div>
@@ -362,9 +365,41 @@
   </div>
 </section>
 
+<section class="mark-2" id="revoke">
+  <div class="shell band split">
+    <div class="marginal">07 / revoke</div>
+    <div>
+      <h2>revoke: take back what an agent was allowed.</h2>
+      <p class="lede">
+        Every allow rule is a call that no longer asks you. <span class="icode">revoke</span>
+        reads Claude Code's settings and lists the grants that let an agent act
+        on its own, then takes them back when you say so.
+      </p>
+      <div class="cmdrow">
+        <div class="cmd">
+          <span class="dollar">$</span>
+          <span id="run-revoke">uvx ranwhat revoke</span>
+          <button class="copy" data-copy="#run-revoke">Copy</button>
+        </div>
+      </div>
+      <div class="rows" style="margin-top:22px">
+        <div class="row"><span class="k">What it lists</span>
+          <span class="v"><span class="icode">bypassPermissions</span> as the default mode, <span class="icode">enableAllProjectMcpServers</span>, an allow rule for any shell command, for <span class="icode">curl</span>, <span class="icode">rm</span>, <span class="icode">git push</span>, <span class="icode">ssh</span> and the like, or for reading or editing a credential file.</span></div>
+        <div class="row"><span class="k">Where</span>
+          <span class="v">Your user settings, and this project's shared and local ones. <span class="icode">--scope</span> picks one.</span></div>
+        <div class="row"><span class="k">Changing them</span>
+          <span class="v">Nothing changes until <span class="icode">--apply</span>. Then a copy of each file is kept beside it as <span class="icode">settings.json.ranwhat-backup</span>, and the file is rewritten the way <span class="icode">hook install</span> writes it. Restart Claude Code afterwards.</span></div>
+        <div class="row"><span class="k">A leaked token</span>
+          <span class="v">Revoked from <a href="/clean">clean</a>'s review with <span class="icode">revoke N</span>, where its value is. GitHub, Slack and Google let a token be revoked with one call; ranwhat asks you to type yes, then sends it to that provider alone. Anything else is rolled in the provider's dashboard: <span class="icode">open N</span>.</span></div>
+      </div>
+      <p class="flaglist">Flags: <a href="#flag-apply"><span class="icode">--apply</span></a>, <a href="#flag-scope"><span class="icode">--scope SCOPE</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
 <section class="mark-2" id="demo">
   <div class="shell band split">
-    <div class="marginal">07 / demo</div>
+    <div class="marginal">08 / demo</div>
     <div>
       <h2>demo: a whole report, with nothing to set up.</h2>
       <p class="lede">
@@ -390,7 +425,7 @@
 
 <section class="mark-2" id="update">
   <div class="shell band split">
-    <div class="marginal">08 / update</div>
+    <div class="marginal">09 / update</div>
     <div>
       <h2>update: a newer capability catalogue.</h2>
       <p class="lede">
@@ -427,7 +462,7 @@
 
 <section class="mark-3" id="login">
   <div class="shell band split">
-    <div class="marginal">09 / login</div>
+    <div class="marginal">10 / login</div>
     <div>
       <h2>login, whoami, logout: link a machine to an account.</h2>
       <p class="lede">
@@ -475,7 +510,7 @@
 
 <section class="mark-4" id="hook">
   <div class="shell band split">
-    <div class="marginal">10 / hook</div>
+    <div class="marginal">11 / hook</div>
     <div>
       <h2>hook: ask before the call, not after.</h2>
       <p class="lede">
@@ -517,7 +552,7 @@
 
 <section class="mark-5" id="flags">
   <div class="shell band split">
-    <div class="marginal">11 / Flags</div>
+    <div class="marginal">12 / Flags</div>
     <div>
       <h2>Every flag, and the commands that take it.</h2>
       <p class="lede">
@@ -546,8 +581,8 @@
               <td data-label="Commands">every command but update, login, whoami and logout; hook only with status</td>
               <td data-label="What it does">Print the result as JSON instead of the report.</td></tr>
           <tr><td><code id="flag-apply">--apply</code></td>
-              <td data-label="Commands">clean</td>
-              <td data-label="What it does">Mask everything found without asking, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">check</span> refuses it.</td></tr>
+              <td data-label="Commands">clean, revoke</td>
+              <td data-label="What it does">clean: mask everything found without asking, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">check</span> refuses it. revoke: take back what it lists, keeping a copy of each settings file beside it.</td></tr>
           <tr><td><code id="flag-no-interactive">--no-interactive</code></td>
               <td data-label="Commands">clean</td>
               <td data-label="What it does">Report and exit, instead of opening the review session.</td></tr>
@@ -606,7 +641,7 @@
               <td data-label="Commands">logout</td>
               <td data-label="What it does">Delete the saved token without asking the server to revoke it; revoke it on the account page instead.</td></tr>
           <tr><td><code id="flag-scope">--scope SCOPE</code></td>
-              <td data-label="Commands">hook</td>
+              <td data-label="Commands">hook, revoke</td>
               <td data-label="What it does">Which Claude Code settings file: <span class="icode">user</span> (<span class="icode">~/.claude/settings.json</span>, or <span class="icode">$CLAUDE_CONFIG_DIR/settings.json</span> when that is set; the default), <span class="icode">project</span> (<span class="icode">.claude/settings.json</span> here) or <span class="icode">local</span> (<span class="icode">.claude/settings.local.json</span> here). <span class="icode">hook status</span> shows all three without it.</td></tr>
           <tr><td><code id="flag-mode">--mode MODE</code></td>
               <td data-label="Commands">hook install</td>

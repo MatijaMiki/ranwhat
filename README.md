@@ -189,6 +189,7 @@ ranwhat> mask all       mask everything listed
 ranwhat> keep 3         leave it alone, and do not report it again
 ranwhat> rotate         what to rotate, grouped by provider, with each page
 ranwhat> open           open those pages in your browser (open 3: just that one)
+ranwhat> revoke 3       revoke that token now, at GitHub, Slack or Google
 ```
 
 `keep` is remembered: a value you keep is neither listed nor counted by
@@ -377,6 +378,7 @@ read -rs RANWHAT_GITHUB_TOKEN                # paste it: not echoed, not saved t
 export RANWHAT_GITHUB_TOKEN
 ranwhat live                                # read-only introspection
 ranwhat callers --mine 198.51.100.0/24      # who used a key, from the provider's log
+ranwhat revoke                              # grants that skip your yes; --apply takes them back
 
 read -rs RANWHAT_STRIPE_TOKEN
 export RANWHAT_STRIPE_TOKEN
@@ -513,8 +515,8 @@ agent's entire authority surface, which is useful to somebody other than you.
 
 ## What goes online
 
-No account needed. live, callers and --pull-usage ask only the provider that issued
-each token, and update, login, whoami and logout talk only to ranwhat.com.
+No account needed. live, callers, --pull-usage and clean's revoke ask only the
+provider that issued each token, and update, login, whoami and logout talk only to ranwhat.com.
 Everything else reads locally and sends nothing.
 
 - Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own ranwhat token, at `~/.ranwhat/token` (mode 0600): the machine token from `ranwhat login`, or a subscription token saved with `update --save-token`.
