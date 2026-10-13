@@ -14,3 +14,14 @@ import tempfile
 HOME = tempfile.mkdtemp(prefix="ranwhat-home-")
 os.environ["RANWHAT_HOME"] = HOME
 atexit.register(shutil.rmtree, HOME, True)
+
+# The user's own home too: a test that reads "nowhere" must not find the
+# Cursor or OpenClaw data of the machine it runs on (CI has none, a laptop does).
+# Not under /tmp: deleting /tmp would then be deleting an ancestor of home,
+# which the deletion-context tests (rightly) rate differently.
+USER_HOME = tempfile.mkdtemp(
+    prefix="ranwhat-userhome-",
+    dir="/var/tmp" if os.path.isdir("/var/tmp") else None)
+os.environ["HOME"] = USER_HOME
+os.environ["USERPROFILE"] = USER_HOME
+atexit.register(shutil.rmtree, USER_HOME, True)
