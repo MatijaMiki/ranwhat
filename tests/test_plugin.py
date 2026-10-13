@@ -16,8 +16,8 @@ PLUGIN = ROOT / "plugins" / "ranwhat"
 
 class ThePlugin(unittest.TestCase):
     def test_manifests_are_json_and_agree(self):
-        market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
-        manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
+        market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "ranwhat")
         self.assertEqual([p["name"] for p in market["plugins"]], [manifest["name"]])
         self.assertTrue((ROOT / market["plugins"][0]["source"]).samefile(PLUGIN))
@@ -25,19 +25,19 @@ class ThePlugin(unittest.TestCase):
     def test_it_installs_no_hook(self):
         self.assertFalse((PLUGIN / "hooks").exists())
         self.assertNotIn("hooks", json.loads(
-            (PLUGIN / ".claude-plugin" / "plugin.json").read_text()))
+            (PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")))
 
     def test_commands_run_only_real_subcommands(self):
         known = {name for name, _ in cli.COMMANDS}
         files = sorted(PLUGIN.rglob("*.md"))
         self.assertTrue(files)
         for f in files:
-            for sub in re.findall(r"uvx ranwhat ([a-z]+)", f.read_text()):
+            for sub in re.findall(r"uvx ranwhat ([a-z]+)", f.read_text(encoding="utf-8")):
                 self.assertIn(sub, known, f)
 
     def test_nothing_that_changes_things_runs_unasked(self):
         for f in (PLUGIN / "commands").glob("*.md"):
-            front = f.read_text().split("---")[1]
+            front = f.read_text(encoding="utf-8").split("---")[1]
             if f.name != "guard.md":
                 self.assertNotRegex(front, r"hook|--apply|revoke|clean")
 
