@@ -28,7 +28,13 @@ const FROM_PAGE = { "sec-fetch-site": "same-origin", origin: ORIGIN };
 const MINUTE = 60, HOUR = 3600, DAY = 24 * HOUR;
 
 /* The clock, which a test moves forward when it needs time to pass. */
-const realNow = Date.now;
+/* Start at noon UTC on a fixed day, not at the real time: the tests move the
+   clock by whole days and hours, and a run that began near a day's end had a
+   rollover land in the middle of one (it failed for a couple of hours a day). */
+const realNow = (() => {
+  const wall = Date.now, t0 = wall(), base = Date.UTC(2026, 0, 15, 12, 0, 0);
+  return () => base + (wall() - t0);
+})();
 let skew = 0;
 Date.now = () => realNow() + skew * 1000;
 const later = (seconds) => { skew += seconds; };
