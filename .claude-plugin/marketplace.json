@@ -1,0 +1,15 @@
+{
+  "name": "ranwhat",
+  "owner": { "name": "Matija Mikulinec" },
+  "metadata": {
+    "description": "ranwhat: see what your AI coding agents ran, and what secrets they left behind."
+  },
+  "plugins": [
+    {
+      "name": "ranwhat",
+      "source": "./plugins/ranwhat",
+      "description": "Flight recorder and secret finder for AI coding agents. Reads local transcripts, sends nothing.",
+      "homepage": "https://ranwhat.com"
+    }
+  ]
+}
