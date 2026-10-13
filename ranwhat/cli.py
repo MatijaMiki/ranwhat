@@ -225,9 +225,8 @@ TAGLINE = "Flight recorder and authority scanner for AI agents."
 # which talk to ranwhat's own server (feed.ranwhat.com). site/install.html
 # quotes it word for word, and commands.html, llms.txt and the README say
 # the same.
-NETWORK = ("No account needed. live, callers and --pull-usage ask only the "
-           "provider "
-           "that issued each token, and update, login, whoami and logout "
+NETWORK = ("No account needed. live, callers, --pull-usage and clean's "
+           "revoke ask only the provider that issued each token, and update, login, whoami and logout "
            "talk only to ranwhat.com. Everything else reads locally and "
            "sends nothing.")
 
@@ -242,6 +241,7 @@ COMMANDS = (
     ("scan", "the authority a set of credentials carries"),
     ("live", "the same, asked of each token's own provider"),
     ("callers", "who used a key, from the provider's own log"),
+    ("revoke", "take back what your agents are allowed (asks first)"),
     ("demo", "see the output without setting anything up"),
     ("update", "refresh the capability catalogue (needs Plus)"),
     ("login", "link this machine to your ranwhat.com account"),
@@ -1550,6 +1550,40 @@ def _reach(p, args):
     return 0
 
 
+def _revoke(p, args):
+    """ranwhat revoke: the grants in Claude Code's settings that let an
+    agent act without asking. Lists them; --apply takes them back, keeping
+    a copy of each file first. Local only: a leaked token is revoked from
+    clean's review, where its value is."""
+    from . import revoke as revoke_mod
+    if args.mode:
+        p.error("--mode is only for hook")
+    allowed = {"command", "profile", "scope", "apply", "json"}
+    stray = [a.option_strings[-1] for a in p._actions
+             if a.option_strings and a.dest not in allowed and a.dest != "help"
+             and getattr(args, a.dest, a.default) != a.default]
+    if stray:
+        p.error("revoke takes only --scope, --apply and --json, not %s"
+                % ", ".join(stray))
+    if args.profile is not None:
+        p.error(_takes_no_path("revoke", args.profile))
+    scopes = (args.scope,) if args.scope else revoke_mod.SCOPES
+    entries = revoke_mod.local(scopes)
+    if args.apply:
+        for e in entries:
+            if e["items"]:
+                try:
+                    e["backup"] = revoke_mod.apply(e["path"], e["items"])
+                except (hook_mod.SettingsError, OSError) as err:
+                    e["error"] = str(err)
+                    e["items"] = []
+    if args.json:
+        print(_json_text({"applied": bool(args.apply), "files": entries}))
+    else:
+        print(revoke_mod.render_local(entries, applied=bool(args.apply)))
+    return 0
+
+
 def _callers(p, args):
     """ranwhat callers: the calls made with a key, from the provider's own
     log, grouped by where they came from. Read-only. AWS is read through the
@@ -1682,8 +1716,8 @@ def _main(argv=None):
                                        "a terminal. None is printed with --json.")
     p.add_argument("command", nargs="?",
                    choices=["check", "demo", "scan", "live", "callers",
-                            "watch", "clean", "sources", "reach", "update",
-                            "login", "whoami", "logout", "hook"])
+                            "revoke", "watch", "clean", "sources", "reach",
+                            "update", "login", "whoami", "logout", "hook"])
     p.add_argument("profile", nargs="?",
                    help="scan: path to a profile JSON. reach: a project "
                         "directory to look at. hook: install, uninstall or "
@@ -1741,7 +1775,9 @@ def _main(argv=None):
                         "what each PATH is)")
     p.add_argument("--apply", action="store_true",
                    help="clean: mask everything found without asking. Without "
-                        "it, clean reports and then opens a review session.")
+                        "it, clean reports and then opens a review session. "
+                        "revoke: take back what it lists, keeping a copy of "
+                        "each settings file first")
     p.add_argument("--fail-on", metavar="SEVERITY",
                    choices=list(sarif_mod.SEVERITIES),
                    help="check, watch, clean: exit with status %d when "
@@ -1794,9 +1830,11 @@ def _main(argv=None):
 
     if args.command == "hook":
         return _hook(p, args)
+    if args.command == "revoke":
+        return _revoke(p, args)
     if args.scope or args.mode:
         # Taken and ignored, `check --mode deny` looked like it did something.
-        p.error("--scope and --mode are only for hook")
+        p.error("--scope and --mode are only for hook and revoke")
 
     if args.profile is not None and args.command not in ("scan", "reach"):
         # Taken and ignored, `check DIR` reported on the default history as

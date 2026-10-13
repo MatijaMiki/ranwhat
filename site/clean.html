@@ -169,7 +169,8 @@ them leaking again. It does not make them safe.</span>
 <span class="c-mut">ranwhat&gt;</span> mask all       <span class="c-mut">mask everything listed</span>
 <span class="c-mut">ranwhat&gt;</span> keep 3         <span class="c-mut">leave it alone, and do not report it again</span>
 <span class="c-mut">ranwhat&gt;</span> rotate         <span class="c-mut">grouped by provider, with each page</span>
-<span class="c-mut">ranwhat&gt;</span> open           <span class="c-mut">open those pages in your browser</span></pre></div>
+<span class="c-mut">ranwhat&gt;</span> open           <span class="c-mut">open those pages in your browser</span>
+<span class="c-mut">ranwhat&gt;</span> revoke 3       <span class="c-mut">revoke it now, at GitHub, Slack or Google</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
         <span class="icode">rotate</span> names the place to roll each one, whether that’s the IAM
@@ -177,6 +178,9 @@ them leaking again. It does not make them safe.</span>
         out where a 64-character string came from. <span class="icode">open</span> opens
         each of those pages in your browser, or <span class="icode">open 3</span> just that
         one&rsquo;s. Over SSH, or with no browser, it lists them instead.
+        <span class="icode">revoke 3</span> revokes a GitHub, Slack or Google token on
+        the spot, after you type yes: GitHub, Slack and Google are the providers
+        that let anyone holding a token revoke it with one call.
       </p>
       <div class="term" style="margin-top:22px">
         <div class="term-body"><pre>ranwhat clean                   <span class="c-mut">report, then open the review</span>
