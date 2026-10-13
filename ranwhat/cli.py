@@ -124,7 +124,9 @@ def _bundled(name):
     """Load data shipped inside the package."""
     try:
         from importlib.resources import files
-        return json.loads(files("ranwhat").joinpath("demo", name)
+        # One join at a time: Python 3.9's zip reader (the single-file build)
+        # takes only one segment.
+        return json.loads(files("ranwhat").joinpath("demo").joinpath(name)
                           .read_text(encoding="utf-8"))
     except Exception:
         here = os.path.dirname(os.path.abspath(__file__))
