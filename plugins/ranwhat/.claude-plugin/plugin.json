@@ -1,0 +1,10 @@
+{
+  "name": "ranwhat",
+  "version": "0.1.0",
+  "description": "Flight recorder and secret finder for AI coding agents: what they ran, which secrets sit in their transcripts, and what they can reach. Reads local files and sends nothing.",
+  "author": { "name": "Matija Mikulinec" },
+  "homepage": "https://ranwhat.com",
+  "repository": "https://github.com/MatijaMiki/ranwhat",
+  "license": "MIT",
+  "keywords": ["security", "secrets", "agents", "audit", "mcp"]
+}

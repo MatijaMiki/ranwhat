@@ -70,6 +70,18 @@ pip install ranwhat
 
 Then `ranwhat demo` shows an authority scan on a bundled example.
 
+### As a Claude Code plugin
+
+```
+/plugin marketplace add MatijaMiki/ranwhat
+/plugin install ranwhat --marketplace MatijaMiki/ranwhat
+```
+
+That adds `/ranwhat:check`, `/ranwhat:watch`, `/ranwhat:reach` and `/ranwhat:guard`,
+and a skill that tells Claude when to use them. The plugin installs no hook:
+the guard stays off until you ask for it with `/ranwhat:guard`. It runs the
+same `uvx ranwhat` commands, so it needs `uv` on your path.
+
 Python 3.9+. No dependencies, and nothing is built on your machine.
 
 ## Commands
