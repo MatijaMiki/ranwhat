@@ -27,7 +27,7 @@ class TheSingleFile(unittest.TestCase):
                    PYTHONIOENCODING="utf-8")
         return subprocess.run([sys.executable, self.a] + list(args), env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              universal_newlines=True, cwd=self.tmp)
+                              encoding="utf-8", cwd=self.tmp)
 
     def test_the_same_source_gives_the_same_bytes(self):
         self.assertEqual(self.sha_a, self.sha_b)
