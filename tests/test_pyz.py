@@ -23,7 +23,8 @@ class TheSingleFile(unittest.TestCase):
         cls.sha_b = build_pyz.build(cls.b)
 
     def run_pyz(self, *args):
-        env = dict(os.environ, RANWHAT_HOME=self.tmp, PYTHONDONTWRITEBYTECODE="1")
+        env = dict(os.environ, RANWHAT_HOME=self.tmp, PYTHONDONTWRITEBYTECODE="1",
+                   PYTHONIOENCODING="utf-8")
         return subprocess.run([sys.executable, self.a] + list(args), env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               universal_newlines=True, cwd=self.tmp)
