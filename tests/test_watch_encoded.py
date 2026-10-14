@@ -249,6 +249,8 @@ class Substitution(Quiet, unittest.TestCase):
             'eval "echo %s | base64 -d | sh"' % ENC,
             "bash -c 'echo %s | base64 -d | sh'" % ENC,
             "sudo bash -c 'echo %s | base64 -d | sh'" % ENC,
+            "sudo bash --norc -c 'echo %s | base64 -d | sh'" % ENC,
+            "env X=1 bash -lc 'base64 -d <<< %s | sh'" % ENC,
             'sh -c "base64 -d <<< %s | sh"' % ENC])
 
     def test_execution_inside_a_substitution(self):
@@ -859,6 +861,72 @@ class SourceScanner(unittest.TestCase):
         self.assertIsNone(decode.scan_source("[" * 10000 + "]" * 10000))
 
 
+class WhatTheOtherRulesRead(unittest.TestCase):
+    """The rule reads source the others must not, and costs the ordinary
+    call nothing."""
+
+    def test_the_default_text_is_what_it_always_was(self):
+        command = "python3 -c \"exec(base64.b64decode('%s'))\"" % ENC
+        shell = watch._shell_text("Bash", {"command": command})
+        self.assertNotIn("exec", shell)
+        self.assertNotIn(ENC, shell)
+        kept = watch._shell_text("Bash", {"command": command}, keep_source=True)
+        self.assertIn("exec(base64.b64decode('%s'))" % ENC, kept)
+        self.assertEqual(watch._shell_text("Write", {"command": command},
+                                           keep_source=True), "")
+
+    def test_source_is_kept_through_a_shell_and_a_substitution(self):
+        for command in (
+                "bash -c \"python3 -c 'exec(base64.b64decode(\\\"%s\\\"))'\"" % ENC,
+                "echo \"$(python3 -c \"exec(base64.b64decode('%s'))\")\"" % ENC):
+            kept = watch._shell_text("Bash", {"command": command},
+                                     keep_source=True)
+            self.assertIn("exec(base64.b64decode(", kept, command)
+
+    def test_a_call_with_nothing_to_decode_is_not_reduced_twice(self):
+        calls = []
+        real = watch._executable_text
+
+        def spy(command, depth=0, limit=None, keep_source=False):
+            calls.append(keep_source)
+            return real(command, depth, limit, keep_source)
+
+        with mock.patch.object(watch, "_executable_text", spy):
+            for command in ("ls -la", "git rev-parse HEAD", "git status && make"):
+                watch.evaluate("Bash", {"command": command})
+        self.assertTrue(calls)
+        self.assertNotIn(True, calls)
+
+    def test_the_pre_filter(self):
+        for text in ("ls", "git rev-parse HEAD", "git revert abc", "cat f.txt",
+                     "printf '%s\\n' a", "echo \\n"):
+            self.assertFalse(watch._may_decode(text), text)
+        for text in ("base64 -d", "echo x | rev", "openssl x", "BASE64",
+                     "printf '\\x41\\x42'", "printf '\\101\\102'",
+                     "atob(x)", "powershell -e x", "Buffer.from(x)"):
+            self.assertTrue(watch._may_decode(text), text)
+
+    def test_substitution_spans(self):
+        text = 'a $(b $(c)) "d $(e)" `f` \'$(g)\' <(h)'
+        self.assertEqual([text[s:e] for s, e in watch._substitution_spans(text)],
+                         ["b $(c)", "e", "f"])
+        self.assertEqual(watch._substitutions(text), ["b $(c)", "e", "f"])
+        self.assertEqual([text[s:e] for s, e in
+                          watch._substitution_spans(text, process=True)],
+                         ["b $(c)", "e", "f", "h"])
+        self.assertEqual(watch._substitution_spans("echo $(open"),
+                         [(7, 11)])
+        self.assertEqual(watch._substitution_spans('x "<(y)"', process=True),
+                         [])
+
+    def test_flattening_keeps_every_offset(self):
+        text = "eval $(echo X | base64 -d; ls) | sh & <(a|b)"
+        flat = watch._flatten_substitutions(text)
+        self.assertEqual(len(flat), len(text))
+        self.assertEqual(flat, "eval $(echo X _ base64 -d_ ls) | sh & <(a_b)")
+        self.assertEqual(watch._flatten_substitutions("ls | sh"), "ls | sh")
+
+
 class NothingIsEverExecuted(unittest.TestCase):
 
     def test_decoding_creates_nothing(self):
@@ -1088,7 +1156,7 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             encoded(lambda n: "rm -rf ~/x ; " * n(2800)),
             encoded(lambda n: "git push " * n(4500)),
             encoded(lambda n: "curl " * n(7000)),
-            encoded(lambda n: "echo QUJD | base64 -d | sh ; " * n(1000)))
+            encoded(lambda n: "echo QUJD|base64 -d|sh;" * n(2000)))
 
 
 if __name__ == "__main__":

@@ -1999,11 +1999,11 @@ def _exec_operand(name, words):
         return " ".join(words[1:])
     if name in _STDIN_SHELLS:
         for i, word in enumerate(words[1:], 1):
-            if word.startswith("-") and not word.startswith("--"):
-                if word.endswith("c") and _ENC_CLUSTER.fullmatch(word):
-                    return words[i + 1] if i + 1 < len(words) else None
-            else:
+            if word == "--" or not word.startswith("-"):
                 return None
+            if (not word.startswith("--") and word.endswith("c")
+                    and _ENC_CLUSTER.fullmatch(word)):
+                return words[i + 1] if i + 1 < len(words) else None
     return None
 
 
