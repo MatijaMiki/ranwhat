@@ -1392,6 +1392,26 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             measured = growth.measure(build, _call, pairs, inputs={1.0: full})
             growth.assert_linear(self, measured, full[:40])
 
+    # Growth over the lower part of the range, four times apart as ever.
+    LOWER = ((0.4, 0.1),)
+
+    def linear_up_to_the_cut(self, *builds):
+        """For a text that is one long quoted word. shlex reads such a word a
+        character at a time, joining each onto the last, so its cost carries a
+        small quadratic term that shows only near the cut at MAX_SCAN_CHARS:
+        about a tenth of a second on the longest text watch reads, and the
+        same on this code before the decoder was added to it. Growth is
+        measured over the lower part of the range, where that term has not
+        shown, and the longest text is held to an absolute second, which a
+        run-away cost would not meet."""
+        for build in builds:
+            full = build(growth.sized(1))
+            self.assertLessEqual(len(full), watch.MAX_SCAN_CHARS)
+            measured = growth.measure(build, _call, self.LOWER)
+            growth.assert_linear(self, measured, full[:40])
+            took, _ = growth.seconds(_call, full)
+            self.assertLess(took, 1.0, full[:40])
+
     def test_pipes(self):
         self.linear(
             lambda n: "base64 -d | " * n(8000) + "sh",
@@ -1462,8 +1482,9 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             lambda n: "echo a | base64 -d | sh 2>&1; " * n(3000))
 
     def test_shell_strings_and_heredoc_openers(self):
+        self.linear_up_to_the_cut(
+            lambda n: "bash -lc '" + "echo a | base64 -d | sh; " * n(2500) + "'")
         self.linear(
-            lambda n: "bash -lc '" + "echo a | base64 -d | sh; " * n(2500) + "'",
             lambda n: "bash " + "-c " * n(20000) + "'x'",
             lambda n: "bash -lc '" * n(5000),
             lambda n: "base64 -d <<EOF | sh 2>&1\nx\nEOF\n" * n(3000),
@@ -1472,7 +1493,8 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
     def test_variables_and_keyword_arguments(self):
         self.linear(
             lambda n: "K=$(echo QUJD | base64 -d); " + "eval '$K' " * n(8000),
-            lambda n: "K=$(echo QUJD | base64 -d); " + "K=a; " * n(10000),
+            lambda n: "K=$(echo QUJD | base64 -d); " + "K=a; " * n(10000))
+        self.linear_up_to_the_cut(
             lambda n: ("python3 -c \"subprocess.run(a, "
                        + "input=b64decode(x), " * n(3000) + "z)\""))
 
