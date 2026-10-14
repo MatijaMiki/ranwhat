@@ -1479,6 +1479,25 @@ class _AfterHandsOn:
             return "nothing" if self._number.fullmatch(word) else None
         return None
 
+    def starts(self, text, pos=0, endpos=None):
+        """Each word, with where it starts, that a program or the tail may
+        start with, once the words before it are read in any way they can
+        be: what match() tries the tail at, without the tail."""
+        end = len(text) if endpos is None else min(endpos, len(text))
+        states = [None]
+        while states:
+            word = _HAND_WORD.match(text, pos, end)
+            if word is None:
+                break
+            start, pos, word = word.start(1), word.end(), word.group(1)
+            yield start, word
+            after = [s for s in (self._next(state, word) for state in states
+                                 if state is not None) if s is not None]
+            program = self._program.fullmatch(word)
+            if program:
+                after.append(program.lastgroup)
+            states = list(dict.fromkeys(after))
+
     def match(self, text, pos=0, endpos=None):
         end = len(text) if endpos is None else min(endpos, len(text))
         states, found = [None], None        # None: no program is being read
@@ -1513,6 +1532,11 @@ class _AfterHandsOn:
         return found
 
 
+# The words that may stand before a program, with no tail: for where each
+# could start.
+_HANDS_ON_WORDS = _AfterHandsOn(r"(?!)")
+
+
 class _IntoShell:
     """`\\|&?\\s*(?:_HANDS_ON)*` and then a shell, with the one method of a
     compiled pattern that its caller uses: search(text)."""
@@ -1545,14 +1569,26 @@ def _runs_substitution():
         r"\s*" + _STAGE_PREFIX + _FETCH_WORD, re.I)
 
 
-def _runs_stdin(stage):
-    """Whether a stage runs what it is piped as a program."""
-    rest = stage[_hands_on().match(stage).end():]
-    words = _argv(rest) or rest.split()
-    if not words:
+# At most this many words that read a program from a pipe are tried, behind
+# the words of a quoted stage, each by splitting the rest of it again.
+_MOST_READERS_TRIED = 16
+
+
+def _is_reader(word):
+    """Whether this word names a program that may read a program from its
+    input: a shell, an interpreter or iex, quoted or not."""
+    name = word.strip("'\"").rsplit("/", 1)[-1].lower()
+    return (name in _STDIN_SHELLS or name in ("iex", "invoke-expression")
+            or _STDIN_INTERPRETERS.match(name) is not None)
+
+
+def _reads_script(words, at=0):
+    """Whether the program that words[at:] runs reads a script from its
+    input."""
+    if at >= len(words):
         return False
-    name = words[0].rsplit("/", 1)[-1].lower()
-    args = words[1:]
+    name = words[at].rsplit("/", 1)[-1].lower()
+    args = (words[i] for i in range(at + 1, len(words)))    # islice would count to at
     if name in ("iex", "invoke-expression"):
         return True
     if name in _STDIN_SHELLS:
@@ -1571,6 +1607,35 @@ def _runs_stdin(stage):
         return not operand or "s" in letters
     if _STDIN_INTERPRETERS.match(name):
         return all(word in _STDIN_FLAGS for word in args)
+    return False
+
+
+def _runs_stdin(stage):
+    """Whether a stage runs what it is piped as a program."""
+    rest = stage[_hands_on().match(stage).end():]
+    if _reads_script(_argv(rest) or rest.split()):
+        return True
+    # _hands_on reads an option's value greedily, and in `sudo -E bash -s`
+    # takes bash for the value of -E, which leaves `-s` to be read. The
+    # words before the program may as well end anywhere else they could:
+    # the program is tried wherever one that reads a script starts.
+    words = None
+    if not _QUOTING.search(stage):
+        words = [w for w in _SHELL_BLANKS.split(stage) if w]
+    tried = 0
+    for index, (start, word) in enumerate(_HANDS_ON_WORDS.starts(stage)):
+        if not _is_reader(word):
+            continue
+        if words is not None and words[index:index + 1] == [word]:
+            if _reads_script(words, index):
+                return True
+            continue
+        tried += 1
+        if tried > _MOST_READERS_TRIED:
+            break
+        rest = stage[start:]
+        if _reads_script(_argv(rest) or rest.split()):
+            return True
     return False
 
 

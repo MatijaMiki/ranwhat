@@ -418,6 +418,25 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("a pipe that reaches no shell", "'x | ' + 'sudo -u ' * n(7999) + 'ls'"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
+    def test_a_fetch_piped_into_a_long_run_of_options_and_shells(self):
+        """A stage that reads a pipe is tried as a program at every word
+        that could start one, behind a fetch. A word of the run that names a
+        shell must not split the whole stage again, and a quoted stage,
+        which shlex has to split, only some of them."""
+        self.assertLinear([
+            ("quoted shells", "'curl x | ' + 'sudo -E \"sh\" ' * n(4900)"),
+            ("interpreters", "'curl x | ' + 'sudo -E python3 ' * n(4200)"),
+            ("a shell at the end", "'curl x | ' + 'sudo -E ' * n(7990) + 'bash -'"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+        # Asked of the stage alone: through evaluate, a shell is also tried
+        # as the one that runs a substitution (see the test before this).
+        self.assertLinear([
+            ("shells as values", "'sudo -E sh ' * n(5800)"),
+            ("shells with -s", "'sudo -u sh -s ' * n(4900)"),
+            ("quoted shells", "'sudo -E \"sh\" ' * n(4900)"),
+            ("interpreters", "'sudo -E python3 ' * n(4200)"),
+        ], call="watch._runs_stdin(text)")
+
     def test_a_command_full_of_credential_files(self):
         """Each credential file a command names was looked for again in the
         whole command, by a regex built for it: whether it was excluded,

