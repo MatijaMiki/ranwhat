@@ -399,6 +399,41 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("typeset -xxx", "'source .env ; typeset -' + 'x' * n(63000) + '1'"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
+    def test_runs_of_programs_that_hand_their_input_on(self):
+        """The word after an option is its value, or the program the next
+        one starts with, and a regex that tried each reading in turn took
+        twice as long for every `sudo -u ` in a run of them: 25 did not
+        finish in ten seconds, and 200 characters were enough to hold up
+        `ranwhat hook`, which runs before every tool call and fails open
+        only when watch raises. 64,000 characters is all watch judges."""
+        self.assertLinear([
+            ("sudo -u", "'sudo -u ' * n(7999) + 'sh'"),
+            ("sudo -E", "'sudo -E ' * n(7999) + 'sh'"),
+            ("exec -a", "'exec -a ' * n(7999) + 'sh'"),
+            ("doas -u", "'doas -u ' * n(7999) + 'sh'"),
+            ("env -u", "'env -u ' * n(9142) + 'sh'"),
+            ("a program as the value", "'sudo -u env ' * n(5332) + 'sh'"),
+            ("nohup as the value", "'sudo -u nohup ' * n(4265) + 'sh'"),
+            ("behind a fetch", "'curl x | ' + 'sudo -u ' * n(7998) + 'sh'"),
+            ("a pipe that reaches no shell", "'x | ' + 'sudo -u ' * n(7999) + 'ls'"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+
+    def test_a_shell_as_the_value_of_every_option(self):
+        """Each `sh` that could end a run of sudo words was tried as the
+        shell that runs a fetch, and each try read on to the end of the
+        command: to find no opener, or the same one at the end. 64,000
+        characters took two seconds."""
+        self.assertLinear([
+            ("sudo -u sh", "'sudo -u sh ' * n(5800)"),
+            ("sudo -E sh", "'sudo -E sh ' * n(5800)"),
+            ("an opener at the end", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
+            ("paths", "'sudo -u /bin/sh ' * n(3700)"),
+            ("a fetch at the end of paths", "'sudo -u /bin/sh ' * n(3700) + '<(curl x)'"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+        self.assertLinear([
+            ("directly", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
+        ], call="watch._runs_substitution().match(text, 0, len(text))")
+
     def test_a_command_full_of_credential_files(self):
         """Each credential file a command names was looked for again in the
         whole command, by a regex built for it: whether it was excluded,

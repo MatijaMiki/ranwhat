@@ -1439,15 +1439,167 @@ def _hands_on():
     return re.compile(r"\s*(?:" + _HANDS_ON + r")*")
 
 
+# What may stand before a program that reads a pipe, as _HANDS_ON describes
+# it (sudo -u root env FOO=1 nohup ...), read a word at a time.
+#
+# A pattern behind (?:_HANDS_ON)* that can fail ran in time exponential in
+# the words: the word after an option is its value, or the program the next
+# item starts with, and in `sudo -u sudo -u sudo -u ...` each reading goes
+# on to the end and fails there, 2**n of them, before the tail is given up
+# on. Python 3.9's re has no atomic group to cut one off. Here the readings
+# a word leaves open are a short list of states, one step each. The list is
+# kept in the order the regex tries them in, and the tail that matches along
+# the best of them is the one returned, so what is found is what _HANDS_ON
+# found, in one pass. tests/test_watch_more_rules.py holds the two together.
+# _HANDS_ON itself is only ever read without a tail, by _hands_on().
+_HAND_WORD = re.compile(r"\s*([^\s|;&]+)")
+
+
+class _AfterHandsOn:
+    """`\\s*(?:_HANDS_ON)*` and then `tail`, with the one method of a compiled
+    pattern that its callers use: match(text, pos, endpos), whose result ends
+    where the tail does. The state of a program is where in its words it is:
+    "sudo" may be given options (so may doas and exec), "sudo option" has
+    just been given one, whose value may be the next word, "env" and "env
+    option" the same for env's options and assignments, "nice" and "nice -n"
+    for nice, and "nothing" may take no more.
+
+    A tail that reads on to the next opener, as exec.remote's does, is also
+    given as `scan`: what starts it, and what is left of it when that does
+    not match. It names the opener it ends on `opener`. The tail is tried at
+    every word that may end a program, and each try read on to the end of
+    the stage again, so a run of `sudo -u sh ` was quadratic, whether the
+    opener was never there or only at the end. What a try found holds for the
+    tries after it, as far as the opener it found, so each reads only past
+    the one before."""
+
+    def __init__(self, tail, flags=0, scan=None):
+        self.tail = re.compile(tail, flags)
+        self._scan = scan and tuple(re.compile(p, flags) for p in scan)
+        self._program = re.compile(
+            r"(?:[^\s|;&]*/)?(?:(?P<sudo>sudo|doas|exec)|(?P<env>env)"
+            r"|(?P<command>command)|(?P<nothing>nohup)|(?P<nice>nice))", flags)
+        self._assignment = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=", flags)
+        self._command_option = re.compile(r"-p", flags)
+        self._nice_option = re.compile(r"-n", flags)
+        self._number = re.compile(r"-?\d+", flags)
+
+    def _next(self, state, word):
+        """The state a program in `state` is left in by `word`, or None when
+        it is not one of its words."""
+        flag = word[0] == "-"
+        if state == "sudo":
+            return "sudo option" if flag else None
+        if state == "sudo option":
+            if flag:
+                return "sudo option"
+            return None if word[0] == "=" else "sudo"
+        if state in ("env", "env option"):
+            if flag:
+                return "env option"
+            if self._assignment.match(word):
+                return "env"
+            # an option's value has no = in it
+            return "env" if state == "env option" and "=" not in word else None
+        if state == "command":
+            return "command" if self._command_option.fullmatch(word) else None
+        if state == "nice":
+            if self._nice_option.fullmatch(word):
+                return "nice -n"
+            return "nothing" if self._number.fullmatch(word) else None
+        if state == "nice -n":
+            return "nothing" if self._number.fullmatch(word) else None
+        return None
+
+    def _tail(self, text, start, end, seen):
+        """self.tail.match(text, start, end), but without reading on again
+        what an earlier try, whose result `seen` keeps, has read."""
+        if not self._scan:
+            return self.tail.match(text, start, end)
+        lead, rest = self._scan
+        reads_on = lead.match(text, start, end)
+        if reads_on is None or seen.get("dead"):
+            return rest.match(text, start, end)
+        before = seen.get("found")
+        if before is not None and reads_on.end() <= before.start("opener"):
+            return before                   # no opener sooner: the same one
+        found = self.tail.match(text, start, end)
+        if found is not None and found.group("opener") is not None:
+            seen["found"] = found
+        else:
+            seen["dead"] = True             # none further on, for any later try
+        return found
+
+    def match(self, text, pos=0, endpos=None):
+        end = len(text) if endpos is None else min(endpos, len(text))
+        states, found = [None], None        # None: no program is being read
+        seen = {}
+        while states:
+            word = _HAND_WORD.match(text, pos, end)
+            if word is None:
+                break
+            start, pos, word = word.start(1), word.end(), word.group(1)
+            after, boundary = [], False
+            for state in states:
+                if state is not None:
+                    follows = self._next(state, word)
+                    if follows is not None and follows not in after:
+                        after.append(follows)
+                if boundary:
+                    continue
+                # Every state may end its program here, and the word then
+                # starts the next one or the tail: the regex tries a program
+                # first, the tail only once none is left to try.
+                boundary = True
+                program = self._program.fullmatch(word)
+                if program and program.lastgroup not in after:
+                    after.append(program.lastgroup)
+                tail = self._tail(text, start, end, seen)
+                if tail:
+                    # The regex stops at its first match. The readings it
+                    # tries before this one are in `after`, and may still
+                    # match further on; those it tries after are dropped.
+                    found = tail
+                    break
+            states = after
+        return found
+
+
+class _IntoShell:
+    """`\\|&?\\s*(?:_HANDS_ON)*` and then a shell, with the one method of a
+    compiled pattern that its caller uses: search(text)."""
+
+    # A pipe and a word that starts a program or is a shell, which a chain
+    # that ends in one starts with. Anything else is not worth walking.
+    _PIPE = re.compile(
+        r"\|&?(?=\s*(?:[^\s|;&]*/)?"
+        r"(?:sh|bash|zsh|dash|ksh|fish|sudo|doas|env|command|exec|nohup|nice)"
+        r"(?![\w.-]))")
+    _SHELL = _AfterHandsOn(
+        r"(?:[^\s|;&]*/)?(?:sh|bash|zsh|dash|ksh|fish)(?![\w.-])")
+
+    def search(self, text):
+        for pipe in self._PIPE.finditer(text):
+            found = self._SHELL.match(text, pipe.end())
+            if found:
+                return found
+        return None
+
+
 @functools.lru_cache(maxsize=1)
 def _runs_substitution():
     """A shell, eval or source given what a fetcher printed, with no pipe:
     bash <(curl ...), sh -c "$(curl ...)", eval "$(curl ...)", iex (irm ...)."""
-    return re.compile(
-        r"\s*(?:" + _HANDS_ON + r")*(?:[^\s|;&]*/)?"
-        r"(?:(?:(?:sh|bash|zsh|dash|ksh|fish|ash|eval|source)(?![\w.-])"
-        r"|\.(?=\s))[^|;&]*?(?:<\(|\$\(|`)|(?:iex|invoke-expression)\s*\(?)"
-        r"\s*" + _STAGE_PREFIX + _FETCH_WORD, re.I)
+    shell = (r"(?:(?:sh|bash|zsh|dash|ksh|fish|ash|eval|source)(?![\w.-])"
+             r"|\.(?=\s))")
+    powershell = r"(?:iex|invoke-expression)\s*\(?"
+    fetched = r"\s*" + _STAGE_PREFIX + _FETCH_WORD
+    return _AfterHandsOn(
+        r"(?:[^\s|;&]*/)?(?:" + shell + r"[^|;&]*?(?P<opener><\(|\$\(|`)|"
+        + powershell + r")" + fetched,
+        re.I,
+        scan=(r"(?:[^\s|;&]*/)?" + shell,
+              r"(?:[^\s|;&]*/)?" + powershell + fetched))
 
 
 def _without_redirects(words):
@@ -2726,16 +2878,17 @@ _TAKES_TEXT = re.compile(
 # and their options, one of which may take a value (sudo -u USER bash),
 # env with its options and assignments, command -p, exec and its options,
 # nohup and nice. A value is the word after an option that is not one,
-# so a run of options is read once.
+# so a run of options is read once. Nothing that can fail may follow it in
+# a regex, which would try each word as a value and as a program in turn,
+# 2**n ways: _AfterHandsOn reads the same words, so the two are changed
+# together.
 _OPTIONS = r"(?:\s+-[^\s|;&]*(?:\s+[^\s|;&=-][^\s|;&]*)?)*"
 _HANDS_ON = (
     r"(?:[^\s|;&]*/)?(?:(?:sudo|doas)" + _OPTIONS
     + r"|env(?:\s+-[^\s|;&]*(?:\s+[^\s|;&=-][^\s|;&=]*)?"
     r"|\s+[A-Za-z_][A-Za-z0-9_]*=[^\s|;&]*)*"
     r"|command(?:\s+-p)*|exec" + _OPTIONS + r"|nohup|nice(?:\s+-n)?(?:\s+-?\d+)?)\s+")
-_INTO_SHELL = re.compile(
-    r"\|&?\s*(?:" + _HANDS_ON + r")*(?:[^\s|;&]*/)?"
-    r"(?:sh|bash|zsh|dash|ksh|fish)(?![\w.-])")
+_INTO_SHELL = _IntoShell()
 _HIDDEN = re.compile(_HIDING)
 _INNER_SEPARATOR = re.compile(r"\|\||&&|;|\||\n")
 
