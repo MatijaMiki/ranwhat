@@ -494,7 +494,7 @@ nothing anyone reads. So these are **not** treated as actions:
 | `git rm --cached x` | Unstages; never touches the working tree |
 | `# rm -rf ~/x` | A comment |
 | `rm -rf build` `rm -rf /tmp/x` | Deleting build output is not an incident |
-| `base64 -d > key.pem`, `curl ... \| base64 -d \| jq` | Decoding is not running; only decoded text handed to a shell, `eval` or an interpreter is reported |
+| `base64 -d > key.pem`, `curl ... \| base64 -d \| jq` | Decoding is not running; decoded text handed to a shell, `eval` or an interpreter is |
 
 `bash -c` is the exception: its payload really is shell, so the parser
 recurses into it. And severity follows the **target**, not the verb:

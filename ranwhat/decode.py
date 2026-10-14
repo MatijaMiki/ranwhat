@@ -40,8 +40,11 @@ _BASE64_URL = re.compile(r"[A-Za-z0-9_-]+={0,2}")
 _BASE32 = re.compile(r"[A-Z2-7]+={0,6}")
 _HEX = re.compile(r"(?:[0-9A-Fa-f]{2})+")
 _BLANKS = re.compile(r"\s+")
-# What is not text: control characters other than tab, newline and return.
-_BINARY = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# What is not text: control characters other than tab, newline and return,
+# and what a lossy UTF-8 decoding leaves for a byte it could not read.
+_BINARY = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffd]")
+# A payload with more of these than this share of its characters is not text.
+_BINARY_SHARE = 0.3
 
 
 def base64_bytes(text: str, urlsafe: bool = False) -> Optional[bytes]:
@@ -162,18 +165,22 @@ def utf16_base64(text: str) -> Optional[bytes]:
 
 
 def text_of(data: Optional[bytes]) -> Optional[str]:
-    """data as text a person could have typed, or None: strict UTF-8, no
-    control characters but tab, newline and return, not blank, and no more
-    than MAX_DECODED_BYTES. Binary and non-UTF-8 payloads are not text."""
+    """data as the text a shell would read from it, or None. A byte that is
+    not UTF-8 and a control character other than tab, newline and return are
+    read as a blank, and a leading byte-order mark is dropped: one stray
+    byte after `rm -rf ~/` does not hide it, as it would not stop a shell.
+    A payload more than 30% of whose characters are such, one that is blank
+    and one past MAX_DECODED_BYTES are not text."""
     if data is None or len(data) > MAX_DECODED_BYTES:
         return None
     try:
-        text = data.decode("utf-8")
+        text = data.decode("utf-8", "replace").lstrip("\ufeff")
+        if len(_BINARY.findall(text)) > _BINARY_SHARE * len(text):
+            return None
+        text = _BINARY.sub(" ", text)
     except Exception:
         return None
-    if _BINARY.search(text) or not text.strip():
-        return None
-    return text
+    return text if text.strip() else None
 
 
 def decode_step(kind: str, text: str) -> Optional[bytes]:
@@ -200,18 +207,19 @@ def decode_step(kind: str, text: str) -> Optional[bytes]:
 
 def decode_via(kinds: Sequence[str], literal: Optional[str]) -> Optional[str]:
     """The text literal decodes to through the decoders in kinds, in order, or
-    None. Each stage between must itself be text: it is what the next one
-    reads."""
+    None. Each stage between must itself be strict UTF-8 text: it is what
+    the next one reads."""
     try:
         if literal is None or not kinds or len(kinds) > MAX_LEVELS:
             return None
         current = literal
         data = None
-        for kind in kinds:
+        for n, kind in enumerate(kinds):
             data = decode_step(kind, current)
             if data is None or len(data) > MAX_DECODED_BYTES:
                 return None
-            current = data.decode("utf-8")
+            if n + 1 < len(kinds):
+                current = data.decode("utf-8")
         return text_of(data)
     except Exception:
         return None
@@ -234,7 +242,8 @@ _TOKEN = re.compile(
     r"""|`(?:[^`\\]|\\[\s\S])*`?)"""
     r"""|(?P<comment>\#[^\n]*|//[^\n]*|/\*[\s\S]*?(?:\*/|\Z))"""
     r"""|(?P<name>[A-Za-z_$][\w$]*)"""
-    r"""|(?P<open>[(\[{])|(?P<close>[)\]}])""")
+    r"""|(?P<open>[(\[{])|(?P<close>[)\]}])|(?P<comma>,)"""
+    r"""|(?P<equals>=(?![=~>]))""")
 
 # Calls that run what they are given, by exact name.
 _SINKS = frozenset((
@@ -273,8 +282,12 @@ def scan_source(source: str) -> Optional[Tuple[str, Optional[str]]]:
 
 
 def _scan_source(source):
-    stack = []            # (opened a sink call, opened a [ or {, saved depths)
+    """Only what a sink is handed first is run: the first argument of its
+    call, and not a later one or a keyword's (subprocess.run(argv,
+    input=b64decode(...)) hands the bytes to the program as data)."""
+    stack = []            # saved (innermost sink, innermost [ or {, its call)
     last_sink = last_bracket = -1
+    call = [0, False]     # the innermost sink's: arguments passed, keyword seen
     pending = False       # the last token was a sink's name
     previous = ""         # the last name
     buffer_seen = False
@@ -293,11 +306,11 @@ def _scan_source(source):
                 strings.append(body)
             pending = False
             if (kind is None and buffer_seen and body in _NODE_ENCODINGS
-                    and last_sink > last_bracket):
+                    and last_sink > last_bracket and call == [0, False]):
                 kind = _NODE_ENCODINGS[body]
             continue
         if group == "name":
-            inside = last_sink > last_bracket
+            inside = last_sink > last_bracket and call == [0, False]
             if pending and text in _DECODERS and kind is None:
                 kind = _DECODERS[text]      # eval decode_base64(...)
             elif inside and text in _DECODERS and kind is None:
@@ -308,19 +321,31 @@ def _scan_source(source):
                        (previous == "subprocess" and text in _SUBPROCESS_CALLS))
             previous = text
             continue
-        previous = ""
+        was_name, previous = previous, ""
+        if group == "comma":
+            if last_sink == len(stack) - 1:
+                call = [call[0] + 1, False]
+            pending = False
+            continue
+        if group == "equals":
+            if (last_sink == len(stack) - 1 and was_name
+                    and source[max(0, m.start() - 1):m.start()] not in "!<>="):
+                call = [call[0], True]
+            pending = False
+            continue
         if group == "open":
             sink = pending and text == "("
             pending = False
-            stack.append((last_sink, last_bracket))
+            stack.append((last_sink, last_bracket, call))
             if sink:
                 last_sink = len(stack) - 1
+                call = [0, False]
             elif text != "(":
                 last_bracket = len(stack) - 1
             continue
         pending = False
         if stack:
-            last_sink, last_bracket = stack.pop()
+            last_sink, last_bracket, call = stack.pop()
     if kind is None:
         return None
     check = _LITERAL_DECODERS.get(kind)
