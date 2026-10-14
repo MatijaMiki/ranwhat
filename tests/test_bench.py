@@ -675,8 +675,10 @@ class Command(_Bench):
         self.assertEqual(list(doc["leak"]), ["surfaces", "planted", "leaks"])
         self.assertEqual(doc["leak"]["surfaces"], list(bench.SURFACES))
         self.assertEqual(list(doc["checks"]), ["read_whole", "read_only", "quiet"])
+        # The run's own temporary directory is named ranwhat-bench-..., so that
+        # prefix is what a leak of it would show. The temp root itself (/tmp on
+        # Linux) can appear legitimately, in a command the answer key quotes.
         self.assertNotIn("ranwhat-bench-", out)
-        self.assertNotIn(tempfile.gettempdir(), out)
         self.assertNotIn(self.tmp, out)
         for g in doc["gaps"]:
             self.assertEqual(list(g), ["id", "label", "kind", "state", "why"])
@@ -820,7 +822,9 @@ class Strictness(_Bench):
             for path in transcripts(kwargs["root"]):
                 os.chmod(path, 0o644)
             return real(*args, **kwargs)
-        for tamper in (touch, chmod):
+        # Windows keeps no mode bits to compare: os.chmod only toggles the
+        # read-only flag, so a chmod to 0o644 changes nothing it could see.
+        for tamper in ((touch,) if sys.platform == "win32" else (touch, chmod)):
             with mock.patch.object(clean, "scan_sources", tamper):
                 result = bench.run()
             self.assertFalse(result.checks["read_only"], tamper.__name__)
@@ -839,6 +843,9 @@ class Strictness(_Bench):
         self.assertEqual(out, "")
         self.assertIn("could not remove the temporary directory", err)
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "os.kill with SIGTERM ends a Windows process outright, "
+                     "so no handler runs and this would kill the test run")
     def test_sigterm_removes_the_temporary_directory(self):
         scratch = os.path.join(self.tmp, "scratch")
         os.makedirs(scratch)
