@@ -477,6 +477,39 @@ ranwhat hook uninstall
 - Each check takes about a fifth of a second. The reason it gives Claude
   Code names the rule, never the value that tripped it.
 
+### `ranwhat bench`: see what ranwhat catches, on made-up data
+
+Builds a made-up agent home in a temporary directory: a Claude Code session
+transcript and the credential files that session printed, with fake secrets
+drawn from a seed. It runs the read-only detection `check`, `watch` and
+`clean` use over it, in this process and offline, and scores the result
+against an answer key: planted secrets `clean` must find (AWS, GitHub,
+Stripe, Slack and OpenAI-style keys, an npm token, a database password and
+URL, a JWT, a private key); decoys it must leave alone (git and SHA-256
+digests, UUIDs, base64 of ordinary text, the AWS and Stripe documentation
+keys, placeholders, code that fetches a password); risky calls `watch` must
+rate, under which rule and at what severity; and ordinary calls it must not
+flag. It also checks that no planted value, nor its leading or trailing
+twelve characters, appears in anything ranwhat printed for the run, and that
+the run read the transcript whole, changed nothing and printed nothing.
+
+```bash
+ranwhat bench             # a table; exit status 3 when an expectation is not met
+ranwhat bench --seed 7    # other fake values, the same expectations
+ranwhat bench --json
+```
+
+Under the table it lists what ranwhat is known not to catch, such as a
+script downloaded to a file and run in a later call, `env | grep -i token`
+and a plain `docker system prune`. Those are never counted as passes and
+never fail the run, and one ranwhat later learns to catch is shown as
+caught. The answer key is written by the people who wrote the detectors, so
+a pass says that nothing on it has regressed, not how much of what is on
+your machine ranwhat would catch. Exit status: 0 every expectation met, 3
+at least one not, 1 an error. It reads and writes inside its own temporary
+directory, which it deletes, and never opens your home directory or
+`~/.ranwhat`.
+
 ## Precision is the feature
 
 A watcher that cries wolf gets muted in a day, and a muted watcher records
@@ -505,6 +538,8 @@ written to a file. A later release reported 15 findings on one machine's
 90-day history, and 11 were true deletions of build and temp directories that
 nobody would want to read. Once deletions were ranked by target, the same
 history gave 4, and all four were real.
+
+`ranwhat bench` runs a public answer key against these rules.
 
 ## Handling credentials
 
