@@ -1,5 +1,5 @@
 {
  "note": "Scopes written since the release named in after. Plus subscribers get them the day they land here; the next release moves them into ranwhat/catalog.py, empties providers and sets after to its own version. Each entry is a catalog.py entry (label, authority, reversible, blast, why) plus added (YYYY-MM-DD) and source (the provider's own documentation, https). An entry may add a scope or raise a rating, never lower one. Stripe keys are ranwhat's resource:verb names for the permissions a restricted key is given in the Dashboard, as in catalog.py (Payouts: Write is payouts:write); the page cited for them lists the same permissions under their Stripe Apps names (payout_write). After editing: python3 scripts/feed.py",
- "after": "0.6.0",
+ "after": "0.7.0",
  "providers": {}
 }

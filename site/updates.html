@@ -124,6 +124,39 @@
         <span class="icode nowrap">pipx upgrade ranwhat</span>.
       </p>
       <div class="releases">
+        <article class="release" id="v0-7-0">
+          <p class="rel-meta"><span class="rel-v">0.7.0</span> <time datetime="2026-10-14T23:32:16Z">14 October 2026</time></p>
+          <h3>Callers, revoke, bench and thirteen watch rules</h3>
+          <ul>
+            <li>New: <a href="/commands#callers">ranwhat callers</a> asks the provider&rsquo;s own
+              log who used a key: AWS CloudTrail by access key ID, and a GitHub
+              organisation&rsquo;s audit log by token hash. <span class="icode">--mine CIDR</span>
+              marks your own addresses, and callers outside them are flagged. It is
+              read-only.</li>
+            <li>New: <a href="/commands#revoke">ranwhat revoke</a> lists the Claude Code settings
+              that let an agent act without asking: <span class="icode">bypassPermissions</span>,
+              <span class="icode">enableAllProjectMcpServers</span>, and allow rules for any
+              shell command, <span class="icode">curl</span>, <span class="icode">rm</span>,
+              <span class="icode">git push</span> or a credential file.
+              <span class="icode">--apply</span> takes them back and keeps a copy of each
+              file.</li>
+            <li>New: <a href="/commands#bench">ranwhat bench</a> plants fake secrets and risky
+              commands in a temporary directory, runs the detection <span class="icode">check</span>
+              uses over them, and scores it against an answer key. What ranwhat is known not to
+              catch is listed apart from the score. It sends nothing, and exits 3 when an
+              expectation is not met.</li>
+            <li><a href="/watch">watch</a> runs thirteen rules, up from nine. The new ones: a
+              script fetched from the network and run in the same command, files made writable
+              by every user, container volumes or every container removed, and a command hidden
+              in base64, hex or printf escapes and then run. That last one is decoded without
+              being run and judged by the other rules, so an encoded
+              <span class="icode">rm -rf ~</span> is reported as that deletion too.</li>
+            <li>The new rules can report calls that 0.6.0 did not, so a pipeline that runs
+              <span class="icode">check --fail-on</span> may start failing after the upgrade.</li>
+            <li><span class="icode">clean</span>&rsquo;s review links the provider&rsquo;s rotation
+              page for each leaked key, and <span class="icode">open N</span> opens it.</li>
+          </ul>
+        </article>
         <article class="release" id="v0-6-0">
           <p class="rel-meta"><span class="rel-v">0.6.0</span> <time datetime="2026-10-07T18:00:00Z">7 October 2026</time></p>
           <h3>Twenty coding agents, accounts and a Claude Code hook</h3>
