@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat watch: an AI agent audit trail for Claude Code</title>
-<meta name="description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta name="description" content="Twelve rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="canonical" href="https://ranwhat.com/watch">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/watch">
 <meta property="og:title" content="ranwhat watch: an AI agent audit trail for Claude Code">
-<meta property="og:description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta property="og:description" content="Twelve rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat watch: an AI agent audit trail for Claude Code">
-<meta name="twitter:description" content="Nine rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta name="twitter:description" content="Twelve rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents already keep: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -97,7 +97,7 @@
     <p class="lede">
       ranwhat watch reads what Claude Code and nineteen other coding agents
       have already written to disk, the audit trail they keep anyway, and
-      reports the nine kinds of action worth a second look. It changes
+      reports the twelve kinds of action worth a second look. It changes
       nothing.
     </p>
     <div class="cmdrow">
@@ -115,7 +115,7 @@
   <div class="shell band split">
     <div class="marginal">01 / Detection</div>
     <div>
-      <h2>Nine things worth interrupting you for.</h2>
+      <h2>Twelve things worth interrupting you for.</h2>
       <p class="lede">
         This isn't antivirus. There's no adversary and no signature, because you asked
         the agent to do things. So it doesn't guess whether an action was allowed.
@@ -152,6 +152,15 @@
           <tr><td><strong>Local file sent to the network</strong><br><code>curl&nbsp;-d&nbsp;@file · curl&nbsp;-F&nbsp;file=@…</code></td>
               <td data-label="Severity"><span class="chip high">High</span></td>
               <td data-label="Why it's on the list">File contents sent outbound in one command. That shape, whatever the intent.</td></tr>
+          <tr><td><strong>Downloaded script run unread</strong><br><code>curl&nbsp;…&nbsp;|&nbsp;sh · bash&nbsp;&lt;(curl&nbsp;…)</code></td>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list">A script fetched from the network and handed straight to a shell or interpreter. Whatever the server sent at that moment ran with your permissions, and nothing on disk shows what it was. Saving it to a file and running it in a later call is two calls, and is not reported.</td></tr>
+          <tr><td><strong>Files made writable by every user</strong><br><code>chmod&nbsp;-R&nbsp;777 · chmod&nbsp;o+w</code></td>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list">Severity follows the reach: <span class="icode">chmod -R 777 /</span> or <span class="icode">~</span> is critical, a recursive change is high, one file or directory is medium, and a scratch path under <span class="icode">/tmp</span> is not reported. <span class="icode">chmod 755</span> and <span class="icode">+x</span> never are.</td></tr>
+          <tr><td><strong>Container data wiped</strong><br><code>docker&nbsp;system&nbsp;prune&nbsp;-a · docker&nbsp;volume&nbsp;rm</code></td>
+              <td data-label="Severity"><span class="chip high">High</span></td>
+              <td data-label="Why it's on the list">Volumes, or every container, removed: <span class="icode">docker system prune --all</span> or <span class="icode">--volumes</span>, volume rm or prune, <span class="icode">compose down -v</span>. A plain prune, or one named container, is not reported.</td></tr>
         </tbody>
       </table>
       </div>

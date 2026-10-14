@@ -1388,8 +1388,242 @@ def _file_piped_out(text):
     return None
 
 
+# exec.remote: a script fetched from the network and run in the same command.
+#
+# Split where the shell splits it, one stage at a time, so a quoted or
+# escaped | joins nothing: echo "curl https://x | sh" prints a line and runs
+# nothing. A fetcher at the head of a pipeline is remembered through every
+# stage after it, so curl ... | tee x | sh and curl ... | gunzip | sh are
+# found as well as curl ... | sh. Downloading to a file and running it in a
+# later command is two calls, each judged on its own, and is not this rule.
+_FETCH_WORD = (r"(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)"
+               r"(?![\w.-])")
+_FETCHER = re.compile(_STAGE_PREFIX + _FETCH_WORD, re.I)
+# Shells run what they are piped as a script, unless given -c (the input is
+# then data for a command string) or -n (nothing runs).
+_STDIN_SHELLS = frozenset(("sh", "bash", "zsh", "dash", "ksh", "fish", "ash"))
+# Interpreters read a program from standard input only when given none of
+# their own: python3 - and a bare python3 do, python3 -m json.tool and
+# python3 -c do not, which is how a fetched JSON document is read.
+_STDIN_INTERPRETERS = re.compile(r"(?:python[0-9.]*|perl|ruby|node)\Z")
+_STDIN_FLAGS = frozenset(("-", "-u", "-s", "-S", "-B", "-q", "-l"))
+
+
+@functools.lru_cache(maxsize=1)
+def _hands_on():
+    """What may stand before the program that reads a pipe: sudo, env, nohup
+    and their options. Built on first use, since _HANDS_ON is defined below
+    the rules."""
+    return re.compile(r"\s*(?:" + _HANDS_ON + r")*")
+
+
+@functools.lru_cache(maxsize=1)
+def _runs_substitution():
+    """A shell, eval or source given what a fetcher printed, with no pipe:
+    bash <(curl ...), sh -c "$(curl ...)", eval "$(curl ...)", iex (irm ...)."""
+    return re.compile(
+        r"\s*(?:" + _HANDS_ON + r")*(?:[^\s|;&]*/)?"
+        r"(?:(?:(?:sh|bash|zsh|dash|ksh|fish|ash|eval|source)(?![\w.-])"
+        r"|\.(?=\s))[^|;&]*?(?:<\(|\$\(|`)|(?:iex|invoke-expression)\s*\(?)"
+        r"\s*" + _STAGE_PREFIX + _FETCH_WORD, re.I)
+
+
+def _runs_stdin(stage):
+    """Whether a stage runs what it is piped as a program."""
+    rest = stage[_hands_on().match(stage).end():]
+    words = _argv(rest) or rest.split()
+    if not words:
+        return False
+    name = words[0].rsplit("/", 1)[-1].lower()
+    args = words[1:]
+    if name in ("iex", "invoke-expression"):
+        return True
+    if name in _STDIN_SHELLS:
+        letters, operand = set(), False
+        for word in args:
+            if word == "--":
+                break
+            if word.startswith("-"):
+                if not word.startswith("--"):
+                    letters.update(word[1:])
+                continue
+            operand = True
+            break
+        if letters & set("cn"):
+            return False
+        return not operand or "s" in letters
+    if _STDIN_INTERPRETERS.match(name):
+        return all(word in _STDIN_FLAGS for word in args)
+    return False
+
+
+def _remote_run(text):
+    """Span from a fetcher to the shell or interpreter that runs what it
+    fetched, or None."""
+    fetched, substitution = None, _runs_substitution()
+    for start, end, op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        found = substitution.match(text, at, end)
+        if found:
+            return at, found.end()
+        if fetched is not None and _runs_stdin(text[at:end]):
+            return fetched, end
+        if fetched is None and _FETCHER.match(text, at, end):
+            fetched = at
+        if op != "|":
+            fetched = None
+    return None
+
+
+# perm.open: a mode that lets every account on the machine change the files.
+_CHMOD = re.compile(_STAGE_PREFIX + r"chmod(?![\w.-])")
+# -R and the other options, as opposed to a mode: -w and -rwx are modes.
+_CHMOD_FLAG = re.compile(r"-[RfvcHLPh]+\Z|--[a-z-]+(?:=.*)?\Z")
+_SYMBOLIC_MODE = re.compile(r"([ugoa]*)([-+=])([rwxXst]*|[ugo])\Z")
+# Where a recursive change reaches past the project: the root, the home
+# directory and the directories an operating system keeps its own files in.
+_SYSTEM_PATHS = frozenset((
+    "", "~", "$HOME", "${HOME}", "/etc", "/usr", "/var", "/home", "/bin",
+    "/sbin", "/lib", "/opt", "/root", "/boot", "/Users", "/System", "/Library"))
+_SCRATCH_PATHS = ("/tmp/", "/var/tmp/", "/private/tmp/", "/dev/shm/",
+                  "$TMPDIR", "${TMPDIR")
+
+
+def _opens_to_others(mode):
+    """Whether this chmod mode makes a file writable by everyone: an octal
+    one whose last digit has the write bit, except one with the sticky bit,
+    which is how /tmp is kept safe; or a symbolic one that gives a or o the
+    w bit. +w with no who follows the umask, and is the owner's."""
+    if re.fullmatch(r"[0-7]{3,4}", mode):
+        sticky = len(mode) == 4 and (int(mode[0]) & 1) != 0
+        return (int(mode[-1]) & 2) != 0 and not sticky
+    for clause in mode.split(","):
+        found = _SYMBOLIC_MODE.match(clause)
+        if (found and found.group(2) != "-" and "w" in found.group(3)
+                and ("a" in found.group(1) or "o" in found.group(1))):
+            return True
+    return False
+
+
+def _chmod_parse(stage):
+    """(recursive, targets) of a chmod that leaves what it names writable by
+    everyone, or None."""
+    head = _CHMOD.match(stage)
+    if not head:
+        return None
+    rest = stage[head.end():]
+    recursive, mode, targets = False, None, []
+    for word in _argv(rest) or rest.split():
+        if word == "--" and mode is None:
+            continue
+        if mode is None and _CHMOD_FLAG.match(word):
+            if word.startswith("--reference"):
+                return None
+            if word == "--recursive" or (word[:2] != "--" and "R" in word):
+                recursive = True
+        elif mode is None:
+            mode = word
+        else:
+            targets.append(word)
+    if mode is None or not _opens_to_others(mode):
+        return None
+    return recursive, targets
+
+
+def _chmod_open(text):
+    """Span of the first chmod that opens files to every user, or None."""
+    for start, end, _op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        if _CHMOD.match(text, at, end) and _chmod_parse(text[at:end]):
+            return at, end
+    return None
+
+
+def _refine_permissions(text, severity, tool_input=None):
+    """How far the chmod reaches. Critical for a recursive change of /, the
+    home directory or a system directory; high for any other recursive
+    change; medium for a named file or directory; and nothing for a
+    scratch path under /tmp, where a world-writable mode is ordinary."""
+    for start, end, _op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        parsed = _CHMOD.match(text, at, end) and _chmod_parse(text[at:end])
+        if parsed:
+            break
+    else:
+        return severity
+    recursive, targets = parsed
+    cleaned = [re.sub(r"/\*?\Z", "", t) for t in targets]
+    scratch = bool(targets) and all(t.startswith(_SCRATCH_PATHS) for t in targets)
+    if recursive and any(t in _SYSTEM_PATHS for t in cleaned):
+        return CRITICAL
+    if recursive:
+        return MEDIUM if scratch else HIGH
+    return None if scratch else MEDIUM
+
+
+# container.destructive: volumes removed, or every container with them.
+_CONTAINER_HINT = re.compile(r"docker|podman|nerdctl", re.I)
+_CONTAINER_CLIS = frozenset(("docker", "podman", "nerdctl"))
+_COMPOSE_CLIS = frozenset(("docker-compose", "podman-compose"))
+_PS_SUBSTITUTION = re.compile(
+    r"(?:\$\(|`)\s*(?:docker|podman|nerdctl)\s+(?:container\s+)?(?:ps|ls)\b")
+
+
+def _wipes_container_data(stage):
+    """Whether a stage removes volumes, or every container: system prune
+    with --all or --volumes, volume rm or prune, compose down -v, and rm
+    given every id that ps lists. A plain system prune, one named
+    container and the images are left alone; each is a pull or a recreate
+    away."""
+    if not _CONTAINER_HINT.search(stage):
+        return False
+    rest = stage[re.match(_STAGE_PREFIX, stage).end():]
+    words = _argv(rest) or rest.split()
+    if not words:
+        return False
+    name, args = words[0], words[1:]
+    flags = [w for w in args if w.startswith("-")]
+    plain = [w for w in args if not w.startswith("-")]
+    letters = set("".join(f[1:] for f in flags if not f.startswith("--")))
+
+    def after(*pair):
+        return any(plain[i:i + len(pair)] == list(pair)
+                   for i in range(len(plain)))
+
+    if name in _CONTAINER_CLIS:
+        if after("system", "prune"):
+            return "--volumes" in flags or "--all" in flags or "a" in letters
+        if after("volume", "prune") or after("volume", "rm") \
+                or after("volume", "remove"):
+            return True
+        if after("compose", "down"):
+            return "--volumes" in flags or "v" in letters
+        if after("rm") or after("container", "rm"):
+            return bool(_PS_SUBSTITUTION.search(rest))
+        return False
+    if name in _COMPOSE_CLIS:
+        return after("down") and ("--volumes" in flags or "v" in letters)
+    if name == "xargs":
+        # docker ps -aq | xargs docker rm -f
+        for i, word in enumerate(plain):
+            if word in _CONTAINER_CLIS:
+                tail = plain[i + 1:]
+                return tail[:1] == ["rm"] or tail[:2] == ["container", "rm"]
+    return False
+
+
+def _container_wipe(text):
+    """Span of the first stage that wipes container data, or None."""
+    for start, end, _op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        if _wipes_container_data(text[at:end]):
+            return at, end
+    return None
+
+
 REFINERS = {"fs.destructive": _refine_deletion,
-            "cred.read": _refine_credential}
+            "cred.read": _refine_credential,
+            "perm.open": _refine_permissions}
 PATH_REFINERS = {"cred.read": _refine_read_path}
 
 
@@ -1476,6 +1710,26 @@ RULES = [
          [_Gap(r"curl\s+", r"(?:--data-binary|-d)\s*@"),
           _Gap(r"curl\s+", r"-F\s+[\"']?file=@")],
          find=_file_piped_out),
+
+    Rule("exec.remote", HIGH,
+         "Downloaded script run without being read",
+         "A script fetched from the network was handed straight to a shell or "
+         "an interpreter. Whatever the server sent at that moment ran with "
+         "your permissions, and nothing on disk shows what it was.",
+         find=_remote_run),
+
+    Rule("perm.open", HIGH,
+         "Files made writable by every user",
+         "A mode that lets any account on the machine, and any process running "
+         "as one, change these files. Done recursively it also strips "
+         "protections the files relied on, which is slow to undo by hand.",
+         find=_chmod_open),
+
+    Rule("container.destructive", HIGH,
+         "Container data wiped",
+         "Volumes, or every container, removed. Whatever a database or service "
+         "kept in them is gone unless a backup exists.",
+         find=_container_wipe),
 ]
 
 
