@@ -62,6 +62,7 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 - [Rotate a leaked API key](https://ranwhat.com/guides/rotate-leaked-api-key-ai-agent): rotate at the provider first for GitHub, AWS, Google Cloud, Slack, Stripe and the model providers, check logs, then mask transcripts and handle git history
 - [Checking AI-written code](https://ranwhat.com/guides/check-ai-agent-code-is-secure): why an agent cannot verify its own code, the deterministic checks that can, where to run them so they cannot be skipped, and what to look for in the diff
 - [Secure-by-default agent setup](https://ranwhat.com/guides/secure-by-default-ai-coding-agent-setup): what secure by default means for a coding agent: a combined Claude Code settings file, scoped credentials, reviewed MCP servers and hooks, and keeping a record
+- [Best AI coding agent security tools](https://ranwhat.com/guides/best-ai-coding-agent-security-tools): six tools compared on five checks anyone can verify (agents read, blocking, stays local, open source, finds secrets in transcripts): ranwhat, Stroq, GitGuardian ggshield, Gitleaks, Snyk Agent Scan and TruffleHog, written by ranwhat's maker with the method and each tool's limits
 
 ## Project
 
