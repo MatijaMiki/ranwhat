@@ -1418,8 +1418,9 @@ _STDIN_SHELLS = frozenset(("sh", "bash", "zsh", "dash", "ksh", "fish", "ash"))
 # python3 -c do not, which is how a fetched JSON document is read.
 _STDIN_INTERPRETERS = re.compile(r"(?:python[0-9.]*|perl|ruby|node|php)\Z")
 _STDIN_FLAGS = frozenset(("-", "-u", "-s", "-S", "-B", "-q", "-l"))
-# A word that redirects: 2>&1, >out, &>log, < file. An operator alone takes
-# the next word as its target. <( ) and >( ) are not redirections.
+# A word that redirects: 2>&1, >out, &>log, < file. When the operator stands
+# by itself, the word after it names the file it points at. <( ) and >( ) are
+# process substitutions, not redirections.
 _REDIRECT = re.compile(r"(?:\d*|&)(?:>>?&?|<<<?-?|<&|<>|<)(?!\()")
 # Options whose value is the next word, and what asks a program for its
 # version or usage and runs nothing.
