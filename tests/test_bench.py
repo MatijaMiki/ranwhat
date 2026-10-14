@@ -480,7 +480,8 @@ class Isolation(_Bench):
 
         def writing(*args, **kwargs):
             home = os.path.dirname(os.path.dirname(kwargs["root"]))
-            with open(os.path.join(home, "stray.txt"), "w") as fh:
+            with open(os.path.join(home, "stray.txt"), "w",
+                      encoding="utf-8") as fh:
                 fh.write("written by a detector")
             return real(*args, **kwargs)
         with mock.patch.object(clean, "scan_sources", writing):
