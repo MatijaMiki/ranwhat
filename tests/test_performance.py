@@ -428,14 +428,36 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("interpreters", "'curl x | ' + 'sudo -E python3 ' * n(4200)"),
             ("a shell at the end", "'curl x | ' + 'sudo -E ' * n(7990) + 'bash -'"),
         ], call="watch.evaluate('Bash', {'command': text})")
-        # Asked of the stage alone: through evaluate, a shell is also tried
-        # as the one that runs a substitution (see the test before this).
+        # Alone, and through evaluate: a shell is also tried there as the one
+        # that runs a substitution (see the test after this one).
         self.assertLinear([
             ("shells as values", "'sudo -E sh ' * n(5800)"),
             ("shells with -s", "'sudo -u sh -s ' * n(4900)"),
             ("quoted shells", "'sudo -E \"sh\" ' * n(4900)"),
             ("interpreters", "'sudo -E python3 ' * n(4200)"),
         ], call="watch._runs_stdin(text)")
+        self.assertLinear([
+            ("shells as values", "'sudo -E sh ' * n(5800)"),
+            ("shells with -s", "'sudo -u sh -s ' * n(4900)"),
+            ("quoted shells", "'sudo -E \"sh\" ' * n(4900)"),
+            ("interpreters", "'sudo -E python3 ' * n(4200)"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+
+    def test_a_shell_as_the_value_of_every_option(self):
+        """Each `sh` that could end a run of sudo words was tried as the
+        shell that runs a fetch, and each try read on to the end of the
+        command: to find no opener, or the same one at the end. 64,000
+        characters took two seconds."""
+        self.assertLinear([
+            ("sudo -u sh", "'sudo -u sh ' * n(5800)"),
+            ("sudo -E sh", "'sudo -E sh ' * n(5800)"),
+            ("an opener at the end", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
+            ("paths", "'sudo -u /bin/sh ' * n(3700)"),
+            ("a fetch at the end of paths", "'sudo -u /bin/sh ' * n(3700) + '<(curl x)'"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+        self.assertLinear([
+            ("directly", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
+        ], call="watch._runs_substitution().match(text, 0, len(text))")
 
     def test_a_command_full_of_credential_files(self):
         """Each credential file a command names was looked for again in the

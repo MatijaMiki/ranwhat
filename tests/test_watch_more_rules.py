@@ -195,6 +195,16 @@ class TheChainOfProgramsIsReadAsTheRegexReadIt(unittest.TestCase):
                 for second in self.MORE:
                     self.assertRead("%s %s %s bash <(curl x)" % (before, first, second))
 
+    def test_shells_and_openers_in_every_order(self):
+        # The tail reads on from each shell to the next opener, and a try
+        # that found one, or none, is not repeated for the shells after it:
+        # every order of a few of each is held to the regex.
+        words = ("sudo", "-u", "sh", "/bin/sh", "a/sh/iex", "a/sh/sh",
+                 "$(curl)", "<(curl", "x", "bash", ";")
+        for length in range(1, 6):
+            for chosen in itertools.product(words, repeat=length):
+                self.assertRead(" ".join(chosen))
+
     def test_a_shell_taken_as_a_value_and_a_later_one_that_runs_the_fetch(self):
         # A fetch inside an option's value comes before the one that runs, so
         # which reading is tried first decides where the match ends.
@@ -351,8 +361,8 @@ class TheRulesAreRegistered(unittest.TestCase):
 
     def test_they_come_after_the_original_nine(self):
         ids = [r.id for r in watch.RULES]
-        self.assertEqual(ids[-3:], ["exec.remote", "perm.open",
-                                    "container.destructive"])
+        self.assertEqual(ids[-4:-1], ["exec.remote", "perm.open",
+                                      "container.destructive"])
         self.assertEqual(len(ids), len(set(ids)))
 
 

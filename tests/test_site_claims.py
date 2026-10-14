@@ -556,6 +556,42 @@ class SiteStructure(unittest.TestCase):
         self.assertIn("runs %s rules over it" % WORDS[len(watch.RULES)],
                       plain(read(SITE / "index.html")))
 
+    def test_every_count_of_watch_rules_is_the_rule_count(self):
+        # llms.txt kept saying nine for a release after the count had
+        # changed, and no test read it. Every page that counts the rules,
+        # the README and llms.txt, the JSON-LD copy of a page's text
+        # included, says the number there are.
+        from ranwhat import watch
+        counted = re.compile(
+            r"\b(%s) (?:rules\b|kinds of action|things worth interrupting)"
+            % "|".join(WORDS.values()), re.I)
+        files = ([SITE.parent / "README.md", SITE / "llms.txt"] + all_pages())
+        seen = 0
+        for path in files:
+            for found in counted.finditer(read(path)):
+                seen += 1
+                self.assertEqual(found.group(1).lower(), WORDS[len(watch.RULES)],
+                                 "%s: %s" % (path.name, found.group()))
+        self.assertGreaterEqual(seen, 12)
+
+    def test_the_rule_tables_list_every_rule(self):
+        from ranwhat import watch
+        row = re.compile(r"<tr><td><strong>")
+        page = read(SITE / "watch.html")
+        table = page[page.index("01 / Detection"):page.index("02 / Precision")]
+        self.assertEqual(len(row.findall(table)), len(watch.RULES))
+        guide = read(SITE / "guides" / "claude-code-audit-log.html")
+        start = guide.index("%s rules</h3>" % WORDS[len(watch.RULES)].capitalize())
+        table = guide[start:guide.index("</table>", start)]
+        self.assertEqual(len(row.findall(table)), len(watch.RULES))
+
+    def test_llms_txt_counts_the_watch_rules(self):
+        from ranwhat import watch
+        text = read(SITE / "llms.txt")
+        words = WORDS[len(watch.RULES)]
+        self.assertIn("`ranwhat watch`: %s rules over" % words, text)
+        self.assertIn("the %s rules, their severities" % words, text)
+
     def test_install_page_names_the_current_version(self):
         self.assertIn("Current version %s." % ranwhat.__version__,
                       read(SITE / "install.html"))
@@ -1063,6 +1099,31 @@ def listed(items):
 
 
 SHIPPED = ("Shipped", "Shipped, secrets read-only")
+
+
+class CommandsPageMatchesTheCommands(unittest.TestCase):
+    """The commands page counts its commands and lists each in its sidebar,
+    as cli.COMMANDS has them, so a command added there cannot be left out."""
+
+    def test_the_commands_page_counts_its_commands(self):
+        n = len(cli.COMMANDS)
+        text = plain(read(SITE / "commands.html"))
+        self.assertIn("%s commands in one tool" % WORDS[n].capitalize(), text)
+        # login, whoami and logout work with an account, and update with Plus.
+        self.assertIn("the other %s need neither" % WORDS[n - 4], text)
+        # watch, clean and scan have pages of their own.
+        self.assertIn("The other %s are below" % WORDS[n - 3], text)
+
+    def test_the_commands_sidebar_lists_every_command(self):
+        text = read(SITE / "commands.html")
+        nav = re.search(r'<p class="docnav-h">Every command</p>\s*<ul>(.*?)</ul>',
+                        text, re.S)
+        self.assertTrue(nav)
+        listed_names = re.findall(r'<a class="cmdname" href="[^"]*">([^<]+)</a>',
+                                  nav.group(1))
+        # whoami and logout have no entry of their own, under login.
+        self.assertEqual(listed_names, [name for name, _ in cli.COMMANDS
+                                        if name not in ("whoami", "logout")])
 
 
 class SiteAgentsComeFromTheRegistry(unittest.TestCase):

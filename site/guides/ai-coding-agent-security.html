@@ -69,6 +69,7 @@
   <ul>
     <li><a href="/guides">Overview</a></li>
     <li><a href="/guides/ai-coding-agent-security" aria-current="page">Security checklist</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
   </ul>
   <p class="docnav-h">Claude Code</p>
   <ul>
@@ -448,12 +449,13 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in your ag
 ranwhat watch --json       <span class="c-mut">one record per flagged call</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        <a href="/watch">ranwhat watch</a> reports twelve kinds of action:
+        <a href="/watch">ranwhat watch</a> reports thirteen kinds of action:
         credential reads, secret-shaped strings in tool calls, package
         publishing, cloud resource changes, payment API calls, log or history
         tampering, destructive git, recursive deletion, local files uploaded
         with curl, scripts downloaded and run unread, files made writable by
-        every user, and container volumes wiped. It reads subagent
+        every user, container volumes wiped, and encoded commands decoded and
+        run. It reads subagent
         transcripts too.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
@@ -646,7 +648,9 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
         <a href="/guides/check-ai-agent-code-is-secure">how to check AI-written
         code</a> covers the review step, and
         <a href="/guides/prompt-injection-coding-agents">prompt injection in
-        coding agents</a> explains why the boundary matters.
+        coding agents</a> explains why the boundary matters. To choose a tool
+        for the checking and guarding steps, see the
+        <a href="/guides/best-ai-coding-agent-security-tools">best AI coding agent security tools</a>.
       </p>
     </div>
   </div>
@@ -746,6 +750,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
           <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
           <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
           <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
         </ul>
       </div>
       <div>

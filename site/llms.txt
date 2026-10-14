@@ -11,7 +11,7 @@ Where it fits: ranwhat is the after-the-fact side of AI agent security and devel
 Commands:
 
 - `ranwhat check`: watch and clean in one read-only pass. It never changes anything.
-- `ranwhat watch`: nine rules over what the agent ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, and local files uploaded with curl. `--json` prints one record per flagged call.
+- `ranwhat watch`: thirteen rules over what the agent ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, local files uploaded with curl, scripts downloaded and run unread, files made writable by every user, container volumes wiped, and encoded commands decoded and run. `--json` prints one record per flagged call.
 - `ranwhat clean`: finds credentials in every agent's transcripts, passwords typed into commands (`mysql -pPASSWORD`, `curl -u user:password`) among them, says what to rotate, and masks them only when asked (`--apply`, or `mask` in the review session). Backups go to `~/.ranwhat/backups`.
 - `ranwhat sources`: every coding agent ranwhat reads, where it looked for each one's history, and whether it found any. `check`, `watch` and `clean` read them all by default; `--source ID` reads one, and `--path ID=PATH` reads one from elsewhere.
 - `ranwhat reach`: the MCP servers agents are configured with (Claude Code's `~/.claude.json` and `.mcp.json`, and the configs of Claude Desktop, Cursor, VS Code, Gemini CLI, Qwen Code, GitHub Copilot CLI, Windsurf and Codex), what each launches or connects to, and risky shapes: a secret inline in `env`, args, headers or the URL (masked the way `clean` masks it), a package fetched by `npx` or `uvx` with no exact version, a remote URL. Then the credential files (`.env`, `~/.aws/credentials`, `~/.ssh/id_*` and others) an agent could read from its working directories that no Claude Code `Read(...)` deny rule covers, paths only, and a `permissions.deny` block to paste into `~/.claude/settings.json`. It writes nothing. `ranwhat reach DIR` looks at one project.
@@ -19,6 +19,7 @@ Commands:
 - `ranwhat callers`: who used a key, from the provider's own log: AWS CloudTrail by access key ID, and a GitHub organisation's audit log by token hash. `--mine CIDR` marks your own addresses, and callers outside them are flagged. Read-only.
 - `ranwhat live`: the same as scan, from read-only token introspection. Pass tokens in the environment (`RANWHAT_GITHUB_TOKEN`, `RANWHAT_GOOGLE_TOKEN`, `RANWHAT_SLACK_TOKEN`, `RANWHAT_STRIPE_TOKEN`), not as flags.
 - `ranwhat demo`: an authority scan on a bundled example, with no setup.
+- `ranwhat bench`: runs ranwhat's own detection over a made-up agent home in a temporary directory and scores it against an answer key: planted secrets that must be found, decoys that must not be reported, risky commands that must be rated, ordinary commands that must not. It lists what ranwhat is known not to catch apart from the score. Offline and read-only; `--seed N` repeats a run, and the exit status is 3 when an expectation is not met.
 - `ranwhat revoke`: lists the Claude Code settings that let an agent act without asking (bypassPermissions, enableAllProjectMcpServers, allow rules for any shell command, curl, rm, git push or credential files). `--apply` takes them back and keeps a copy of each file. A leaked GitHub, Slack or Google token is revoked from clean's review with `revoke N`.
 - `ranwhat hook install`: the one opt-in exception to after the fact. It adds a PreToolUse hook to Claude Code's settings (`--scope user`, `project` or `local`), and each tool call watch's rules rate high or critical then waits for the user's yes (`--mode ask`, the default) or, when critical, is refused (`--mode deny`). It judges locally and sends nothing; a call no rule rates high or critical gets no answer, and if the hook fails the call goes ahead. `ranwhat hook status` shows where it is installed and `ranwhat hook uninstall` removes it. It needs a lasting install (`uv tool install`, `pipx install` or `pip install`), not `uvx`.
 - `ranwhat update`: refreshes the capability catalogue. Needs Plus, which is live: €12 a month per organisation. On a terminal, `scan`, `live` and `update --status` may add one dim line about the feed on stderr, never with `--json`; `RANWHAT_NO_HINTS=1` turns it off.
@@ -37,7 +38,7 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 ## Docs
 
 - [Commands](https://ranwhat.com/commands): every command and every flag, what each reads and what it sends
-- [watch](https://ranwhat.com/watch): the nine rules, their severities, the false positives it suppresses, and where it reads from
+- [watch](https://ranwhat.com/watch): the thirteen rules, their severities, the false positives it suppresses, and where it reads from
 - [clean](https://ranwhat.com/clean): how secrets are found, why masking is not remediation, and the review session
 - [scan](https://ranwhat.com/scan): the three scores, evidence states, and the providers the catalogue covers
 - [Install](https://ranwhat.com/install): uvx, pipx or pip, and what it reads and writes
@@ -61,6 +62,7 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 - [Rotate a leaked API key](https://ranwhat.com/guides/rotate-leaked-api-key-ai-agent): rotate at the provider first for GitHub, AWS, Google Cloud, Slack, Stripe and the model providers, check logs, then mask transcripts and handle git history
 - [Checking AI-written code](https://ranwhat.com/guides/check-ai-agent-code-is-secure): why an agent cannot verify its own code, the deterministic checks that can, where to run them so they cannot be skipped, and what to look for in the diff
 - [Secure-by-default agent setup](https://ranwhat.com/guides/secure-by-default-ai-coding-agent-setup): what secure by default means for a coding agent: a combined Claude Code settings file, scoped credentials, reviewed MCP servers and hooks, and keeping a record
+- [Best AI coding agent security tools](https://ranwhat.com/guides/best-ai-coding-agent-security-tools): six tools compared on five checks anyone can verify (agents read, blocking, stays local, open source, finds secrets in transcripts): ranwhat, Stroq, GitGuardian ggshield, Gitleaks, Snyk Agent Scan and TruffleHog, written by ranwhat's maker with the method and each tool's limits
 
 ## Project
 
