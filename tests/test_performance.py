@@ -418,6 +418,31 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("a pipe that reaches no shell", "'x | ' + 'sudo -u ' * n(7999) + 'ls'"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
+    def test_a_fetch_piped_into_a_long_run_of_options_and_shells(self):
+        """A stage that reads a pipe is tried as a program at every word
+        that could start one, behind a fetch. A word of the run that names a
+        shell must not split the whole stage again, and a quoted stage,
+        which shlex has to split, only some of them."""
+        self.assertLinear([
+            ("quoted shells", "'curl x | ' + 'sudo -E \"sh\" ' * n(4900)"),
+            ("interpreters", "'curl x | ' + 'sudo -E python3 ' * n(4200)"),
+            ("a shell at the end", "'curl x | ' + 'sudo -E ' * n(7990) + 'bash -'"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+        # Alone, and through evaluate: a shell is also tried there as the one
+        # that runs a substitution (see the test after this one).
+        self.assertLinear([
+            ("shells as values", "'sudo -E sh ' * n(5800)"),
+            ("shells with -s", "'sudo -u sh -s ' * n(4900)"),
+            ("quoted shells", "'sudo -E \"sh\" ' * n(4900)"),
+            ("interpreters", "'sudo -E python3 ' * n(4200)"),
+        ], call="watch._runs_stdin(text)")
+        self.assertLinear([
+            ("shells as values", "'sudo -E sh ' * n(5800)"),
+            ("shells with -s", "'sudo -u sh -s ' * n(4900)"),
+            ("quoted shells", "'sudo -E \"sh\" ' * n(4900)"),
+            ("interpreters", "'sudo -E python3 ' * n(4200)"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+
     def test_a_shell_as_the_value_of_every_option(self):
         """Each `sh` that could end a run of sudo words was tried as the
         shell that runs a fetch, and each try read on to the end of the
@@ -433,6 +458,17 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
         self.assertLinear([
             ("directly", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
         ], call="watch._runs_substitution().match(text, 0, len(text))")
+
+    def test_a_shell_or_interpreter_that_is_the_value_of_an_option(self):
+        """Each such word is also tried as the program that reads the pipe,
+        and each try reads on through the option words after it. With no
+        limit on the tries that was quadratic."""
+        shapes = [
+            ("sh as the value of -o", "'sudo -o ' + 'sh -o ' * n(8000) + '-x -c'"),
+            ("python3 as the value of -W", "'sudo -W ' + 'python3 -W ' * n(5800) + 'x -c'"),
+        ]
+        self.assertLinear(shapes, call="watch._runs_stdin(text)")
+        self.assertLinear(shapes, call="watch.evaluate('Bash', {'command': 'curl x | ' + text})")
 
     def test_a_command_full_of_credential_files(self):
         """Each credential file a command names was looked for again in the

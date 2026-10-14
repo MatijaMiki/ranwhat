@@ -1421,7 +1421,7 @@ _STDIN_FLAGS = frozenset(("-", "-u", "-s", "-S", "-B", "-q", "-l"))
 # A word that redirects: 2>&1, >out, &>log, < file. When the operator stands
 # by itself, the word after it names the file it points at. <( ) and >( ) are
 # process substitutions, not redirections.
-_REDIRECT = re.compile(r"(?:\d*|&)(?:>>?&?|<<<?-?|<&|<>|<)(?!\()")
+_REDIRECT_WORD = re.compile(r"(?:\d*|&)(?:>>?&?|<<<?-?|<&|<>|<)(?!\()")
 # Options whose value is the next word, and what asks a program for its
 # version or usage and runs nothing.
 _SHELL_VALUE_OPTIONS = frozenset(("-o", "-O", "+o", "+O", "--rcfile",
@@ -1456,9 +1456,10 @@ _HAND_WORD = re.compile(r"\s*([^\s|;&]+)")
 
 
 class _AfterHandsOn:
-    """`\\s*(?:_HANDS_ON)*` and then `tail`, with the one method of a compiled
-    pattern that its callers use: match(text, pos, endpos), whose result ends
-    where the tail does. The state of a program is where in its words it is:
+    """`\\s*(?:_HANDS_ON)*` and then `tail`, with two methods:
+    match(text, pos, endpos), as a compiled pattern's, whose result ends
+    where the tail does, and starts(text), the words a program or the tail
+    may start with. The state of a program is where in its words it is:
     "sudo" may be given options (so may doas and exec), "sudo option" has
     just been given one, whose value may be the next word, "env" and "env
     option" the same for env's options and assignments, "nice" and "nice -n"
@@ -1510,6 +1511,25 @@ class _AfterHandsOn:
         if state == "nice -n":
             return "nothing" if self._number.fullmatch(word) else None
         return None
+
+    def starts(self, text):
+        """Each word, with where it starts, that a program or the tail may
+        start with, once the words before it are read in any way they can
+        be: what match() tries the tail at, without the tail."""
+        pos, end = 0, len(text)
+        states = [None]
+        while states:
+            word = _HAND_WORD.match(text, pos, end)
+            if word is None:
+                break
+            start, pos, word = word.start(1), word.end(), word.group(1)
+            yield start, word
+            after = [s for s in (self._next(state, word) for state in states
+                                 if state is not None) if s is not None]
+            program = self._program.fullmatch(word)
+            if program:
+                after.append(program.lastgroup)
+            states = list(dict.fromkeys(after))
 
     def _tail(self, text, start, end, seen):
         """self.tail.match(text, start, end), but without reading on again
@@ -1565,6 +1585,11 @@ class _AfterHandsOn:
         return found
 
 
+# The words that may stand before a program, with no tail: for where each
+# could start.
+_HANDS_ON_WORDS = _AfterHandsOn(r"(?!)")
+
+
 class _IntoShell:
     """`\\|&?\\s*(?:_HANDS_ON)*` and then a shell, with the one method of a
     compiled pattern that its caller uses: search(text)."""
@@ -1602,6 +1627,11 @@ def _runs_substitution():
               r"(?:[^\s|;&]*/)?" + powershell + fetched))
 
 
+# What ends a word in starts(), besides blanks: a stage that holds one has
+# words that stage.split() cuts differently.
+_SEPARATORS = re.compile(r"[|;&]")
+
+
 def _without_redirects(words):
     """(words without the redirections, whether one replaces the standard
     input). `sh 2>&1` and `sh >/dev/null` still read the pipe: their
@@ -1612,7 +1642,7 @@ def _without_redirects(words):
         if skip:
             skip = False
             continue
-        found = _REDIRECT.match(word)
+        found = _REDIRECT_WORD.match(word)
         if not found:
             kept.append(word)
             continue
@@ -1623,23 +1653,40 @@ def _without_redirects(words):
     return kept, replaced
 
 
-# Known gaps: xargs sh -c and tee >(sh) run what they are piped through a
-# third program, and are not followed. The stage that reads the pipe is the
-# one named.
-def _runs_stdin(stage):
-    """Whether a stage runs what it is piped as a program."""
-    rest = stage[_hands_on().match(stage).end():]
-    words, replaced = _without_redirects(_argv(rest) or rest.split())
-    if not words or replaced:
+# At most this many words that may read a program from a pipe are tried
+# behind a stage's option words, whether it is quoted or not: each costs a
+# read of the rest of the stage, so this keeps the whole linear. A stage
+# with more of them than this (`sudo -E sh sh sh ... bash -s`, seventeen
+# shells deep) is judged by its first sixteen, and a word that is the value
+# of an option (`sudo -u sh`) is one of them, as the regexes this replaced
+# read it.
+_MOST_READERS_TRIED = 16
+
+
+def _is_reader(word):
+    """Whether this word names a program that may read a program from its
+    input: a shell, an interpreter or iex, quoted or not."""
+    name = word.strip("'\"").rsplit("/", 1)[-1].lower()
+    return (name in _STDIN_SHELLS or _STDIN_INTERPRETERS.match(name) is not None
+            or name in ("iex", "invoke-expression", "busybox", "$shell", "${shell}"))
+
+
+def _reads_script(words, at=0):
+    """Whether the program that words[at:] runs reads a script from its
+    input."""
+    if at >= len(words):
         return False
-    name = words[0].rsplit("/", 1)[-1].lower()
-    args = words[1:]
+    name = words[at].rsplit("/", 1)[-1].lower()
     if name in ("iex", "invoke-expression"):
         return True
-    if name == "busybox" and args and args[0] in _STDIN_SHELLS:
-        name, args = args[0], args[1:]
+    # `busybox sh` is the shell, whose words follow it: the program moves on
+    # by one, the words are not copied (a slice, or islice, would count to at).
+    if name == "busybox" and at + 1 < len(words) and words[at + 1] in _STDIN_SHELLS:
+        at += 1
+        name = words[at]
     elif name in ("$shell", "${shell}"):
         name = "sh"
+    args = (words[i] for i in range(at + 1, len(words)))
     if name in _STDIN_SHELLS:
         letters, operand, skip = set(), False, False
         for word in args:
@@ -1674,6 +1721,50 @@ def _runs_stdin(stage):
             elif word not in flags:
                 return False
         return True
+    return False
+
+
+# Known gaps: xargs sh -c and tee >(sh) run what they are piped through a
+# third program, and are not followed. The stage that reads the pipe is the
+# one named.
+def _runs_stdin(stage):
+    """Whether a stage runs what it is piped as a program."""
+    # A redirection that replaces the standard input, anywhere in the stage
+    # (`sh < file`, `sudo -E <<<x -H bash -s`), leaves nothing piped to read.
+    if _without_redirects(_argv(stage) or stage.split())[1]:
+        return False
+    rest = stage[_hands_on().match(stage).end():]
+    if _reads_script(_without_redirects(_argv(rest) or rest.split())[0]):
+        return True
+    # _hands_on reads an option's value greedily, and in `sudo -E bash -s`
+    # takes bash for the value of -E, which leaves `-s` to be read. The
+    # words before the program may as well end anywhere else they could:
+    # the program is tried wherever one that reads a script starts.
+    #
+    # Where the stage has no quoting, no separator and no redirection, its
+    # words are the ones starts() walks and a reader's place among them is
+    # its index, so each is tried without splitting the stage again.
+    # Otherwise each is read from its own start, with its redirections
+    # filtered as above.
+    plain = None
+    if not (_QUOTING.search(stage) or _SEPARATORS.search(stage)):
+        words = stage.split()
+        if not any(_REDIRECT_WORD.match(w) for w in words):
+            plain = words
+    tried = 0
+    for index, (start, word) in enumerate(_HANDS_ON_WORDS.starts(stage)):
+        if not _is_reader(word):
+            continue
+        tried += 1
+        if tried > _MOST_READERS_TRIED:
+            break
+        if plain is not None and plain[index:index + 1] == [word]:
+            if _reads_script(plain, index):
+                return True
+            continue
+        rest = stage[start:]
+        if _reads_script(_without_redirects(_argv(rest) or rest.split())[0]):
+            return True
     return False
 
 
