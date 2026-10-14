@@ -21,6 +21,7 @@ import os
 import random
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -382,8 +383,8 @@ class Leaks(_Bench):
         root = bench.write(syn, home)
         missing = os.path.join(self.tmp, "no-openclaw")
         probes = []
-        for p in syn.planted:
-            probes += [p.core, p.core[:12], p.core[-12:]]
+        for p in syn.planted + syn.typed:
+            probes += [text for kind, text in p.probes()]
         for flags in (["--json"], []):
             rc, out, err = self.run_cli(
                 "check", *(flags + ["--root", root, "--source", "claude-code",
@@ -690,8 +691,10 @@ class Command(_Bench):
                 (["bench", "--seed", "-1"], "--seed must be a whole number from 0 to"),
                 (["bench", "--seed", "9007199254740992"], "--seed must be a whole number from 0 to"),
                 (["check", "--seed", "1"], "--seed is only for bench"),
-                (["hook", "install", "--seed", "1"], "--seed"),
-                (["revoke", "--seed", "1"], "--seed")):
+                (["hook", "install", "--seed", "1"],
+                 "hook install does not take --seed"),
+                (["revoke", "--seed", "1"],
+                 "revoke takes only --scope, --apply and --json, not --seed")):
             rc, out, err = self.run_cli(*argv)
             self.assertEqual(rc, 2, argv)
             self.assertIn(message, err, argv)
@@ -723,6 +726,168 @@ class Command(_Bench):
         self.assertEqual(rc, cli.FAIL_STATUS)
         self.assertRegex(out, r"FAIL  \d+ expectations? not met \(exit status 3\)")
         self.assertIn("Not met", out)
+
+
+class Strictness(_Bench):
+    """What a broken or careless detector, or run, must not get away with."""
+
+    def blind(self, *rows):
+        """bench.build, with what the named rows printed replaced by "ok":
+        a detector shown none of those files."""
+        real = bench.build
+
+        def build(seed=bench.DEFAULT_SEED):
+            syn = real(seed)
+            for rid in rows:
+                syn.by_id[rid].output = "ok"
+            return syn
+        return mock.patch.object(bench, "build", build)
+
+    def test_a_secret_typed_in_a_command_is_not_the_one_in_a_file(self):
+        syn = bench.build()
+        self.assertEqual(len(syn.typed), 3)
+        files = " ".join(syn.row_text(p.row) for p in syn.planted)
+        for t in syn.typed:
+            self.assertIn(t.value, syn.row_text(t.row), t.id)
+            self.assertNotIn(t.value, files, t.id)
+            self.assertNotIn(t.value, [p.value for p in syn.planted])
+        with self.blind("app-env", "aws-credentials", "gh-auth-token",
+                        "npmrc", "ssh-key"):
+            result = bench.run()
+        self.assertEqual([c["id"] for c in result.cases
+                          if c["group"] == "secrets"
+                          and c["outcome"] == "pass"], [])
+        self.assertEqual([c["id"] for c in result.cases
+                          if c["group"] == "risky"
+                          and c["outcome"] == "fail"], [])
+
+    def test_a_value_typed_in_a_command_is_a_leak_when_printed(self):
+        typed = bench.build().typed[0]
+        real = watch.render
+        with mock.patch.object(watch, "render",
+                               lambda *a, **k: real(*a, **k) + "\n" + typed.value):
+            result = bench.run()
+        self.assertIn(typed.id, [l["case"] for l in result.leaks])
+        self.assertFalse(result.passed)
+
+    def test_one_reported_blob_does_not_find_every_secret(self):
+        real = clean.scan_sources
+
+        def blob(*args, **kwargs):
+            found = real(*args, **kwargs)
+            found.values = {"fp": "\n".join(found.values.values())}
+            return found
+        with mock.patch.object(clean, "scan_sources", blob):
+            result = bench.run()
+        self.assertFalse(result.passed)
+        passing = [c["id"] for c in result.cases
+                   if c["group"] == "secrets" and c["outcome"] == "pass"]
+        self.assertEqual(passing, [])
+
+    def test_the_leak_check_looks_at_the_middle_and_at_a_key_whole(self):
+        by = dict((p.id, p.value) for p in bench.build().planted)
+        pem = by["secret.private-key"].split("\n")
+        pieces = {
+            "pem line 2": pem[2], "pem line 6": pem[6],
+            "jwt payload": by["secret.jwt"].split(".")[1],
+            "aws id middle": by["secret.aws-access-key-id"][3:-3],
+            "ghp middle": by["secret.github-ghp"][10:-10],
+            "db password middle": by["secret.db-password"][4:-4],
+        }
+        real = watch.render
+        for name, piece in sorted(pieces.items()):
+            with mock.patch.object(watch, "render",
+                                   lambda *a, **k: real(*a, **k) + "\n" + piece):
+                result = bench.run()
+            self.assertTrue(result.leaks, name)
+            self.assertFalse(result.passed, name)
+            self.assertTrue(result.leaks_in(piece), name)
+
+    def test_a_touch_or_a_chmod_counts_as_a_write(self):
+        real = clean.scan_sources
+
+        def transcripts(root):
+            for here, _, names in os.walk(root):
+                for name in names:
+                    yield os.path.join(here, name)
+
+        def touch(*args, **kwargs):
+            for path in transcripts(kwargs["root"]):
+                os.utime(path, (1, 1))
+            return real(*args, **kwargs)
+
+        def chmod(*args, **kwargs):
+            for path in transcripts(kwargs["root"]):
+                os.chmod(path, 0o644)
+            return real(*args, **kwargs)
+        for tamper in (touch, chmod):
+            with mock.patch.object(clean, "scan_sources", tamper):
+                result = bench.run()
+            self.assertFalse(result.checks["read_only"], tamper.__name__)
+            self.assertFalse(result.passed, tamper.__name__)
+
+    def test_a_temporary_directory_that_will_not_go_is_an_error(self):
+        scratch = os.path.join(self.tmp, "scratch")
+        os.makedirs(scratch)
+        self.addCleanup(shutil.rmtree, scratch, True)
+        with mock.patch.object(tempfile, "tempdir", scratch), \
+                mock.patch.object(shutil, "rmtree", lambda *a, **k: None):
+            with self.assertRaises(bench.BenchError):
+                bench.run()
+            rc, out, err = self.run_cli("bench")
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("could not remove the temporary directory", err)
+
+    def test_sigterm_removes_the_temporary_directory(self):
+        scratch = os.path.join(self.tmp, "scratch")
+        os.makedirs(scratch)
+        before = signal.getsignal(signal.SIGTERM)
+
+        def killed(*args, **kwargs):
+            os.kill(os.getpid(), signal.SIGTERM)
+            raise AssertionError("SIGTERM did not stop the run")
+        with mock.patch.object(tempfile, "tempdir", scratch), \
+                mock.patch.object(watch, "scan_sources_counted", killed):
+            with self.assertRaises(SystemExit) as stopped:
+                bench.run()
+        self.assertEqual(stopped.exception.code, 128 + signal.SIGTERM)
+        self.assertEqual(os.listdir(scratch), [])
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+    def test_a_failing_verdict_fits_the_width(self):
+        # Ten or more unmet expectations used to push it one column over 46.
+        with mock.patch.object(clean, "_found", lambda text: []), \
+                mock.patch.object(watch, "RULES", []):
+            result = bench.run()
+        self.assertGreaterEqual(result.unmet, 10)
+        for columns in (46, 60, 80):
+            with mock.patch.dict(os.environ, {"RANWHAT_WIDTH": str(columns)}):
+                text = bench.render(result)
+                for line in text.splitlines():
+                    self.assertLessEqual(len(line), columns, line)
+                flat = " ".join(" ".join(text.split()).split())
+                self.assertIn("FAIL %d expectations not met (exit status 3)"
+                              % result.unmet, flat)
+
+    def test_no_advice_to_move_a_gap_into_the_key_on_a_failed_run(self):
+        with mock.patch.object(clean, "_found", lambda text: []), \
+                mock.patch.object(watch, "RULES", []):
+            result = bench.run()
+        self.assertFalse(result.passed)
+        self.assertIn("miss", [g["kind"] for g in result.gaps])
+        self.assertNotIn("into the key", " ".join(bench.render(result).split()))
+
+    def test_advice_for_a_closed_gap_says_what_closed(self):
+        result = bench.run()
+        self.assertTrue(result.passed)
+        for g in result.gaps:
+            g["state"] = "caught" if g["kind"] == "miss" else "quiet"
+        text = " ".join(bench.render(result).split())
+        self.assertIn("(now caught: move it into the key)", text)
+        self.assertIn("(no longer reported: move it into the key)", text)
+        self.assertEqual(text.count("now caught"),
+                         sum(1 for g in result.gaps if g["kind"] == "miss"))
 
 
 class PublicCopy(unittest.TestCase):

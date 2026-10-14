@@ -44,8 +44,8 @@ _LAZY = {"introspect": "introspect", "usage_mod": "usage", "feed_mod": "feed",
          "account_mod": "account", "bench_mod": "bench"}
 # introspect.PROVIDERS, named here for the flags each takes, and usage's
 # default window (tests/test_work_done.py checks that they agree). bench is
-# lazy too, for random and tempfile: its default seed is named here for
-# --help, and tests/test_bench.py checks it.
+# lazy too: nothing but the bench command needs it. Its default seed is
+# named here for --help, and tests/test_bench.py checks it.
 _PROVIDER_NAMES = ("google", "github", "slack", "stripe")
 _DEFAULT_WINDOW_DAYS = 90
 _BENCH_SEED = 2026
@@ -1593,12 +1593,14 @@ def _revoke(p, args):
 def _bench(p, args):
     """ranwhat bench: ranwhat's own detection, run over a made-up agent
     home in a temporary directory and scored against an answer key.
-    Read-only and offline: it opens nothing outside that directory, and
-    prints no planted value. Exit status 0 when every expectation is met,
+    Read-only and offline: it never opens your home directory or
+    ~/.ranwhat, and prints no planted value. Exit status 0 when every expectation is met,
     FAIL_STATUS when one is not (a case, a leak, or a run check), 1 on an
     error; 2 only from the parser. Never 2 for "nothing read": it builds
     what it reads."""
     bench_mod = _module("bench_mod")
+    # As for hook, revoke and reach: a flag given its default value is not
+    # seen as given, so only a changed one is refused.
     stray = [a.option_strings[-1] for a in p._actions
              if a.option_strings and a.dest not in {"command", "profile",
                                                     "json", "seed"}

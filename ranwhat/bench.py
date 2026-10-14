@@ -6,14 +6,17 @@ secrets drawn from a seed. It runs the read-only detection check, watch and
 clean use over it, and scores what they report against an answer key.
 The key is written by the people who wrote the detectors, so a pass says
 that nothing on it has regressed, not how much of what is on your machine
-ranwhat would catch. It reads and writes only inside its own temporary
-directory, offline and in this process.
+ranwhat would catch. It reads and writes inside its own temporary
+directory, offline and in this process. It never opens your home
+directory or ~/.ranwhat; it only asks whether two top-level names exist
+(/ranwhat and /ranwhat-bench), as clean does to find a project's folder.
 
 Four groups of cases must pass: planted secrets clean must find, decoys it
 must leave alone, risky calls watch must rate, and ordinary calls it must
 not flag. What ranwhat is known not to catch is listed apart, as gaps, and
-is never counted. No planted value, nor the edges of one, may appear in
-anything ranwhat printed for the run.
+is never counted. No planted value, nor its edges or middle, may appear in
+anything ranwhat printed for the run, as Python reports it (the standard
+streams and the reports and records the detectors return).
 
 Not reentrant and not for threads: a run changes the environment,
 clean.BACKUP_ROOT and the standard streams while the detectors work, and
@@ -31,6 +34,7 @@ import json
 import os
 import random
 import shutil
+import signal
 import tempfile
 import time
 
@@ -156,13 +160,35 @@ class Row(object):
                 self.output)
 
 
+# A value clean reports inside a longer one (a password, as the whole URL
+# it is in) may carry at most this many other characters.
+EMBED_SLACK = 80
+
+
 class Planted(object):
-    def __init__(self, id, label, value, row, core=None):
+    def __init__(self, id, label, value, row, core=None, parts=(),
+                 embedded=False):
         self.id, self.label, self.value, self.row = id, label, value, row
         # What a leak probe looks for: the whole value, but for a PEM key
         # its first body line and for a JWT its signature, as the rest is
         # constant and public ("-----BEGIN O", "eyJhbGciOiJI").
         self.core = value if core is None else core
+        # More secret text to look for: the other body lines of a key, the
+        # payload of a JWT.
+        self.parts = tuple(parts)
+        # clean reports it as part of a longer value (the URL it is in).
+        self.embedded = embedded
+
+    def probes(self):
+        """[(kind, text)]: what a leak check looks for. The core, its first
+        and last twelve characters and twelve from its middle, then each of
+        the parts. A half-masked key is still a leak."""
+        n = len(self.core)
+        mid = max(0, (n - 12) // 2)
+        out = [("value", self.core), ("leading", self.core[:12]),
+               ("trailing", self.core[-12:]),
+               ("middle", self.core[mid:mid + 12])]
+        return out + [("part", text) for text in self.parts]
 
 
 class Decoy(object):
@@ -192,10 +218,14 @@ class Synthetic(object):
     """The made-up home of one seed: the rows of its transcript, the files
     beside it and the answer key. build() makes one, with no I/O."""
 
-    def __init__(self, seed, rows, planted, decoys, risky, benign, gaps, files):
+    def __init__(self, seed, rows, planted, decoys, risky, benign, gaps, files,
+                 typed=()):
         self.seed, self.rows, self.planted = seed, rows, planted
         self.decoys, self.risky, self.benign = decoys, risky, benign
         self.gaps, self.files = gaps, files
+        # Secrets typed in a risky call, apart from the ones in the files:
+        # not cases of their own, but a leak check looks for them too.
+        self.typed = list(typed)
         self.by_id = dict((row.id, row) for row in rows)
 
     def row_text(self, *ids):
@@ -218,7 +248,8 @@ class Synthetic(object):
 
     def _state(self):
         return (self.listing(), [row.state() for row in self.rows],
-                sorted(self.files.items()))
+                sorted(self.files.items()),
+                [(p.id, p.value) for p in self.typed])
 
     def __eq__(self, other):
         return isinstance(other, Synthetic) and self._state() == other._state()
@@ -264,6 +295,11 @@ def build(seed=DEFAULT_SEED):
     u = [d.hex(8), d.hex(4), d.hex(3), d.hex(3), d.hex(12)]
     uuid = "%s-%s-4%s-8%s-%s" % tuple(u)
     prose = base64.b64encode(_sentence(d.index(3)).encode("ascii")).decode("ascii")
+    # The values a risky call types. Not the ones in the files: a case for a
+    # file's secret must not pass on the strength of a command's.
+    typed_ghp = "gh" "p_" + d.text(36)
+    typed_stripe = "sk_" "live_" + d.text(24)
+    typed_pw = d.text(20)
 
     files = {
         ".aws/credentials": "[default]\naws_access_key_id = %s\n"
@@ -308,12 +344,20 @@ def build(seed=DEFAULT_SEED):
                 "app-env"),
         Planted("secret.db-password", "Database password", db_pw, "app-env"),
         Planted("secret.db-url-password", "Password in a database URL",
-                db_url_pw, "app-env"),
+                db_url_pw, "app-env", embedded=True),
         Planted("secret.npm-token", "npm token", npm, "npmrc"),
         Planted("secret.jwt", "JSON Web Token", jwt, "app-env",
-                core=jwt_signature),
+                core=jwt_signature, parts=(jwt_payload,)),
         Planted("secret.private-key", "PEM private key", pem, "ssh-key",
-                core=pem_lines[0]),
+                core=pem_lines[0], parts=pem_lines[1:]),
+    ]
+    typed_secrets = [
+        Planted("typed.github-ghp", "GitHub token in a header", typed_ghp,
+                "risky.secret-in-header"),
+        Planted("typed.stripe-live", "Stripe key in an export", typed_stripe,
+                "risky.secret-in-export"),
+        Planted("typed.db-password", "Password in a command line", typed_pw,
+                "risky.password-on-command-line"),
     ]
 
     # Risky calls: (name, label, rule, floor, command or (tool, input)).
@@ -359,13 +403,13 @@ def build(seed=DEFAULT_SEED):
             ("secret-in-header", "a token in a request header",
              "secret.literal", "critical",
              'curl -s -H "Authorization: Bearer %s" '
-             "https://api.github.com/user" % ghp),
+             "https://api.github.com/user" % typed_ghp),
             ("secret-in-export", "a key exported on the command line",
              "secret.literal", "critical",
-             "export STRIPE_SECRET_KEY=%s && ./charge.sh" % stripe),
+             "export STRIPE_SECRET_KEY=%s && ./charge.sh" % typed_stripe),
             ("password-on-command-line", "a password in a command's arguments",
              "secret.literal", "critical",
-             "mysql -u app_user -p%s -h db.internal.test app" % db_pw)):
+             "mysql -u app_user -p%s -h db.internal.test app" % typed_pw)):
         if name in shared:
             rid = shared[name]
         else:
@@ -505,7 +549,8 @@ def build(seed=DEFAULT_SEED):
         "reported as a secret.",
         ["export OPENAI_API_KEY=sk-your-key-here"], "clean")
 
-    return Synthetic(seed, rows, planted, decoys, risky, benign, gaps, files)
+    return Synthetic(seed, rows, planted, decoys, risky, benign, gaps, files,
+                     typed_secrets)
 
 
 def transcript(syn):
@@ -564,10 +609,10 @@ class Detected(object):
     """What the detectors reported, and printed, over one home."""
 
     def __init__(self, searched, records, counts, unread, output, surfaces,
-                 complete, notes):
+                 notes):
         self.searched, self.records, self.counts = searched, records, counts
         self.unread, self.output, self.surfaces = unread, output, surfaces
-        self.complete, self.notes = complete, notes
+        self.notes = notes
 
 
 def _jsonable(value):
@@ -577,7 +622,7 @@ def _jsonable(value):
 
 
 def detect(root):
-    """Run the detection check runs over the projects directory `root`:
+    """Run the detection that check runs over the projects directory `root`:
     clean.scan_sources and watch.scan_sources_counted, once each, as
     cli._check calls them, then the two reports they print. Read-only;
     whatever they print is caught, and is one of the outputs the leak check
@@ -611,7 +656,7 @@ def detect(root):
         "detector output": out.getvalue() + err.getvalue(),
     }
     return Detected(searched, records, counts, unread,
-                    out.getvalue() + err.getvalue(), surfaces, complete, notes)
+                    out.getvalue() + err.getvalue(), surfaces, notes)
 
 
 @contextlib.contextmanager
@@ -634,28 +679,66 @@ def _environment(changes):
                 os.environ[name] = value
 
 
+def _stamp(path):
+    """The mode and modification time of a path: a touch or a chmod is a
+    write too."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return "gone"
+    return "%o %d" % (st.st_mode, st.st_mtime_ns)
+
+
 def _tree(base):
-    """{path under base: sha256 of a file, or "dir"}: the temp directory
-    as it is, to see that a read changed none of it."""
+    """{path under base: sha256 of a file, or "dir", with its mode and
+    modification time}: the temp directory as it is, to see that a read
+    changed none of it."""
     seen = {}
     for here, dirs, names in os.walk(base):
         for name in dirs:
-            seen[os.path.relpath(os.path.join(here, name), base)] = "dir"
+            path = os.path.join(here, name)
+            seen[os.path.relpath(path, base)] = "dir " + _stamp(path)
         for name in names:
             path = os.path.join(here, name)
             try:
                 with open(path, "rb") as fh:
-                    seen[os.path.relpath(path, base)] = hashlib.sha256(
-                        fh.read()).hexdigest()
+                    digest = hashlib.sha256(fh.read()).hexdigest()
             except OSError:
-                seen[os.path.relpath(path, base)] = "unreadable"
+                digest = "unreadable"
+            seen[os.path.relpath(path, base)] = digest + " " + _stamp(path)
     return seen
+
+
+@contextlib.contextmanager
+def _terminated():
+    """Turn SIGTERM (a CI timeout, `kill`) into SystemExit while a run is
+    on, so its temporary directory is removed as it is on Ctrl-C, and put
+    the old handler back. Does nothing off the main thread."""
+    def stop(signum, frame):
+        raise SystemExit(128 + signum)
+    try:
+        old = signal.signal(signal.SIGTERM, stop)
+        installed = True
+    except (ValueError, OSError):
+        installed = False               # not the main thread
+    try:
+        yield
+    finally:
+        if installed:
+            signal.signal(signal.SIGTERM, old)
 
 
 def run(seed=DEFAULT_SEED):
     """Build the home for `seed` in a temporary directory, detect over it
     and score what was reported: a Result. The directory is removed on
-    every path. A detector's own exception propagates, after that."""
+    every path, SIGTERM and Ctrl-C included, and a detector's own exception
+    propagates after that. BenchError when the directory cannot be made or
+    filled, or, after a run that otherwise went through, removed."""
+    with _terminated():
+        return _run(seed)
+
+
+def _run(seed):
     try:
         tmp = tempfile.mkdtemp(prefix="ranwhat-bench-")
     except OSError as e:
@@ -685,9 +768,14 @@ def run(seed=DEFAULT_SEED):
         finally:
             clean_mod.BACKUP_ROOT = backups
         unchanged = before == _tree(tmp) and not os.path.exists(state)
-        return score(syn, detected, unchanged)
+        result = score(syn, detected, unchanged)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    # Reached only when nothing was raised: an error in flight is the news.
+    if os.path.exists(tmp):
+        raise BenchError("could not remove the temporary directory %s, which "
+                         "holds made-up credential files" % tmp)
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -722,7 +810,9 @@ def score(syn, detected, unchanged):
     for p in syn.planted:
         if p.value in values:
             found_as = "value"
-        elif any(p.value in v for v in values):
+        elif p.embedded and any(
+                p.value in v and len(v) - len(p.value) <= EMBED_SLACK
+                for v in values):
             found_as = "part"
         else:
             found_as = None
@@ -774,16 +864,16 @@ def score(syn, detected, unchanged):
     }
 
     probes = []
-    for p in syn.planted:
-        probes += [(p.id, "value", p.core), (p.id, "leading", p.core[:12]),
-                   (p.id, "trailing", p.core[-12:])]
+    for p in syn.planted + syn.typed:
+        probes += [(p.id, kind, text) for kind, text in p.probes()]
     leaks = []
     for case, kind, probe in probes:
         for surface in SURFACES:
-            if probe in detected.surfaces.get(surface, ""):
-                leaks.append({"case": case, "surface": surface, "probe": kind})
+            leak = {"case": case, "surface": surface, "probe": kind}
+            if probe in detected.surfaces.get(surface, "") and leak not in leaks:
+                leaks.append(leak)
     return Result(syn.seed, cases, gaps, leaks, checks, probes,
-                  len(syn.planted))
+                  len(syn.planted) + len(syn.typed))
 
 
 class Result(object):
@@ -914,8 +1004,12 @@ def render(result):
     for g in result.gaps:
         said = "%s: %s" % ("miss" if g["kind"] == "miss" else "false alarm",
                            g["label"])
-        if g["state"] in _CLOSED:
-            said += " (now caught: move it into the key)"
+        # Only on a sound run: with a detector broken, "now caught" is a
+        # broken detector, and moving the case into the key would be wrong.
+        if result.passed and g["state"] in _CLOSED:
+            said += (" (now caught: move it into the key)"
+                     if g["kind"] == "miss" else
+                     " (no longer reported: move it into the key)")
         L += term.wrap(said, indent="      ", first="    ")
 
     L.append("")
@@ -923,7 +1017,11 @@ def render(result):
         L.append("  " + GRN("PASS") + "  every expectation met")
     else:
         n = result.unmet
-        L.append("  " + RED("FAIL") + "  %d expectation%s not met "
-                 "(exit status %d)" % (n, "" if n == 1 else "s", FAIL_STATUS))
+        lead = "  FAIL  "
+        verdict = term.wrap("%d expectation%s not met (exit status %d)"
+                            % (n, "" if n == 1 else "s", FAIL_STATUS),
+                            indent=" " * len(lead), first=lead)
+        L.append("  " + RED("FAIL") + verdict[0][len(lead) - 2:])
+        L += verdict[1:]
     L += ["", DIM(term.rule("-")), DIM(term.FOOTER), ""]
     return "\n".join(L)

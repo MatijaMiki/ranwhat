@@ -489,9 +489,11 @@ URL, a JWT, a private key); decoys it must leave alone (git and SHA-256
 digests, UUIDs, base64 of ordinary text, the AWS and Stripe documentation
 keys, placeholders, code that fetches a password); risky calls `watch` must
 rate, under which rule and at what severity; and ordinary calls it must not
-flag. It also checks that no planted value, nor its leading or trailing
-twelve characters, appears in anything ranwhat printed for the run, and that
-the run read the transcript whole, changed nothing and printed nothing.
+flag. It also checks that no planted value, nor its leading, trailing or
+middle characters, nor any line of a planted key, appears in what ranwhat
+printed for the run (on the standard streams and in the reports it built;
+a write that bypasses them is out of its sight), and that the run read the
+transcript whole, changed nothing and printed nothing.
 
 ```bash
 ranwhat bench             # a table; exit status 3 when an expectation is not met
