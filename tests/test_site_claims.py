@@ -1065,6 +1065,31 @@ def listed(items):
 SHIPPED = ("Shipped", "Shipped, secrets read-only")
 
 
+class CommandsPageMatchesTheCommands(unittest.TestCase):
+    """The commands page counts its commands and lists each in its sidebar,
+    as cli.COMMANDS has them, so a command added there cannot be left out."""
+
+    def test_the_commands_page_counts_its_commands(self):
+        n = len(cli.COMMANDS)
+        text = plain(read(SITE / "commands.html"))
+        self.assertIn("%s commands in one tool" % WORDS[n].capitalize(), text)
+        # login, whoami and logout work with an account, and update with Plus.
+        self.assertIn("the other %s need neither" % WORDS[n - 4], text)
+        # watch, clean and scan have pages of their own.
+        self.assertIn("The other %s are below" % WORDS[n - 3], text)
+
+    def test_the_commands_sidebar_lists_every_command(self):
+        text = read(SITE / "commands.html")
+        nav = re.search(r'<p class="docnav-h">Every command</p>\s*<ul>(.*?)</ul>',
+                        text, re.S)
+        self.assertTrue(nav)
+        listed_names = re.findall(r'<a class="cmdname" href="[^"]*">([^<]+)</a>',
+                                  nav.group(1))
+        # whoami and logout have no entry of their own, under login.
+        self.assertEqual(listed_names, [name for name, _ in cli.COMMANDS
+                                        if name not in ("whoami", "logout")])
+
+
 class SiteAgentsComeFromTheRegistry(unittest.TestCase):
     """Every agent the site, llms.txt and the README name, and every count
     of them, is what `ranwhat sources --json` says."""

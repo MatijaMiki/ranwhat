@@ -41,11 +41,14 @@ from . import term
 # and logout use them, so each is imported there, and cli.introspect,
 # cli.usage_mod, cli.feed_mod and cli.account_mod still name them.
 _LAZY = {"introspect": "introspect", "usage_mod": "usage", "feed_mod": "feed",
-         "account_mod": "account"}
+         "account_mod": "account", "bench_mod": "bench"}
 # introspect.PROVIDERS, named here for the flags each takes, and usage's
-# default window (tests/test_work_done.py checks that they agree).
+# default window (tests/test_work_done.py checks that they agree). bench is
+# lazy too: nothing but the bench command needs it. Its default seed is
+# named here for --help, and tests/test_bench.py checks it.
 _PROVIDER_NAMES = ("google", "github", "slack", "stripe")
 _DEFAULT_WINDOW_DAYS = 90
+_BENCH_SEED = 2026
 
 
 def _module(name):
@@ -245,6 +248,7 @@ COMMANDS = (
     ("callers", "who used a key, from the provider's own log"),
     ("revoke", "take back what your agents are allowed (asks first)"),
     ("demo", "see the output without setting anything up"),
+    ("bench", "run ranwhat's detection on made-up data, and score it"),
     ("update", "refresh the capability catalogue (needs Plus)"),
     ("login", "link this machine to your ranwhat.com account"),
     ("whoami", "which account, organisation and plan this machine uses"),
@@ -1586,6 +1590,62 @@ def _revoke(p, args):
     return 0
 
 
+def _bench(p, args):
+    """ranwhat bench: ranwhat's own detection, run over a made-up agent
+    home in a temporary directory and scored against an answer key.
+    Read-only and offline: it never opens your home directory or
+    ~/.ranwhat, and prints no planted value. Exit status 0 when every expectation is met,
+    FAIL_STATUS when one is not (a case, a leak, or a run check), 1 on an
+    error; 2 only from the parser. Never 2 for "nothing read": it builds
+    what it reads."""
+    bench_mod = _module("bench_mod")
+    # As for hook, revoke and reach: a flag given its default value is not
+    # seen as given, so only a changed one is refused.
+    stray = [a.option_strings[-1] for a in p._actions
+             if a.option_strings and a.dest not in {"command", "profile",
+                                                    "json", "seed"}
+             and a.dest != "help"
+             and getattr(args, a.dest, a.default) != a.default]
+    if stray:
+        p.error("bench takes only --seed and --json, not %s"
+                % ", ".join(stray))
+    if args.profile is not None:
+        p.error(_takes_no_path("bench", args.profile))
+    seed = bench_mod.DEFAULT_SEED if args.seed is None else args.seed
+    if not 0 <= seed <= bench_mod.MAX_SEED:
+        p.error("--seed must be a whole number from 0 to %d"
+                % bench_mod.MAX_SEED)
+    try:
+        result = bench_mod.run(seed)
+    except bench_mod.BenchError as e:
+        print("ranwhat bench: %s" % e, file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        sys.stderr.write("\n  Cancelled.\n")
+        return 130
+    except Exception as e:
+        # The class only: an error's text can quote what was read.
+        sys.stderr.write("ranwhat bench: a detector raised %s; nothing was "
+                         "scored.\n" % type(e).__name__)
+        return 1
+    text = (_json_text(result.as_json()) if args.json
+            else bench_mod.render(result))
+    if result.leaks_in(text):
+        sys.stderr.write("ranwhat bench: the report would have held a planted "
+                         "value, so it was not printed. That is a bug in "
+                         "bench.\n")
+        return 1
+    print(text)
+    if not result.passed:
+        if args.json:
+            n = result.unmet
+            sys.stderr.write("ranwhat bench: %d expectation%s not met (exit "
+                             "status %d).\n" % (n, "" if n == 1 else "s",
+                                                FAIL_STATUS))
+        return FAIL_STATUS
+    return 0
+
+
 def _callers(p, args):
     """ranwhat callers: the calls made with a key, from the provider's own
     log, grouped by where they came from. Read-only. AWS is read through the
@@ -1717,9 +1777,10 @@ def _main(argv=None):
                                        "one-line hints some commands print on "
                                        "a terminal. None is printed with --json.")
     p.add_argument("command", nargs="?",
-                   choices=["check", "demo", "scan", "live", "callers",
-                            "revoke", "watch", "clean", "sources", "reach",
-                            "update", "login", "whoami", "logout", "hook"])
+                   choices=["check", "demo", "bench", "scan", "live",
+                            "callers", "revoke", "watch", "clean", "sources",
+                            "reach", "update", "login", "whoami", "logout",
+                            "hook"])
     p.add_argument("profile", nargs="?",
                    help="scan: path to a profile JSON. reach: a project "
                         "directory to look at. hook: install, uninstall or "
@@ -1757,6 +1818,12 @@ def _main(argv=None):
     p.add_argument("--days", type=int, default=DEFAULT_DAYS,
                    help="check, watch, clean: how far back to read local "
                         "agent history (default 30)")
+    p.add_argument("--seed", type=int, default=None, metavar="N",
+                   help="bench: draw the made-up secrets from this seed "
+                        "(default %d), so a run can be repeated. Another seed "
+                        "gives other values and the same expectations. Exit "
+                        "status %d when an expectation is not met, 1 on an "
+                        "error" % (_BENCH_SEED, FAIL_STATUS))
     p.add_argument("--root", metavar="PATH",
                    help="check, watch, clean: Claude Code transcript directory "
                         "(default ~/.claude/projects); the same as "
@@ -1834,9 +1901,14 @@ def _main(argv=None):
         return _hook(p, args)
     if args.command == "revoke":
         return _revoke(p, args)
+    if args.command == "bench":
+        return _bench(p, args)
     if args.scope or args.mode:
         # Taken and ignored, `check --mode deny` looked like it did something.
         p.error("--scope and --mode are only for hook and revoke")
+    if args.seed is not None:
+        # Taken and ignored, `check --seed 1` looked like a repeatable run.
+        p.error("--seed is only for bench")
 
     if args.profile is not None and args.command not in ("scan", "reach"):
         # Taken and ignored, `check DIR` reported on the default history as
