@@ -459,6 +459,17 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("directly", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
         ], call="watch._runs_substitution().match(text, 0, len(text))")
 
+    def test_a_shell_or_interpreter_that_is_the_value_of_an_option(self):
+        """Each such word is also tried as the program that reads the pipe,
+        and each try reads on through the option words after it. With no
+        limit on the tries that was quadratic."""
+        shapes = [
+            ("sh as the value of -o", "'sudo -o ' + 'sh -o ' * n(8000) + '-x -c'"),
+            ("python3 as the value of -W", "'sudo -W ' + 'python3 -W ' * n(5800) + 'x -c'"),
+        ]
+        self.assertLinear(shapes, call="watch._runs_stdin(text)")
+        self.assertLinear(shapes, call="watch.evaluate('Bash', {'command': 'curl x | ' + text})")
+
     def test_a_command_full_of_credential_files(self):
         """Each credential file a command names was looked for again in the
         whole command, by a regex built for it: whether it was excluded,

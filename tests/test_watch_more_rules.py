@@ -266,6 +266,75 @@ class AStageThatRunsItsInputStillDoes(unittest.TestCase):
         self.assertTrue(watch._runs_stdin("sudo -E bash -s"))
 
 
+class AStageWithRedirectionsAndOtherSpellings(unittest.TestCase):
+    """What the search for a program behind option words must still see, and
+    must still not, once the words around it hold redirections, $SHELL or
+    busybox, or the stage is long."""
+
+    def test_a_trailing_output_redirection_does_not_hide_the_shell(self):
+        # The greedy reading of these takes bash for the value of -E and
+        # leaves only the redirection, which holds no program to read.
+        for stage in ("sudo -E bash -s 2>&1", "sudo -E bash -s >/dev/null",
+                      "sudo -E bash > out", "sudo -k dash -s 2>&1",
+                      'sudo -E "bash" -s 2>&1', "sudo -E -H bash -s &>log"):
+            self.assertTrue(watch._runs_stdin(stage), stage)
+
+    def test_a_redirection_of_the_standard_input_anywhere_leaves_nothing_piped(self):
+        for stage in ("sudo -E bash -s < f", "sudo -E bash -s <<< x",
+                      "sudo -E <<<x -H bash -s", "sudo -E < -f bash -s",
+                      "sudo -E <f bash -s", "sudo -E 0<f bash -s",
+                      "doas -n <<<t -s dash --norc", "sudo -b <<<t -A iex -x"):
+            self.assertFalse(watch._runs_stdin(stage), stage)
+
+    def test_shell_spellings_behind_option_words(self):
+        for stage in ("sudo -E $SHELL -s", "sudo -E ${SHELL} -s",
+                      "sudo -E busybox sh -s"):
+            self.assertTrue(watch._runs_stdin(stage), stage)
+        for stage in ("sudo -E busybox ls", "sudo -E $SHELL -c x"):
+            self.assertFalse(watch._runs_stdin(stage), stage)
+
+    def test_words_cut_by_other_whitespace_are_still_the_words_they_are_read_as(self):
+        # starts() reads words as \s does; the fast path must line up with it.
+        for gap in ("\xa0", "\x0b", "\f"):
+            self.assertTrue(watch._runs_stdin("sudo%s-E bash -s" % gap), repr(gap))
+            self.assertFalse(watch._runs_stdin("sudo%s-E ls" % gap), repr(gap))
+
+    def test_the_cap_on_readers_is_the_same_quoted_or_not(self):
+        # Each `-E sh` makes a shell the value of an option, and a reader to
+        # try; the program that really reads is the last one, bash, so it is
+        # reached only if it is among the first sixteen.
+        most = watch._MOST_READERS_TRIED
+        for values in (2, most - 2, most - 1, most, most + 1, 2 * most):
+            lead = "sudo" + " -E sh" * values
+            plain = lead + " -E bash -s"
+            quoted = lead + ' -E "bash" -s'
+            redirected = lead + " -E bash -s 2>&1"
+            self.assertEqual(watch._runs_stdin(plain), watch._runs_stdin(quoted), values)
+            self.assertEqual(watch._runs_stdin(plain), watch._runs_stdin(redirected), values)
+        # bash is the sixteenth reader after fifteen shells, and the seventeenth after sixteen
+        self.assertTrue(watch._runs_stdin("sudo" + " -E sh" * (most - 1) + " -E bash -s"))
+        self.assertFalse(watch._runs_stdin("sudo" + " -E sh" * most + " -E bash -s"))
+
+    def test_no_module_level_name_is_defined_twice(self):
+        # A second _REDIRECT once replaced the first, and the code that read
+        # the first went on reading the second.
+        import ast
+        import inspect
+        tree = ast.parse(inspect.getsource(watch))
+        seen, twice = {}, []
+        for node in tree.body:
+            names = []
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                names = [node.name]
+            elif isinstance(node, ast.Assign):
+                names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            for name in names:
+                if name in seen:
+                    twice.append("%s (lines %d and %d)" % (name, seen[name], node.lineno))
+                seen[name] = node.lineno
+        self.assertEqual(twice, [])
+
+
 class PermissionsOpened(unittest.TestCase):
     RULE = "perm.open"
 
