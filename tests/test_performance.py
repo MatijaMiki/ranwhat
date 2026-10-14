@@ -418,6 +418,22 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("a pipe that reaches no shell", "'x | ' + 'sudo -u ' * n(7999) + 'ls'"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
+    def test_a_shell_as_the_value_of_every_option(self):
+        """Each `sh` that could end a run of sudo words was tried as the
+        shell that runs a fetch, and each try read on to the end of the
+        command: to find no opener, or the same one at the end. 64,000
+        characters took two seconds."""
+        self.assertLinear([
+            ("sudo -u sh", "'sudo -u sh ' * n(5800)"),
+            ("sudo -E sh", "'sudo -E sh ' * n(5800)"),
+            ("an opener at the end", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
+            ("paths", "'sudo -u /bin/sh ' * n(3700)"),
+            ("a fetch at the end of paths", "'sudo -u /bin/sh ' * n(3700) + '<(curl x)'"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+        self.assertLinear([
+            ("directly", "'sudo -u sh ' * n(5800) + 'bash <(curl x)'"),
+        ], call="watch._runs_substitution().match(text, 0, len(text))")
+
     def test_a_command_full_of_credential_files(self):
         """Each credential file a command names was looked for again in the
         whole command, by a regex built for it: whether it was excluded,

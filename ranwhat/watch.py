@@ -1440,10 +1440,20 @@ class _AfterHandsOn:
     "sudo" may be given options (so may doas and exec), "sudo option" has
     just been given one, whose value may be the next word, "env" and "env
     option" the same for env's options and assignments, "nice" and "nice -n"
-    for nice, and "nothing" may take no more."""
+    for nice, and "nothing" may take no more.
 
-    def __init__(self, tail, flags=0):
+    A tail that reads on to the next opener, as exec.remote's does, is also
+    given as `scan`: what starts it, and what is left of it when that does
+    not match. It names the opener it ends on `opener`. The tail is tried at
+    every word that may end a program, and each try read on to the end of
+    the stage again, so a run of `sudo -u sh ` was quadratic, whether the
+    opener was never there or only at the end. What a try found holds for the
+    tries after it, as far as the opener it found, so each reads only past
+    the one before."""
+
+    def __init__(self, tail, flags=0, scan=None):
         self.tail = re.compile(tail, flags)
+        self._scan = scan and tuple(re.compile(p, flags) for p in scan)
         self._program = re.compile(
             r"(?:[^\s|;&]*/)?(?:(?P<sudo>sudo|doas|exec)|(?P<env>env)"
             r"|(?P<command>command)|(?P<nothing>nohup)|(?P<nice>nice))", flags)
@@ -1479,9 +1489,29 @@ class _AfterHandsOn:
             return "nothing" if self._number.fullmatch(word) else None
         return None
 
+    def _tail(self, text, start, end, seen):
+        """self.tail.match(text, start, end), but without reading on again
+        what an earlier try, whose result `seen` keeps, has read."""
+        if not self._scan:
+            return self.tail.match(text, start, end)
+        lead, rest = self._scan
+        reads_on = lead.match(text, start, end)
+        if reads_on is None or seen.get("dead"):
+            return rest.match(text, start, end)
+        before = seen.get("found")
+        if before is not None and reads_on.end() <= before.start("opener"):
+            return before                   # no opener sooner: the same one
+        found = self.tail.match(text, start, end)
+        if found is not None and found.group("opener") is not None:
+            seen["found"] = found
+        else:
+            seen["dead"] = True             # none further on, for any later try
+        return found
+
     def match(self, text, pos=0, endpos=None):
         end = len(text) if endpos is None else min(endpos, len(text))
         states, found = [None], None        # None: no program is being read
+        seen = {}
         while states:
             word = _HAND_WORD.match(text, pos, end)
             if word is None:
@@ -1502,7 +1532,7 @@ class _AfterHandsOn:
                 program = self._program.fullmatch(word)
                 if program and program.lastgroup not in after:
                     after.append(program.lastgroup)
-                tail = self.tail.match(text, start, end)
+                tail = self._tail(text, start, end, seen)
                 if tail:
                     # The regex stops at its first match. The readings it
                     # tries before this one are in `after`, and may still
@@ -1538,11 +1568,16 @@ class _IntoShell:
 def _runs_substitution():
     """A shell, eval or source given what a fetcher printed, with no pipe:
     bash <(curl ...), sh -c "$(curl ...)", eval "$(curl ...)", iex (irm ...)."""
+    shell = (r"(?:(?:sh|bash|zsh|dash|ksh|fish|ash|eval|source)(?![\w.-])"
+             r"|\.(?=\s))")
+    powershell = r"(?:iex|invoke-expression)\s*\(?"
+    fetched = r"\s*" + _STAGE_PREFIX + _FETCH_WORD
     return _AfterHandsOn(
-        r"(?:[^\s|;&]*/)?"
-        r"(?:(?:(?:sh|bash|zsh|dash|ksh|fish|ash|eval|source)(?![\w.-])"
-        r"|\.(?=\s))[^|;&]*?(?:<\(|\$\(|`)|(?:iex|invoke-expression)\s*\(?)"
-        r"\s*" + _STAGE_PREFIX + _FETCH_WORD, re.I)
+        r"(?:[^\s|;&]*/)?(?:" + shell + r"[^|;&]*?(?P<opener><\(|\$\(|`)|"
+        + powershell + r")" + fetched,
+        re.I,
+        scan=(r"(?:[^\s|;&]*/)?" + shell,
+              r"(?:[^\s|;&]*/)?" + powershell + fetched))
 
 
 def _runs_stdin(stage):
