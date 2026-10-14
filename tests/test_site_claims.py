@@ -556,6 +556,42 @@ class SiteStructure(unittest.TestCase):
         self.assertIn("runs %s rules over it" % WORDS[len(watch.RULES)],
                       plain(read(SITE / "index.html")))
 
+    def test_every_count_of_watch_rules_is_the_rule_count(self):
+        # llms.txt kept saying nine for a release after the count had
+        # changed, and no test read it. Every page that counts the rules,
+        # the README and llms.txt, the JSON-LD copy of a page's text
+        # included, says the number there are.
+        from ranwhat import watch
+        counted = re.compile(
+            r"\b(%s) (?:rules\b|kinds of action|things worth interrupting)"
+            % "|".join(WORDS.values()), re.I)
+        files = ([SITE.parent / "README.md", SITE / "llms.txt"] + all_pages())
+        seen = 0
+        for path in files:
+            for found in counted.finditer(read(path)):
+                seen += 1
+                self.assertEqual(found.group(1).lower(), WORDS[len(watch.RULES)],
+                                 "%s: %s" % (path.name, found.group()))
+        self.assertGreaterEqual(seen, 12)
+
+    def test_the_rule_tables_list_every_rule(self):
+        from ranwhat import watch
+        row = re.compile(r"<tr><td><strong>")
+        page = read(SITE / "watch.html")
+        table = page[page.index("01 / Detection"):page.index("02 / Precision")]
+        self.assertEqual(len(row.findall(table)), len(watch.RULES))
+        guide = read(SITE / "guides" / "claude-code-audit-log.html")
+        start = guide.index("%s rules</h3>" % WORDS[len(watch.RULES)].capitalize())
+        table = guide[start:guide.index("</table>", start)]
+        self.assertEqual(len(row.findall(table)), len(watch.RULES))
+
+    def test_llms_txt_counts_the_watch_rules(self):
+        from ranwhat import watch
+        text = read(SITE / "llms.txt")
+        words = WORDS[len(watch.RULES)]
+        self.assertIn("`ranwhat watch`: %s rules over" % words, text)
+        self.assertIn("the %s rules, their severities" % words, text)
+
     def test_install_page_names_the_current_version(self):
         self.assertIn("Current version %s." % ranwhat.__version__,
                       read(SITE / "install.html"))
