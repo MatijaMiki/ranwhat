@@ -282,8 +282,8 @@ class TheRulesAreRegistered(unittest.TestCase):
 
     def test_they_come_after_the_original_nine(self):
         ids = [r.id for r in watch.RULES]
-        self.assertEqual(ids[-3:], ["exec.remote", "perm.open",
-                                    "container.destructive"])
+        self.assertEqual(ids[-4:-1], ["exec.remote", "perm.open",
+                                      "container.destructive"])
         self.assertEqual(len(ids), len(set(ids)))
 
 

@@ -155,11 +155,14 @@ Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
 machine; Grok Build, xAI's coding CLI, is supported. The current Amp keeps
 its threads on ampcode.com.
 
-Twelve rules: credential access, secret-shaped strings in tool calls, package
+Thirteen rules: credential access, secret-shaped strings in tool calls, package
 publishing, cloud resource changes, financial API calls, log tampering,
 destructive git, recursive deletion, local files uploaded with curl, scripts
-downloaded and run unread, files made writable by every user, and container
-volumes wiped.
+downloaded and run unread, files made writable by every user, container
+volumes wiped, and encoded commands decoded and run.
+A command hidden in base64, hex or printf escapes and handed to a shell,
+`eval` or an interpreter is decoded without being run, and what it decodes to
+is judged by the same rules.
 Each agent's tool calls are judged by the same rules; every action says
 which agent ran it.
 
@@ -526,6 +529,7 @@ nothing anyone reads. So these are **not** treated as actions:
 | `git rm --cached x` | Unstages; never touches the working tree |
 | `# rm -rf ~/x` | A comment |
 | `rm -rf build` `rm -rf /tmp/x` | Deleting build output is not an incident |
+| `base64 -d > key.pem`, `curl ... \| base64 -d \| jq` | Decoding is not running; decoded text handed to a shell, `eval` or an interpreter is |
 
 `bash -c` is the exception: its payload really is shell, so the parser
 recurses into it. And severity follows the **target**, not the verb:

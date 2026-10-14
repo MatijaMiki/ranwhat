@@ -17,6 +17,7 @@ OTLP receiver slots in behind the same Action Record interface.
 from __future__ import annotations
 
 import bisect
+import collections
 import contextlib
 import datetime
 import functools
@@ -29,6 +30,7 @@ import re
 import time
 
 from . import agents as _agents
+from . import decode
 from . import sources as _registry
 from . import term
 from .sources import _sqlite
@@ -52,7 +54,7 @@ CRITICAL, HIGH, MEDIUM = "critical", "high", "medium"
 
 class Rule(object):
     def __init__(self, rid, severity, title, why, patterns=(), scan_raw=False,
-                 paths=False, find=None, hide=None):
+                 paths=False, find=None, hide=None, keep_source=False):
         self.id = rid
         self.severity = severity
         self.title = title
@@ -75,6 +77,10 @@ class Rule(object):
         # what the rule must not judge blanked out. Offsets survive, so the
         # evidence still quotes the command as it was written.
         self.hide = hide
+        # Judged on the command with the source of other-language one-liners
+        # kept: python3 -c "exec(base64.b64decode(...))" is a command whose
+        # payload the other rules must not read, and this one must.
+        self.keep_source = keep_source
 
     def match(self, text):
         """(start, end) of the first match, or None."""
@@ -310,6 +316,11 @@ def _evidence(text, span, before=20, after=70, known=None):
             ("…" if lo > 0 else "") + snippet + ("…" if hi < len(text) else ""))
     if known:
         evidence = known.mask(evidence)
+    return _masked_here(evidence)
+
+
+def _masked_here(evidence):
+    """evidence, noted as masked already (see _MASKED_HERE)."""
     if len(_MASKED_HERE) >= _MASKED_HERE_MAX:
         _MASKED_HERE.clear()
     _MASKED_HERE.add(evidence)
@@ -1405,8 +1416,19 @@ _STDIN_SHELLS = frozenset(("sh", "bash", "zsh", "dash", "ksh", "fish", "ash"))
 # Interpreters read a program from standard input only when given none of
 # their own: python3 - and a bare python3 do, python3 -m json.tool and
 # python3 -c do not, which is how a fetched JSON document is read.
-_STDIN_INTERPRETERS = re.compile(r"(?:python[0-9.]*|perl|ruby|node)\Z")
+_STDIN_INTERPRETERS = re.compile(r"(?:python[0-9.]*|perl|ruby|node|php)\Z")
 _STDIN_FLAGS = frozenset(("-", "-u", "-s", "-S", "-B", "-q", "-l"))
+# A word that redirects: 2>&1, >out, &>log, < file. When the operator stands
+# by itself, the word after it names the file it points at. <( ) and >( ) are
+# process substitutions, not redirections.
+_REDIRECT = re.compile(r"(?:\d*|&)(?:>>?&?|<<<?-?|<&|<>|<)(?!\()")
+# Options whose value is the next word, and what asks a program for its
+# version or usage and runs nothing.
+_SHELL_VALUE_OPTIONS = frozenset(("-o", "-O", "+o", "+O", "--rcfile",
+                                  "--init-file"))
+_INFO_FLAGS = frozenset(("--version", "--help"))
+_INTERPRETER_INFO_FLAGS = frozenset(("-V", "-VV", "-h"))
+_INTERPRETER_VALUE_OPTIONS = frozenset(("-W", "-X"))
 
 
 @functools.lru_cache(maxsize=1)
@@ -1580,32 +1602,78 @@ def _runs_substitution():
               r"(?:[^\s|;&]*/)?" + powershell + fetched))
 
 
+def _without_redirects(words):
+    """(words without the redirections, whether one replaces the standard
+    input). `sh 2>&1` and `sh >/dev/null` still read the pipe: their
+    redirections are not operands. `sh < file` and `sh <<< text` read
+    something else."""
+    kept, replaced, skip = [], False, False
+    for word in words:
+        if skip:
+            skip = False
+            continue
+        found = _REDIRECT.match(word)
+        if not found:
+            kept.append(word)
+            continue
+        if found.end() == len(word):
+            skip = True                      # the target is the next word
+        if "<" in found.group() and not word.startswith(("1", "2")):
+            replaced = True
+    return kept, replaced
+
+
+# Known gaps: xargs sh -c and tee >(sh) run what they are piped through a
+# third program, and are not followed. The stage that reads the pipe is the
+# one named.
 def _runs_stdin(stage):
     """Whether a stage runs what it is piped as a program."""
     rest = stage[_hands_on().match(stage).end():]
-    words = _argv(rest) or rest.split()
-    if not words:
+    words, replaced = _without_redirects(_argv(rest) or rest.split())
+    if not words or replaced:
         return False
     name = words[0].rsplit("/", 1)[-1].lower()
     args = words[1:]
     if name in ("iex", "invoke-expression"):
         return True
+    if name == "busybox" and args and args[0] in _STDIN_SHELLS:
+        name, args = args[0], args[1:]
+    elif name in ("$shell", "${shell}"):
+        name = "sh"
     if name in _STDIN_SHELLS:
-        letters, operand = set(), False
+        letters, operand, skip = set(), False, False
         for word in args:
-            if word == "--":
+            if skip:
+                skip = False
+            elif word == "--":
                 break
-            if word.startswith("-"):
+            elif word in _INFO_FLAGS:
+                return False
+            elif word in _SHELL_VALUE_OPTIONS:
+                skip = True
+            elif word.startswith("-"):
                 if not word.startswith("--"):
                     letters.update(word[1:])
-                continue
-            operand = True
-            break
+                    skip = word[-1] in "oO"
+            elif not word.startswith("+"):
+                operand = True
+                break
         if letters & set("cn"):
             return False
         return not operand or "s" in letters
     if _STDIN_INTERPRETERS.match(name):
-        return all(word in _STDIN_FLAGS for word in args)
+        flags = _STDIN_FLAGS | {"-i"} if name.startswith("python") else _STDIN_FLAGS
+        skip = False
+        for word in args:
+            if skip:
+                skip = False
+            elif word in _INFO_FLAGS or word in _INTERPRETER_INFO_FLAGS:
+                return False
+            elif word in _INTERPRETER_VALUE_OPTIONS:
+                skip = True
+            elif word not in flags:
+                return False
+        return True
     return False
 
 
@@ -1773,6 +1841,652 @@ def _container_wipe(text):
     return None
 
 
+# exec.encoded: decoded text, run in the command that decoded it.
+#
+# `echo cm0gLXJmIH4v | base64 -d | sh` hides what it runs from every rule
+# that reads the command: the deletion is in the encoding. Decoded and
+# handed to a shell, `eval` or an interpreter is the act, and it is reported
+# whether or not the text can be read back. Decoding to a file, to a filter
+# or to the terminal is not: base64 -d > key.pem and curl ... | base64 -d |
+# jq read an encoding, and run nothing.
+#
+# As exec.remote does, one stage at a time, on the splitter that knows quotes,
+# so a command that only mentions the pipeline (an echo, a grep pattern, a
+# commit message, a heredoc) is data. Each finder keys on the command word of
+# a stage, never on text inside one of its arguments. Linear throughout: a
+# stage is read once, by regexes anchored where they start, and shlex splits
+# only a stage whose command word is one of these or that follows a decoder.
+#
+# What a literal decodes to is read in decode.py, which never runs it. It is
+# then judged by the other rules (_decoded_hits), so an encoded rm -rf ~/ is
+# reported twice: as a decoded command run, and as the deletion.
+_ENCODED = "exec.encoded"
+# Most findings read from one text; characters one finding's evidence spans;
+# variables remembered; a producer's length shown with what it feeds.
+_ENC_FINDINGS = 4
+_ENC_SPAN = 240
+_ENC_NAMES = 16
+_ENC_PRODUCER = 120
+# Payloads decoded in one call, over every level.
+MAX_PAYLOADS = 4
+
+_Encoded = collections.namedtuple("_Encoded", "span via literal")
+# Decoded text flowing out of the stages so far: where it began, the decoders
+# it went through, the literal it came from (None when it is not known) and
+# whether that literal is what the last decoder was given.
+_Pipe = collections.namedtuple("_Pipe", "start via literal adjacent")
+
+_ENC_HINTS = ("base64", "base32", "b64", "b32", "a2b_", "xxd", "openssl",
+              "unhex", "fromhex", "hex2bin", "atob", "buffer", "decode",
+              "powershell", "pwsh", "frombase64")
+_ENC_ESCAPES = re.compile(
+    r"(?<![\w-])rev(?![\w-])|\\x[0-9a-fA-F]|\\0?[0-7]{3}|\\u[0-9a-fA-F]{4}")
+
+
+def _may_decode(text):
+    """Whether text holds anything that could be a decoder: a name, or the
+    escapes printf turns into letters. Only a way not to read the rest of a
+    call that has none of them, which is nearly every call."""
+    low = text.lower()
+    return (any(hint in low for hint in _ENC_HINTS)
+            or _ENC_ESCAPES.search(text) is not None)
+
+
+_ENC_SEPARATORS = re.compile(r"[|;&\n]")
+
+
+def _flatten_substitutions(text):
+    """text with the separators inside every $( ), ` ` and <( ) turned to
+    _, the same length. _command_spans splits at the pipes of an unquoted
+    $( ): `eval $(echo X | base64 -d)` is two stages there, and is the one
+    command of a decoder inside a substitution here."""
+    spans = _substitution_spans(text, process=True)
+    if not spans:
+        return text
+    out, pos = [], 0
+    for lo, hi in spans:
+        out.append(text[pos:lo])
+        out.append(_ENC_SEPARATORS.sub("_", text[lo:hi]))
+        pos = hi
+    out.append(text[pos:])
+    return "".join(out)
+
+
+_ENC_LEADING = re.compile(
+    r"(?:\s*(?:\(|\{(?=\s)|(?:then|do|else|elif|if|while|until|time)(?=\s)))+\s*")
+_ENC_WRAPPERS = re.compile(
+    r"(?:(?:time|setsid)\s+|timeout(?:\s+-[A-Za-z]+)*\s+\d[\w.]*\s+)+")
+
+
+def _normalised(stage):
+    """The command a stage runs: without the ( or { that groups it, a
+    leading then, do, else, if, while or time, a timeout or setsid in front,
+    a trailing &, and the ) or } that closes a group opened before it."""
+    found = _ENC_LEADING.match(stage)
+    if found:
+        stage = stage[found.end():]
+    found = _ENC_WRAPPERS.match(stage)
+    if found:
+        stage = stage[found.end():]
+    stage = stage.rstrip(" \t\r\n&")
+    extra = stage.count(")") - stage.count("(")
+    if extra > 0:
+        closing = len(stage) - len(stage.rstrip(")"))
+        stage = stage[:len(stage) - min(extra, closing)].rstrip(" \t\r\n&")
+    if stage.endswith("}") and stage.count("}") > stage.count("{"):
+        stage = stage[:-1].rstrip(" \t\r\n;&")
+    return stage
+
+
+# bash -c 'echo X | base64 -d | sh' is reduced to `bash -c echo X | base64 -d
+# | sh`: the first stage then is the shell, its flag and what its string
+# starts with.
+_ENC_INLINED = re.compile(
+    r"(?:sh|bash|zsh|dash|ksh)\s+(?:-[A-Za-z]+\s+)*?-[A-Za-z]*c\s+"
+    r"(?:-[A-Za-z]+\s+)*")
+_ENC_PREFIX = re.compile(_STAGE_PREFIX)
+_ENC_WORD = re.compile(r"[\"']?([^\s'\"\\|;&<>()$`]+)")
+# The programs a stage's words are read for, whatever else it is.
+_ENC_HEADS = frozenset((
+    "base64", "base32", "openssl", "xxd", "rev", "eval", "source", ".",
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "ash", "perl", "ruby", "node",
+    "nodejs", "php", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+    "iex", "invoke-expression"))
+
+
+def _unwrap_c(stage):
+    """stage without the shell and its -c in front, when its string was
+    inlined. A string still quoted (bash -lc '...' is not reduced) is read
+    as the operand of the shell, by _exec_operand."""
+    found = _ENC_INLINED.match(stage)
+    if not found or stage[found.end():found.end() + 1] in ("'", '"'):
+        return stage
+    return stage[found.end():]
+
+
+def _after_prefix(stage):
+    """stage without the sudo, env, VAR=value and directory in front of
+    its command."""
+    rest = stage[_hands_on().match(stage).end():]
+    return rest[_ENC_PREFIX.match(rest).end():]
+
+
+def _command_word(stage):
+    """The program a stage runs, by its base name and in lower case, read
+    without splitting the stage into words."""
+    found = _ENC_WORD.match(_after_prefix(stage))
+    return found.group(1).rsplit("/", 1)[-1].lower() if found else ""
+
+
+def _known_head(name):
+    return name in _ENC_HEADS or name.startswith("python")
+
+
+def _stage_words(stage):
+    rest = _after_prefix(stage)
+    return _argv(rest) or rest.split()
+
+
+_ENC_CLUSTER = re.compile(r"-[A-Za-z0-9]+")
+_ENC_XXD = re.compile(r"-[abCcdEeghilnoprRsuv]{1,4}")
+_ENC_ECHO_FLAGS = re.compile(r"-[neE]+")
+_ENC_PRINTF_ARGUMENT = re.compile(r"%s(?:\\n)?")
+
+
+def _decoder_kind(name, words):
+    """The kind of decoding a stage does of its input, or None: base64 or
+    base32 given -d, openssl base64 -d, xxd -r, and rev."""
+    args = words[1:]
+    if name in ("base64", "base32"):
+        for word in args:
+            if word in ("--decode", "-d", "-D") or (
+                    word[:2] != "--" and _ENC_CLUSTER.fullmatch(word)
+                    and ("d" in word or "D" in word)):
+                return name
+        return None
+    if name == "openssl" and args[:1] in (["base64"], ["enc"]):
+        if "-out" in args or not ("-d" in args or "-decode" in args):
+            return None
+        if args[0] == "base64" or any(a in ("-base64", "-a", "-A")
+                                      for a in args):
+            return "base64"
+        return None
+    if name == "xxd":
+        # A second name is the file it writes. A here-string and its text
+        # are what it reads.
+        names, skip = 0, False
+        for word in args:
+            if skip:
+                skip = False
+            elif word == "<<<":
+                skip = True
+            elif not word.startswith(("-", "<")):
+                names += 1
+        if names > 1:
+            return None
+        for word in args:
+            if word == "-revert" or (_ENC_XXD.fullmatch(word) and "r" in word):
+                return "hex"
+        return None
+    if name == "rev":
+        return "rev"
+    return None
+
+
+def _escape_decoder(name, words):
+    """("printf", format) of a printf, or an echo -e, whose text spells
+    letters with escapes: \\x72\\x6d. Colour codes and newlines format, and
+    do not count. A plain echo prints its backslashes as they are."""
+    args = words[1:]
+    if name == "printf":
+        if "-v" in args:
+            return None
+        fmt = next((w for w in args if not w.startswith("-")), None)
+        if fmt is None:
+            return None
+    elif name == "echo":
+        escapes, i = False, 0
+        while i < len(args) and _ENC_ECHO_FLAGS.fullmatch(args[i]):
+            for letter in args[i][1:]:
+                if letter in "eE":
+                    escapes = letter == "e"
+            i += 1
+        if not escapes:
+            return None
+        fmt = " ".join(args[i:])
+    else:
+        return None
+    if decode.unescape(fmt)[1] < decode.MIN_ESCAPES:
+        return None
+    return "printf", fmt
+
+
+def _here_string(words):
+    for i, word in enumerate(words):
+        if word == "<<<" and i + 1 < len(words):
+            return words[i + 1]
+        if word.startswith("<<<") and len(word) > 3:
+            return word[3:]
+    return None
+
+
+def _produced_literal(stage):
+    """What an echo or printf stage writes, when it writes one word and that
+    is plain: the text a decoder after it is given."""
+    words = _stage_words(stage)
+    if not words:
+        return None
+    name = words[0].rsplit("/", 1)[-1].lower()
+    if name == "echo":
+        i = 1
+        while i < len(words) and _ENC_ECHO_FLAGS.fullmatch(words[i]):
+            i += 1
+        literal = " ".join(words[i:])
+    elif name == "printf":
+        args = words[1:]
+        if len(args) == 2 and _ENC_PRINTF_ARGUMENT.fullmatch(args[0]):
+            literal = args[1]
+        elif len(args) == 1 and "%" not in args[0]:
+            literal = args[0]
+        else:
+            return None
+    else:
+        return None
+    return literal if literal and len(literal) < decode.MAX_ENCODED_CHARS else None
+
+
+# An unquoted > that sends the standard output to a file: >, >>, >|, 1> and
+# &>, but not 2>, 2>&1 or >&2. A quoted string and an escape are skipped.
+_ENC_REDIRECT = re.compile(
+    r"""(?P<skip>'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]?)"""
+    r"""|(?:(?<!\w)(?P<fd>\d+)|&)?>>?(?P<dup>&)?""")
+
+
+def _stdout_redirected(stage):
+    for m in _ENC_REDIRECT.finditer(stage):
+        if m.group("skip") is None and not m.group("dup") \
+                and m.group("fd") in (None, "1"):
+            return True
+    return False
+
+
+def _reads_stdin_program(stage, name, words):
+    """Whether a stage runs what it is piped as a program: _runs_stdin, and
+    a shell or source given /dev/stdin."""
+    if _runs_stdin(stage):
+        return True
+    if (name in _STDIN_SHELLS or name in ("source", ".")) \
+            and "/dev/stdin" in words[1:]:
+        letters = set()
+        for word in words[1:]:
+            if word.startswith("-") and not word.startswith("--"):
+                letters.update(word[1:])
+        return not letters & set("cn")
+    return False
+
+
+# A stage whose program runs a string it is given: eval, source, a shell
+# with -c, an interpreter with its payload flag. Given the result of a
+# substitution that decodes, it runs what that decoded.
+_ENC_RUNNER = re.compile(
+    r"(?:eval|source|sh|bash|zsh|dash|ksh|fish|ash|python[0-9.]*|perl|ruby"
+    r"|node|nodejs|php)(?![\w.-])|\.(?=\s)")
+_ENC_OPTION = re.compile(r"\s+(-[A-Za-z]+)")
+_ENC_SUBSTITUTION_NEXT = re.compile(r"\s*\"?(?:\$\(|`)")
+_ENC_PROCESS_FORM = re.compile(r"(?:\s+-[A-Za-z-]+)*\s*(?:<\s*)?(?=<\()")
+_ENC_HERE_FORM = re.compile(
+    r"(?:\s+-[A-Za-z-]+)*\s*<<<\s*(?=\"?(?:\$\(|`))")
+# The flag of each language that is followed by the program text.
+_ENC_PAYLOAD_LETTERS = {"python": "c", "perl": "eE", "ruby": "e",
+                        "node": "ep", "nodejs": "ep", "php": "r"}
+_ENC_LANGUAGE = re.compile(r"(python)[0-9.]*\Z|(perl|ruby|node|nodejs|php)\Z")
+# Options that take the next word as their value.
+_ENC_VALUE_OPTIONS = {"python": ("-W", "-X"), "perl": ("-I",),
+                      "ruby": ("-r", "-I", "-C", "-W"),
+                      "node": ("-r", "--require", "-C"),
+                      "nodejs": ("-r", "--require", "-C"),
+                      "php": ("-d", "-c")}
+
+
+def _language(name):
+    found = _ENC_LANGUAGE.match(name)
+    return (found.group(1) or found.group(2)) if found else None
+
+
+def _payload_option_end(tail, letters, last_only):
+    """Where, in the options of tail, the one that carries a command string
+    ends when a substitution follows it at once, or None. last_only: the
+    flag is the last letter of a cluster (python -Sc, perl -le)."""
+    pos = 0
+    while True:
+        found = _ENC_OPTION.match(tail, pos)
+        if not found:
+            return None
+        pos = found.end()
+        option = found.group(1)
+        carries = (option[-1] in letters if last_only
+                   else any(ch in letters for ch in option[1:]))
+        if carries and _ENC_SUBSTITUTION_NEXT.match(tail, pos):
+            return pos
+
+
+def _exec_substitutions(stage, spans):
+    """The spans, of those of the stage's substitutions, whose text the
+    stage's program runs: all of an eval's or a source's; for a shell the one
+    after -c, the script operand <( ) or the <<<; for an interpreter the one
+    after its payload flag."""
+    if not spans:
+        return ()
+    rest = _after_prefix(stage)
+    found = _ENC_RUNNER.match(rest)
+    if not found:
+        return ()
+    word = found.group()
+    pos = len(stage) - len(rest) + found.end()
+    if word in ("eval", "source", "."):
+        return [span for span in spans if span[0] >= pos]
+    tail = stage[pos:]
+    if word in _STDIN_SHELLS:
+        ends = []
+        end = _payload_option_end(tail, "c", False)
+        if end is not None:
+            ends.append(end)
+        for form in (_ENC_PROCESS_FORM, _ENC_HERE_FORM):
+            matched = form.match(tail)
+            if matched:
+                ends.append(matched.end())
+    else:
+        language = _language(word)
+        end = (_payload_option_end(tail, _ENC_PAYLOAD_LETTERS[language], True)
+               if language else None)
+        ends = [] if end is None else [end]
+    for end in ends:
+        first = [span for span in spans if span[0] >= pos + end]
+        if first:
+            return first[:1]
+    return ()
+
+
+def _exec_operand(name, words):
+    """The text a stage runs as shell source: what eval is given, or the
+    first word after a shell's options when one of them is -c (-c, -lc, -ec).
+    None for any other stage."""
+    if name == "eval":
+        return " ".join(words[1:])
+    if name in _STDIN_SHELLS:
+        carries, skip = False, False
+        for i, word in enumerate(words[1:], 1):
+            if skip:
+                skip = False
+            elif word == "--":
+                return words[i + 1] if carries and i + 1 < len(words) else None
+            elif word in _SHELL_VALUE_OPTIONS:
+                skip = True
+            elif word[:1] in ("-", "+") and len(word) > 1:
+                carries = carries or (
+                    word[0] == "-" and word[:2] != "--"
+                    and _ENC_CLUSTER.fullmatch(word) is not None
+                    and "c" in word)
+            else:
+                return word if carries else None
+    return None
+
+
+def _interpreter_payload(name, words):
+    """The program text an interpreter one-liner was given, or None."""
+    language = _language(name)
+    if language is None:
+        return None
+    letters = _ENC_PAYLOAD_LETTERS[language]
+    takes_value = _ENC_VALUE_OPTIONS[language]
+    args = words[1:]
+    i = 0
+    while i < len(args):
+        word = args[i]
+        if word in ("--eval", "--print"):
+            return args[i + 1] if i + 1 < len(args) else None
+        if word.startswith("--eval="):
+            return word[len("--eval="):]
+        if word.startswith("-") and not word.startswith("--") and len(word) > 1:
+            if _ENC_CLUSTER.fullmatch(word) and word[-1] in letters:
+                return args[i + 1] if i + 1 < len(args) else None
+            if word in takes_value:
+                i += 1
+        elif not word.startswith("--"):
+            return None
+        i += 1
+    return None
+
+
+_ENC_POWERSHELLS = ("powershell", "powershell.exe", "pwsh", "pwsh.exe")
+_ENC_POWERSHELL_BLOB = re.compile(r"[A-Za-z0-9+/]{8,}={0,2}\Z")
+_ENC_POWERSHELL_EXPRESSION = re.compile(r"(?<![\w-])(?:iex|invoke-expression)(?![\w-])")
+_ENC_POWERSHELL_LITERAL = re.compile(
+    r"frombase64string\(\s*['\"]([A-Za-z0-9+/]{8,}={0,2})['\"]", re.I)
+
+
+def _powershell_encoded(name, words, stage):
+    """(kind, literal) of a PowerShell run of encoded text: -EncodedCommand
+    (any prefix of it, and -ec) given a base64 operand, or an iex of what
+    FromBase64String gave. None otherwise."""
+    if name in _ENC_POWERSHELLS:
+        args = words[1:]
+        for i, word in enumerate(args):
+            flag = word[1:].lower()
+            if word[:1] == "-" and flag and (
+                    "file".startswith(flag) or "command".startswith(flag)):
+                break               # what follows is the script's, or text
+            if word[:1] == "-" and flag and (
+                    "encodedcommand".startswith(flag) or flag == "ec"):
+                if i + 1 < len(args) and _ENC_POWERSHELL_BLOB.match(args[i + 1]):
+                    return "utf16b64", args[i + 1]
+    elif name not in ("iex", "invoke-expression"):
+        return None
+    low = stage.lower()
+    if "frombase64string" in low and _ENC_POWERSHELL_EXPRESSION.search(low):
+        found = _ENC_POWERSHELL_LITERAL.search(stage)
+        return "base64", (found.group(1) if found else None)
+    return None
+
+
+_ENC_ASSIGN = re.compile(
+    r"(?:(?:export|declare|local|readonly|typeset)\s+(?:-\S+\s+)*)?"
+    r"([A-Za-z_]\w*)\+?=")
+_ENC_NAME_VALUE = re.compile(r"[A-Za-z_]\w*\+?=")
+_ENC_VARIABLE = re.compile(r"\$\{?([A-Za-z_]\w*)")
+_ENC_VARIABLE_WORD = re.compile(
+    r"(?:\"\$\{?([A-Za-z_]\w*)\}?\"|\$\{?([A-Za-z_]\w*)\}?)(?:\s|\Z)")
+# What a single quote hides: '$K' is the two characters, never the value.
+_ENC_SINGLE_QUOTED = re.compile(r"(\"(?:[^\"\\]|\\[\s\S])*\"?)|'[^']*'?")
+
+
+def _enc_assignment(stage, spans):
+    """The name a stage assigns, when every word of it is NAME=value (with
+    the substitutions in them blanked, as `export NAME=$(...)` has them), or
+    None. PYTHONPATH=x python3 -c ... is a command, not an assignment."""
+    found = _ENC_ASSIGN.match(stage)
+    if not found:
+        return None
+    blanked = stage
+    for lo, hi in reversed(spans):
+        blanked = blanked[:lo] + "_" * (hi - lo) + blanked[hi:]
+    rest = blanked[found.start(1):]
+    words = _argv(rest) or rest.split()
+    if words and all(_ENC_NAME_VALUE.match(word) for word in words):
+        return found.group(1)
+    return None
+
+
+def _tracked_run(text, tracked):
+    """(via, literal) of the first variable in text that holds decoded text,
+    outside single quotes."""
+    if "'" in text:
+        text = _ENC_SINGLE_QUOTED.sub(lambda m: m.group(1) or "", text)
+    for found in _ENC_VARIABLE.finditer(text):
+        got = tracked.get(found.group(1))
+        if got:
+            return got
+    return None
+
+
+class _EncodedBudget(object):
+    """The characters of nested text (a substitution's body, an eval's
+    string) still to be read in one call."""
+
+    def __init__(self, chars):
+        self.chars = chars
+
+
+def _walk_encoded(text, depth, budget, want_output=False):
+    """([_Encoded], output) of text. output, with want_output, is (via,
+    literal) of the first pipeline of text whose decoded stream is still
+    flowing at its end: what a substitution hands to the command around it.
+
+    State, stage by stage: `state` is decoded text flowing out of the
+    stages so far, `pending` the echo or printf stage that may have written
+    the literal the next decoder reads, `tracked` the variables that hold
+    decoded text."""
+    found, output = [], None
+    if not text or depth > 3:
+        return found, output
+    state = pending = None
+    tracked = {}
+    for start, end, op in _command_spans(_flatten_substitutions(text)):
+        if len(found) >= _ENC_FINDINGS:
+            break
+        at = _SPACES.match(text, start, end).end()
+        stage = _normalised(text[at:end])
+        if not stage or stage[0] == "#":
+            if op != "|":
+                state = pending = None
+            continue
+        core = _unwrap_c(stage)
+        name = _command_word(core)
+        spans = (_substitution_spans(stage, process=True)
+                 if "$(" in stage or "`" in stage or "<(" in stage else [])
+        assigned = _enc_assignment(stage, spans) if "=" in stage else None
+
+        # A pipeline inside a substitution, and what it hands on. A name
+        # assigned again holds what the new value is.
+        if assigned:
+            tracked.pop(assigned, None)
+        walked = {}
+        for lo, hi in spans:
+            if budget.chars <= 0:
+                break
+            budget.chars -= hi - lo
+            inner, handed = _walk_encoded(stage[lo:hi], depth + 1, budget, True)
+            walked[(lo, hi)] = handed
+            if inner:
+                found.append(_Encoded((at, end), inner[0].via, inner[0].literal))
+            if assigned and handed and len(tracked) < _ENC_NAMES:
+                tracked[assigned] = handed
+        for span in _exec_substitutions(stage, spans):
+            handed = walked.get(span)
+            if handed:
+                found.append(_Encoded((at, end), handed[0], handed[1]))
+                break
+
+        flowing = state is not None
+        words = (_stage_words(core)
+                 if flowing or tracked or _known_head(name) else None)
+        if words and not assigned:
+            operand = _exec_operand(name, words)
+            if tracked and (name in ("eval", "source", ".")
+                            or operand is not None):
+                got = _tracked_run(stage, tracked)
+                if got:
+                    found.append(_Encoded((at, end), got[0], got[1]))
+            if operand and depth < 3 and budget.chars > 0 \
+                    and _may_decode(operand):
+                budget.chars -= len(operand)
+                inner, _handed = _walk_encoded(operand, depth + 1, budget)
+                if inner:
+                    found.append(_Encoded((at, end), inner[0].via,
+                                          inner[0].literal))
+            program = _interpreter_payload(name, words)
+            hit = decode.scan_source(program) if program else None
+            if hit:
+                found.append(_Encoded((at, end), (hit[0],), hit[1]))
+            hit = _powershell_encoded(name, words, stage)
+            if hit:
+                found.append(_Encoded((at, end), (hit[0],), hit[1]))
+        if tracked and not assigned:
+            ref = _ENC_VARIABLE_WORD.match(_after_prefix(core))
+            if ref and (ref.group(1) or ref.group(2)) in tracked:
+                got = tracked[ref.group(1) or ref.group(2)]
+                found.append(_Encoded((at, end), got[0], got[1]))
+
+        decoder = None
+        if words and not assigned:
+            decoder = _decoder_kind(name, words)
+            if decoder and _stdout_redirected(core):
+                decoder = None
+        if flowing and words and _reads_stdin_program(core, name, words):
+            found.append(_Encoded((state.start, end), state.via, state.literal))
+            state = None
+        elif decoder:
+            if flowing:
+                state = _Pipe(state.start,
+                              (state.via + (decoder,))[:decode.MAX_LEVELS + 1],
+                              state.literal if state.adjacent else None, True)
+            else:
+                literal, begin = _here_string(words), at
+                if literal is None and pending is not None:
+                    literal = _produced_literal(pending[1])
+                    if literal is not None and len(pending[1]) <= _ENC_PRODUCER:
+                        begin = pending[0]
+                state = _Pipe(begin, (decoder,), literal, True)
+        elif (op == "|" or want_output) and name in ("echo", "printf") \
+                and not assigned:
+            state, got = None, None
+            if "\\" in core:
+                got = _escape_decoder(name, words or _stage_words(core))
+            if got:
+                state = _Pipe(at, (got[0],), got[1], True)
+            elif tracked:
+                got = _tracked_run(core, tracked)
+                if got:
+                    state = _Pipe(at, got[0], got[1], True)
+        elif flowing:
+            state = state._replace(literal=None, adjacent=False)
+        pending = ((at, core) if op == "|" and state is None
+                   and name in ("echo", "printf") else None)
+        if op != "|":
+            if want_output and state is not None and output is None:
+                output = (state.via, state.literal)
+            state = pending = None
+    return found, output
+
+
+_ENC_CONTINUATION = re.compile(r"\\\r?\n")
+
+
+def _joined_lines(text):
+    """text with each backslash-newline turned to blanks, the same length: a
+    command a shell reads as one line, `sh \\<newline> -x`, is one here."""
+    if "\\" not in text:
+        return text
+    return _ENC_CONTINUATION.sub(lambda m: " " * len(m.group()), text)
+
+
+@functools.lru_cache(maxsize=64)
+def _encoded_findings(text):
+    """The decoded commands run in text, as _Encoded: the span of the whole
+    act (the decoder, or the echo that feeds it, to what runs it), the
+    decoders it went through and the literal it decodes, when it has one."""
+    text = _joined_lines(text)
+    found, _output = _walk_encoded(text, 0, _EncodedBudget(2 * MAX_SCAN_CHARS))
+    return tuple(f._replace(span=(f.span[0], min(f.span[1], f.span[0] + _ENC_SPAN)))
+                 for f in found[:_ENC_FINDINGS])
+
+
+def _encoded_run(text):
+    """Span of the first decoded command run in text, or None."""
+    found = _encoded_findings(text)
+    return found[0].span if found else None
+
+
 REFINERS = {"fs.destructive": _refine_deletion,
             "cred.read": _refine_credential,
             "perm.open": _refine_permissions}
@@ -1882,6 +2596,13 @@ RULES = [
          "Volumes, or every container, removed. Whatever a database or service "
          "kept in them is gone unless a backup exists.",
          find=_container_wipe),
+
+    Rule(_ENCODED, HIGH,
+         "Decoded command run",
+         "Encoded text was decoded and run in one command. What ran is not "
+         "readable in the transcript, which is the point of encoding it, and "
+         "it ran with your permissions.",
+         find=_encoded_run, keep_source=True),
 ]
 
 
@@ -1901,10 +2622,13 @@ _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 _TERMINATOR = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)[^\S\n]*$", re.M)
 
 
-def _strip_heredocs(command):
+def _strip_heredocs(command, keep_tail=False):
     """Remove heredoc bodies. The body is data being written to disk, not a
     sequence of commands being executed. A << with no line of its word
     after it is not one (1 << x in a python -c string), and is kept.
+
+    keep_tail keeps the rest of the line that opens one: the `| sh` of
+    `base64 -d <<EOF | sh` is a command the shell runs, whatever its input.
 
     The operator stays as it was written, `<<'EOF'`. A placeholder here
     was quoted as evidence, and read as `<redacted` by _REDACTING, which
@@ -1932,6 +2656,9 @@ def _strip_heredocs(command):
             pos = op.start() + 1          # no terminator: not a heredoc
             continue
         out.append(command[copied:op.end()])
+        if keep_tail:
+            newline = command.find("\n", op.end(), lines[0][i])
+            out.append(command[op.end():newline if newline >= 0 else op.end()])
         copied = pos = lines[1][i]
     out.append(command[copied:])
     return "".join(out)
@@ -2068,23 +2795,36 @@ _SUB_CONTEXT = {"top": _SUB_OUTSIDE, "$(": _SUB_INSIDE, '"': _SUB_QUOTED,
                 "`": _SUB_BACKTICKS}
 
 
-def _substitutions(text, quoted=False):
-    """The text inside each outermost $( ) and `...` of text that the shell
-    runs, in order, read as far as MAX_SCAN_CHARS. One left open runs to
-    the end. A substitution inside another is in the text of the outer
-    one, and is found when that is judged. quoted: text is inside double
-    quotes."""
+# The same contexts for a command that also runs a process substitution,
+# <( ): a body opens at `<(` as it does at `$(`. In double quotes <( is text.
+_SUB_OUTSIDE_PROCESS = re.compile(
+    _ANSI_C + r"""|'[^']*'?|\\[\s\S]?|(?:\$|<)\(|["`]"""
+    r"""|(?<![^ \t\n;&|(])#[^\n]*""")
+_SUB_INSIDE_PROCESS = re.compile(
+    _ANSI_C + r"""|'[^']*'?|\\[\s\S]?|(?:\$|<)\(|["`()]"""
+    r"""|(?<![^ \t\n;&|(])#[^\n]*""")
+_SUB_CONTEXT_PROCESS = dict(_SUB_CONTEXT, top=_SUB_OUTSIDE_PROCESS,
+                            **{"$(": _SUB_INSIDE_PROCESS})
+
+
+def _substitution_spans(text, quoted=False, process=False):
+    """(start, end) in text of the body of each outermost $( ) and `...` of
+    it that the shell runs, in order, read as far as MAX_SCAN_CHARS. One
+    left open runs to the end. A substitution inside another is in the
+    text of the outer one, and is found when that is judged. quoted: text
+    is inside double quotes. process: a <( ) opens a body too."""
     end = min(len(text), MAX_SCAN_CHARS)
+    contexts = _SUB_CONTEXT_PROCESS if process else _SUB_CONTEXT
     stack = [['"' if quoted else "top", 0, 0]]     # [kind, body start, parens]
-    bodies, opened, pos = [], 0, 0
+    spans, opened, pos = [], 0, 0
     while pos < end:
         context = stack[-1]
-        m = _SUB_CONTEXT[context[0]].search(text, pos, end)
+        m = contexts[context[0]].search(text, pos, end)
         if not m:
             break
         token, pos = m.group(), m.end()
-        if token == "$(" or (token == "`" and context[0] != "`"):
-            stack.append([token, pos, 0])
+        if token == "$(" or token == "<(" or (token == "`" and context[0] != "`"):
+            stack.append(["$(" if token == "<(" else token, pos, 0])
             opened += 1
         elif token == '"':
             if context[0] == '"':
@@ -2097,14 +2837,20 @@ def _substitutions(text, quoted=False):
             stack.pop()
             opened -= 1
             if not opened:
-                bodies.append(text[context[1]:m.start()])
+                spans.append((context[1], m.start()))
         elif token == ")":
             context[2] -= 1
     for context in stack:
         if context[0] in ("$(", "`"):
-            bodies.append(text[context[1]:end])       # left open
+            spans.append((context[1], end))           # left open
             break
-    return bodies
+    return spans
+
+
+def _substitutions(text, quoted=False):
+    """The text inside each outermost $( ) and `...` of text that the shell
+    runs, in order: see _substitution_spans."""
+    return [text[lo:hi] for lo, hi in _substitution_spans(text, quoted)]
 
 
 def _segments(command):
@@ -2199,10 +2945,11 @@ def _argv(segment):
 _PLAIN_FIRST_WORD = re.compile(r"\s*([^\s'\"\\]+)(?:\s|$)")
 
 
-def _reduce_segment(segment, depth, into_shell=False):
+def _reduce_segment(segment, depth, into_shell=False, keep_source=False):
     """What runs of one segment, or None when nothing does. into_shell
-    says the command pipes into a shell, which runs what was text."""
-    foreign = _FOREIGN_PAYLOAD.match(segment)
+    says the command pipes into a shell, which runs what was text.
+    keep_source leaves the source of another language's one-liner in."""
+    foreign = None if keep_source else _FOREIGN_PAYLOAD.match(segment)
     if foreign:
         return segment[:foreign.end()]
 
@@ -2222,16 +2969,22 @@ def _reduce_segment(segment, depth, into_shell=False):
     binary = os.path.basename(argv[0]).split("/")[-1]
     payload_idx = next((i for i, a in enumerate(argv) if a in _PAYLOAD_FLAGS), None)
 
-    if binary in _FOREIGN_INTERPRETERS and payload_idx is not None:
+    if (binary in _FOREIGN_INTERPRETERS and payload_idx is not None
+            and not keep_source):
         return " ".join(argv[:payload_idx + 1])
     if binary in _SHELL_INTERPRETERS and payload_idx is not None:
-        head = " ".join(argv[:payload_idx + 1])
-        body = argv[payload_idx + 1] if payload_idx + 1 < len(argv) else ""
-        return head + " " + _executable_text(body, depth + 1)
+        # The string is the first word that is no option: bash -c -l '...'.
+        at = payload_idx + 1
+        while at < len(argv) and argv[at].startswith("-") and len(argv[at]) > 1:
+            at += 1
+        head = " ".join(argv[:at])
+        body = argv[at] if at < len(argv) else ""
+        return head + " " + _executable_text(body, depth + 1,
+                                             keep_source=keep_source)
     return _quoted_commands_elided(segment, into_shell)
 
 
-def _executable_text(command, depth=0, limit=None):
+def _executable_text(command, depth=0, limit=None, keep_source=False):
     """Reduce a shell command to only the parts that are actually executed.
 
     Drops heredoc bodies and the source payloads of foreign interpreters,
@@ -2247,19 +3000,26 @@ def _executable_text(command, depth=0, limit=None):
     With a limit, it stops once that many characters are kept: the rest
     would only be cut off after, and reducing it all cost a second or two
     a megabyte.
+
+    With keep_source, the source of a python, perl or node one-liner stays,
+    and what is piped stays whichever program reads it: for the rule that
+    judges what such a source decodes and runs.
     """
     if not command or depth > 3:
         return command or ""
-    command = _strip_heredocs(command)
+    command = _strip_heredocs(command, keep_tail=keep_source)
     bodies = []
-    command = _neutralize_foreign_payloads(command, bodies)
+    if keep_source:
+        into_shell = "|" in command
+    else:
+        command = _neutralize_foreign_payloads(command, bodies)
+        into_shell = "|" in command and _INTO_SHELL.search(command) is not None
 
     out, flowing, kept_chars = [], False, 0
-    into_shell = "|" in command and _INTO_SHELL.search(command) is not None
     for raw, piped in _segments(command):
         segment = _COMMENT.sub("", raw).strip()
         kept = (None if not segment or _is_inert(segment, into_shell)
-                else _reduce_segment(segment, depth, into_shell))
+                else _reduce_segment(segment, depth, into_shell, keep_source))
         if kept != raw.strip() and ("$(" in raw or "`" in raw):
             # What was dropped as text may hold a command the shell runs
             # first: echo "$(rm -rf ~)", git commit -m "$(ls; cat .env)".
@@ -2280,7 +3040,7 @@ def _executable_text(command, depth=0, limit=None):
     for body in dict.fromkeys(bodies):
         if limit is not None and kept_chars >= limit:
             break
-        inner = _executable_text(body, depth + 1, limit)
+        inner = _executable_text(body, depth + 1, limit, keep_source)
         if inner:
             out.append(" ; " if out else "")
             out.append(inner)
@@ -2338,10 +3098,13 @@ def _words(value):
     return value if isinstance(value, str) else ""
 
 
-def _shell_text(tool_name, tool_input):
+def _shell_text(tool_name, tool_input, keep_source=False):
     """The parts of a shell tool's command that run, or "" for any other
     tool. A command longer than MAX_SCAN_CHARS is cut after reduction, not
-    before, so a heredoc keeps the terminator that marks its body as data."""
+    before, so a heredoc keeps the terminator that marks its body as data.
+    With keep_source the source of other languages' one-liners stays in, and
+    a command with nothing in it that could be an encoding is "": the one
+    rule that reads it has nothing to find there."""
     if _base_name(tool_name) not in _SHELL_TOOLS:
         return ""
     if not isinstance(tool_input, dict):
@@ -2352,7 +3115,10 @@ def _shell_text(tool_name, tool_input):
                     if a)
     if argv:
         commands = commands[:-1] + [" ".join(commands[-1:] + [argv])]
-    parts = [_executable_text(c, limit=MAX_SCAN_CHARS) for c in commands]
+    if keep_source and not any(_may_decode(c) for c in commands):
+        return ""
+    parts = [_executable_text(c, limit=MAX_SCAN_CHARS, keep_source=keep_source)
+             for c in commands]
     return " ; ".join(p for p in parts if p)[:MAX_SCAN_CHARS]
 
 
@@ -2452,26 +3218,22 @@ MAX_SCAN_CHARS = 64000
 MAX_RAW_CHARS = 4 * MAX_SCAN_CHARS
 
 
-def evaluate(tool_name, tool_input, known=None):
-    """Return (hits, payload) for one tool call: the rules it trips, and the
-    whole input as masked text for telling flagged calls apart ("" when
-    nothing tripped, since then there is nothing to tell apart). `known`,
-    a known.Matcher, is every value clean finds in the history, masked in
-    both wherever a copy starts."""
-    shell = _shell_text(tool_name, tool_input)
-    paths = _read_paths(tool_name, tool_input)
-    raw = _raw_strings(tool_input)
-
+def _rule_hits(rules, shell, source, paths, raw, tool_input, known):
+    """The hits of `rules` on a call: its judged shell text, the same text
+    with the source of one-liners kept (source(), asked only by a rule that
+    wants it), the paths a file-reading tool opened and every string the
+    call carried. One hit per rule."""
     hits = []
-    for rule in RULES:
+    for rule in rules:
         # (subject, what the rule judges in it, refiners). The two differ
         # only by what rule.hide blanks and by a Windows path's backslashes
         # read as /, so a span in one is a span in both.
         if rule.scan_raw:
             subjects = [(s, s, REFINERS) for s in raw]
         else:
-            seen = rule.hide(shell) if rule.hide and shell else shell
-            subjects = [(shell, seen, REFINERS)]
+            text = source() if rule.keep_source else shell
+            seen = rule.hide(text) if rule.hide and text else text
+            subjects = [(text, seen, REFINERS)]
             if rule.paths:
                 subjects.append((paths, _slashed(paths), PATH_REFINERS))
         for subject, seen, refiners in subjects:
@@ -2490,10 +3252,114 @@ def evaluate(tool_name, tool_input, known=None):
                     continue
                 if isinstance(severity, tuple):
                     severity, why = severity
+            evidence = _evidence(subject, span, known=known)
+            if rule.id == _ENCODED:
+                evidence = _elided(evidence, _encoded_findings(seen))
             hits.append({"rule": rule.id, "severity": severity,
                          "title": rule.title, "why": why,
-                         "evidence": _evidence(subject, span, known=known)})
+                         "evidence": evidence})
             break
+    return hits
+
+
+# A long run of what base64 is spelt in, or of printf escapes.
+_OPAQUE = re.compile(r"[A-Za-z0-9+/_-]{24,}={0,2}|(?:\\(?:x[0-9A-Fa-f]{2}|[0-7]{3})){4,}")
+_OPAQUE_MIN = 20
+
+
+def _elided(evidence, findings):
+    """evidence with the encoded text it shows replaced by its size. What
+    was hidden in an encoding is shown decoded, and masked, by the hit that
+    judges it; the encoding itself would give a secret back to anyone who
+    decodes it, and it is no help in telling the command from another."""
+    for found in sorted({(f.literal, f.via[:1]) for f in findings if f.literal},
+                        key=lambda f: -len(f[0])):
+        literal, via = found
+        if len(literal) >= _OPAQUE_MIN and literal in evidence:
+            label = decode.LABELS.get(via[0], "encoded") if via else "encoded"
+            evidence = evidence.replace(literal, "<%s, %d chars>"
+                                        % (label, len(literal)))
+
+    def hide(m):
+        token = m.group()
+        if token.count("/") * 12 > len(token):
+            return token                  # a path
+        return "<encoded, %d chars>" % len(token)
+
+    return _masked_here(_OPAQUE.sub(hide, evidence))
+
+
+def _no_source():
+    return ""
+
+
+def _decoded_hits(source, seen, known):
+    """What the text a call decoded and ran trips in the other rules, as
+    hits whose evidence says where the text came from. Judged as the shell
+    command it is, never run: decode.py reads it as text and the rules read
+    it as they read any command, with no tool input to resolve a path by,
+    so a target is judged as the worst it could be. At most MAX_PAYLOADS are
+    decoded, to two levels (a payload that decodes to another). A rule the
+    call tripped already, `seen`, is not reported twice."""
+    hits, budget, judged = [], [MAX_PAYLOADS], set()
+    rules = [r for r in RULES if r.id != _ENCODED]
+
+    def judge(text, levels, path):
+        for found in _encoded_findings(text):
+            if budget[0] <= 0:
+                return
+            if len(found.via) > levels:
+                continue
+            # The same payload, however often a command runs it, is judged
+            # once: its cost is the rules' cost on it, again for each copy.
+            if (path + found.via, found.literal) in judged:
+                continue
+            judged.add((path + found.via, found.literal))
+            decoded = decode.decode_via(found.via, found.literal)
+            if decoded is None:
+                continue
+            budget[0] -= 1
+            how = path + found.via
+            label = " then ".join(decode.LABELS[kind] for kind in how)
+            shell = _executable_text(decoded, limit=MAX_SCAN_CHARS)[:MAX_SCAN_CHARS]
+            for hit in _rule_hits(rules, shell, _no_source, "",
+                                  [decoded[:MAX_SCAN_CHARS]], None, known):
+                if hit["rule"] in seen:
+                    continue
+                seen.add(hit["rule"])
+                hit["evidence"] = _masked_here(
+                    "decoded %s: %s" % (label, hit["evidence"]))
+                hits.append(hit)
+            left = levels - len(found.via)
+            if left > 0 and _may_decode(decoded):
+                judge(_executable_text(decoded, limit=MAX_SCAN_CHARS,
+                                       keep_source=True)[:MAX_SCAN_CHARS],
+                      left, how)
+
+    judge(source, decode.MAX_LEVELS, ())
+    return hits
+
+
+def evaluate(tool_name, tool_input, known=None):
+    """Return (hits, payload) for one tool call: the rules it trips, and the
+    whole input as masked text for telling flagged calls apart ("" when
+    nothing tripped, since then there is nothing to tell apart). `known`,
+    a known.Matcher, is every value clean finds in the history, masked in
+    both wherever a copy starts."""
+    shell = _shell_text(tool_name, tool_input)
+    paths = _read_paths(tool_name, tool_input)
+    raw = _raw_strings(tool_input)
+    kept = []
+
+    def source():
+        # Asked only by a rule that judges source, and read once.
+        if not kept:
+            kept.append(_shell_text(tool_name, tool_input, keep_source=True))
+        return kept[0]
+
+    hits = _rule_hits(RULES, shell, source, paths, raw, tool_input, known)
+    if any(h["rule"] == _ENCODED for h in hits) and source():
+        hits.extend(_decoded_hits(source(), {h["rule"] for h in hits}, known))
     return hits, (_payload(tool_input, known) if hits else "")
 
 
