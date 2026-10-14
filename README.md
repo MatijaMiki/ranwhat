@@ -155,9 +155,11 @@ Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
 machine; Grok Build, xAI's coding CLI, is supported. The current Amp keeps
 its threads on ampcode.com.
 
-Nine rules: credential access, secret-shaped strings in tool calls, package
+Twelve rules: credential access, secret-shaped strings in tool calls, package
 publishing, cloud resource changes, financial API calls, log tampering,
-destructive git, recursive deletion, and local files uploaded with curl.
+destructive git, recursive deletion, local files uploaded with curl, scripts
+downloaded and run unread, files made writable by every user, and container
+volumes wiped.
 Each agent's tool calls are judged by the same rules; every action says
 which agent ran it.
 
