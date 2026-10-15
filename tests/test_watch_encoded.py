@@ -15,6 +15,7 @@ import io
 import json
 import os
 import random
+import shlex
 import sys
 import tempfile
 import unittest
@@ -1392,24 +1393,27 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             measured = growth.measure(build, _call, pairs, inputs={1.0: full})
             growth.assert_linear(self, measured, full[:40])
 
-    # Growth over the lower part of the range, four times apart as ever.
-    LOWER = ((0.4, 0.1),)
-
     def linear_up_to_the_cut(self, *builds):
         """For a text that is one long quoted word. shlex reads such a word a
         character at a time, joining each onto the last, so its cost carries a
-        small quadratic term that shows only near the cut at MAX_SCAN_CHARS:
-        about a tenth of a second on the longest text watch reads, and the
-        same on this code before the decoder was added to it. Growth is
-        measured over the lower part of the range, where that term has not
-        shown, and the longest text is held to an absolute second, which a
-        run-away cost would not meet."""
+        quadratic term of its own, which is the standard library's and not
+        watch's: about a tenth of a second on the longest text watch reads on
+        one machine, and enough on a Windows runner to read 11.5 times as dear
+        at 0.4 of the length as at 0.1, for code that grows no faster than
+        ever. Most of what is timed here is that term (0.094s of 0.111s for
+        the first text below), so the seconds spent in shlex.split are left
+        out, and what watch hands to it is held to growing as the text does:
+        a watch that split the same word again and again would not hide in
+        the seconds left out. What is left is watch's own cost, measured over
+        the whole range, and the longest text is held to an absolute second of
+        it, which a run-away cost would not meet."""
         for build in builds:
             full = build(growth.sized(1))
             self.assertLessEqual(len(full), watch.MAX_SCAN_CHARS)
-            measured = growth.measure(build, _call, self.LOWER)
-            growth.assert_linear(self, measured, full[:40])
-            took, _ = growth.seconds(_call, full)
+            with growth.Outside(shlex, "split") as outside:
+                measured = growth.measure(build, _call, outside=outside)
+                growth.assert_linear(self, measured, full[:40])
+                took, _ = growth.seconds(outside.apart(_call), full)
             self.assertLess(took, 1.0, full[:40])
 
     def test_pipes(self):
