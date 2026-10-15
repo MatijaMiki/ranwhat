@@ -26,6 +26,12 @@ Where a test compares two costs at one size instead (this one costs no
 more than that one), settle() gives it the same best-of-TRIES, so that a
 margin can be a proportion rather than a number of seconds.
 
+Where the code under test calls a function it does not own, and that
+function's own cost grows faster than the code's, Outside leaves its seconds
+out of the time and holds the characters handed to it to the same LIMIT: the
+standard library's shlex.split joins a word a character at a time, and a
+Windows runner took it past LIMIT for code that grows no faster than ever.
+
 Where the input is a file tree too large to build twice in one run (a
 transcript of tens of megabytes), measure_apart() builds it here at each
 size and measures the call on its own interpreter, stopped after HANG.
@@ -77,16 +83,92 @@ def forget():
                 clear()
 
 
+class Outside:
+    """A function the code under test calls but does not own, whose own cost
+    is not the code's to answer for: its seconds are left out of what a call
+    is timed at, and what the code hands to it is counted instead.
+
+    shlex.split reads a word a character at a time, joining each onto the
+    last, so its cost carries a quadratic term of its own. On the machine this
+    was written on that term is small; on a Windows runner the same text read
+    11.5 times as dear at 0.4 of its length as at 0.1, past LIMIT, for code
+    that grows no faster than ever. Timing the call whole measures the
+    platform's allocator as much as the code. So the seconds spent in the
+    function are subtracted, and what is left is the code's own.
+
+    What the code hands to the function stays its own to answer for. The
+    characters given to it, summed over every call, are counted, and
+    assert_linear() holds them to LIMIT as it does a time: code that split
+    the same text again and again would hide in the seconds left out, and
+    does not hide in the characters.
+
+    A context manager: owner.name is the timed function inside it.
+
+        with growth.Outside(watch.shlex, "split") as outside:
+            measured = growth.measure(build, call, outside=outside)
+            growth.assert_linear(test, measured)
+    """
+
+    def __init__(self, owner, name):
+        self.owner, self.name = owner, name
+        self.label = "%s.%s" % (getattr(owner, "__name__", type(owner).__name__),
+                                name)
+        self.seconds = 0.0
+        self.volume = 0
+        self._real = None
+
+    def reset(self):
+        self.seconds, self.volume = 0.0, 0
+
+    def __enter__(self):
+        real = self._real = getattr(self.owner, self.name)
+
+        def timed(text, *args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return real(text, *args, **kwargs)
+            finally:
+                self.seconds += time.perf_counter() - start
+                self.volume += len(text) if isinstance(text, (str, bytes)) else 0
+        setattr(self.owner, self.name, timed)
+        return self
+
+    def __exit__(self, *_):
+        setattr(self.owner, self.name, self._real)
+
+    def apart(self, call):
+        """call, marked so that seconds() takes this function's seconds off."""
+        return _Apart(call, self)
+
+
+class _Apart:
+    """A call, and the Outside whose seconds are taken off what it is timed
+    at: seconds() looks for `outside` on what it is given."""
+
+    def __init__(self, call, outside):
+        self.call, self.outside = call, outside
+
+    def __call__(self, arg):
+        return self.call(arg)
+
+
 def seconds(call, arg):
-    """How long call(arg) takes, and what it returns."""
+    """How long call(arg) takes, and what it returns; less what a call marked
+    by Outside.apart() spent in the function that is left out."""
     forget()
     gc.collect()
     enabled = gc.isenabled()
     gc.disable()
+    outside = getattr(call, "outside", None)
+    if outside is not None:
+        outside.reset()
     try:
         start = time.perf_counter()
         result = call(arg)
-        return time.perf_counter() - start, result
+        took = time.perf_counter() - start
+        if outside is not None:
+            took = max(took - outside.seconds, 0.0)
+        return took, result
     finally:
         if enabled:
             gc.enable()
@@ -115,12 +197,16 @@ class Measured:
     """The best seconds at each scale, the pairs of scales to compare, and
     what the call returned at the largest scale."""
 
-    def __init__(self, best, pairs, result=None, runs=()):
+    def __init__(self, best, pairs, result=None, runs=(), volumes=None,
+                 outside=None):
         self.best = best
         self.pairs = [tuple(p) for p in pairs]
         self.result = result
         # one {scale: seconds} per try, its scales timed back to back
         self.runs = [dict(r) for r in runs]
+        # with an Outside: {scale: characters handed to it}, and its name
+        self.volumes = dict(volumes or {})
+        self.outside = outside
 
     def growth(self, large, small):
         return least_growth(self.best, self.runs, large, small)
@@ -136,16 +222,23 @@ class Measured:
                    runs=[{s: t for s, t in r} for r in doc.get("runs", [])])
 
 
-def measure(build, call, pairs=QUARTER, rebuild=False, inputs=None):
+def measure(build, call, pairs=QUARTER, rebuild=False, inputs=None,
+            outside=None):
     """Time call(build(n)) at each scale named in pairs, as a Measured.
 
     build(n) makes the input at a scale: n(k) is the count k there, so
     `"a=" * n(500000)` is half a million at full size and a quarter of
     that at a quarter. The input is made once per scale, unless rebuild:
     then before every run, for a call that changes its input or depends on
-    state build sets up. `inputs`, {scale: input}, are ones already made."""
+    state build sets up. `inputs`, {scale: input}, are ones already made.
+    `outside` is an Outside, entered by the caller: the seconds spent in its
+    function are left out of every time, and the characters handed to it at
+    each scale are kept, for assert_linear() to hold to LIMIT too."""
     scales = sorted({s for pair in pairs for s in pair})
     inputs = dict(inputs or {})
+    volumes = {}
+    if outside is not None:
+        call = outside.apart(call)
 
     def arg(scale):
         if rebuild or scale not in inputs:
@@ -165,13 +258,16 @@ def measure(build, call, pairs=QUARTER, rebuild=False, inputs=None):
             run[scale] = took
             best[scale] = min(best[scale], took)
             spent += took
+            if outside is not None:
+                volumes[scale] = outside.volume
             if scale == scales[-1]:
                 result = out
         runs.append(run)
         if (in_proportion(best, pairs, runs) or best[scales[-1]] >= CEILING
                 or spent >= CEILING):
             break
-    return Measured(best, pairs, result, runs)
+    return Measured(best, pairs, result, runs, volumes,
+                    outside.label if outside is not None else None)
 
 
 def assert_linear(test, measured, what=""):
@@ -186,6 +282,16 @@ def assert_linear(test, measured, what=""):
                    small / large, times, SCALE, SCALE ** 2))
         test.assertLess(best[large], CEILING, said)
         test.assertLess(times, LIMIT, said)
+        if large in measured.volumes and small in measured.volumes:
+            handed = measured.volumes[large] / max(measured.volumes[small], 1)
+            test.assertLess(
+                handed, LIMIT,
+                "%s%d characters handed to %s, against %d at %g of the size: "
+                "%.1f times, where a linear count grows %d times and a "
+                "quadratic one %d"
+                % (what + ": " if what else "", measured.volumes[large],
+                   measured.outside, measured.volumes[small], small / large,
+                   handed, SCALE, SCALE ** 2))
 
 
 class Assertions:
