@@ -1403,6 +1403,44 @@ class NeverWritten(WarpCase):
         self.assertEqual(_sha(db), digest)
 
 
+class ResultVariants(WarpCase):
+    """Result fields the schema allows besides the common ones."""
+
+    def answer(self, call_no, call, result_no, payload):
+        db = self.one([msg(tool_call("c1", call_no, call)),
+                       msg(tool_result("c1", result_no, payload))])
+        return (self.by_id(db)["c1"],
+                json.dumps([t.node for t in self.texts(db)], default=str))
+
+    def test_any_files_success_is_output_and_scanned(self):
+        file = s(1, "/p/.env") + s(2, "KEY=" + SECRET)
+        call, blob = self.answer(5, read_call("/p/.env"), 5,
+                                 ld(3, ld(1, ld(2, file))))
+        self.assertEqual(call.output, "KEY=" + SECRET)
+        self.assertIn(SECRET, blob)
+
+    def test_deprecated_shell_output_is_output_and_scanned(self):
+        call, blob = self.answer(2, shell_call("cat .env"), 2,
+                                 s(3, "cat .env") + s(1, "KEY=" + SECRET))
+        self.assertEqual(call.output, "KEY=" + SECRET)
+        self.assertIn(SECRET, blob)
+
+    def test_mcp_embedded_resource_text_is_output_and_scanned(self):
+        call, blob = self.answer(
+            12, mcp_call("n", {}), 16,
+            ld(1, ld(1, ld(3, s(1, "file:///x") + ld(2, s(1, "KEY=" + SECRET))))))
+        self.assertEqual(call.output, "KEY=" + SECRET)
+        self.assertIn(SECRET, blob)
+
+    def test_unread_fields_of_a_decoded_result_are_still_searched(self):
+        # failed_reads (field 2 of text_files_success) is not decoded
+        file = s(1, "/p/a") + s(2, "fine")
+        _call, blob = self.answer(
+            5, read_call("/p/a"), 5,
+            ld(1, ld(1, file) + ld(2, s(1, "/p/" + SECRET))))
+        self.assertIn(SECRET, blob)
+
+
 class Judging(WarpCase):
 
     def test_an_edit_to_a_secret_file_and_a_shell_read_are_judged(self):

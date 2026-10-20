@@ -983,6 +983,12 @@ class WarpSource(Source):
                     call.timestamp, call.not_after = stamp, None
             elif snapshot:
                 call.output = _str(buf, snapshot, 1)
+            if call.output is None and R_SHELL in result:
+                # RunShellCommandResult.output (field 1) is deprecated but
+                # older persisted blobs still carry it.
+                old = _str(buf, shell, 1)
+                if old:
+                    call.output = old
             return start
         if R_DIFFS in result:
             error = _sub(buf, _sub(buf, result, R_DIFFS), 2)
@@ -993,6 +999,11 @@ class WarpSource(Source):
             read = _sub(buf, result, R_READ)
             texts = [_str(buf, f, 2) for f in _subs(
                 buf, _sub(buf, read, 1), 1)]
+            # any_files_success (3): files[] (1) -> AnyFileContent with
+            # text_content (2) -> FileContent{file_path 1, content 2}
+            for f in _subs(buf, _sub(buf, read, 3), 1):
+                texts.append(_str(buf, _sub(buf, f, 2), 2))
+            texts = [t for t in texts if t]
             error = _sub(buf, read, 2)
             if texts:
                 call.output = "\n".join(texts)[:MAX_TEXT]
@@ -1001,8 +1012,13 @@ class WarpSource(Source):
             return None
         if R_MCP in result:
             mcp = _sub(buf, result, R_MCP)
-            texts = [_str(buf, _sub(buf, r, 1), 1)
-                     for r in _subs(buf, _sub(buf, mcp, 1), 1) if 1 in r]
+            texts = []
+            for r in _subs(buf, _sub(buf, mcp, 1), 1):
+                if 1 in r:
+                    texts.append(_str(buf, _sub(buf, r, 1), 1))
+                if 3 in r:      # embedded resource: text (2) -> content (1)
+                    texts.append(_str(buf, _sub(buf, _sub(buf, r, 3), 2), 1))
+            texts = [t for t in texts if t]
             error = _sub(buf, mcp, 2)
             if texts:
                 call.output = "\n".join(texts)[:MAX_TEXT]
@@ -1150,6 +1166,7 @@ class WarpSource(Source):
                         for piece in _pieces(text):
                             yield SecretText(piece, where=where)
                 continue
+            seen = set()
             if 5 in message:
                 result = _sub(buf, message, 5)
                 made = calls.get(_str(buf, result, 1))
@@ -1157,14 +1174,14 @@ class WarpSource(Source):
                     self._answer(buf, made, result)
                     for piece in _pieces(made.output or ""):
                         if piece:
+                            seen.add(piece)
                             yield SecretText(piece, call=made, where=where)
-                    if any(n in result for n in (R_SHELL, R_LONG, R_MCP,
-                                                 R_READ)) \
-                            and stop - start <= MAX_TEXT:
-                        continue
+            # Whatever the reader did not decode is still searched; what it
+            # did decode is not given a second time.
             for text in _loose(buf, start, stop):
                 for piece in _pieces(text):
-                    yield SecretText(piece, where=where)
+                    if piece not in seen:
+                        yield SecretText(piece, where=where)
 
 
 def _when_mtime(mtime):
