@@ -37,6 +37,13 @@ publishes a successor and leaves the old file as it was. Only the highest
 is read for tool calls, or each call would count twice. The older ones are
 role "side" stores: clean searches them for secrets, watch does not.
 
+Forks: a session whose header has isSeeded true (parentSession set) starts
+with a verbatim copy of the parent's events (buildForkSeed, core/session/src/
+fork.ts), ended by a `session/end-seed` {inherited:true} row. Those rows are
+the parent's, already counted under the parent's own session, so tool_calls
+skips everything up to the last such marker (secret_texts still reads them,
+the file holds them). Without the marker nothing is skipped.
+
 Rows: line 1 is {"type":"session","version":V,"id","createdAt" (ms),
 "cwd"?,"parentSession"?,"origin"?,...}. Every later row is an event
 {"type","data":{...},"seq","time" (ms),...}. A row with no integer "seq"
@@ -74,9 +81,11 @@ says v3 is current in two places; the code and docs/session-format-status.md
 say 4.
 
 Not verified, so handled defensively: the "arguments" of a tool/call that
-is not a JSON string is used as it is; a tool result's error codes are not
-listed anywhere in the source I read, so an error is not taken for a
-refusal; the content of a PTC result is read as text when it is a string or
+is not a JSON string is used as it is; an error in general is not a
+refusal, only the codes ABORTED_BEFORE_DISPATCH, TOOL_NOT_STARTED and
+UNKNOWN_TOOL in a tool/result's data.error.code (the call never ran) are
+"declined", as is a call whose approval/decided outcome says so (a run_code
+sub-call is paired by its subCallId); the content of a PTC result is read as text when it is a string or
 a list of text blocks. Not read: a torn last frame, rows of unknown types,
 the assistant/message streams (they repeat the tool-call blocks),
 /slash command rows (command/run), anything outside sessions/.
@@ -119,6 +128,12 @@ CWD_CHANGE = "working-directory/change"
 # ApprovalOutcome values after which the call did not run.
 DECLINED = "declined"
 NOT_RUN = ("rejected", "cancelled", "unavailable")
+# tool/result error codes (core/tools/src/index.ts, core/session/src/repair.ts)
+# of a call whose body never ran: the turn was cancelled before dispatch, a
+# crash or fork closer found it never started, or the tool does not exist.
+# TOOL_OUTCOME_UNKNOWN and ABORTED are left alone: the tool may have run.
+NEVER_RAN = ("ABORTED_BEFORE_DISPATCH", "TOOL_NOT_STARTED", "UNKNOWN_TOOL")
+END_SEED = "session/end-seed"
 
 VERSIONS = (0, 1, 2, 3, 4)
 
@@ -375,6 +390,16 @@ def _results_of(data):
                 out.append((block["toolCallId"],
                             output_text(block.get("content"))))
     return out
+
+
+def _never_ran(data):
+    """True when a tool/result (or PTC dispatch) row carries one of the
+    error codes of a call that did not run."""
+    for holder in (data, data.get("message")):
+        err = holder.get("error") if isinstance(holder, dict) else None
+        if isinstance(err, dict) and err.get("code") in NEVER_RAN:
+            return True
+    return False
 
 
 def _seqs(value):
@@ -636,6 +661,18 @@ class DshSource(Source):
             output=output_text(content) if content is not None else None,
             **self._base(store, obj, header, cwd))
 
+    def _seed_end(self, store):
+        """The line number of the last session/end-seed row with inherited
+        true (0 when there is none): everything up to it is copied from the
+        parent. One more pass over the file, no counting."""
+        end = 0
+        for line_no, obj, _text in self._records(store, self._calls_tallied):
+            if (isinstance(obj, dict) and obj.get("type") == END_SEED
+                    and isinstance(obj.get("data"), dict)
+                    and obj["data"].get("inherited") is True):
+                end = line_no
+        return end
+
     def tool_calls(self, store):
         """Every call once, with its result's text as output: a call is
         yielded when its result arrives, and those still waiting at the end
@@ -649,18 +686,26 @@ class DshSource(Source):
         pending, done, seqs = {}, set(), {}
         asked, refused = {}, set()
         ptc_open, ptc_done = {}, set()
-        for _n, obj, _text in self._records(store, self._calls_tallied):
+        seed_end = 0
+        for line_no, obj, _text in self._records(store, self._calls_tallied):
             if obj is _BAD:
                 continue
             if isinstance(obj, dict) and obj.get("type") == "session":
                 if not header:
                     header = obj
                     cwd = _string(obj.get("cwd"))
+                    if obj.get("isSeeded") is True:
+                        seed_end = self._seed_end(store)
                 continue
             data = self._event(obj)
             if data is None:
                 continue
             kind = obj["type"]
+            if line_no <= seed_end:
+                # The parent's events, copied in; its calls are its own.
+                if kind == CWD_CHANGE:
+                    cwd = _string(data.get("cwd")) or cwd
+                continue
             if kind == CWD_CHANGE:
                 cwd = _string(data.get("cwd")) or cwd
             elif kind == ASKED:
@@ -676,9 +721,18 @@ class DshSource(Source):
                 cid = call.tool_call_id
                 if cid is None:
                     yield call
-                elif cid not in done and cid not in pending:
-                    pending[cid] = call
-                    seqs[obj["seq"]] = cid
+                    continue
+                # An id can be reused once its call is answered (dsh falls
+                # back to call-<index> per response).
+                done.discard(cid)
+                old = pending.get(cid)
+                if old is not None and (old.tool_name, old.tool_input) == (
+                        call.tool_name, call.tool_input):
+                    continue            # the same call written twice
+                if old is not None:
+                    yield old           # a different call took the id
+                pending[cid] = call
+                seqs[obj["seq"]] = cid
             elif kind == RESULT:
                 answered = _results_of(data)
                 if not answered:
@@ -698,7 +752,7 @@ class DshSource(Source):
                     call.output = output
                     if call.kind == "shell" and ran_in:
                         call.workdir = ran_in
-                    if cid in refused:
+                    if cid in refused or _never_ran(data):
                         call.status = DECLINED
                     done.add(cid)
                     yield call
@@ -713,12 +767,17 @@ class DshSource(Source):
                         continue
                     ptc_done.add(sub)
                     ptc_open.pop(sub, None)
-                yield self._ptc(store, obj, data, header, cwd)
+                made = self._ptc(store, obj, data, header, cwd)
+                if (sub in refused) or _never_ran(data):
+                    made.status = DECLINED
+                yield made
         for cid, call in pending.items():
             if cid in refused:
                 call.status = DECLINED
             yield call
-        for call in ptc_open.values():
+        for sub, call in ptc_open.items():
+            if sub in refused:
+                call.status = DECLINED
             yield call
 
     def secret_texts(self, store):
