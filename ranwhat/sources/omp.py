@@ -116,12 +116,23 @@ that changed its length would corrupt the header after it, so a file whose
 title slot holds a value to mask is refused ("would alter more than the
 secret"), not rewritten.
 
+Spilled tool output, <session folder>/<n>.<tool>.log, is a side store
+(plain text): it is scanned for secrets and masked, but not tied to the
+call that produced it (the artifact id link is not verified). In a folder
+shared with Pi it is taken only beside a session file that starts with the
+title slot. A file under omp's own default root, a profile or XDG folder is
+omp's even when PI_CODING_AGENT_DIR names the same folder.
+
 Not read: gzip archives (archive/sessions/**/*.jsonl.gz, written only by
 the opt-in `omp gc --apply`), history.db (prompt history, SQLite), blobs/,
-and the files beside a session's artifacts (<n>.<tool>.log, spilled tool
-output; <id>.md; draft.txt). Their text can hold what a tool printed, so a
-secret there is not found or masked. Unverifiable and handled defensively:
-the exact text omp writes for a validation failure, which is taken from Pi.
+and the other files beside a session's artifacts (<id>.md; draft.txt).
+A call omp refused before running is declined: "Tool was not executed
+because the run was aborted", 'Validation failed for tool "x":', "The tool
+was not run." (all with isError), or details {isError, error} equal to the
+text (agent-loop.ts, validation.ts). A read path is split on ";" (and on
+"," or white space, keeping the whole too), a file:// URI is a local file,
+and selectors may be comma lists. Still unverifiable and handled
+defensively: the exact validation text for other failures, taken from Pi.
 """
 
 from __future__ import annotations
@@ -129,6 +140,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from urllib.parse import unquote
 
 from . import _lines, _paths, _rewrite, base, pi
 from .base import MaskResult, SecretText, Source, ToolCall
@@ -191,23 +203,35 @@ ROLES = ("user", "developer", "assistant", "toolResult", USER_SHELL,
 
 # How omp spells a call it could not find (agent-loop.ts, v18.12.3).
 NOT_FOUND = pi.NOT_FOUND
+ABORTED_BEFORE = "Tool was not executed because the run was aborted"
+VALIDATION = 'Validation failed for tool "'
+NOT_RUN = "The tool was not run."
 NOT_FOUND_TAIL = (". Did you mean", ". Closest available")
 
 # A selector at the end of a read path (tools/read.ts).
-_SELECTOR = re.compile(r":(?:-?\d+(?:[-+]\d*)?|raw|img|conflicts)$")
+_SELECTOR = re.compile(
+    r":(?:-?\d+(?:[-+]\d*)?(?:,\d+(?:[-+]\d*)?)*|raw|img|conflicts)$")
 _SELECTORS_MAX = 4
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 _WEB = re.compile(r"^https?://", re.IGNORECASE)
+_FILE_URL = re.compile(r"^file://", re.IGNORECASE)
+# omp splits a read path on ";" and, when the literal path is not a file,
+# on "," and white space (read.ts, path-utils.ts); each piece is a target.
+_SPLIT_HARD = ";"
+_SPLIT_SOFT = re.compile(r"[,\s]+")
+_PIECES_MAX = 64
 
 # Lines of an apply_patch body that name a file.
-_PATCH_PATH = re.compile(
-    r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): *(.+?) *$", re.M)
+_PATCH_HEADS = ("*** Add File:", "*** Update File:", "*** Delete File:",
+                "*** Move to:")
 _PATCH_PATHS_MAX = 256
 
 # The registry marker holds one path; a longer file is not one.
 _MARKER_MAX = 4096
 
 _HEAD_MAX = 1 << 16
+_LOG_CHUNK = 1 << 20
+_LOG_OVERLAP = 1 << 12
 
 
 def _string(value):
@@ -248,25 +272,66 @@ def session_in_folder(folder):
 
 # -- how a call's arguments are read ------------------------------------------
 
-def _clean_path(value):
-    """The file(s) a read or edit names: the value without a trailing
-    selector. Returns (paths, web): the paths ("@x" as written and as Pi
-    resolves it, since omp is a Pi fork and the sources read do not say
-    whether it drops the "@"), and True for an http(s) URL. Internal URIs
-    (artifact://, local://, agent://, history://) name no file."""
-    if _WEB.match(value):
-        return (), True
-    if _SCHEME.match(value):
-        return (), False
+def _file_url_path(value):
+    """The local path a file:// URI stands for (omp's stripFileUrl)."""
+    rest = unquote(value[len("file://"):])
+    if rest.lower().startswith("localhost/"):
+        rest = rest[len("localhost"):]
+    if re.match(r"^/[A-Za-z]:[\\/]", rest):
+        rest = rest[1:]                 # file:///C:/x
+    return rest
+
+
+def _strip_selectors(value):
     for _ in range(_SELECTORS_MAX):
         stripped = _SELECTOR.sub("", value)
         if stripped == value:
             break
         value = stripped
-    out = [value] if value else []
-    if value.startswith("@") and len(value) > 1:
-        out.append(value[1:])
-    return tuple(out), False
+    return value
+
+
+def _one_target(value, out):
+    """Add the file `value` names (one piece) to `out`; True for a web URL."""
+    value = value.strip()
+    if _WEB.match(value):
+        return True
+    if _FILE_URL.match(value):
+        value = _file_url_path(value)
+    elif _SCHEME.match(value):
+        return False
+    value = _strip_selectors(value)
+    for path in ([value, value[1:]] if value.startswith("@")
+                 and len(value) > 1 else [value]):
+        if path and path not in out:
+            out.append(path)
+    return False
+
+
+def _clean_path(value):
+    """The file(s) a read or edit names: the value without a trailing
+    selector. Returns (paths, web): the paths ("@x" as written and as Pi
+    resolves it, since omp is a Pi fork and the sources read do not say
+    whether it drops the "@"), and True for an http(s) URL. file:// is a
+    local file; a ";" separates several targets, and "," or white space
+    may (omp decides by whether the literal path exists, which is not known
+    here, so the whole value and its pieces are all kept). Internal URIs
+    (artifact://, local://, agent://, history://) name no file."""
+    if _WEB.match(value):
+        return (), True
+    out, web = [], False
+    pieces = value.split(_SPLIT_HARD)[:_PIECES_MAX]
+    for piece in pieces:
+        web = _one_target(piece, out) or web
+        if _WEB.match(piece.strip()) or _SCHEME.match(piece.strip()) \
+                and not _FILE_URL.match(piece.strip()):
+            continue
+        clean = _strip_selectors(piece.strip())
+        if _SPLIT_SOFT.search(clean):
+            for sub in _SPLIT_SOFT.split(clean)[:_PIECES_MAX]:
+                if sub:
+                    _one_target(sub, out)
+    return tuple(out), web and not out
 
 
 def _paths_in(arguments, selectors):
@@ -293,10 +358,18 @@ def _paths_in(arguments, selectors):
 
 
 def _patch_paths(text):
+    """File names on the header lines of an apply_patch body, read line by
+    line (linear in the text, whatever the spaces on a line)."""
     out = []
-    for match in _PATCH_PATH.finditer(text):
-        if match.group(1) not in out:
-            out.append(match.group(1))
+    for line in text.split("\n"):
+        if not line.startswith("*** "):
+            continue
+        for head in _PATCH_HEADS:
+            if line.startswith(head):
+                name = line[len(head):].strip()
+                if name and name not in out:
+                    out.append(name)
+                break
         if len(out) >= _PATCH_PATHS_MAX:
             break
     return out
@@ -350,6 +423,25 @@ def _walk(folder):
         except OSError:
             continue
     return files, folders
+
+
+_ARTIFACT_LOG = re.compile(r"^\d+\..+\.log$")
+
+
+def _artifact_logs(folder):
+    """[(path, session id, session file)] for the spilled tool output
+    (<n>.<tool>.log) in each session's artifact folder under `folder`."""
+    out = []
+    for sub in _walk(folder)[1]:
+        for entry in pi._entries(sub):
+            try:
+                if (_ARTIFACT_LOG.match(entry.name) and entry.is_file()
+                        and not entry.is_symlink()):
+                    out.append((entry.path, session_in_folder(
+                        os.path.basename(sub)), sub + SUFFIX))
+            except OSError:
+                continue
+    return out
 
 
 def _transcripts(folder):
@@ -464,19 +556,62 @@ class OhMyPiSource(PiSource):
         shared = location.how in SHARED
         out = []
         for folder in self.session_folders(location):
-            out.extend((path, parent, shared)
+            out.extend((path, parent, shared, None)
                        for path, parent in _transcripts(folder))
+            out.extend((path, session, shared, owner)
+                       for path, session, owner in _artifact_logs(folder))
         # A marker is omp's own record of the file, whatever its first line.
-        out.extend((path, None, False)
+        out.extend((path, None, False, None)
                    for path in self.registry_paths(location))
         return out
 
+    def _own_roots(self, locations):
+        """The folders whose files are omp's whatever their first line says:
+        the default root, profiles and XDG folders omp would look in now
+        (even when a location for them was dropped as a repeat of
+        PI_CODING_AGENT_DIR) and every given location that is not shared
+        with Pi."""
+        out = []
+        try:
+            pairs = self.default_paths(os.environ, _paths.home(),
+                                       _paths.platform_name())
+        except Exception:
+            pairs = []
+        for path, how in pairs:
+            if path and how not in SHARED:
+                out.append(path)
+        out.extend(loc.path for loc in locations if loc.how not in SHARED)
+        return [os.path.normcase(os.path.abspath(os.path.expanduser(p)))
+                for p in out]
+
+    @staticmethod
+    def _under(path, roots):
+        key = os.path.normcase(os.path.abspath(path))
+        return any(key == r or key.startswith(r.rstrip("\\/") + os.sep)
+                   for r in roots)
+
     def stores(self, locations, since_days=None):
         found, seen = [], set()
+        roots = self._own_roots(locations)
         for loc in locations:
-            for path, parent, shared in self._candidates(loc):
+            for path, parent, shared, owner in self._candidates(loc):
                 key = os.path.normcase(os.path.abspath(path))
                 if key in seen:
+                    continue
+                if shared and self._under(path, roots):
+                    shared = False  # under omp's own folder: omp's
+                if owner is not None:
+                    # spilled output: the store of the session that spilled
+                    # it, when that session is omp's
+                    if shared and not _read_head(owner)[0]:
+                        continue
+                    if not os.path.isfile(owner) and not parent:
+                        continue
+                    seen.add(key)
+                    store = self.store(path, "text", role="side",
+                                       unit="tool output", session=parent)
+                    if store is not None:
+                        found.append(store)
                     continue
                 slot, header = _read_head(path)
                 if shared and not slot:
@@ -524,6 +659,15 @@ class OhMyPiSource(PiSource):
             if (details.get("__synthetic") is True
                     and details.get("executed") is not True
                     and not details.get("__interrupted")):
+                return True
+        if message.get("isError") is True and isinstance(output, str):
+            # agent-loop.ts / validation.ts: a call refused before it ran
+            if (output.startswith(ABORTED_BEFORE)
+                    or output.startswith(VALIDATION)
+                    or NOT_RUN in output):
+                return True
+            if (isinstance(details, dict) and details.get("isError") is True
+                    and details.get("error") == output):
                 return True
         tool = _string(message.get("toolName"))
         if (tool and message.get("isError") is True
@@ -616,6 +760,9 @@ class OhMyPiSource(PiSource):
         A line that is not JSON is handed over as text. The copies of a
         command in tool_execution_start and session_exit entries are in the
         whole line."""
+        if store.role == "side":
+            yield from self._log_texts(store)
+            return
         if store.role != "transcript":
             return
         header = {}
@@ -650,6 +797,33 @@ class OhMyPiSource(PiSource):
                     if cid is not None and cid not in calls:
                         calls[cid] = call
             yield SecretText(obj, where=where)
+
+    def _log_texts(self, store):
+        """A spilled tool output log, in overlapping chunks so that a value
+        split by a chunk boundary is still whole in one of them (it is not
+        tied to a call: the artifact id that links them is not verified)."""
+        try:
+            fh = open(store.path, "rb")
+        except OSError as e:
+            self._bad_store(store, e.strerror or str(e))
+            return
+        with fh:
+            tail, offset = b"", 0
+            while True:
+                try:
+                    block = fh.read(_LOG_CHUNK)
+                except OSError as e:
+                    self._bad_store(store, e.strerror or str(e))
+                    return
+                if not block:
+                    break
+                data = tail + block
+                yield SecretText(data.decode("utf-8", "surrogateescape"),
+                                 where="offset %d" % max(0, offset))
+                offset += len(block)
+                tail = data[-_LOG_OVERLAP:]
+            if offset == 0:
+                return
 
     # -- masking ------------------------------------------------------------
 

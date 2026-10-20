@@ -336,10 +336,11 @@ class Discovery(OmpCase):
         self.write(sub + "Explore.jsonl", [header(sid="sub-1", cwd=CWD)])
         self.write(sub + "Explore.Review.jsonl", [header(sid=None, cwd=CWD)])
         self.write(sub + "__advisor.jsonl", [])
-        self.write(sub + "1.bash.log", ["not a transcript"])
+        self.write(sub + "1.bash.log", ["not a transcript"])   # a side store
         self.write(sub + "abc.md", ["# not a transcript"])
         self.write(sub + "draft.txt", ["x"])
-        names = sorted(os.path.basename(s.path) for s in self.stores())
+        names = sorted(os.path.basename(s.path) for s in self.stores()
+                       if s.role == "transcript")
         self.assertEqual(names, sorted([NAME, "Explore.jsonl",
                                         "Explore.Review.jsonl",
                                         "__advisor.jsonl"]))
@@ -1207,6 +1208,130 @@ class Performance(OmpCase):
         self.assertEqual(len(calls), n // 2)
         self.assertEqual(len(texts), 2 + 3 * (n // 2))
         self.assertLess(elapsed, 30)
+
+
+class ReviewFindings(OmpCase):
+    """Regressions for the review of the first version."""
+
+    def session(self, lines=None, **kw):
+        return self.write("sessions/%s/%s" % (FOLDER, NAME),
+                          lines if lines is not None else head(), **kw)
+
+    def test_env_dir_equal_to_the_default_folder_keeps_old_files(self):
+        self.write("sessions/%s/%s" % (FOLDER, NAME), [header(sid=SID)])
+        self.assertEqual(len(self.stores()), 1)
+        os.environ[ENV] = self.root
+        locs = self.omp.locations()
+        self.assertEqual(locs[0].how, "env " + ENV)
+        self.assertEqual(len(self.omp.stores(locs)), 1)
+
+    def test_a_pi_file_in_a_shared_dir_outside_omp_folders_is_still_skipped(self):
+        shared = self.other("omp-shared-")
+        self.write("sessions/%s/%s" % (FOLDER, NAME), [header(sid=SID)],
+                   root=shared)
+        os.environ[ENV] = shared
+        self.assertEqual(self.stores(), [])
+
+    def test_a_long_space_run_in_a_patch_is_linear(self):
+        import time
+        start = time.time()
+        for _ in range(3):
+            kind, _k, _c, paths, _x, _w = omp_module.classify(
+                "edit", {"input": "*** Add File: a" + " " * 200000 + "x\n"})
+        self.assertLess(time.time() - start, 3)
+        self.assertEqual(kind, "write")
+        self.assertEqual(len(paths), 1)
+
+    def test_patch_headers_are_read_stripped(self):
+        got = omp_module.classify("edit", {"input": (
+            "*** Begin Patch\n*** Add File:  a.py  \n+x\n"
+            "*** Update File: b.py\n*** Move to: c.py\n"
+            "*** Delete File: d.py\n")})[3]
+        self.assertEqual(got, ("a.py", "b.py", "c.py", "d.py"))
+
+    def test_read_of_a_file_url_names_the_file(self):
+        got = omp_module.classify(
+            "read", {"path": "file:///home/u/.ssh/id_rsa"})
+        self.assertEqual((got[0], got[3]), ("read", ("/home/u/.ssh/id_rsa",)))
+        got = omp_module.classify(
+            "read", {"path": "file:///home/u/my%20file.txt:3-4"})
+        self.assertEqual(got[3], ("/home/u/my file.txt",))
+        self.assertEqual(omp_module.classify(
+            "read", {"path": "artifact://3"})[3], ())
+
+    def test_read_splits_semicolon_lists_and_comma_selectors(self):
+        got = omp_module.classify(
+            "read", {"path": "~/.ssh/id_rsa;~/.aws/credentials"})[3]
+        self.assertEqual(got, ("~/.ssh/id_rsa", "~/.aws/credentials"))
+        got = omp_module.classify("read", {"path": "a.ts:1-5;b.env:2"})[3]
+        self.assertEqual(got, ("a.ts", "b.env"))
+        self.assertEqual(omp_module.classify(
+            "read", {"path": "a.py:1-10,20-30"})[3], ("a.py",))
+        got = omp_module.classify("read", {"path": "a.env, b.env"})[3]
+        self.assertIn("a.env", got)
+        self.assertIn("b.env", got)
+
+    def test_calls_refused_before_they_ran_are_declined(self):
+        texts = (
+            "Tool was not executed because the run was aborted: user cancelled.",
+            'Validation failed for tool "write":\nTool call arguments are '
+            "not valid JSON.\nParse Error: x\nRaw JSON: {",
+            "`i` is a short intent label, at most 80 characters. The tool "
+            "was not run.")
+        for text in texts:
+            lines = head() + [
+                entry(1, assistant([tool_call("c1", "write", {
+                    "path": "a", "content": "x"})], BASE_MS)),
+                entry(2, tool_result("c1", "write", text, BASE_MS,
+                                     is_error=True, details={}))]
+            call = self.by_id(self.session(lines))["c1"]
+            self.assertEqual(call.status, "declined", text)
+        lines = head() + [
+            entry(1, assistant([tool_call("c1", "write", {
+                "path": "a", "content": "x"})], BASE_MS)),
+            entry(2, tool_result("c1", "write", "bad args", BASE_MS,
+                                 is_error=True, details={
+                                     "isError": True, "error": "bad args"}))]
+        self.assertEqual(self.by_id(self.session(lines))["c1"].status,
+                         "declined")
+
+    def test_an_ordinary_error_still_ran(self):
+        lines = head() + [
+            entry(1, assistant([tool_call("c1", "bash", {"command": "false"})],
+                               BASE_MS)),
+            entry(2, tool_result("c1", "bash", "exit 1", BASE_MS,
+                                 is_error=True, details={}))]
+        self.assertEqual(self.by_id(self.session(lines))["c1"].status, None)
+
+    def test_spilled_tool_output_is_scanned_and_masked(self):
+        stem = NAME[:-len(".jsonl")]
+        path = self.session()
+        log = self.write("sessions/%s/%s/1.bash.log" % (FOLDER, stem), [],
+                         raw=(b"x" * 3000000 + b" " + SECRET.encode() + b"\n"),
+                         mode=0o600)
+        stores = {s.path: s for s in self.stores()}
+        self.assertIn(log, stores)
+        store = stores[log]
+        self.assertEqual((store.role, store.format, store.session),
+                         ("side", "text", SID))
+        found = "".join(t.node for t in self.omp.secret_texts(store)
+                        if isinstance(t.node, str))
+        self.assertIn(SECRET, found)
+        result = self.omp.mask(store, [SECRET])
+        self.assertFalse(result.skipped)
+        with open(log, "rb") as fh:
+            self.assertNotIn(SECRET.encode(), fh.read())
+        self.assertEqual(list(self.omp.tool_calls(store)), [])
+
+    def test_a_log_beside_a_pi_file_in_a_shared_dir_is_left_alone(self):
+        shared = self.other("omp-shared-")
+        pi_name = "2026-10-01T09-00-00-000Z_pi.jsonl"
+        self.write("sessions/%s/%s" % (FOLDER, pi_name),
+                   [header(sid="pi-1", cwd=CWD)], root=shared)
+        self.write("sessions/%s/%s/1.bash.log" % (FOLDER, pi_name[:-6]), [],
+                   raw=b"hi\n", root=shared)
+        os.environ[ENV] = shared
+        self.assertEqual(self.stores(), [])
 
 
 if __name__ == "__main__":
