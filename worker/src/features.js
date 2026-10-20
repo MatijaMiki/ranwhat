@@ -34,7 +34,7 @@ export const FEATURES = Object.freeze({
     says: "Invite your team by email: one price however many people.",
   }),
   push: Object.freeze({
-    plan: "plus", status: "coming", name: "Push",
+    plan: "plus", status: "live", name: "Push",
     says: "Send a machine's findings to your account, as derived metadata only.",
   }),
   alerts: Object.freeze({
@@ -42,7 +42,7 @@ export const FEATURES = Object.freeze({
     says: "An email when what a linked machine's agents can do changes.",
   }),
   machines: Object.freeze({
-    plan: "plus", status: "coming", name: "Cross-machine view",
+    plan: "plus", status: "live", name: "Cross-machine view",
     says: "Every linked machine's findings side by side.",
   }),
   history: Object.freeze({

@@ -294,7 +294,8 @@ class ToolCalls(_Case):
         self.assertEqual(second.tool_input, ["rm", "-rf", "/"])
         for call in (first, second):
             self.assertEqual(watch.judge(call),
-                             watch.evaluate(call.tool_name, call.tool_input))
+                             watch.evaluate(call.tool_name, call.tool_input,
+                                            subjects=True))
 
     def test_names_ids_and_times_that_are_not_strings(self):
         entry = tool_use("ls", call_id={"odd": 1})

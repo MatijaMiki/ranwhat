@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import growth  # noqa: E402
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
-from ranwhat import catalog, clean, feed, score  # noqa: E402
+from ranwhat import catalog, clean, feed, ignore, score  # noqa: E402
 
 
 class Linear(growth.Assertions, unittest.TestCase):
@@ -127,6 +127,61 @@ class EmbeddedImages(growth.Assertions, unittest.TestCase):
         text = "export STRIPE_KEY=sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc" + " and done"
         labels = [label for _, label in clean.find_secrets(text)]
         self.assertTrue(labels, "a live-shaped key in prose was missed")
+
+
+class IgnoreFile(growth.Assertions, unittest.TestCase):
+    """watch and check ask the ignore file of every action they read, on
+    every run. A baseline holds an id for every action ever listed, and a
+    file a team keeps may hold hundreds of entries: 10,000 actions against
+    500 entries and 100,000 ids, all growing together, must cost what they
+    are long, not actions times entries. Entries are looked up by rule,
+    word count and the command's first two words, and ids by a dict."""
+
+    ACTIONS, ENTRIES, IDS = 10000, 500, 100000
+    TODAY = __import__("datetime").date(2026, 10, 20)
+    RULES = ("publish", "git.destructive", "fs.destructive", "cloud.destructive",
+             "persist", "exec.remote")
+
+    def text(self, n):
+        lines = ["%s 'tool%d sub%d arg%d' in=/w/p%d until=2027-01-01"
+                 % (self.RULES[i % len(self.RULES)], i, i, i % 7, i)
+                 for i in range(n(self.ENTRIES))]
+        lines += ["%016x  # publish 'npm publish' in=~/w  (Claude Code, "
+                  "2026-10-19 10:00)" % (i * 7919) for i in range(n(self.IDS))]
+        return "\n".join(lines) + "\n"
+
+    def records(self, n):
+        out = []
+        for i in range(n(self.ACTIONS)):
+            k = i % n(self.ENTRIES)
+            out.append({"id": "%016x" % (10 ** 12 + i), "severity": "critical",
+                        "cwd": "/w/p%d/sub" % k, "hits": [{
+                            "rule": self.RULES[k % len(self.RULES)],
+                            "severity": "critical", "why": "w", "_on": "command",
+                            "_subject": "tool%d sub%d arg%d" % (k, k, i % 7),
+                            "_cd": ""}]})
+        return out
+
+    def against_a_file(self, n):
+        found = ignore.Ignore(parsed=ignore.parse(self.text(n), self.TODAY),
+                              today=self.TODAY, exists=True)
+        return found, self.records(n)
+
+    def test_split_costs_what_the_report_and_the_file_are_long(self):
+        listed = self.assertScalesLinearly(
+            self.against_a_file, lambda pair: pair[0].split(pair[1]), rebuild=True)
+        # each action whose command its entry names is left out, and only
+        # those: its last word is the entry's for one action in seven or so
+        hidden = sum(1 for i in range(self.ACTIONS)
+                     if i % 7 == (i % self.ENTRIES) % 7)
+        self.assertGreater(hidden, 1000)
+        self.assertEqual(len(listed), self.ACTIONS - hidden)
+
+    def test_reading_a_large_baseline_is_linear(self):
+        parsed = self.assertScalesLinearly(
+            self.text, lambda text: ignore.parse(text, self.TODAY))
+        self.assertEqual((len(parsed.ids), len(parsed.entries)),
+                         (self.IDS, self.ENTRIES))
 
 
 class FeedLookups(growth.Assertions, unittest.TestCase):
@@ -485,6 +540,86 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("a long path read back", "'F=' + 'a/' * n(30000) + '.env; ' + 'cat $F ' * n(100000)"),
             ("a variable read back", "'F=.env; ' + 'cat \"$F\" ' * n(110000)"),
         ], call="watch.evaluate('Bash', {'command': text})")
+
+    def test_what_a_command_writes_and_where_it_does(self):
+        """persist and agent.config read the command as it was written, a
+        stage and a word at a time: where a regex over the words would read
+        on to the end of the stage for each of them, and shlex would split a
+        long echo it only has to print, each is read once. 64,000 characters
+        is all watch judges."""
+        self.assertLinear([
+            ("startup-file appends", "'echo x >> ~/.bashrc ; ' * n(2900)"),
+            ("one long quoted echo", repr("echo '") + " + 'a' * n(63000) + "
+             + repr("' >> ~/.zshrc")),
+            ("crontab -u values", "'crontab ' + '-u x ' * n(12700)"),
+            ("systemctl options", "'systemctl ' + '--user ' * n(9000) + 'enable x'"),
+            ("sudo -u before crontab", "'sudo -u ' * n(7900) + 'crontab x'"),
+            ("redirections", "'echo bashrc ' + '>a ' * n(21000)"),
+            ("tee targets", "'echo x | tee -a ' + '~/.bashrc ' * n(6300)"),
+            ("cp sources", "'cp ' + 'a ' * n(31000) + '~/Library/LaunchAgents/'"),
+            ("nested sh -c", repr("sh -c 'sh -c \"crontab x\"' ; ") + " * n(2200)"),
+            ("a digit run", "'1' * n(63000) + '> ~/.bashrc'"),
+            ("redirections after a launch", "'echo claude ' + '> a ' * n(15900)"),
+            ("quoted >", "'echo claude ' + " + repr("'>' ") + " * n(15900)"),
+            ("commented >", repr("echo claude # > \n") + " * n(3700)"),
+            ("tee words", "'echo claude | ' + 'tee f ' * n(10600)"),
+            ("sed -i words", "'sed -i ' * n(8000) + "
+             + repr("'s/a/b/' ~/.claude/settings.json")),
+            ("codex --yolo", "'codex ' + '--yolo ' * n(9000)"),
+            ("assignments before a launch", "'RANWHAT_HOOK=0 ' * n(4200) + 'claude'"),
+            ("npx -y", "'npx ' + '-y ' * n(21000) + '@anthropic-ai/claude-code'"),
+            ("bypassPermissions repeated", repr("echo '") + " + 'bypassPermissions ' "
+             "* n(3500) + " + repr("' > ~/.claude/settings.json")),
+            ("lists opened", repr("echo '\"allow\": [") + " + "
+             + repr('"Bash(x)", [') + " * n(5000) + "
+             + repr("' > ~/.claude/settings.json")),
+            ("metadata hosts", "'curl ' + 'http://169.254.169.254/' * n(2700)"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+
+    # A settings file's JSON, as an agent would write it, and where.
+    JSON = repr('"Bash(x)",')
+    SETTINGS = repr("~/.claude/settings.json ")
+
+    def test_one_text_written_to_many_settings_files(self):
+        """agent.config judged what a stage writes again for each file it
+        wrote it to, at the cost of the text each time: a 60KB command took
+        17 seconds, past the ten Claude Code gives the hook before it goes
+        on without it, and every rule with it. The text and the files grow
+        together here, so a cost of their product shows."""
+        json_text, settings = self.JSON, self.SETTINGS
+        self.assertLinear([
+            ("tee targets", repr("echo '") + " + %s * n(1500) + " % json_text
+             + repr("' | tee ") + " + %s * n(1000)" % settings),
+            ("redirections", repr("echo '") + " + %s * n(1500) + " % json_text
+             + repr("'") + " + ' > ~/.claude/settings.json' * n(1000)"),
+            ("a here-document's redirections", "'cat' + ' > ~/.claude/settings.json'"
+             " * n(1000) + " + repr(" <<'EOF'\n") + " + %s * n(1500) + " % json_text
+             + repr("\nEOF")),
+            ("a source copied again and again", repr("echo '") + " + %s * n(1500)"
+             " + " % json_text + repr("' > /tmp/a ; ")
+             + " + 'cp /tmp/a ~/.claude/settings.json ; ' * n(700)"),
+            ("a sed script on many files", repr("sed -i '") + " + 's/a/b/;' * n(3000)"
+             " + " + repr("' ") + " + %s * n(1000)" % settings),
+            ("a publish before it", repr("npm publish; echo '") + " + '\"x\",' * n(3000)"
+             " + " + repr("' | tee ") + " + '.claude/settings.json ' * n(1000)"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+
+    def test_a_file_tool_that_writes_many_settings_files(self):
+        """The same, through a file tool: its input was read again, and
+        judged again, for each path it wrote, 256 of them at most."""
+        self.assertLinear([
+            ("paths and content", "%s * n(6000)" % self.JSON),
+        ], call="watch.evaluate('Write', {'paths': ['/p%d/.claude/settings.json' % i"
+                " for i in range(len(text) // 250)], 'content': text})")
+        self.assertLinear([
+            ("patch headers", "''.join('*** Update File: /p%d/.claude/settings.json\\n'"
+             " % i + '+\"Bash(x)\",\\n' * 20 for i in range(n(220)))"),
+        ], call="watch.evaluate('apply_patch', {'input': text})")
+        self.assertLinear([
+            ("edits", "'x' * n(256)"),
+        ], call="watch.evaluate('MultiEdit', {'file_path': '/home/u/.claude/"
+                "settings.json', 'edits': [{'old_string': '\"Bash(y)\",' * 25, "
+                "'new_string': '\"Bash(x)\",' * 25}] * len(text)})")
 
     def test_a_megabyte_of_distinct_keys(self):
         """Each distinct value was looked for again in the whole text, once

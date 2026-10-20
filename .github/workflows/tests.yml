@@ -50,11 +50,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - run: node --check worker/src/index.js && node --check worker/src/list.js && node --check worker/src/feed.js && node --check worker/src/auth.js && node --check worker/src/stripe.js && node --check worker/src/accounts.js && node --check worker/src/session.js && node --check worker/src/dashboard.js && node --check worker/src/ui.js && node --check worker/src/features.js && node --check worker/src/password.js && node --check worker/src/challenge.js && node --check worker/src/oauth.js && node --check worker/src/webauthn.js && node --check worker/src/passkeys.js && node --check worker/src/device.js && node --check worker/src/machines.js && node --check worker/src/billing.js && node --check worker/src/members.js && node --check functions/_middleware.js
+      - run: node --check worker/src/index.js && node --check worker/src/list.js && node --check worker/src/feed.js && node --check worker/src/auth.js && node --check worker/src/stripe.js && node --check worker/src/accounts.js && node --check worker/src/session.js && node --check worker/src/dashboard.js && node --check worker/src/ui.js && node --check worker/src/features.js && node --check worker/src/password.js && node --check worker/src/challenge.js && node --check worker/src/oauth.js && node --check worker/src/webauthn.js && node --check worker/src/passkeys.js && node --check worker/src/device.js && node --check worker/src/machines.js && node --check worker/src/billing.js && node --check worker/src/members.js && node --check worker/src/push.js && node --check worker/src/push_schema.js && node --check functions/_middleware.js
       # The release list and the feed end to end, over node:sqlite (Node
       # 22.13 and later). The feed test runs the real `ranwhat update`
       # against the Worker, so it needs the Python the runner comes with.
-      - run: node --test worker/test/list.test.mjs worker/test/feed.test.mjs worker/test/auth.test.mjs worker/test/stripe.test.mjs worker/test/accounts.test.mjs worker/test/plans.test.mjs worker/test/password.test.mjs worker/test/oauth.test.mjs worker/test/webauthn.test.mjs worker/test/passkeys.test.mjs worker/test/device.test.mjs worker/test/machines.test.mjs worker/test/billing.test.mjs worker/test/members.test.mjs worker/test/stripe_probe.test.mjs
+      - run: node --test worker/test/list.test.mjs worker/test/feed.test.mjs worker/test/auth.test.mjs worker/test/stripe.test.mjs worker/test/accounts.test.mjs worker/test/plans.test.mjs worker/test/password.test.mjs worker/test/oauth.test.mjs worker/test/webauthn.test.mjs worker/test/passkeys.test.mjs worker/test/device.test.mjs worker/test/machines.test.mjs worker/test/billing.test.mjs worker/test/members.test.mjs worker/test/stripe_probe.test.mjs worker/test/push.test.mjs worker/test/push_e2e.test.mjs
 
   action:
     name: The GitHub Action fails on findings
@@ -90,12 +90,39 @@ jobs:
           upload-sarif: "false"
           sarif-file: critical.sarif
           args: --source claude-code --root ${{ runner.temp }}/projects
+      # The same action, left out by an ignore file args names: it comes
+      # after the Action's own --ignore, and wins.
+      - run: |
+          printf '%s\n' "fs.destructive 'rm -rf ~/Documents/archive'" > "$RUNNER_TEMP/ranwhat-ignore"
+      - id: ignored
+        uses: ./
+        with:
+          fail-on: high
+          upload-sarif: "false"
+          sarif-file: ignored.sarif
+          args: --source claude-code --root ${{ runner.temp }}/projects --ignore ${{ runner.temp }}/ranwhat-ignore
+      # ignore-file names a file no commit holds: a warning, nothing is
+      # left out, and the step fails on the action as before.
+      - id: unread
+        uses: ./
+        continue-on-error: true
+        with:
+          fail-on: high
+          upload-sarif: "false"
+          sarif-file: unread.sarif
+          ignore-file: no/such/.ranwhatignore
+          args: --source claude-code --root ${{ runner.temp }}/projects
       - env:
           HIGH_OUTCOME: ${{ steps.high.outcome }}
           HIGH_CODE: ${{ steps.high.outputs.exit-code }}
           CRITICAL_CODE: ${{ steps.critical.outputs.exit-code }}
+          IGNORED_CODE: ${{ steps.ignored.outputs.exit-code }}
+          UNREAD_CODE: ${{ steps.unread.outputs.exit-code }}
         run: |
           test "$HIGH_OUTCOME" = failure
           test "$HIGH_CODE" = 3
           test "$CRITICAL_CODE" = 0
+          test "$IGNORED_CODE" = 0
+          test "$UNREAD_CODE" = 3
           python3 -c "import json; r = json.load(open('ranwhat.sarif'))['runs'][0]['results']; assert [x['ruleId'] for x in r] == ['fs.destructive'], r"
+          python3 -c "import json; run = json.load(open('ignored.sarif'))['runs'][0]; assert run['results'] == [] and run['properties']['ignored']['actions'] == 1, run.get('properties')"

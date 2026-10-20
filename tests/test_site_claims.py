@@ -1049,7 +1049,9 @@ class GuidesHangTogether(unittest.TestCase):
 # Number words, as the site writes counts ("Nine rules", "twelve providers").
 WORDS = dict(enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve "
-    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty"
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty "
+    "twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six "
+    "twenty-seven twenty-eight twenty-nine thirty"
     .split()))
 
 
@@ -1109,8 +1111,9 @@ class CommandsPageMatchesTheCommands(unittest.TestCase):
         n = len(cli.COMMANDS)
         text = plain(read(SITE / "commands.html"))
         self.assertIn("%s commands in one tool" % WORDS[n].capitalize(), text)
-        # login, whoami and logout work with an account, and update with Plus.
-        self.assertIn("the other %s need neither" % WORDS[n - 4], text)
+        # login, whoami and logout work with an account, and update and push
+        # with Plus.
+        self.assertIn("the other %s need neither" % WORDS[n - 5], text)
         # watch, clean and scan have pages of their own.
         self.assertIn("The other %s are below" % WORDS[n - 3], text)
 
@@ -1467,6 +1470,28 @@ class EmailSignup(unittest.TestCase):
             self.assertIn('src="/subscribe.js"', text, name)
             # Loaded from subscribe.js on first use, not by the page.
             self.assertNotIn("challenges.cloudflare.com/turnstile", text, name)
+
+class PushCopyTests(unittest.TestCase):
+    def test_every_page_listing_login_and_whoami_also_names_push(self):
+        for page in sorted(SITE.glob("*.html")):
+            text = re.sub(r"<[^>]+>", "", read(page))
+            if "whoami and logout" in text or "logout talk only" in text:
+                with self.subTest(page=page.name):
+                    self.assertRegex(text, r"\bpush\b")
+        self.assertIn("push", re.sub(r"<[^>]+>", "", read(SITE / "faq.html")))
+        self.assertIn('id="push"', read(SITE / "privacy.html"))
+
+    def test_the_action_id_is_not_called_unrecoverable(self):
+        from ranwhat import push
+        flat = lambda t: re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", t)))
+        for name, text in (("README.md", read(SITE.parent / "README.md")),
+                           ("privacy.html", read(SITE / "privacy.html")),
+                           ("commands.html", read(SITE / "commands.html"))):
+            with self.subTest(page=name):
+                self.assertNotIn("cannot be recovered", flat(text))
+                self.assertRegex(flat(text), r"guess\w* at a plain command can be checked|guesses a plain command can check the guess")
+        self.assertIn("a guess at a plain command can be checked", push.ID_NOTE)
+
 
 if __name__ == "__main__":
     unittest.main()

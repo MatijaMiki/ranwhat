@@ -75,9 +75,12 @@ settings/ (mcp_settings.json holds MCP servers' env, custom_modes.yaml),
 cache/, and the CLI's ~/.roo/. The extension keeps its keys in the
 editor's secret storage, which is not read either.
 
-Kilo Code is not read here: up to 5.x it wrote this same format under
-globalStorage/kilocode.kilo-code, and 7.x is built on OpenCode and keeps
-its sessions in a SQLite database (~/.local/share/kilo/kilo.db).
+Kilo Code is read by kilo.py, not here: up to 5.x it wrote this same format
+under globalStorage/kilocode.kilo-code, and 7.x is built on OpenCode and keeps
+its sessions in a SQLite database (~/.local/share/kilo/kilo.db). The 7.x
+extension imports Roo's tasks (and its own older ones) into that database,
+so a task kept in both places is read by both sources, once each, and its
+calls are counted under Roo Code and under Kilo Code.
 """
 
 from __future__ import annotations

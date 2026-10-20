@@ -1,0 +1,10388 @@
+{
+ "valid": [
+  {
+   "name": "empty snapshot",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 7,
+    "counts": {
+     "flagged": 0,
+     "ignored": 0,
+     "omitted": 0,
+     "unread": 0,
+     "severity": {
+      "critical": 0,
+      "high": 0,
+      "medium": 0
+     },
+     "rules": {},
+     "agents": {},
+     "scanned": {
+      "codex": 1
+     }
+    },
+    "actions": []
+   }
+  },
+  {
+   "name": "full example",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "pre-release version",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0rc1",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "six days old",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now-6d",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": null,
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": null,
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "window of a year",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 365,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "action nearly a year old",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-300d",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "100 actions and 5 omitted",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 7,
+    "counts": {
+     "flagged": 105,
+     "ignored": 0,
+     "omitted": 5,
+     "unread": 0,
+     "severity": {
+      "critical": 0,
+      "high": 105,
+      "medium": 0
+     },
+     "rules": {
+      "publish": 105
+     },
+     "agents": {
+      "codex": 105
+     },
+     "scanned": {
+      "codex": 1
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a000000a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000010",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000011",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000012",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000013",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000014",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000015",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000016",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000017",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000018",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000019",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000020",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000021",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000022",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000023",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000024",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000025",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000026",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000027",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000028",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000029",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000030",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000031",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000032",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000033",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000034",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000035",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000036",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000037",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000038",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000039",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000040",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000041",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000042",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000043",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000044",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000045",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000046",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000047",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000048",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000049",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000050",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000051",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000052",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000053",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000054",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000055",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000056",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000057",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000058",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000059",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000060",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000061",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000062",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000063",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000064",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000065",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000066",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000067",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000068",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000069",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hits in any order",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 7,
+    "counts": {
+     "flagged": 1,
+     "ignored": 0,
+     "omitted": 0,
+     "unread": 0,
+     "severity": {
+      "critical": 0,
+      "high": 1,
+      "medium": 0
+     },
+     "rules": {
+      "agent.config": 1,
+      "audit.tamper": 1
+     },
+     "agents": {
+      "codex": 1
+     },
+     "scanned": {
+      "codex": 1
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "agent.config",
+        "severity": "high"
+       },
+       {
+        "rule": "audit.tamper",
+        "severity": "critical"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "invalid": [
+  {
+   "name": "root v missing",
+   "doc": {
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/v",
+   "reason": "missing"
+  },
+  {
+   "name": "root ranwhat missing",
+   "doc": {
+    "v": 1,
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/ranwhat",
+   "reason": "missing"
+  },
+  {
+   "name": "root generated_at missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "missing"
+  },
+  {
+   "name": "root window_days missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/window_days",
+   "reason": "missing"
+  },
+  {
+   "name": "root counts missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts",
+   "reason": "missing"
+  },
+  {
+   "name": "root actions missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    }
+   },
+   "field": "/actions",
+   "reason": "missing"
+  },
+  {
+   "name": "counts flagged missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/flagged",
+   "reason": "missing"
+  },
+  {
+   "name": "counts ignored missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/ignored",
+   "reason": "missing"
+  },
+  {
+   "name": "counts omitted missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/omitted",
+   "reason": "missing"
+  },
+  {
+   "name": "counts unread missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/unread",
+   "reason": "missing"
+  },
+  {
+   "name": "counts severity missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/severity",
+   "reason": "missing"
+  },
+  {
+   "name": "counts rules missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/rules",
+   "reason": "missing"
+  },
+  {
+   "name": "counts agents missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/agents",
+   "reason": "missing"
+  },
+  {
+   "name": "counts scanned missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/scanned",
+   "reason": "missing"
+  },
+  {
+   "name": "severity critical missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/severity/critical",
+   "reason": "missing"
+  },
+  {
+   "name": "severity high missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/severity/high",
+   "reason": "missing"
+  },
+  {
+   "name": "severity medium missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/severity/medium",
+   "reason": "missing"
+  },
+  {
+   "name": "action id missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "missing"
+  },
+  {
+   "name": "action agent missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/agent",
+   "reason": "missing"
+  },
+  {
+   "name": "action at missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/at",
+   "reason": "missing"
+  },
+  {
+   "name": "action hits missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h"
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits",
+   "reason": "missing"
+  },
+  {
+   "name": "hit rule missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/rule",
+   "reason": "missing"
+  },
+  {
+   "name": "hit severity missing",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/severity",
+   "reason": "missing"
+  },
+  {
+   "name": "unknown key hostname in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "hostname": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key user in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "user": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key cwd in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "cwd": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key command in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "command": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key path in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "path": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key evidence in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "evidence": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key session in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "session": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key machine in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "machine": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key org in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "org": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key __proto__ in root",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ],
+    "__proto__": "SECRETCANARY-9f3a"
+   },
+   "field": "/",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key in counts",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     },
+     "hostname": "SECRETCANARY-9f3a"
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key in severity",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1,
+      "low": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/severity",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key in action",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ],
+      "command": "SECRETCANARY-9f3a"
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/1",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "unknown key in hit",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high",
+        "evidence": "SECRETCANARY-9f3a"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/1",
+   "reason": "unknown_key"
+  },
+  {
+   "name": "v is a string",
+   "doc": {
+    "v": "1",
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/v",
+   "reason": "type"
+  },
+  {
+   "name": "v is 1.5",
+   "doc": {
+    "v": 1.5,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/v",
+   "reason": "type"
+  },
+  {
+   "name": "v is 0",
+   "doc": {
+    "v": 0,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/v",
+   "reason": "unsupported_version",
+   "error": "unsupported_version"
+  },
+  {
+   "name": "v is 2",
+   "doc": {
+    "v": 2,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/v",
+   "reason": "unsupported_version",
+   "error": "unsupported_version"
+  },
+  {
+   "name": "ranwhat is a number",
+   "doc": {
+    "v": 1,
+    "ranwhat": 8,
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/ranwhat",
+   "reason": "type"
+  },
+  {
+   "name": "ranwhat has a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "SECRETCANARY-9f3a",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/ranwhat",
+   "reason": "format"
+  },
+  {
+   "name": "ranwhat too long",
+   "doc": {
+    "v": 1,
+    "ranwhat": "1.2.3aaaaaaaaaaaaaaaaaaaa",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/ranwhat",
+   "reason": "format"
+  },
+  {
+   "name": "ranwhat has a newline",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0\n",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/ranwhat",
+   "reason": "format"
+  },
+  {
+   "name": "generated_at is a number",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": 1,
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "type"
+  },
+  {
+   "name": "window_days is a string",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": "3",
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/window_days",
+   "reason": "type"
+  },
+  {
+   "name": "window_days is 1.5",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 1.5,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/window_days",
+   "reason": "type"
+  },
+  {
+   "name": "flagged is a string",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": "3",
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/flagged",
+   "reason": "type"
+  },
+  {
+   "name": "counts is an array",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": [],
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts",
+   "reason": "type"
+  },
+  {
+   "name": "counts is null",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": null,
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts",
+   "reason": "type"
+  },
+  {
+   "name": "actions is an object",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": {}
+   },
+   "field": "/actions",
+   "reason": "type"
+  },
+  {
+   "name": "action is a string",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     "SECRETCANARY-9f3a",
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0",
+   "reason": "type"
+  },
+  {
+   "name": "hits is a string",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": "SECRETCANARY-9f3a"
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits",
+   "reason": "type"
+  },
+  {
+   "name": "rules map is an array",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": [],
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/rules",
+   "reason": "type"
+  },
+  {
+   "name": "rule count is a string",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": "2"
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/rules/publish",
+   "reason": "type"
+  },
+  {
+   "name": "action id is a number",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": 5,
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "type"
+  },
+  {
+   "name": "action agent is an object",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": {},
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/agent",
+   "reason": "type"
+  },
+  {
+   "name": "action at is a number",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": 5,
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/at",
+   "reason": "type"
+  },
+  {
+   "name": "hit rule is an array",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": [],
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/rule",
+   "reason": "type"
+  },
+  {
+   "name": "window_days 0",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 0,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/window_days",
+   "reason": "range"
+  },
+  {
+   "name": "window_days 366",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 366,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/window_days",
+   "reason": "range"
+  },
+  {
+   "name": "window_days negative",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": -1,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/window_days",
+   "reason": "range"
+  },
+  {
+   "name": "flagged negative",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": -1,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/flagged",
+   "reason": "range"
+  },
+  {
+   "name": "flagged over a million",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 1000001,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/flagged",
+   "reason": "range"
+  },
+  {
+   "name": "ignored over a million",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 1000001,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/ignored",
+   "reason": "range"
+  },
+  {
+   "name": "unread negative",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": -3,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/unread",
+   "reason": "range"
+  },
+  {
+   "name": "severity over a million",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1000001,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/severity/high",
+   "reason": "range"
+  },
+  {
+   "name": "rule count 0",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 0
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/rules/publish",
+   "reason": "range"
+  },
+  {
+   "name": "scanned count 0",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 0
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/scanned/codex",
+   "reason": "range"
+  },
+  {
+   "name": "generated_at eight days old",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now-8d",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "range"
+  },
+  {
+   "name": "generated_at two days ahead",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now+2d",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "range"
+  },
+  {
+   "name": "action more than a year old",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-400d",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/at",
+   "reason": "range"
+  },
+  {
+   "name": "action in the future",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now+2d",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/at",
+   "reason": "range"
+  },
+  {
+   "name": "hits empty",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": []
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits",
+   "reason": "range"
+  },
+  {
+   "name": "unsafe integer",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 9007199254740992,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/unread",
+   "reason": "type"
+  },
+  {
+   "name": "action id upper case",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000A0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "format"
+  },
+  {
+   "name": "action id 15 chars",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "0000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "format"
+  },
+  {
+   "name": "action id 17 chars",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "000000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "format"
+  },
+  {
+   "name": "action id with a trailing newline",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "0000000a0000001\n",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "format"
+  },
+  {
+   "name": "action id with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "SECRETCANARY-9f3a",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "format"
+  },
+  {
+   "name": "action id with non-ASCII digits",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "١١١١١١١١١١١١١١١١",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/id",
+   "reason": "format"
+  },
+  {
+   "name": "generated_at on a day that does not exist",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "2026-02-31T10:00:00Z",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "format"
+  },
+  {
+   "name": "generated_at with an offset",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "2026-10-20T10:00:00+01:00",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "format"
+  },
+  {
+   "name": "generated_at with a lower case z",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "2026-10-20T10:00:00z",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "format"
+  },
+  {
+   "name": "generated_at with fractions",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "2026-10-20T10:00:00.5Z",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "format"
+  },
+  {
+   "name": "generated_at with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "SECRETCANARY-9f3a",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/generated_at",
+   "reason": "format"
+  },
+  {
+   "name": "action at not a time",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "SECRETCANARY-9f3a",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/at",
+   "reason": "format"
+  },
+  {
+   "name": "rule id with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "SECRETCANARY-9f3a",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/rule",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "rule id from nowhere",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "made.up",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/rule",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "rule id is __proto__",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "__proto__",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/rule",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "rule id is constructor",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "constructor",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/rule",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "severity low",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "low"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/severity",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "severity with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "SECRETCANARY-9f3a"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/0/severity",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "agent id with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "SECRETCANARY-9f3a",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/agent",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "agent id toString",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "toString",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/agent",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "counts rules key with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2,
+      "SECRETCANARY-9f3a": 1
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/rules",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "counts agents key with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1,
+      "SECRETCANARY-9f3a": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/agents",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "counts scanned key with a canary",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7,
+      "SECRETCANARY-9f3a": 1
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/scanned",
+   "reason": "unknown_value"
+  },
+  {
+   "name": "duplicate action id",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000001",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/1/id",
+   "reason": "duplicate"
+  },
+  {
+   "name": "duplicate rule in an action",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "cred.read",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits/1/rule",
+   "reason": "duplicate"
+  },
+  {
+   "name": "101 actions",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 7,
+    "counts": {
+     "flagged": 101,
+     "ignored": 0,
+     "omitted": 0,
+     "unread": 0,
+     "severity": {
+      "critical": 0,
+      "high": 101,
+      "medium": 0
+     },
+     "rules": {},
+     "agents": {
+      "codex": 101
+     },
+     "scanned": {
+      "codex": 1
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a000000a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000000f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000010",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000011",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000012",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000013",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000014",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000015",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000016",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000017",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000018",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000019",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000001f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000020",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000021",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000022",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000023",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000024",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000025",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000026",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000027",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000028",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000029",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000002f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000030",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000031",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000032",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000033",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000034",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000035",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000036",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000037",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000038",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000039",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000003f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000040",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000041",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000042",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000043",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000044",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000045",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000046",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000047",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000048",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000049",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000004f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000050",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000051",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000052",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000053",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000054",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000055",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000056",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000057",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000058",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000059",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000005f",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000060",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000061",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000062",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000063",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000064",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000065",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000066",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000067",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000068",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000069",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006a",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006b",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006c",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006d",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a000006e",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions",
+   "reason": "too_many"
+  },
+  {
+   "name": "16 hits in an action",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "agent.config",
+        "severity": "high"
+       },
+       {
+        "rule": "audit.tamper",
+        "severity": "high"
+       },
+       {
+        "rule": "cloud.destructive",
+        "severity": "high"
+       },
+       {
+        "rule": "container.destructive",
+        "severity": "high"
+       },
+       {
+        "rule": "cred.metadata",
+        "severity": "high"
+       },
+       {
+        "rule": "cred.read",
+        "severity": "high"
+       },
+       {
+        "rule": "exec.encoded",
+        "severity": "high"
+       },
+       {
+        "rule": "exec.remote",
+        "severity": "high"
+       },
+       {
+        "rule": "exfil.shape",
+        "severity": "high"
+       },
+       {
+        "rule": "fs.destructive",
+        "severity": "high"
+       },
+       {
+        "rule": "git.destructive",
+        "severity": "high"
+       },
+       {
+        "rule": "money",
+        "severity": "high"
+       },
+       {
+        "rule": "perm.open",
+        "severity": "high"
+       },
+       {
+        "rule": "persist",
+        "severity": "high"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       },
+       {
+        "rule": "secret.literal",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions/0/hits",
+   "reason": "too_many"
+  },
+  {
+   "name": "severity sum differs from flagged",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 0
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/severity",
+   "reason": "inconsistent"
+  },
+  {
+   "name": "agents sum differs from flagged",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 0,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 5
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/counts/agents",
+   "reason": "inconsistent"
+  },
+  {
+   "name": "actions plus omitted differ from flagged",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 30,
+    "counts": {
+     "flagged": 3,
+     "ignored": 2,
+     "omitted": 1,
+     "unread": 1,
+     "severity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1
+     },
+     "rules": {
+      "cred.read": 1,
+      "git.destructive": 1,
+      "publish": 2
+     },
+     "agents": {
+      "claude-code": 2,
+      "codex": 1
+     },
+     "scanned": {
+      "claude-code": 41,
+      "codex": 7
+     }
+    },
+    "actions": [
+     {
+      "id": "00000000a0000001",
+      "agent": "claude-code",
+      "at": "@now-1h",
+      "hits": [
+       {
+        "rule": "cred.read",
+        "severity": "critical"
+       },
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000002",
+      "agent": "codex",
+      "at": null,
+      "hits": [
+       {
+        "rule": "publish",
+        "severity": "high"
+       }
+      ]
+     },
+     {
+      "id": "00000000a0000003",
+      "agent": "claude-code",
+      "at": "@now-2h",
+      "hits": [
+       {
+        "rule": "git.destructive",
+        "severity": "medium"
+       }
+      ]
+     }
+    ]
+   },
+   "field": "/actions",
+   "reason": "inconsistent"
+  },
+  {
+   "name": "omitted without actions to account for it",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 7,
+    "counts": {
+     "flagged": 0,
+     "ignored": 0,
+     "omitted": 4,
+     "unread": 0,
+     "severity": {
+      "critical": 0,
+      "high": 0,
+      "medium": 0
+     },
+     "rules": {},
+     "agents": {},
+     "scanned": {
+      "codex": 1
+     }
+    },
+    "actions": []
+   },
+   "field": "/actions",
+   "reason": "inconsistent"
+  },
+  {
+   "name": "agents without flagged",
+   "doc": {
+    "v": 1,
+    "ranwhat": "0.8.0",
+    "generated_at": "@now",
+    "window_days": 7,
+    "counts": {
+     "flagged": 0,
+     "ignored": 0,
+     "omitted": 0,
+     "unread": 0,
+     "severity": {
+      "critical": 0,
+      "high": 0,
+      "medium": 0
+     },
+     "rules": {},
+     "agents": {
+      "codex": 1
+     },
+     "scanned": {
+      "codex": 1
+     }
+    },
+    "actions": []
+   },
+   "field": "/counts/agents",
+   "reason": "inconsistent"
+  }
+ ]
+}

@@ -220,7 +220,7 @@ const forged = async (e, b, action, org, fields = {}) =>
 /* Every account page's HTML, one after another, for what may be on any of them. */
 async function everyPage(b) {
   let html = "";
-  for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) {
+  for (const path of ["/", "/machines", "/findings", "/members", "/billing", "/security", "/activity"]) {
     const r = await b.get(path);
     assert.equal(r.status, 200, `${path}: ${r.status}`);
     html += r.text;

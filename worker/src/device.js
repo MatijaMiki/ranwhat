@@ -196,7 +196,7 @@ async function tables(db) {
    make without a preflight: without this, a page could spend its
    visitors' networks on device codes. Sec-Fetch-Site: none is a browser's
    own navigation, typed or bookmarked, which no page can cause. */
-function fromBrowser(request) {
+export function fromBrowser(request) {
   const site = request.headers.get("sec-fetch-site");
   return request.headers.get("origin") !== null || (site !== null && site !== "none");
 }
@@ -424,6 +424,8 @@ export async function logout(request, env) {
     db.prepare(`UPDATE tokens SET revoked_at = ? WHERE revoked_at IS NULL
                 AND hash = (SELECT hash FROM machines WHERE id = ? AND kind = 'device')`).bind(now(), who.machine.id),
     event(db, { org: who.org, user: who.machine.user, what: "machine_logout", subject: who.machine.id }),
+    /* What it pushed (push.js) goes with its token. */
+    db.prepare("DELETE FROM pushes WHERE machine_id = ?").bind(who.machine.id),
   ]);
   return reply(200, { revoked: true });
 }

@@ -482,7 +482,7 @@ class Flags(_Cli):
         return " ".join(err.split())
 
     def test_the_source_choices_are_the_registry_ids(self):
-        said = self.argparse_error("watch", "--source", "zed")
+        said = self.argparse_error("watch", "--source", "crush")
         listed = said.split("choose from ")[1].split(")")[0]
         self.assertEqual([c.strip(" '") for c in listed.split(",")],
                          list(sources.ids()))
@@ -505,8 +505,8 @@ class Flags(_Cli):
                     command, "--source", "meta-muse"))
 
     def test_path_for_an_agent_ranwhat_does_not_know_is_an_error(self):
-        said = self.argparse_error("watch", "--path", "zed=" + self.tmp)
-        self.assertIn("no agent 'zed'", said)
+        said = self.argparse_error("watch", "--path", "crush=" + self.tmp)
+        self.assertIn("no agent 'crush'", said)
         self.assertIn("codex", said)
 
     def test_path_takes_an_id_and_a_path(self):
@@ -767,10 +767,32 @@ class Reports(_Cli):
         by_source = {r["source"]: r for r in json.loads(out)}
         self.assertEqual(by_source["codex"]["kind"], "shell")
         self.assertEqual(by_source["codex"]["project"], "/home/dev/app")
-        # Claude Code's records keep exactly the keys they had
+        # where the call ran, from the workdir Codex gave it
+        self.assertEqual(by_source["codex"]["cwd"], "/home/dev/app")
+        # Claude Code's records keep exactly the keys they had, and the id
+        # ranwhat ignore names each by (a transcript with no cwd: no cwd)
         self.assertEqual(sorted(by_source["claude-code"]), sorted(
-            ["source", "session", "project", "timestamp", "tool_name",
+            ["id", "source", "session", "project", "timestamp", "tool_name",
              "tool_call_id", "payload_hash", "severity", "hits"]))
+
+    def test_every_agents_records_carry_an_id(self):
+        roots = {}
+        for agent in af.AGENTS:
+            roots[agent.id] = root = self.agent_root(agent)
+            agent.write(root, _calls(self.now))
+        self.claude_transcript(_claude_call(1, "rm -rf ~/Documents/c", "ok", self.now))
+        flags = list(self.base_flags())
+        for agent_id, root in roots.items():
+            flags += ["--path", "%s=%s" % (agent_id, root)]
+        rc, out, _ = self.run_cli("watch", "--json", *flags)
+        records = json.loads(out)
+        self.assertEqual({r["source"] for r in records},
+                         {a.id for a in af.AGENTS} | {"claude-code"})
+        for r in records:
+            self.assertRegex(r["id"], r"\A[0-9a-f]{16}\Z")
+            for hit in r["hits"]:
+                self.assertFalse([k for k in hit if k.startswith("_")])
+        self.assertEqual(len({r["id"] for r in records}), len(records))
 
     def test_every_line_fits(self):
         roots = {}
@@ -1028,6 +1050,14 @@ class AbsentAgentsCostAStatOrTwo(_Cli):
                     # also looks at the current directory's git root: one
                     # stat of each folder on the way up to it.
                     limit += len(os.path.abspath(os.getcwd()).split(os.sep))
+                if source.id == "vscode-copilot":
+                    # One stat for each editor's User folder: VS Code and
+                    # the five forks _paths probes.
+                    limit = 6
+                if source.id == "warp" and sys.platform == "darwin":
+                    # Five channels, each in the group container and in
+                    # Application Support: a stat of each of the ten.
+                    limit = 10
                 self.assertLessEqual(n, limit)
 
     def test_a_whole_run(self):

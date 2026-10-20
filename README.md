@@ -1,7 +1,7 @@
 # ranwhat
 
 **A flight recorder for AI agents, and a scanner for the authority they hold.**
-AI coding agent security for Claude Code and nineteen other coding agents, run
+AI coding agent security for Claude Code and twenty-nine other coding agents, run
 on your own machine.
 No account, no telemetry, no dependencies.
 
@@ -20,22 +20,22 @@ $ ranwhat watch --days 90
 
   2 critical  2 high
 
-  * Credential material accessed   2026-09-30 18:13:00  Bash
+  * Credential material accessed   2026-09-30 18:13:00  Bash  9c41e07b2d5a8f13
       cat ~/.ssh/id_rsa
       -> The agent read a file whose only purpose is to hold secrets. Whatever
          it read is now in a model context you do not control.
 
-  * Bulk or recursive deletion   2026-09-28 14:42:00  Bash
+  * Bulk or recursive deletion   2026-09-28 14:42:00  Bash  51e3c6a43e946bf5
       …rm -rf '@'
       -> Recursive deletion. Recoverable only if something else was backing it
          up.
 
-  * Package or release published   2026-09-21 11:05:00  Bash
+  * Package or release published   2026-09-21 11:05:00  Bash  3fa9c2d81b7e4a06
       npm publish
       -> Something was pushed to a registry other people may install from.
          Supply-chain reach, and usually irreversible.
 
-  * Destructive git operation   2026-09-15 17:30:00  Bash
+  * Destructive git operation   2026-09-15 17:30:00  Bash  e181acd29cf199ab
       git push --force origin main
       -> History rewriting or branch deletion. This is the class of action
          that destroys the record of what else happened.
@@ -111,6 +111,8 @@ chars`), never its value or its fingerprint, and every value `clean`
 finds is masked wherever else it shows up there, as in the report. Agent
 history lives outside your repository, so each result points at the
 transcript or project directory it came from on the machine that ran it.
+An action's results carry its `id` (`actionId`), and fingerprints made from
+it, so code scanning can follow a finding from one run to the next.
 
 On a terminal, check, watch and clean keep one status line on stderr while
 they read, counting transcripts through each pass: `indexing secrets`
@@ -131,22 +133,32 @@ machine is skipped.
 | Claude Code | `~/.claude/projects/*/*.jsonl` and each session's `subagents/**/agent-*.jsonl`, or the same under `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
 | Codex (CLI, IDE extension, desktop app) | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` and `archived_sessions/` (`$CODEX_HOME`); `history.jsonl`, `shell_snapshots/` and its SQLite thread index are searched for secrets | JSONL; SQLite read only; `.jsonl.zst` read only, on Python 3.14 or with the `zstd` command |
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.jsonl` and older `session-*.json` (`$GEMINI_CLI_HOME`) | JSONL, JSON |
+| Antigravity (`agy`, the app and the IDE) | `~/.gemini/antigravity-cli/brain/<conversation>/.system_generated/logs/transcript_full.jsonl`, and the same under `~/.gemini/antigravity` and `~/.gemini/antigravity-ide` | JSONL |
 | GitHub Copilot CLI | `~/.copilot/session-state/<session>/events.jsonl` (`$COPILOT_HOME`) | JSONL |
+| GitHub Copilot in VS Code | `<editor>/User/workspaceStorage/<workspace>/chatSessions/<session>.jsonl` and `globalStorage/emptyWindowChatSessions/` (`$VSCODE_PORTABLE`, `$VSCODE_APPDATA`) | JSONL, JSON |
 | Cursor (editor and `cursor-agent`) | the editor's `Cursor/User/globalStorage/state.vscdb` (under `~/Library/Application Support`, `%APPDATA%` or `~/.config`), and `~/.cursor/chats/*/*/store.db` | SQLite, read only |
 | Windsurf | `~/.windsurf/transcripts/*.jsonl`, which Windsurf writes when its `post_cascade_response_with_transcript` hook is on; Cascade's own history (`~/.codeium/windsurf/cascade/*.pb`) is encrypted, so it is counted, not read | JSONL |
 | Cline | `<editor>/User/globalStorage/saoudrizwan.claude-dev/tasks/<task>/`, and `~/.cline/data` (`$CLINE_DATA_DIR`) | JSON |
 | Roo Code | `<editor>/User/globalStorage/rooveterinaryinc.roo-cline/tasks/<task>/` | JSON, text |
+| Kilo Code (CLI and extensions) | `~/.local/share/kilo/kilo.db` and the older `storage/` JSON files (`$XDG_DATA_HOME/kilo`, `$KILO_DB`) | SQLite read only; JSON |
 | OpenCode | `~/.local/share/opencode/opencode.db` and the older `storage/` JSON files (`$XDG_DATA_HOME/opencode`, `$OPENCODE_DB`) | SQLite read only; JSON |
 | Continue (IDE extensions and `cn`) | `~/.continue/sessions/<session>.json` (`$CONTINUE_GLOBAL_DIR`) | JSON |
 | Aider | `.aider.chat.history.md` and `.aider.input.history` in the repository you run ranwhat in, and in your home folder (`$AIDER_CHAT_HISTORY_FILE`) | Text |
 | Goose (CLI and desktop) | `~/.local/share/goose/sessions/sessions.db` and older `*.jsonl` there (`$GOOSE_PATH_ROOT`; `%APPDATA%\Block\goose\data` on Windows) | SQLite read only; JSONL |
+| Zed | `~/.local/share/zed/threads/threads.db` (`$XDG_DATA_HOME/zed`) | SQLite, read only; zstd-compressed threads need Python 3.14 or the `zstd` command |
+| Warp | `~/.local/state/warp-terminal/warp.sqlite` (`$XDG_STATE_HOME`) | SQLite, read only |
+| Amazon Q (IDE plugins and `q chat`) | `~/.aws/amazonq/history/chat-history-*.json`, and the CLI's `data.sqlite3` under `~/.local/share/amazon-q` (`$XDG_DATA_HOME`) | JSON, SQLite; both read only |
 | Qwen Code | `~/.qwen/projects/<project>/chats/*.jsonl` and older `tmp/<hash>/chats/session-*.json` (`$QWEN_RUNTIME_DIR`, `$QWEN_HOME`) | JSONL, JSON |
+| CodeBuddy | `~/.codebuddy/projects/<project>/<session>.jsonl` (`$CODEBUDDY_CONFIG_DIR`) | JSONL |
 | Grok Build | `~/.grok/sessions/<folder>/<session>/updates.jsonl` (`$GROK_HOME`) | JSONL |
 | Droid | `~/.factory/sessions/*.jsonl`, and `-<cwd>/*.jsonl` and `btw/*.jsonl` below it (`$FACTORY_HOME_OVERRIDE`) | JSONL |
 | Kimi Code | `~/.kimi-code/sessions/<folder>/<session>/agents/*/wire.jsonl` (`$KIMI_CODE_HOME`) | JSONL |
 | Kimi CLI | `~/.kimi/sessions/<folder>/<session>/wire.jsonl` and `context*.jsonl` (`$KIMI_SHARE_DIR`) | JSONL |
 | Pi | `~/.pi/agent/sessions/--<cwd>--/*.jsonl` (`$PI_CODING_AGENT_DIR`) | JSONL |
+| Oh My Pi | `~/.omp/agent/sessions/<project>/*.jsonl` (`$PI_CODING_AGENT_DIR`, `$PI_CONFIG_DIR`, `$XDG_DATA_HOME/omp`) | JSONL |
 | Muse Code | `~/.local/share/muse/sessions/YYYY/MM/DD/<session>/session.jsonl` (`$XDG_DATA_HOME/muse`) | JSONL |
+| Mistral Vibe | `~/.vibe/logs/session/unified/<session>/` and the older `session_*/messages.jsonl` (`$VIBE_HOME`) | JSON, JSONL; unified sessions read only |
+| DeepSeek Harness (`dsh`) | `~/.dsh/sessions/<project>/<session>/session.jsonl.zstd` (`$DSH_HOME`) | JSONL; compressed read only, on Python 3.14 or with the `zstd` command |
 | OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite` | SQLite, read only |
 
 Meta Muse runs in Meta's cloud and keeps nothing on your machine, so there
@@ -155,14 +167,34 @@ Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
 machine; Grok Build, xAI's coding CLI, is supported. The current Amp keeps
 its threads on ampcode.com.
 
-Thirteen rules: credential access, secret-shaped strings in tool calls, package
+Antigravity, GitHub Copilot in VS Code, Kilo Code, Zed, Warp, Amazon Q,
+CodeBuddy, Oh My Pi, Mistral Vibe and DeepSeek Harness were written from each
+agent's own source code (and its documentation where it has any), not from a
+long-lived install: only Mistral Vibe and Antigravity's `agy` CLI were also
+run, and none of the ten publishes its history format, so a release of the
+agent can change it. Not checked on a real machine: Antigravity's app and
+IDE folders and its Windows path, the Preview folders of Warp, VS Code
+forks other than Code, and Flatpak Zed. A task that Kilo Code imported from
+Roo Code is read under both, so it can be listed twice. Zed's compressed
+threads and DeepSeek Harness's sessions need Python 3.14 or the `zstd`
+command to be read; without either, `ranwhat sources` counts them as unread.
+
+Sixteen rules: credential access, secret-shaped strings in tool calls, package
 publishing, cloud resource changes, financial API calls, log tampering,
 destructive git, recursive deletion, local files uploaded with curl, scripts
 downloaded and run unread, files made writable by every user, container
-volumes wiped, and encoded commands decoded and run.
+volumes wiped, encoded commands decoded and run, an instance's credentials
+asked of a cloud metadata service, jobs set to run at login, boot or on a
+schedule, and an agent's guardrails loosened.
 A command hidden in base64, hex or printf escapes and handed to a shell,
 `eval` or an interpreter is decoded without being run, and what it decodes to
-is judged by the same rules.
+is judged by the same rules. A change to a shell startup file is medium; one
+that runs `curl … | sh` in every new shell is high. An edit to an agent's
+settings is judged by what it lets through: an MCP server added is medium,
+`bypassPermissions` in your user settings, or an edit that takes the ranwhat
+hook out, is critical. So is any change an agent makes to what ranwhat
+itself reports: the secrets `clean` was told to keep, the key they are kept
+under, the ignore file, or where ranwhat keeps them.
 Each agent's tool calls are judged by the same rules; every action says
 which agent ran it.
 
@@ -176,6 +208,118 @@ ranwhat sources                             # every agent, where it looked, what
 
 `--root` and `--state-dir` still work, as the names of
 `--path claude-code=` and `--path openclaw=`.
+
+Each action ends with its `id`: 16 characters, the same on every run
+over the same history, and new for a call run again or flagged for
+something more. A call read more than once with no time of its own (two
+sessions holding it, or an OpenClaw call run again) is one action. With
+`--json`, each action has its `id`, the id of each copy in `ids` where
+there is more than one, and `cwd`, the directory it ran in, when the
+agent wrote one down. An action you expected is left out of later
+reports with [`ranwhat ignore`](#ranwhat-ignore-leave-out-what-you-expected).
+
+### `ranwhat ignore`: leave out what you expected
+
+A report that lists the same expected actions on every run stops being
+read. `ranwhat ignore` names what to leave out, by the id at the end of
+each action's line:
+
+```bash
+ranwhat ignore 3fa9c2d81b7e4a06   # that action, or on a terminal, every one like it
+ranwhat ignore all                # everything listed now: later runs list only what is new
+ranwhat ignore                    # what the file leaves out, line by line
+```
+
+On a terminal, `ranwhat ignore ID` asks whether to leave out that action
+alone or every action like it: the same command, word for word, run in
+the same folder or below it, and for a critical one until a date a year
+away. `--no-interactive` adds the id without asking.
+
+Both write `~/.ranwhat/ignore` (`$RANWHAT_HOME/ignore`), mode 0600, a
+plain-text file you can read and edit. One entry a line, and `#` after a
+blank starts a comment:
+
+```
+publish 'npm publish' in=~/work/mylib until=2027-01-31       # mylib releases
+persist 'sudo systemctl enable docker'                        # docker at boot here
+git.destructive 'git push --force origin gh-pages'
+cred.read ~/work/mylib/.env.test until=2027-04-01             # fixture values only
+exec.remote                                                   # medium and high only
+3fa9c2d81b7e4a06  # publish 'npm publish' in=~/work/mylib  (Claude Code, 2026-09-21 11:05)
+```
+
+- An id leaves out that action. Several on a line are the copies of one
+  call, as watch's `ids` lists them.
+- `RULE 'COMMAND'` leaves out every action the rule flags whose command is
+  COMMAND, word for word. It is matched against the whole command the
+  action ran, not the evidence printed: `npm publish --registry
+  https://registry.npmjs.evil.example/` is not `npm publish`, and `sudo npm
+  publish` is not either. A `*` stands for any run of characters within one
+  word. When the rule flagged a file a tool read or wrote, a path stands in
+  for the command. With no command, every action the rule flags.
+- `in=DIR` leaves out only what ran in DIR or below it, following a `cd`
+  earlier in the same call; `until=YYYY-MM-DD` is the last day it applies.
+- A line ranwhat cannot read is skipped, named in every report, and leaves
+  nothing out. `ranwhat ignore` exits 3 when one is.
+
+`--ignore PATH` makes check, watch and ignore use another file, such as a
+repository's `.ranwhatignore`. ranwhat never picks one up from the working
+tree on its own, which is what an agent writes most easily, and no variable
+points at one, so a cron job and your terminal read the same file.
+
+What is never left out:
+
+- A secret. `clean` masks it, or keeps it in its review; an action that
+  holds one stays listed until then.
+- A critical action, but by its id, or by an entry that names its program
+  in full, with `in=` and an `until=` no more than 400 days ahead. The
+  report says when an entry matches a critical action and lacks those.
+  An entry sees the words of the one command, not the state set before it
+  in the call or by an earlier one (an `export`, `npm config set`, an
+  `.npmrc` written a call ago), so a critical action you cannot afford to
+  see redirected is better left out by its id than by a pattern.
+- A change an agent made to what ranwhat reports (this file, the values
+  `clean` was told to keep, the key, where ranwhat keeps them, or `ranwhat
+  ignore` itself), until you acknowledge it on a terminal with `ranwhat
+  ignore ID`, which writes the id with `ack`.
+- What a call decoded from base64 or the like, but by its id.
+
+Every report says how many actions the file left out, and by which line:
+under the report, on stderr with `watch --json`, and as `"ignored"` in
+`check --json`. `--no-ignore` lists them all again, each marked with the
+line that would leave it out. `--fail-on` counts only what is listed, and
+says how many at or above it were left out. A SARIF log leaves them out
+too, which closes their alerts in code scanning. The hook does not read the
+ignore file: what you ignore is left out of reports, and the hook still
+asks.
+
+**Only what is new.** `ranwhat ignore all` writes the id of every action
+listed now, in one dated block. Give it the `--days` you run watch with: a
+later `--days 365` lists older actions it never saw. `ranwhat ignore -`
+reads the ids from `watch --json` or `check --json` on stdin, so a cron job
+alerts on each new action once:
+
+```bash
+ranwhat ignore all --days 30                      # once: what is there now is known
+# hourly:
+ranwhat watch --days 30 --fail-on high --json > ~/ranwhat-new.json 2> ~/ranwhat-notes.txt
+[ $? -eq 3 ] && mail -s "ranwhat: new actions" me < ~/ranwhat-new.json
+ranwhat ignore - < ~/ranwhat-new.json             # each new action alerts once
+```
+
+A change to ranwhat's own settings is never added by `ignore all` or
+`ignore -`, so it alerts on every run until you acknowledge it.
+
+watch and the hook judge what a call shows, so a script that rewrites the
+file is not seen. An id changes when a later ranwhat flags a call for
+something more, or rates it otherwise, and the action is listed once more:
+run `ranwhat ignore all` again after an upgrade for a fresh baseline. An
+agent that records neither a call id nor a time for a call (Windsurf) is
+named by what the call held, as ranwhat masks it, so its action is listed
+once more if another agent's history later shows a value from its command;
+`ranwhat ignore all` leaves it out again. The comment ranwhat writes after each id holds the command, masked as the
+report masks it, and where it ran; read a `.ranwhatignore` before you
+commit it.
 
 ### `ranwhat clean`: find secrets in Claude Code and other agents' transcripts
 
@@ -367,11 +511,24 @@ steps:
       # upload-sarif: "true"
       # sarif-file: ranwhat.sarif
       # allow-empty: "false"           # "true" passes when there is no history
+      # ignore-file: .ranwhatignore    # what to leave out, as committed at the base
 ```
 
 The step fails with ranwhat's exit status, which is also its `exit-code`
 output: 3 for findings at or above `fail-on`, 2 when there was no agent
 history to read (unless `allow-empty`), 1 on an error.
+
+`ignore-file` names a [`ranwhat ignore`](#ranwhat-ignore-leave-out-what-you-expected)
+file in the repository. The Action reads it as it was committed at the pull
+request's base, or before the push, never as the job left it: neither a step
+that ran an agent nor the pull request itself can widen it, and it warns
+when the job changed it. Without the input nothing is left out, and the
+runner's own `~/.ranwhat/ignore` is never read. `args: --ignore PATH` reads
+a file as it is instead. On a self-hosted runner whose agent history
+persists, build the file with `ranwhat ignore all --ignore .ranwhatignore`,
+read it (its comments hold commands, masked), commit it, and give it an
+owner in CODEOWNERS; a pull request job that runs `ranwhat ignore --ignore
+.ranwhatignore` fails with exit status 3 on a line ranwhat cannot read.
 
 ### `ranwhat scan`: score what an agent's credentials can do
 
@@ -453,6 +610,41 @@ uvx ranwhat logout    # revokes this machine's token, then deletes it
   last heard for it, under the token's SHA-256, so the hints about Plus are
   right; `logout` deletes both.
 
+### `ranwhat push`: send this machine's findings to your account
+
+Plus, and only ever something you run. `ranwhat push` reads what `watch`
+reads, leaves out what your ignore file leaves out, and sends the result to
+your organisation's account, so every linked machine's findings can be read
+side by side at [account.ranwhat.com/findings](https://account.ranwhat.com/findings).
+Nothing runs it for you: not the hook, `check` or `watch`.
+
+```bash
+uvx ranwhat push --dry-run   # print the exact JSON; sends nothing, needs no account
+uvx ranwhat push             # say what it will send, ask, then send
+```
+
+- What it sends is derived metadata: for each flagged action (at most 100,
+  most severe first) the rule id and severity of each rule it tripped, a
+  16-character action id (a hash, not the action; where an agent writes no
+  call id, a guess at a plain command can be checked against it), the agent and the time in
+  UTC; then counts, ranwhat's version and the window in days. Actions your
+  ignore file leaves out are counted and not listed. The machine is the token
+  that signs the request, and the body has no field for anything else.
+- It never sends a command, a path, evidence, a working directory, a session
+  id, file contents, a secret, your hostname or your user name. The document
+  is built from those few facts and nothing else is read from a record, and
+  the server refuses a body with any other field.
+- It goes only to `feed.ranwhat.com`, over HTTPS, with this machine's token
+  (`ranwhat login`) or a CI token in `RANWHAT_TOKEN`. An organisation on Free
+  is refused, and nothing is stored. Without `--yes` it asks first, and on a
+  pipe it refuses. `--days N` sets the window; `--json` prints the answer.
+- Plus keeps each machine's latest push whole, and a summary of the counts of
+  earlier pushes for 30 days, at most 30, and nothing past 90 days. That is
+  not the 13-month record, a separate feature that is still being built. The
+  same findings pushed again change nothing. Every member of the organisation
+  can read them. `ranwhat logout`, or revoking the machine on the account
+  page, deletes what that machine pushed.
+
 ### `ranwhat hook install`: ask before a high-risk Claude Code call
 
 Every other command works after the fact, and the agent never knows.
@@ -477,6 +669,33 @@ ranwhat hook uninstall
 - `--scope project` writes `.claude/settings.json` for everyone on the
   repository; `--scope local` writes `.claude/settings.local.json` for you.
 - `RANWHAT_HOOK=0` in Claude Code's environment lets every call through.
+- It asks before a call that shows it turning the hook off: `ranwhat hook
+  uninstall`, `RANWHAT_HOOK=0 claude`, or an edit (Edit, `sed`, `jq`, `yq`, a
+  removal) that takes its entry out of the settings or sets
+  `disableAllHooks`. Claude Code applies a settings change as soon as the
+  file changes, so before the call is the only time to ask. In deny mode such
+  a call is refused, and the agent is told to ask you to run it yourself.
+  A settings file rewritten whole with other settings, by a call that does
+  not show what it replaced, is recorded as medium and not asked about, and
+  a script that rewrites it is not seen: the hook judges what a call shows,
+  and is no sandbox.
+- It asks in the same way before a call that changes what ranwhat itself
+  reports, since what such a change leaves out is missing from every report
+  after it: a write to `~/.ranwhat/known/kept.json`, which holds the secrets
+  `clean` was told to keep, or to the key beside it; a write to the ignore
+  file, `~/.ranwhat/ignore` or a `.ranwhatignore` anywhere; anything copied,
+  moved or linked into `~/.ranwhat`; `RANWHAT_HOME` set for good, in a
+  startup file, in Claude Code's settings, or with `setx`, `launchctl
+  setenv` or `systemctl set-environment`; and `ranwhat ignore` given an
+  action to add. Reading the ignore file or `kept.json`, or taking one out,
+  only means more is reported, and is not asked about; reading the key is,
+  as a credential read (below). A one-off
+  `RANWHAT_HOME=/tmp/x ranwhat watch`, which changes that run alone, is not
+  asked about either. A
+  state folder set with `RANWHAT_HOME` to a path without the word ranwhat in
+  it is recognised in a file tool's path, and not in a shell command.
+- The hook does not read the ignore file: what you ignore is left out of
+  reports, and the hook still asks.
 - Each check takes about a fifth of a second. The reason it gives Claude
   Code names the rule, never the value that tripped it.
 
@@ -567,12 +786,21 @@ prints a warning saying why it shouldn't.
 
 Reports are written mode `600` and never through a symlink: a report maps an
 agent's entire authority surface, which is useful to somebody other than you.
+The ignore file, `~/.ranwhat/ignore`, is written mode `600` as well, whole and
+under a lock; a file other users can write is not used.
+
+ranwhat keeps two secrets of its own, each mode `600`: its account token,
+`~/.ranwhat/token`, and `~/.ranwhat/known/key`, the key the secrets index
+and the values `clean` was told to keep are hashed under. Whoever holds the
+key can write `kept.json` to keep any value out of every report. `watch`
+rates an agent's read of either as credential material accessed, critical,
+as it rates a read of `~/.aws/credentials`, and the hook asks before one.
 
 ## What goes online
 
 No account needed. live, callers, --pull-usage and clean's revoke ask only the
-provider that issued each token, and update, login, whoami and logout talk only to ranwhat.com.
-Everything else reads locally and sends nothing.
+provider that issued each token, and update, login, whoami, logout and push talk only to ranwhat.com.
+push sends derived metadata only, and only when you run it. Everything else reads locally and sends nothing.
 
 - Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own ranwhat token, at `~/.ranwhat/token` (mode 0600): the machine token from `ranwhat login`, or a subscription token saved with `update --save-token`.
 - Live introspection talks only to the credential's own issuer

@@ -34,7 +34,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"AI coding agent security: a checklist for your own machine","description":"What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.","datePublished":"2026-10-02","dateModified":"2026-10-14","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-security","about":[{"@type":"Thing","name":"AI agent security"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent security","item":"https://ranwhat.com/guides/ai-coding-agent-security"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"AI coding agent security: a checklist for your own machine","description":"What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.","datePublished":"2026-10-02","dateModified":"2026-10-20","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-security","about":[{"@type":"Thing","name":"AI agent security"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent security","item":"https://ranwhat.com/guides/ai-coding-agent-security"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -121,7 +121,7 @@
     <p style="margin:18px 0 0;font-size:14px;color:var(--muted)">
       Checked against the Claude Code, GitHub, Stripe, AWS and MCP
       documentation, and the advisories and research under Sources.
-      Published 2 October 2026, updated <time datetime="2026-10-14">14 October 2026</time>.
+      Published 2 October 2026, updated <time datetime="2026-10-20">20 October 2026</time>.
     </p>
   </div>
 </section>
@@ -439,7 +439,7 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in your ag
       </div>
       <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
         One read-only pass: the risky actions in the history of Claude Code
-        and nineteen other coding agents, and the credentials left in it. Every
+        and twenty-nine other coding agents, and the credentials left in it. Every
         <span class="icode">ranwhat</span> command on this page also runs as
         <span class="icode">uvx ranwhat &hellip;</span> without installing
         anything.
@@ -449,13 +449,15 @@ uvx ranwhat clean --no-interactive    <span class="c-mut">credentials in your ag
 ranwhat watch --json       <span class="c-mut">one record per flagged call</span></pre></div>
       </div>
       <p style="margin-top:22px;font-size:14.5px;color:var(--muted)">
-        <a href="/watch">ranwhat watch</a> reports thirteen kinds of action:
+        <a href="/watch">ranwhat watch</a> reports sixteen kinds of action:
         credential reads, secret-shaped strings in tool calls, package
         publishing, cloud resource changes, payment API calls, log or history
         tampering, destructive git, recursive deletion, local files uploaded
         with curl, scripts downloaded and run unread, files made writable by
-        every user, container volumes wiped, and encoded commands decoded and
-        run. It reads subagent
+        every user, container volumes wiped, encoded commands decoded and
+        run, an instance's credentials asked of a cloud metadata service,
+        jobs set to run at login, boot or on a schedule, and an agent's
+        guardrails loosened. It reads subagent
         transcripts too.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
@@ -626,7 +628,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
       </p>
       <div class="rows">
         <div class="row"><span class="k">Covers</span>
-          <span class="v"><span class="icode">watch</span>: risky actions in the history of Claude Code and nineteen other coding agents. <span class="icode">clean</span>: credentials in their transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries. <span class="icode">reach</span>: the MCP servers in your agents' configuration, with secrets written inline, packages fetched at no fixed version and remote URLs, and the credential files no Read deny rule covers.</span></div>
+          <span class="v"><span class="icode">watch</span>: risky actions in the history of Claude Code and twenty-nine other coding agents. <span class="icode">clean</span>: credentials in their transcripts, masked only when you ask. <span class="icode">scan</span> and <span class="icode">live</span>: the authority a set of credentials carries. <span class="icode">reach</span>: the MCP servers in your agents' configuration, with secrets written inline, packages fetched at no fixed version and remote URLs, and the credential files no Read deny rule covers.</span></div>
         <div class="row"><span class="k">Does not</span>
           <span class="v">Block anything while the agent works, unless you install its opt-in <a href="/commands#hook">hook</a> for Claude Code; beyond that, Claude Code's permission rules, hooks and sandbox do it. <span class="icode">reach</span> reads how an MCP server is configured, not what it is: it does not inspect a server's code, its tool descriptions or skills for malicious content. It flags a WebFetch call only when a secret-shaped value is in it, and does not flag a setup command that fetches its payload at run time.</span></div>
         <div class="row"><span class="k">OWASP</span>

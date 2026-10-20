@@ -14,6 +14,11 @@ through without a word, as it would have been without the hook.
 
 Nothing here touches the network. `run` reads stdin and writes stdout;
 `install` and `uninstall` change one settings file, and nothing else.
+
+It never reads the ignore file (ignore.py): what someone leaves out of
+watch's reports after the fact is still asked about here, before it runs,
+and a call that changes that file, or runs ranwhat ignore, is asked about
+like any other change to what ranwhat reports.
 """
 
 from __future__ import annotations
@@ -53,6 +58,14 @@ ISOLATED = ("-I",)
 
 # Set to 0 to let every call through without uninstalling, for one session.
 OFF_ENV = "RANWHAT_HOOK"
+
+
+def is_off(value):
+    """Whether a value of OFF_ENV turns the hook off. watch's agent.config
+    rule asks the same of a RANWHAT_HOOK an agent sets, so the two cannot
+    drift apart."""
+    return isinstance(value, str) and value.strip().lower() in (
+        "0", "off", "false", "no")
 
 
 class SettingsError(Exception):
@@ -274,7 +287,7 @@ def run(stdin=None, stdout=None, mode=DEFAULT_MODE, env=None):
     stdout = sys.stdout if stdout is None else stdout
     env = os.environ if env is None else env
     try:
-        if env.get(OFF_ENV, "").strip().lower() in ("0", "off", "false", "no"):
+        if is_off(env.get(OFF_ENV, "")):
             return 0
         # Bytes where there are any: Claude Code sends UTF-8, and read as
         # text in Windows' ANSI code page, a call with an emoji in it failed

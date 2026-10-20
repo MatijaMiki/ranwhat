@@ -550,7 +550,7 @@ test("sign-in sends you on only to a page on the list", async () => {
 test("every account page needs a session, sign-in comes back to it, and a form that fails draws its own page again", async () => {
   const s = services();
   const e = env();
-  const PAGES = ["/", "/machines", "/members", "/billing", "/security", "/activity"];
+  const PAGES = ["/", "/machines", "/findings", "/members", "/billing", "/security", "/activity"];
   const nobody = new Browser(e);
   for (const path of PAGES) {
     const r = await nobody.get(path);
@@ -1231,7 +1231,7 @@ test("no page runs our script; Turnstile's alone loads, only on the forms that m
   plain.push(await b.get("/signin/code"));
   challenged.push(await b.get("/signin/again"));
   await typeCode(b, codeIn(s.emails.at(-1)));
-  for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) plain.push(await b.get(path));
+  for (const path of ["/", "/machines", "/findings", "/members", "/billing", "/security", "/activity"]) plain.push(await b.get(path));
   /* A step-up's code page sends a signed-in person back to the account
      page for a new code, never to a page with Turnstile on it. */
   later(20 * MINUTE);

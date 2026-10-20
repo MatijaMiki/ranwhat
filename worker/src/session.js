@@ -80,7 +80,7 @@ const EMAIL = /^[^@\s<>()[\]\\,;:"]+@[^@\s<>()[\]\\,;:".]+(\.[^@\s<>()[\]\\,;:".
    out of the database). Anything else, a query string included, goes to
    the account. */
 const NEXT = new Set([
-  "/", "/machines", "/members", "/billing", "/security", "/activity", "/device", "/upgrade", "/invite",
+  "/", "/machines", "/findings", "/members", "/billing", "/security", "/activity", "/device", "/upgrade", "/invite",
 ]);
 export const nextPath = (value) => (NEXT.has(value) ? value : "/");
 

@@ -202,16 +202,23 @@ export async function identify(request, env) {
 export const UPGRADE = "https://account.ranwhat.com/";
 
 /* identify(), and whether the token's plan has `feature` (features.js).
-   { ok: true, account } when it does; a token whose organisation's plan
-   has not got it is refused with 403 'plus_required' (or 'team_required')
-   and where to upgrade. Subscription and hand-made tokens are on Plus at
-   least, so for the feed they answer as they always have. */
-export async function entitled(request, env, feature = "feed") {
+   { ok: true, who } when it does, with identify()'s answer whole; a token
+   whose organisation's plan has not got it is refused with 403
+   'plus_required' (or 'team_required') and where to upgrade. Subscription
+   and hand-made tokens are on Plus at least, so for the feed they answer
+   as they always have. */
+export async function entitledWho(request, env, feature = "feed") {
   const who = await identify(request, env);
   if (!who.ok) return who;
   if (!allows(who.plan, feature)) {
     return { ok: false, status: 403, error: allows("plus", feature) ? "plus_required" : "team_required",
              upgrade: UPGRADE };
   }
-  return { ok: true, account: who.account };
+  return { ok: true, who };
+}
+
+/* The same, answering { ok: true, account } for the feed. */
+export async function entitled(request, env, feature = "feed") {
+  const answer = await entitledWho(request, env, feature);
+  return answer.ok ? { ok: true, account: answer.who.account } : answer;
 }

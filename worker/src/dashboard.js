@@ -8,6 +8,9 @@
  *                       what is left to set up, what each paid plan has
  *                       (features.js) and what happened lately.
  *   GET  /machines      Its machines and CI tokens (machines.js).
+ *   GET  /findings      What its machines pushed with ranwhat push, side
+ *                       by side (push.js); any member may read it.
+ *                       ?machine=<id> narrows it to one.
  *   GET  /members       The organisation, its members and invites
  *                       (members.js).
  *   GET  /billing       Its billing (billing.js).
@@ -151,6 +154,8 @@ import {
   registrationOptions, signIn, signinOptions,
 } from "./passkeys.js";
 import { approve, deny, deviceLookup, devicePage } from "./device.js";
+import { RETENTION, actionsOf, latestPushes, recentPushes } from "./push.js";
+import { AGENTS, RULES } from "./push_schema.js";
 import { PRICES, billingPanel, billingPost, upgradePage, upgradePost, upgradedNotice } from "./billing.js";
 import {
   MEMBER_EVENTS, acceptPost, inviteAgain, invitePage, invitePost, leavePost, membersOf, membersPanel, removePost,
@@ -161,7 +166,7 @@ import {
   mayChange, mintCi, renameMachine, revokeMachine,
 } from "./machines.js";
 import {
-  APP_PAGES, actions, away, back, callout, card, cell, command, confirmCallout, dangerButton, data, dayStamp, elsewhere,
+  APP_PAGES, actions, ago, away, back, callout, card, cell, command, confirmCallout, dangerButton, data, dayStamp, elsewhere,
   empty, fields, form, icon, lockBadge, notFound, page, pill, redirect, refused, script, shell, shownAddress, stamp, stat,
   stepupForm, table, widget, wrongMethod,
 } from "./ui.js";
@@ -2168,10 +2173,249 @@ const drawnAgain = (handle, draw, at = "") => async (request, env, ctx, url) => 
   return draw(env, who, { status, error: text, at: top ? "" : at, stepup, fallback });
 };
 
+/* ---------- findings pushed by machines ---------- */
+
+/* What the page draws comes out of the database, and the database is not
+   trusted at read time: a rule's or agent's name is looked up in
+   push_schema.js by a key it has, and said as an unknown one when it has
+   not, never echoed; a count is a whole number in range or nothing; an
+   action whose id or time does not read as one is left out; text that
+   does not parse as JSON draws as no list. So whatever reaches the table
+   by any path cannot reach the markup. */
+const SEVERITY_TONE = { critical: "crit", high: "warn", medium: "info" };
+const WHEN_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const ACTION_ID = /^[0-9a-f]{16}$/;
+const STALE_AFTER = 7 * DAY;
+
+const count = (n) => (typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= 1_000_000_000 ? n : 0);
+/* A time, unix seconds: count() stops at a billion, which is 2001, so every
+   received_at went through it as 0 and read 1970 and Stale. */
+const pushTime = (n) => (typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n < 4e9 ? n : 0);
+const ruleTitle = (id) => (Object.hasOwn(RULES, id) && typeof RULES[id] === "string" ? RULES[id] : "an unknown rule");
+const agentName = (id) => (Object.hasOwn(AGENTS, id) && typeof AGENTS[id] === "string" ? AGENTS[id] : "an unknown agent");
+
+/* A stored JSON object of counts by id, keeping only the ids `known` has. */
+function tallyOf(text, known) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return {}; }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const out = {};
+  for (const key of Object.keys(parsed)) {
+    if (Object.hasOwn(known, key) && count(parsed[key]) > 0) out[key] = count(parsed[key]);
+  }
+  return out;
+}
+
+/* A machine's stored actions, as the page may draw them: [{ id, agent,
+   at (unix seconds or null), hits: [{ rule, severity }] }]. */
+function actionsFrom(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return []; }
+  if (!Array.isArray(parsed)) return [];
+  const out = [];
+  for (const a of parsed.slice(0, 100)) {
+    if (a === null || typeof a !== "object" || typeof a.id !== "string" || !ACTION_ID.test(a.id)) continue;
+    const at = typeof a.at === "string" && WHEN_AT.test(a.at) && Number.isFinite(Date.parse(a.at))
+      ? Math.floor(Date.parse(a.at) / 1000) : null;
+    const hits = (Array.isArray(a.hits) ? a.hits : []).slice(0, 15)
+      .filter((h) => h !== null && typeof h === "object" && Object.hasOwn(SEVERITY_TONE, h.severity))
+      .map((h) => ({ rule: typeof h.rule === "string" ? h.rule : "", severity: h.severity }));
+    out.push({ id: a.id, agent: typeof a.agent === "string" ? a.agent : "", at, hits });
+  }
+  return out;
+}
+
+const topRules = (rules, n = 3) => Object.entries(rules).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, n);
+
+const severityPill = (n, tone) => pill(String(n), n > 0 ? tone : "");
+
+/* An action's findings: each rule by name, with its severity. */
+const hitsCell = (hits) => hits.length
+  ? hits.map((h) => `${escape(ruleTitle(h.rule))} ${pill(h.severity, SEVERITY_TONE[h.severity])}`).join("<br>")
+  : `<span class="none">-</span>`;
+
+const actionRow = (a, machine) => `<tr>${cell("When", a.at === null ? `<span class="none">No time</span>` : stamp(a.at))}` +
+  `${machine === null ? "" : cell("Machine", machine)}${cell("Agent", escape(agentName(a.agent)))}` +
+  `${cell("What", hitsCell(a.hits))}${cell("Action", `<code>${escape(a.id)}</code>`)}</tr>`;
+
+const byNewest = (a, b) => (a.at === null) - (b.at === null) || (b.at || 0) - (a.at || 0) || (a.id < b.id ? -1 : 1);
+
+const KEPT = `ranwhat keeps each machine's latest push, and a summary of each earlier push for ${RETENTION.plus.days}
+  days, ${RETENTION.plus.snapshots} at most, and nothing older. It is not a long-term record. Revoking a machine
+  hides what it sent at once and deletes it within a day.`;
+
+/* What each linked machine pushed with ranwhat push, side by side. Any
+   member of the organisation may read it: it is metadata a machine chose
+   to send, and nothing on it can be changed from here. ?machine=<id>
+   narrows it to one machine, which must be this organisation's and live,
+   else the same 404 for any id that is not. */
+async function findingsView(env, who, { status = 200, error = "" } = {}, url = null) {
+  const org = who.org;
+  const name = escape(org.name);
+  const onPlan = await plan(env, org.id);
+  const feature = FEATURES.machines;
+  const head = { title: "Findings", sub: `What the machines linked to ${name} chose to send with ranwhat push.` };
+  if (!allows(onPlan, "machines")) {
+    const manager = canManage(org);
+    return app(env, who, "findings", {
+      ...head, onPlan, status,
+      body: `<div class="grid">${card({
+        title: feature.name, mark: lockBadge(), cls: "locked", attributes: 'id="findings" data-feature="machines"',
+        aside: pill(`Needs ${PLAN_NAMES[feature.plan]}`, "brand"),
+        body: `<p>${escape(feature.says)} Push (${escape(FEATURES.push.says)}) sends them: each machine runs
+           ranwhat push when you choose, and this page puts what they sent side by side.</p>
+          ${manager ? `<div class="actions"><a class="btn primary" href="${UPGRADE}">Upgrade to ${PLAN_NAMES[feature.plan]}</a></div>`
+            : `<p class="hint">An owner or an admin of ${name} can upgrade it to ${PLAN_NAMES[feature.plan]}.</p>`}`,
+      })}</div>`,
+    });
+  }
+
+  const wanted = url ? url.searchParams.get("machine") : null;
+  const list = await machinesOf(env, org.id, 0);
+  const byId = new Map(list.map((m) => [m.id, m]));
+  let focus = null;
+  if (wanted !== null) {
+    focus = await machineIn(env, org.id, wanted);
+    if (!focus) {
+      return findingsView(env, who, { status: 404, error: "That machine is not one of this organisation's, or it is revoked." });
+    }
+  }
+  const latest = await latestPushes(env, org.id);
+  const pushed = latest.filter((p) => byId.has(p.machine_id)).sort((a, b) => pushTime(b.received_at) - pushTime(a.received_at));
+  const t = now();
+  const label = (m) => (m.label ? m.label : UNNAMED[m.kind] || "Machine");
+  const intro = `<p class="card-intro">What each machine chose to send with ranwhat push, as metadata only: the rule, its
+    severity, the agent and the time. Never a command, a path or evidence. Machines report their own findings;
+    ranwhat does not check them. Everyone in ${name} can read this page.</p>`;
+  const kept = `<p class="hint">${escape(KEPT)}</p>`;
+
+  if (focus) {
+    const p = pushed.find((x) => x.machine_id === focus.id);
+    const m = byId.get(focus.id) || focus;
+    const up = back(PATHS.findings, "All machines");
+    if (!p) {
+      return app(env, who, "findings", { ...head, title: "Findings", onPlan, status, body: `<div class="grid">${card({
+        title: label(m), icon: "findings", attributes: 'id="findings"',
+        body: `${up}${empty(`<p><strong>${escape(label(m))} has not pushed yet.</strong></p>
+          <p>Run this in that machine's terminal to see exactly what would be sent, then to send it.</p>
+          ${command("uvx ranwhat push --dry-run")}${command("uvx ranwhat push")}`)}${kept}`,
+      })}</div>` });
+    }
+    const rules = tallyOf(p.rules, RULES);
+    const actions = actionsFrom((await actionsOf(env, org.id, [focus.id]))[0]?.actions).sort(byNewest);
+    const recent = await recentPushes(env, org.id, focus.id);
+    const summary = card({
+      title: label(m), icon: "findings", attributes: 'id="findings"',
+      aside: `${severityPill(count(p.critical), "crit")}${severityPill(count(p.high), "warn")}${severityPill(count(p.medium), "info")}`,
+      body: `${up}${intro}
+        <p>Last push ${stamp(pushTime(p.received_at))} &middot; ranwhat ${escape(String(p.version).slice(0, 24))} &middot;
+           the last ${count(p.window_days)} days &middot; ${count(p.flagged)} flagged, ${count(p.ignored)} ignored</p>
+        ${topRules(rules, 15).length ? `<ul class="events">${topRules(rules, 15).map(([id, n]) =>
+          `<li><span>${escape(ruleTitle(id))} <code>${escape(id)}</code></span><span class="when">${n}</span></li>`).join("")}</ul>` : ""}`,
+    });
+    const list100 = card({
+      title: "Actions", icon: "activity",
+      body: actions.length
+        ? `${table([["When"], ["Agent"], ["What"], ["Action"]], actions.map((a) => actionRow(a, null)), { label: "Actions" })}
+           <p class="hint">A push lists at most 100 actions, the newest first. To leave one out, run
+             <code>ranwhat ignore ID</code> on that machine.</p>`
+        : empty("<p>No actions in its latest push.</p>"),
+    });
+    const history = card({
+      title: "Recent pushes", icon: "clock",
+      body: `<p class="card-intro">A summary of each push in the last ${RETENTION.plus.days} days; the actions of older pushes are not kept.</p>
+        ${table([["Pushed"], ["Flagged"], ["Critical"], ["High"], ["Medium"], ["Ignored", "opt"]], recent.map((r) =>
+          `<tr>${cell("Pushed", stamp(pushTime(r.received_at)))}${cell("Flagged", String(count(r.flagged)))}` +
+          `${cell("Critical", severityPill(count(r.critical), "crit"))}${cell("High", severityPill(count(r.high), "warn"))}` +
+          `${cell("Medium", severityPill(count(r.medium), "info"))}${cell("Ignored", String(count(r.ignored)), "opt")}</tr>`),
+          { label: "Recent pushes" })}${kept}`,
+    });
+    return app(env, who, "findings", { ...head, onPlan, status, body: `<div class="grid">${summary}${list100}${history}</div>` });
+  }
+
+  const totals = pushed.reduce((s, p) => ({ critical: s.critical + count(p.critical), high: s.high + count(p.high),
+    medium: s.medium + count(p.medium) }), { critical: 0, high: 0, medium: 0 });
+  const stats = `<div class="stats">
+      ${stat({ label: "Machines pushing", value: String(pushed.length), sub: `of ${list.length} linked`, href: PATHS.machines, icon: "machines" })}
+      ${stat({ label: "Critical", value: String(totals.critical), sub: "in the latest pushes", href: PATHS.findings, icon: "alert" })}
+      ${stat({ label: "High", value: String(totals.high), sub: "in the latest pushes", href: PATHS.findings, icon: "alert" })}
+      ${stat({ label: "Medium", value: String(totals.medium), sub: pushed.length ? `last push ${ago(pushTime(pushed[0].received_at), t)}` : "nothing pushed yet",
+               href: PATHS.findings, icon: "info" })}
+    </div>`;
+
+  if (!list.length || !pushed.length) {
+    const body = `${intro}${problem(error)}${empty(`<p><strong>${list.length ? "No machine has pushed yet." : "No machines linked yet."}</strong></p>
+      <p>${list.length ? "Run these on a linked machine: the first prints exactly what would be sent, and the second sends it."
+        : `Link a terminal to ${name}, then see exactly what a push would send, and send it.`}</p>
+      ${list.length ? "" : command("uvx ranwhat login")}${command("uvx ranwhat push --dry-run")}${command("uvx ranwhat push")}`)}${kept}`;
+    return app(env, who, "findings", { ...head, onPlan, status, body: `<div class="grid">${stats}${card({
+      title: "Machines side by side", icon: "findings", attributes: 'id="findings"', body })}</div>` });
+  }
+
+  const rows = list.map((m) => {
+    const p = pushed.find((x) => x.machine_id === m.id);
+    const link = `<a href="${PATHS.findings}?machine=${escape(m.id)}"><strong>${escape(label(m))}</strong></a>`;
+    if (!p) {
+      return `<tr data-machine="${escape(m.id)}">${cell("", link, "cell-main")}${cell("Kind", pill(KINDS[m.kind], KIND_TONE[m.kind]))}` +
+        `${cell("Last push", `<span class="none">Never pushed</span>`)}${cell("Critical", "")}${cell("High", "")}${cell("Medium", "")}` +
+        `${cell("Ignored", "", "opt")}${cell("Top rules", "")}${cell("ranwhat", "", "opt")}${cell("Window", "", "opt")}</tr>`;
+    }
+    const received = pushTime(p.received_at);
+    const old = t - received > STALE_AFTER ? pill("Stale", "warn") : "";
+    const top = topRules(tallyOf(p.rules, RULES)).map(([id, n]) => `${escape(ruleTitle(id))} &times; ${n}`).join("<br>");
+    return `<tr data-machine="${escape(m.id)}">${cell("", link, "cell-main")}${cell("Kind", pill(KINDS[m.kind], KIND_TONE[m.kind]))}` +
+      `${cell("Last push", `${stamp(received)} ${old}`)}${cell("Critical", severityPill(count(p.critical), "crit"))}` +
+      `${cell("High", severityPill(count(p.high), "warn"))}${cell("Medium", severityPill(count(p.medium), "info"))}` +
+      `${cell("Ignored", String(count(p.ignored)), "opt")}${cell("Top rules", top || `<span class="none">-</span>`)}` +
+      `${cell("ranwhat", escape(String(p.version).slice(0, 24)), "opt")}${cell("Window", `${count(p.window_days)} days`, "opt")}</tr>`;
+  });
+  const side = card({
+    title: "Machines side by side", icon: "findings", attributes: 'id="findings"',
+    body: `${intro}${problem(error)}${table([["Name"], ["Kind"], ["Last push"], ["Critical"], ["High"], ["Medium"],
+      ["Ignored", "opt"], ["Top rules"], ["ranwhat", "opt"], ["Window", "opt"]], rows, { label: "Machines and their latest push" })}`,
+  });
+
+  /* Rules across the machines that pushed most lately. */
+  const shown = pushed.slice(0, 8);
+  const tallies = shown.map((p) => tallyOf(p.rules, RULES));
+  const seen = new Map();
+  for (const tl of tallies) for (const [id, n] of Object.entries(tl)) seen.set(id, (seen.get(id) || 0) + n);
+  const ruleRows = [...seen.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([id]) =>
+    `<tr>${cell("", `<strong>${escape(ruleTitle(id))}</strong> <code>${escape(id)}</code>`, "cell-main")}` +
+    shown.map((p, i) => cell(label(byId.get(p.machine_id)), tallies[i][id] ? String(tallies[i][id]) : `<span class="none">-</span>`)).join("") + `</tr>`);
+  const matrix = ruleRows.length ? card({
+    title: "Rules across machines", icon: "machines", attributes: 'id="rules"',
+    aside: pushed.length > shown.length ? pill(`Showing ${shown.length} of ${pushed.length} machines`) : "",
+    body: table([["Rule"], ...shown.map((p) => [label(byId.get(p.machine_id))])], ruleRows, { label: "Rules by machine" }),
+  }) : "";
+
+  /* The newest findings of the ten machines that pushed most lately. */
+  const ten = pushed.slice(0, 10);
+  const stored = await actionsOf(env, org.id, ten.map((p) => p.machine_id));
+  const merged = [];
+  for (const row of stored) {
+    const m = byId.get(row.machine_id);
+    if (!m) continue;
+    for (const a of actionsFrom(row.actions)) merged.push({ ...a, machine: `<a href="${PATHS.findings}?machine=${escape(m.id)}">${escape(label(m))}</a>` });
+  }
+  merged.sort(byNewest);
+  const newest = merged.length ? card({
+    title: "Newest findings", icon: "activity", attributes: 'id="newest"',
+    body: `${table([["When"], ["Machine"], ["Agent"], ["What"], ["Action"]], merged.slice(0, 50).map((a) => actionRow(a, a.machine)),
+      { label: "Newest findings" })}
+      <p class="hint">Showing ${Math.min(50, merged.length)} of ${merged.length}. A machine lists at most 100 actions, the newest first.
+        To leave one out, run <code>ranwhat ignore ID</code> on that machine.</p>${kept}`,
+  }) : card({ title: "Newest findings", icon: "activity", attributes: 'id="newest"',
+    body: `${empty("<p>No machine has anything flagged in its latest push.</p>")}${kept}` });
+
+  return app(env, who, "findings", { ...head, onPlan, status, body: `<div class="grid">${stats}${side}${matrix}${newest}</div>` });
+}
+
 /* Path: { method: handler }. */
 const ROUTES = {
   "/": { GET: signedInPage(overview) },
   "/machines": { GET: signedInPage(machinesView) },
+  "/findings": { GET: signedInPage(findingsView) },
   "/members": { GET: signedInPage(membersView) },
   "/security": { GET: signedInPage(securityView) },
   "/activity": { GET: signedInPage(activityView) },

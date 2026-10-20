@@ -162,7 +162,11 @@ class ClaudeCodeSource(Source):
         """Every tool_use block, as recorded: kind None, so watch judges it
         by its name exactly as it did before the port, and its input not
         decoded. A name that is not a string is "?", and a time that is not
-        one is None: an object there could not be told apart from another."""
+        one is None: an object there could not be told apart from another.
+        The directory the session was in when it made the call, its entry's
+        cwd, is its workdir: where the call ran, for the report's records.
+        watch judges a kind None call by its input alone, so no verdict
+        changes with it."""
         project, session = place(store.path)
         for entry, block in tool_uses(store.path,
                                       lambda e: self.unopened(store, e)):
@@ -170,10 +174,12 @@ class ClaudeCodeSource(Source):
             if not isinstance(tool, str):
                 tool = "?"
             stamp = entry.get("timestamp")
+            cwd = entry.get("cwd")
             yield ToolCall(self.id, store.path, tool, block.get("input", {}),
                            decode=False, session=session, project=project,
                            timestamp=stamp if isinstance(stamp, str) else None,
-                           tool_call_id=block.get("id"))
+                           tool_call_id=block.get("id"),
+                           workdir=cwd if isinstance(cwd, str) and cwd else None)
 
     def unopened(self, store, error):
         """A transcript that cannot be opened: counted once a run as a file

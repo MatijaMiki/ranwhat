@@ -771,7 +771,8 @@ class Calls(ClineCase):
         [call] = calls      # an XML tag of no Cline tool is text
         self.assertEqual((call.kind, call.known), ("other", False))
         self.assertEqual(watch.judge(call),
-                         watch.evaluate(call.tool_name, call.tool_input))
+                         watch.evaluate(call.tool_name, call.tool_input,
+                                        subjects=True))
         self.assertEqual(rules(call), [("fs.destructive", "rm -rf ~/Documents/x")])
 
     def test_the_two_block_result_of_cline_3_0(self):

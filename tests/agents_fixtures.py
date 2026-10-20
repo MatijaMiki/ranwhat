@@ -16,6 +16,7 @@ import json
 import os
 import time
 
+import test_source_codebuddy as cbd
 import test_source_codex as cx
 import test_source_continue_dev as ct
 import test_source_copilot_cli as cp
@@ -26,6 +27,7 @@ import test_source_grok as gk
 import test_source_kimi as km
 import test_source_kimi_code as kc
 import test_source_muse_code as mu
+import test_source_omp as omp
 import test_source_pi as pi
 import test_source_qwen as qw
 import test_source_windsurf as ws
@@ -354,6 +356,68 @@ class Pi(Agent):
         return write(self._path(root, name), GARBAGE)
 
 
+class CodeBuddy(Agent):
+    id = "codebuddy"
+
+    def root(self, base):
+        return os.path.join(base, ".codebuddy")
+
+    def _path(self, root, name):
+        return os.path.join(root, "projects", cbd.ENC, "%s.jsonl"
+                            % _uuid("codebuddy", ord(name[0])))
+
+    def write(self, root, calls, name="a", age=3600):
+        first = min(c[4] for c in calls) - 5 if calls else time.time() - age
+        records = [cbd.user(1, "go on", ts=int(first * 1000))]
+        n = 2
+        for cid, kind, text, output, when in calls:
+            tool, args = (("Bash", {"command": text}) if kind == "shell"
+                          else ("Read", {"file_path": text}))
+            ms = int(when * 1000)
+            records.append(cbd.call(n, cid, tool, args, ts=ms))
+            if output is not None:
+                records.append(cbd.result(n + 1, cid, tool, output, ts=ms + 1))
+            n += 2
+        return write(self._path(root, name), [cbd._dump(r) for r in records], age)
+
+    def garbage(self, root, name="z"):
+        return write(self._path(root, name), GARBAGE)
+
+
+class OhMyPi(Agent):
+    id = "omp"
+
+    def root(self, base):
+        return os.path.join(base, ".omp", "agent")
+
+    def _path(self, root, name):
+        return os.path.join(root, "sessions", omp.FOLDER,
+                            "2026-10-01T09-00-00-000Z_%s.jsonl"
+                            % _uuid("omp", ord(name[0])))
+
+    def write(self, root, calls, name="a", age=3600):
+        first = min(c[4] for c in calls) - 5 if calls else time.time() - age
+        records = [omp.slot(), omp.header(sid=_uuid("omp", ord(name[0])),
+                                          cwd=omp.CWD, ms=int(first * 1000))]
+        n = 1
+        for cid, kind, text, output, when in calls:
+            tool, args = (("bash", {"command": text}) if kind == "shell"
+                          else ("read", {"path": text}))
+            ms = int(when * 1000)
+            records.append(omp.entry(n, omp.assistant(
+                [omp.tool_call(cid, tool, args)], ms), ms=ms))
+            if output is not None:
+                records.append(omp.entry(n + 1, omp.tool_result(
+                    cid, tool, output, ms + 1), ms=ms + 1))
+            n += 2
+        return write(self._path(root, name),
+                     [r if isinstance(r, str) else pi._dump(r) for r in records],
+                     age)
+
+    def garbage(self, root, name="z"):
+        return write(self._path(root, name), GARBAGE)
+
+
 class MuseCode(Agent):
     id = "muse-code"
 
@@ -477,7 +541,8 @@ class Goose(Agent):
 
 # In registry order.
 AGENTS = (Codex(), Gemini(), CopilotCli(), Windsurf(), Continue(), Goose(),
-          Qwen(), GrokBuild(), Droid(), KimiCode(), Kimi(), Pi(), MuseCode())
+          Qwen(), CodeBuddy(), GrokBuild(), Droid(), KimiCode(), Kimi(), Pi(),
+          OhMyPi(), MuseCode())
 
 # The environment variables any adapter reads to find its folder, unset for
 # every test that runs the CLI, so only --path points anywhere.
@@ -488,6 +553,8 @@ AGENT_ENV = ("CLAUDE_CONFIG_DIR", "OPENCLAW_STATE_DIR", "CODEX_HOME",
              "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR",
              "CONTINUE_GLOBAL_DIR", "GOOSE_PATH_ROOT", "OPENCODE_DB",
              "AIDER_CHAT_HISTORY_FILE", "CLINE_DATA_DIR", "CLINE_DIR",
-             "CLINE_SESSION_DATA_DIR",
+             "CLINE_SESSION_DATA_DIR", "KILO_DB", "VSCODE_PORTABLE", "VSCODE_APPDATA",
+             "FLATPAK_XDG_DATA_HOME", "VIBE_HOME", "DSH_HOME",
+             "PI_CONFIG_DIR", "CODEBUDDY_CONFIG_DIR",
              "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
              "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA")

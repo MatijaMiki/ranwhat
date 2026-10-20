@@ -288,10 +288,11 @@ class EvidenceShownWholeIsNotScannedAgain(unittest.TestCase):
 class ReadingCommandsImportNoNetwork(unittest.TestCase):
 
     # Printed by each child below: whichever of these it ended up importing.
-    # ranwhat.account: login, whoami and logout, opt-in and online.
+    # ranwhat.account: login, whoami and logout, opt-in and online. ranwhat.push:
+    # the one command that sends findings, run by hand.
     NETWORK = ("print(sorted(m for m in ('urllib.request', 'http.client', 'ssl',\n"
                "                         'ranwhat.introspect', 'ranwhat.feed',\n"
-               "                         'ranwhat.account') if m in sys.modules))\n")
+               "                         'ranwhat.account', 'ranwhat.push') if m in sys.modules))\n")
 
     def _imported(self, code, *argv):
         env = dict(os.environ, PYTHONPATH=ROOT, NO_COLOR="1")

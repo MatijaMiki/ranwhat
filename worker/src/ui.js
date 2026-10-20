@@ -21,7 +21,7 @@
  * Two layouts share that one style. page() is the narrow centred card of
  * the pages around signing in and of every one-off page (a code, a
  * passkey, a terminal to approve, the upgrade, an invite, an error).
- * shell() is the signed-in app: a sidebar with the organisation, the six
+ * shell() is the signed-in app: a sidebar with the organisation, the seven
  * account pages and signing out, which becomes a top bar on a phone, and
  * the page's own header and cards. Neither needs a script: the nav is
  * links (wrapped onto rows on a phone, so every page and the current one
@@ -460,6 +460,7 @@ async function secured(headers, { challenge = false, away = [], passkeys = false
 const PATHS = Object.freeze({
   overview: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
   machines: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/>',
+  findings: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 14.5h18M9 9.5V20"/>',
   members: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><path d="M15.5 5.3a3.5 3.5 0 0 1 0 6.4M17.8 14.9c1.9.7 3.2 2.3 3.7 4.6"/>',
   billing: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6.5 15h4"/>',
   security: '<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6L12 3z"/><path d="M9 12.2l2.2 2.2 4.3-4.4"/>',
@@ -644,6 +645,7 @@ export async function page(title, body, {
 export const APP_PAGES = Object.freeze([
   ["overview", "/", "Overview"],
   ["machines", "/machines", "Machines"],
+  ["findings", "/findings", "Findings"],
   ["members", "/members", "Members"],
   ["billing", "/billing", "Billing"],
   ["security", "/security", "Security"],

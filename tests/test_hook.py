@@ -86,6 +86,82 @@ class Decisions(unittest.TestCase):
         with mock.patch("ranwhat.watch.evaluate", side_effect=RecursionError):
             self.assertEqual(answer(event("cat .env")), (0, None))
 
+    def test_a_change_to_what_ranwhat_reports_is_asked_or_refused(self):
+        # The hook never reads what ranwhat leaves out of its reports; it
+        # asks before a call that changes it, and before a read of the key
+        # that lets kept.json be forged.
+        home = os.path.expanduser("~")
+        calls = [("Bash", {"command": command}) for command in (
+            "echo 'publish' >> ~/.ranwhat/ignore", "ranwhat ignore all",
+            "uvx ranwhat ignore 3fa9c2d81b7e4a06", "cp -r /tmp/state ~/.ranwhat",
+            "echo 'export RANWHAT_HOME=/tmp/x' >> ~/.bashrc",
+            "setx RANWHAT_HOME C:\\x", "cat ~/.ranwhat/known/key",
+            "cat ~/.ranwhat/token")]
+        calls += [("Write", {"file_path": os.path.join(home, ".ranwhat", "known",
+                                                       "kept.json"), "content": "{}"}),
+                  ("Edit", {"file_path": "/repo/.ranwhatignore", "old_string": "a",
+                            "new_string": "b"}),
+                  ("Read", {"file_path": os.path.join(home, ".ranwhat", "token")}),
+                  # the same files, spelt by a path that walks to them
+                  ("Write", {"file_path": os.path.join(home, ".ranwhat", ".", "ignore"),
+                             "content": "publish\n"}),
+                  ("Write", {"file_path": os.path.join(home, ".ranwhat", "x", "..",
+                                                       "known", "kept.json"),
+                             "content": "{}"}),
+                  ("Write", {"file_path": "/repo/.RANWHATIGNORE", "content": "x"}),
+                  ("Read", {"file_path": home + "/.ranwhat//known/key"}),
+                  ("Read", {"file_path": os.path.join(os.environ["RANWHAT_HOME"],
+                                                      "known", "key")}),
+                  ("Bash", {"command": "python3 -m ranwhat.cli ignore all"})]
+        for tool, tool_input in calls:
+            with self.subTest(call=str(tool_input)[:80]):
+                decision, reason = hook.decide(tool, tool_input)
+                self.assertEqual(decision, "ask", reason)
+                decision, reason = hook.decide(tool, tool_input, mode="deny")
+                self.assertEqual(decision, "deny", reason)
+                self.assertIn("Ask the user to run it themselves", reason)
+        for command in ("cat ~/.ranwhat/ignore", "ranwhat ignore", "ranwhat ignore --json",
+                        "ranwhat watch --no-ignore", "ranwhat watch --ignore x",
+                        "rm ~/.ranwhat/ignore", "RANWHAT_HOME=/tmp/x ranwhat watch"):
+            self.assertEqual(hook.decide("Bash", {"command": command}, mode="deny"),
+                             (None, ""), command)
+
+    def test_the_ignore_file_is_never_read(self):
+        # What someone leaves out of watch's reports is still asked about:
+        # a file that leaves out everything changes no answer, and is not
+        # even opened.
+        state = tempfile.mkdtemp(prefix="hook-ignore-")
+        self.addCleanup(__import__("shutil").rmtree, state, True)
+        path = os.path.join(state, "ignore")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("".join("%s\n" % rule for rule in (
+                "publish", "cred.read", "agent.config", "git.destructive",
+                "fs.destructive", "exec.remote")))
+        calls = [("Bash", {"command": c}) for c in (
+            "npm publish", "cat ~/.aws/credentials", "git push --force origin main",
+            "echo publish >> ~/.ranwhat/ignore")]
+        before = [hook.decide(t, i) for t, i in calls]
+        opened = []
+        real_open, real_os_open = open, os.open
+
+        def watching(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)) and "ignore" in os.fsdecode(file):
+                opened.append(file)
+            return real_open(file, *args, **kwargs)
+
+        def watching_os(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)) and "ignore" in os.fsdecode(file):
+                opened.append(file)
+            return real_os_open(file, *args, **kwargs)
+        with mock.patch.dict(os.environ, {"RANWHAT_HOME": state}), \
+                mock.patch("builtins.open", watching), mock.patch("os.open", watching_os):
+            after = [hook.decide(t, i) for t, i in calls]
+            status, out = answer(event("npm publish"))
+        self.assertEqual(before, after)
+        self.assertEqual(out["permissionDecision"], "ask")
+        self.assertEqual(opened, [])
+        self.assertTrue(all(decision for decision, _reason in after))
+
     def test_other_events_are_not_judged(self):
         text = json.dumps({"hook_event_name": "PostToolUse", "tool_name": "Bash",
                            "tool_input": {"command": "cat .env"}})

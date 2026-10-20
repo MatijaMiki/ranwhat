@@ -463,7 +463,7 @@ class Calls(ContinueCase):
             self.assertEqual((got[cid].kind, got[cid].known), ("other", False))
             self.assertEqual(watch.judge(got[cid]),
                              watch.evaluate(got[cid].tool_name,
-                                            got[cid].tool_input))
+                                            got[cid].tool_input, subjects=True))
         self.assertEqual(rules(got["mcp"]),
                          [("fs.destructive", "rm -rf ~/Documents/x")])
 

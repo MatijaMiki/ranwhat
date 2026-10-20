@@ -12,8 +12,9 @@
  * Every table the accounts design needs is made here, including the ones
  * later work fills (passwords, passkeys, Google and GitHub identities,
  * machines, subscriptions linked to an organisation, grants, invites,
- * device codes). Later changes add routes and new tables, and never
- * change the columns of a table an earlier deploy may have made:
+ * device codes, and what machines push). Later changes add routes and
+ * new tables, and never change the columns of a table an earlier deploy
+ * may have made:
  * CREATE TABLE IF NOT EXISTS does nothing to a table that is there, and
  * the first deploy's tables are in every D1 where ACCOUNTS_ON was ever
  * set. A change to one would need an ALTER, run on purpose.
@@ -32,6 +33,7 @@
  * because machines join the feed's tokens and org_subscriptions joins its
  * subscriptions.
  */
+import { schema as feedSchema } from "./auth.js";
 
 export const ACCOUNT_HOST = "account.ranwhat.com";
 export const ACCOUNT_ORIGIN = `https://${ACCOUNT_HOST}`;
@@ -42,6 +44,8 @@ export const SESSION_IDLE = 14 * DAY;   // a session nobody used for this long i
 export const SESSION_MAX = 30 * DAY;    // and none lasts longer than this after sign-in
 const KEEP_EVENTS = 396 * DAY;          // the audit log: 13 months
 const KEEP_COUNTS = 7 * DAY;            // the daily email counts
+const PUSH_KEEP_DAYS = 30;              // a summary of each earlier push (push.js's RETENTION)
+const PUSH_HARD_DAYS = 90;              // and nothing pushed is kept past this, the latest included
 
 /* What one account may do in a day that adds a row to the audit log and
    needs no fresh code: renames (of an organisation and of its machines,
@@ -503,6 +507,41 @@ const SCHEMA = [
      ticket TEXT NOT NULL,
      since INTEGER NOT NULL)`,
 
+  /* What a machine pushed (push.js): derived metadata only, never a command,
+     path, evidence, session id or hostname. One row per snapshot; seq
+     counts a machine's snapshots from 1. Only the machine's latest row keeps
+     its actions (a JSON array of at most 100 entries, as push_schema.js
+     normalises them); older rows keep their counts, for the summary the
+     page shows, until they age out. digest: SHA-256 of the normalised body
+     without its time, to tell a repeated push from a new one. rules, agents
+     and scanned: JSON objects of counts, as validated. machine_id and
+     org_id come from the token, never the body. Nothing here is a token, a
+     hash of one, an address or a user agent. */
+  `CREATE TABLE IF NOT EXISTS pushes (
+     id TEXT PRIMARY KEY,
+     machine_id TEXT NOT NULL,
+     org_id TEXT NOT NULL,
+     seq INTEGER NOT NULL,
+     first_at INTEGER NOT NULL,
+     received_at INTEGER NOT NULL,
+     generated_at INTEGER NOT NULL,
+     digest TEXT NOT NULL,
+     version TEXT NOT NULL,
+     window_days INTEGER NOT NULL,
+     flagged INTEGER NOT NULL,
+     ignored INTEGER NOT NULL,
+     omitted INTEGER NOT NULL,
+     unread INTEGER NOT NULL,
+     critical INTEGER NOT NULL,
+     high INTEGER NOT NULL,
+     medium INTEGER NOT NULL,
+     rules TEXT NOT NULL,
+     agents TEXT NOT NULL,
+     scanned TEXT NOT NULL,
+     actions TEXT)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS pushes_machine_seq ON pushes (machine_id, seq)`,
+  `CREATE INDEX IF NOT EXISTS pushes_org ON pushes (org_id)`,
+
   `INSERT OR IGNORE INTO settings (key, value) VALUES ('accounts_schema', '1')`,
 ];
 
@@ -751,6 +790,8 @@ export async function sweep(env) {
      since, so that every statement below has its table. */
   if (accountsOn(env) || await tablesMade(db)) await schema(db);
   else return;
+  /* The sweep of pushes below reads tokens. */
+  await feedSchema(db);
   const t = now();
   await db.batch([
     db.prepare("DELETE FROM signins WHERE expires_at <= ? OR used_at IS NOT NULL").bind(t),
@@ -763,5 +804,16 @@ export async function sweep(env) {
     db.prepare("DELETE FROM device_codes WHERE expires_at <= ?").bind(t - HOUR),
     db.prepare(`UPDATE invites SET email = NULL WHERE email IS NOT NULL
                 AND (accepted_at IS NOT NULL OR revoked_at IS NOT NULL OR expires_at <= ?)`).bind(t),
+    /* What machines pushed (push.js): the backstop for every way a token
+       ends that runs no push code (revokeIdle, a member removed, an
+       organisation left), and for what has outlived its keeping. */
+    db.prepare(`DELETE FROM pushes WHERE machine_id IN
+                (SELECT m.id FROM machines m JOIN tokens k ON k.hash = m.hash WHERE k.revoked_at IS NOT NULL)`),
+    db.prepare("DELETE FROM pushes WHERE received_at <= ?").bind(t - PUSH_HARD_DAYS * DAY),
+    db.prepare(`DELETE FROM pushes WHERE received_at <= ?
+                AND seq < (SELECT max(q.seq) FROM pushes q WHERE q.machine_id = pushes.machine_id)`)
+      .bind(t - PUSH_KEEP_DAYS * DAY),
+    db.prepare(`UPDATE pushes SET actions = NULL WHERE actions IS NOT NULL
+                AND seq < (SELECT max(q.seq) FROM pushes q WHERE q.machine_id = pushes.machine_id)`),
   ]);
 }

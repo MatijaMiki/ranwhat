@@ -54,8 +54,10 @@ DECOYS = {"decoy." + n for n in (
     "code-call env-lookup").split()}
 RISKY = {"risky." + n for n in (
     "rm-rf-home git-force-push git-reset-hard npm-publish curl-pipe-sh "
-    "chmod-777 s3-rm-recursive drop-table docker-prune-volumes read-env "
-    "read-aws-credentials read-ssh-key read-ssh-key-tool stripe-payout "
+    "chmod-777 s3-rm-recursive drop-table docker-prune-volumes "
+    "imds-credentials crontab-install hook-uninstall agent-no-prompts "
+    "ignore-file-append read-env read-aws-credentials read-ssh-key "
+    "read-ssh-key-tool read-ranwhat-key stripe-payout "
     "history-clear upload-env secret-in-header secret-in-export "
     "password-on-command-line").split()}
 BENIGN = {"benign." + n for n in (
@@ -63,11 +65,11 @@ BENIGN = {"benign." + n for n in (
     "echo-quoted-rm grep-for-force-push rm-node-modules rm-tmp-scratch "
     "chmod-plus-x chmod-755 curl-jq force-with-lease git-rm-cached "
     "cat-env-example docker-ps cat-public-key ssh-with-key read-readme "
-    "write-script").split()}
+    "cat-ranwhat-ignore ranwhat-ignore-list write-script").split()}
 GAPS = {"gap." + n for n in (
     "download-then-run env-grep-token docker-plain-prune "
-    "git-push-plus-refspec rsync-delete python-rmtree base64-secret "
-    "npmrc-read placeholder-key-prefix").split()}
+    "git-push-plus-refspec rsync-delete python-rmtree python-imds "
+    "base64-secret npmrc-read placeholder-key-prefix").split()}
 PUBLISHED = ("decoy.aws-doc", "decoy.stripe-doc", "decoy.placeholder",
              "decoy.code-call", "decoy.env-lookup")
 RANDOM = ("decoy.git-sha", "decoy.sha256", "decoy.uuid", "decoy.base64-prose")
@@ -248,7 +250,7 @@ class Scoring(_Bench):
         self.assertEqual([(g["id"], g["passed"], g["total"])
                           for g in result.groups()],
                          [("secrets", 12, 12), ("decoys", 9, 9),
-                          ("risky", 19, 19), ("benign", 22, 22)])
+                          ("risky", 25, 25), ("benign", 24, 24)])
 
     def test_every_must_case_passes_with_two_other_seeds(self):
         for seed in (7, 4242):
@@ -278,7 +280,7 @@ class Scoring(_Bench):
         ids = [c[0] for c in bench.build().listing()]
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(set(ids), SECRETS | DECOYS | RISKY | BENIGN)
-        self.assertEqual(len(ids), 62)
+        self.assertEqual(len(ids), 70)
         self.assertEqual(set(g.id for g in bench.build().gaps), GAPS)
 
     def test_every_risky_case_names_a_real_rule_and_floor(self):
@@ -303,7 +305,7 @@ class Gaps(_Bench):
             self.assertIn(g["kind"], ("miss", "false_alarm"))
             self.assertIn(g["state"], ("missed", "caught", "quiet", "flagged"))
             self.assertTrue(g["why"].endswith("."), g["id"])
-        self.assertEqual(sum(g["total"] for g in result.groups()), 62)
+        self.assertEqual(sum(g["total"] for g in result.groups()), 70)
         self.assertFalse([c for c in result.cases if c["id"].startswith("gap.")])
         text = bench.render(result)
         self.assertIn("Not counted", text)
@@ -321,8 +323,8 @@ class Gaps(_Bench):
     def test_a_gap_that_ranwhat_closes_does_not_fail_the_run(self):
         real = watch.evaluate
 
-        def evaluate(tool_name, tool_input, known=None):
-            hits, payload = real(tool_name, tool_input, known)
+        def evaluate(tool_name, tool_input, known=None, **kwargs):
+            hits, payload = real(tool_name, tool_input, known, **kwargs)
             if "grep -i token" in json.dumps(tool_input) and not hits:
                 hits = [{"rule": "cred.read", "severity": "high",
                          "title": "Credential read", "why": "It reads one.",
@@ -336,7 +338,7 @@ class Gaps(_Bench):
         self.assertTrue(doc["passed"])
         states = dict((g["id"], g["state"]) for g in doc["gaps"])
         self.assertEqual(states["gap.env-grep-token"], "caught")
-        self.assertEqual([g["total"] for g in doc["groups"]], [12, 9, 19, 22])
+        self.assertEqual([g["total"] for g in doc["groups"]], [12, 9, 25, 24])
         with mock.patch.object(watch, "evaluate", evaluate):
             rc, out, _ = self.run_cli("bench")
         self.assertIn("now caught", out)
@@ -430,6 +432,19 @@ class Isolation(_Bench):
         self.assertEqual(touched, [])
         self.assertEqual(os.listdir(self.home), [])
         self.assertFalse(os.path.exists(self.state))
+
+    def test_an_ignore_file_that_leaves_out_everything_changes_nothing(self):
+        # bench runs in a state folder of its own: the ignore file of the
+        # machine it runs on, however wide, is never read.
+        before = bench.run().as_json()
+        os.makedirs(self.state)
+        with open(os.path.join(self.state, "ignore"), "w", encoding="utf-8") as fh:
+            fh.write("".join("%s\n" % rule.id for rule in watch.RULES
+                             if rule.id != "secret.literal"))
+        self.assertEqual(bench.run().as_json(), before)
+        rc, out, _err = self.run_cli("bench", "--json")
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out), before)
 
     def test_the_environment_is_restored(self):
         def snapshot():
@@ -561,7 +576,7 @@ class Failing(_Bench):
         self.assertEqual([(g["id"], g["passed"], g["total"])
                           for g in doc["groups"]],
                          [("secrets", 0, 12), ("decoys", 9, 9),
-                          ("risky", 0, 19), ("benign", 22, 22)])
+                          ("risky", 0, 25), ("benign", 24, 24)])
         self.assertEqual(rc_text, cli.FAIL_STATUS)
         self.assertIn("FAIL", text)
         self.assertIn("not met", err)
@@ -585,7 +600,7 @@ class Failing(_Bench):
         self.assertEqual(rc, cli.FAIL_STATUS)
         self.assertEqual(sorted(failed), ["decoy.git-sha", "decoy.sha256"])
 
-        def everything(tool_name, tool_input, known=None):
+        def everything(tool_name, tool_input, known=None, **kwargs):
             return ([{"rule": "cred.read", "severity": "critical",
                       "title": "t", "why": "w", "evidence": "x"}], "x")
         with mock.patch.object(watch, "evaluate", everything):

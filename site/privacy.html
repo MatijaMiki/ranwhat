@@ -84,7 +84,7 @@
         Not a policy but an architecture. Anything touching a secret runs
         locally. <span class="icode">live</span>, <span class="icode">update</span>,
         <span class="icode">login</span>, <span class="icode">whoami</span>,
-        <span class="icode">logout</span> and the <span class="icode">--pull-usage</span>
+        <span class="icode">logout</span>, <span class="icode">push</span> and the <span class="icode">--pull-usage</span>
         flag go online, and only when you run them.
       </p>
       <div class="grid2">
@@ -94,7 +94,7 @@
         </div>
         <div class="cell">
           <h3>Goes online, when you ask</h3>
-          <p><span class="icode">live</span>, <span class="icode">callers</span>, <span class="icode">--pull-usage</span> and <span class="icode">revoke N</span> in clean's review call the provider that issued each token, and nothing else. <span class="icode">revoke N</span> sends a leaked token to GitHub, Slack or Google to revoke it, only after you type yes. <span class="icode">callers</span> reads AWS through your own <span class="icode">aws</span> CLI, and searches GitHub's audit log by a hash of the token, never the token itself. <span class="icode">update</span> sends your token to <span class="icode">feed.ranwhat.com</span> and nothing else. A token made by <span class="icode">ranwhat login</span> belongs to one machine, and a CI token to one pipeline, so we know the day each last used its token, and nothing finer. <span class="icode">login</span>, <span class="icode">whoami</span> and <span class="icode">logout</span> talk to the same host: <span class="icode">login</span> to get a code and then this machine&rsquo;s token, <span class="icode">whoami</span> with the token it is given with <span class="icode">--token</span>, or else the one in <span class="icode">RANWHAT_TOKEN</span>, or else the saved one, and <span class="icode">logout</span> with the saved one. None of them sends a hostname, operating system, user name or machine identifier. A hosted record of what your agents did, when one exists, would receive derived metadata only: what tool, what authority, whether it was reversible, with payloads hashed in place. None exists yet, and the account described below holds no agent data at all.</p>
+          <p><span class="icode">live</span>, <span class="icode">callers</span>, <span class="icode">--pull-usage</span> and <span class="icode">revoke N</span> in clean's review call the provider that issued each token, and nothing else. <span class="icode">revoke N</span> sends a leaked token to GitHub, Slack or Google to revoke it, only after you type yes. <span class="icode">callers</span> reads AWS through your own <span class="icode">aws</span> CLI, and searches GitHub's audit log by a hash of the token, never the token itself. <span class="icode">update</span> sends your token to <span class="icode">feed.ranwhat.com</span> and nothing else. A token made by <span class="icode">ranwhat login</span> belongs to one machine, and a CI token to one pipeline, so we know the day each last used its token, and nothing finer. <span class="icode">login</span>, <span class="icode">whoami</span> and <span class="icode">logout</span> talk to the same host: <span class="icode">login</span> to get a code and then this machine&rsquo;s token, <span class="icode">whoami</span> with the token it is given with <span class="icode">--token</span>, or else the one in <span class="icode">RANWHAT_TOKEN</span>, or else the saved one, and <span class="icode">logout</span> with the saved one. None of them sends a hostname, operating system, user name or machine identifier. <span class="icode">push</span> is the one command that sends anything about what your agents did, as derived metadata only, and it is the one place the account holds agent data; <a href="#push">what it sends, and what it does not</a>, is below. A hosted record beyond that, with payloads hashed in place, does not exist yet.</p>
         </div>
       </div>
       <div class="rows" style="margin-top:30px">
@@ -325,7 +325,7 @@
         <h3>The install is not tracked</h3>
         <p>Installing ranwhat, and running check, watch, clean, scan or demo,
            sends us nothing. There is no licence check, no version ping, no
-           crash reporter. update, login, whoami and logout are the only
+           crash reporter. update, login, whoami, logout and push are the only
            commands that talk to our server, and only when you run them. If you
            link a machine with ranwhat login, we know that machine exists and
            the day its token was last used. Beyond that we do not know how
@@ -493,6 +493,82 @@
             <span class="icode">hello@ranwhat.com</span> from its address and we
             delete it by hand, with what belongs to it alone, keeping only the
             IDs of a sale as its record.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3" id="push">
+  <div class="shell band split">
+    <div class="marginal">04 / Push</div>
+    <div>
+      <h2>What <span class="icode">ranwhat push</span> sends, and what it does not.</h2>
+      <p class="lede">
+        <span class="icode">push</span> is a Plus feature and an explicit
+        command. Nothing runs it for you: not the hook, not
+        <span class="icode">check</span> or <span class="icode">watch</span>, and
+        not a schedule we set. It says what it will send and asks before it
+        does. <span class="icode">push --dry-run</span> prints the exact JSON and
+        sends nothing, and needs no account.
+      </p>
+      <div class="grid2">
+        <div class="cell">
+          <h3>Sent</h3>
+          <p>For each flagged action, at most 100 of them, the most severe
+             first: the id of each rule it tripped and its severity, a
+             16-character action id (a hash made on your machine, not the action;
+             where an agent writes no call id, someone who guesses a plain
+             command can check the guess against it), which agent ran it, and the
+             time in UTC. Then counts: flagged, left out by your ignore file
+             (counted, never listed), not listed, transcripts read per agent,
+             how many were unreadable, by severity, by rule and by agent;
+             the window in days and ranwhat&rsquo;s version. Which machine
+             sent it is the token that signs the request, and the body has
+             no field to say anything else about it.</p>
+        </div>
+        <div class="cell">
+          <h3>Never sent</h3>
+          <p>A command, a path, evidence, a working directory, a session id,
+             a project name, a tool name, file contents, a secret, your
+             hostname or your user name. The client builds the document from
+             those few facts and reads nothing else from a record, and the
+             server refuses a body with any other field, so a bug in the
+             client cannot make it carry more. Ignored actions are counted and
+             not listed.</p>
+        </div>
+      </div>
+      <div class="rows" style="margin-top:30px">
+        <div class="row"><span class="k">Where it goes</span>
+          <span class="v">Only to <span class="icode">feed.ranwhat.com</span>, over
+            HTTPS, with this machine&rsquo;s token, from a machine linked with
+            <span class="icode">ranwhat login</span> or a CI token. An
+            organisation on Free is refused, and nothing is stored. It is
+            stored in the same Cloudflare D1 database as the rest of the
+            account, and no IP address, user agent or hostname is kept with
+            it.</span></div>
+        <div class="row"><span class="k">Who can read it</span>
+          <span class="v">Every member of the organisation the machine is linked
+            to, on the Findings page at account.ranwhat.com, which lists each
+            machine with when it last pushed, its counts by severity and by
+            rule, and its newest findings. Nothing pushed is served back
+            over the feed host.</span></div>
+        <div class="row"><span class="k">How long</span>
+          <span class="v">Each machine&rsquo;s latest push is kept whole. Before
+            it, only a summary of the counts of each earlier push is kept, for
+            30 days and at most 30 pushes, and nothing at all is kept past 90
+            days. Pushing the same findings again changes nothing but the time
+            it was received. This is not the 13-month record: that is a
+            separate feature, and it is not built.</span></div>
+        <div class="row"><span class="k">How to stop</span>
+          <span class="v">Stop running <span class="icode">push</span>. Run
+            <span class="icode">ranwhat logout</span>, or revoke the machine on
+            the account page, and everything that machine pushed is deleted
+            with its token, in the same step. If an organisation leaves Plus, its machines are refused
+            and what they pushed is deleted by the same 90-day limit.
+            Deleting an organisation, by hand as
+            <a href="#account-deletion">Deleting</a> says.</span></div>
+        <div class="row"><span class="k">Legal basis</span>
+          <span class="v">The contract you enter by using Plus (GDPR art.&nbsp;6(1)(b)).</span></div>
       </div>
     </div>
   </div>

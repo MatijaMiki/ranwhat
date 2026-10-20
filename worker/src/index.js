@@ -43,6 +43,11 @@
  * the code is typed. Each is looked up by host and path together, and
  * with ACCOUNTS_ON unset none of them is there: they answer 404 as an
  * unknown path does.
+ *
+ * Pushing findings (push.js): POST feed.ranwhat.com/v1/push, from a
+ * linked terminal or a CI token of a Plus or Team organisation, as
+ * derived metadata only. Routed the same way, and dark with ACCOUNTS_ON
+ * unset. The page that shows what was pushed is on the account host.
  */
 import { EmailMessage } from "cloudflare:email";
 import { announce, confirm, subscribe, switchedOn } from "./list.js";
@@ -52,6 +57,7 @@ import { billingEmailsDue } from "./billing.js";
 import { ACCOUNT_HOST, accountsOn, sweep } from "./accounts.js";
 import { account } from "./dashboard.js";
 import { deviceRoute } from "./device.js";
+import { pushRoute } from "./push.js";
 import { revokeIdle } from "./machines.js";
 import { challenge } from "./challenge.js";
 
@@ -268,7 +274,7 @@ export default {
     if (url.hostname === ACCOUNT_HOST) {
       return accountsOn(env) ? account(request, env, ctx) : json(404, { error: "Not found." });
     }
-    const route = (accountsOn(env) && deviceRoute(url)) || ROUTES[url.pathname];
+    const route = (accountsOn(env) && (deviceRoute(url) || pushRoute(url))) || ROUTES[url.pathname];
     if (!route) return json(404, { error: "Not found." });
     const [handle, methods] = route;
     if (!methods.includes(request.method)) {

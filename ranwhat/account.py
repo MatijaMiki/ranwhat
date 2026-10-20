@@ -1,6 +1,7 @@
 """Linking this machine to a ranwhat.com account: login, whoami, logout.
 
-Three opt-in commands, and with `update` the only ones that talk to
+Three opt-in commands, and with `update` and `push` (push.py, which
+borrows this module's transport) the only ones that talk to
 ranwhat's own server. None of the others needs an account. check, watch,
 clean and sources never load this module or the HTTP stack it uses. scan,
 live and `update --status` may load it, with feed.py, to read the plan
@@ -259,10 +260,13 @@ def _refusal(status, doc, doing):
     return "The server answered HTTP %d %s." % (status, doing)
 
 
-def _call(path, form=None, token=None, timeout=TIMEOUT):
+def _call(path, form=None, token=None, timeout=TIMEOUT, payload=None,
+          headers_out=None):
     """(status, JSON object) for one request: a POST of `form` when there
-    is one, a GET otherwise. Unreachable when there was no answer; any HTTP
-    answer, error or not, is returned for the caller to read."""
+    is one, a POST of `payload` (bytes of JSON) when that is given, a GET
+    otherwise. Unreachable when there was no answer; any HTTP answer, error
+    or not, is returned for the caller to read. `headers_out`, a dict, is
+    given the answer's Retry-After when it has one (push reads it)."""
     url = api_base() + path
     feed._check_url(url)
     headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
@@ -273,14 +277,19 @@ def _call(path, form=None, token=None, timeout=TIMEOUT):
     if form is not None:
         data = urllib.parse.urlencode(form).encode("ascii")
         headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif payload is not None:
+        data = payload
+        headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers,
                                  method="GET" if data is None else "POST")
     host = urllib.parse.urlsplit(url).hostname
     try:
         with feed._open(req, timeout, ssl.create_default_context()) as resp:
             status, body = resp.status, resp.read(MAX_BYTES + 1)
+            wait = resp.headers.get("Retry-After")
     except urllib.error.HTTPError as exc:
         status = exc.code
+        wait = exc.headers.get("Retry-After") if exc.headers else None
         try:
             body = exc.read(MAX_BYTES + 1)
         except (OSError, http.client.HTTPException):
@@ -297,6 +306,8 @@ def _call(path, form=None, token=None, timeout=TIMEOUT):
         # Whatever else http.client refuses in a header, its message quotes
         # the header, token included. from None: not shown as the cause.
         raise AccountError("The request to %s could not be sent." % host) from None
+    if headers_out is not None and wait:
+        headers_out["retry-after"] = wait
     if len(body) > MAX_BYTES:
         raise AccountError("The answer from %s is larger than any it sends; "
                            "not reading it." % host)
