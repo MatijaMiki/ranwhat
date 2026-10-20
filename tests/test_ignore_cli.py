@@ -438,7 +438,7 @@ class Flags(_Cli):
     def test_who_takes_which(self):
         rc, _out, err = self.cli("clean", "--ignore", "x")
         self.assertEqual(rc, 2)
-        self.assertIn("--ignore is only for check, watch and ignore; clean leaves a "
+        self.assertIn("--ignore is only for check, watch, ignore and push; clean leaves a "
                       "secret alone with keep, in its review", err)
         for argv in (["ignore", "--no-ignore"], ["clean", "--no-ignore"],
                      ["sources", "--no-ignore"]):

@@ -4333,7 +4333,7 @@ _RANWHAT_VALUES = frozenset((
 _RANWHAT_FLAGS = frozenset((
     "--help", "--json", "--pull-usage", "--apply", "--no-interactive",
     "--save-token", "--status", "--force", "--no-browser", "--local",
-    "--no-ignore"))
+    "--no-ignore", "--dry-run", "--yes"))
 _RANWHAT_OPTIONS = tuple(sorted(_RANWHAT_VALUES | _RANWHAT_FLAGS))
 
 

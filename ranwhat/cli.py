@@ -42,7 +42,8 @@ from . import term
 # and logout use them, so each is imported there, and cli.introspect,
 # cli.usage_mod, cli.feed_mod and cli.account_mod still name them.
 _LAZY = {"introspect": "introspect", "usage_mod": "usage", "feed_mod": "feed",
-         "account_mod": "account", "bench_mod": "bench"}
+         "account_mod": "account", "bench_mod": "bench",
+         "push_mod": "push"}
 # introspect.PROVIDERS, named here for the flags each takes, and usage's
 # default window (tests/test_work_done.py checks that they agree). bench is
 # lazy too: nothing but the bench command needs it. Its default seed is
@@ -227,14 +228,14 @@ TAGLINE = "Flight recorder and authority scanner for AI agents."
 
 # What reaches the network, said once for the overview and --help. "Nothing is
 # transmitted" was false for live and --pull-usage, which send each token to
-# the provider that issued it, and for update, login, whoami and logout,
-# which talk to ranwhat's own server (feed.ranwhat.com). site/install.html
+# the provider that issued it, and for update, login, whoami, logout and
+# push, which talk to ranwhat's own server (feed.ranwhat.com). site/install.html
 # quotes it word for word, and commands.html, llms.txt and the README say
 # the same.
 NETWORK = ("No account needed. live, callers, --pull-usage and clean's "
-           "revoke ask only the provider that issued each token, and update, login, whoami and logout "
-           "talk only to ranwhat.com. Everything else reads locally and "
-           "sends nothing.")
+           "revoke ask only the provider that issued each token, and update, login, whoami, logout and push "
+           "talk only to ranwhat.com. push sends derived metadata only, and only when you run it. "
+           "Everything else reads locally and sends nothing.")
 
 # Descriptions wrap under their own column on a narrow terminal, rather than
 # being folded again by the terminal into ragged half-lines.
@@ -255,6 +256,7 @@ COMMANDS = (
     ("login", "link this machine to your ranwhat.com account"),
     ("whoami", "which account, organisation and plan this machine uses"),
     ("logout", "unlink this machine and delete its token"),
+    ("push", "send this machine's findings to your account, as metadata only"),
     ("hook", "opt in: ask before a high-risk Claude Code call runs"),
 )
 
@@ -607,6 +609,145 @@ def _account(p, args):
     except KeyboardInterrupt:
         sys.stderr.write("\n  Cancelled.\n")
         return 130
+
+
+def _push(p, args):
+    """ranwhat push (push.py): this machine's findings, as metadata only, to
+    the account it is linked to. Explicit by construction: it sends after a
+    typed yes or --yes and nowhere else, and the hook, watch and check never
+    call it."""
+    if args.token is not None:
+        p.error("--token is for update and whoami; push uses the token saved "
+                "on this machine or RANWHAT_TOKEN")
+    if args.days < 1 or args.days > 365:
+        p.error("--days for push is 1 to 365")
+    if args.apply:
+        p.error("--apply is only for clean and revoke; push changes nothing here")
+    if args.no_interactive:
+        p.error("--no-interactive is only for clean and ignore; push asks only "
+                "when it is about to send, and --yes answers it")
+    push_mod = _module("push_mod")
+    err, out = sys.stderr, sys.stdout
+
+    def say(stream, text):
+        stream.write("\n".join(term.wrap(text, stream=stream)) + "\n")
+
+    ignoring = _ignoring(args)
+    if ignoring is None:
+        return 1
+    tok = None
+    sending = False
+    try:
+        if not args.dry_run:
+            # Before the long read: a missing token is found at once.
+            tok, why = push_mod.token()
+            if tok is None:
+                if why == "symlink":
+                    say(err, "%s is a symlink; not reading a token through it. "
+                        "Nothing was sent." % _module("feed_mod").token_path())
+                elif why == "unreadable":
+                    say(err, "%s holds no token ranwhat can read. Nothing was "
+                        "sent." % _module("feed_mod").token_path())
+                else:
+                    say(err, "Not logged in. push sends a machine's findings to "
+                        "the organisation it is linked to, so run ranwhat login "
+                        "first. Nothing was sent.")
+                return 1
+
+        records, counts, unread, _everywhere = _watch_scan(args)
+        if not sum(counts.values()):
+            if sum(unread.values()):
+                say(err, "ranwhat could read none of the %d transcripts it found. "
+                    "Nothing was sent." % sum(unread.values()))
+                return 1
+            places = watch_mod.locations(
+                args.sources, root=args.root, state_dir=args.state_dir,
+                paths=args.paths, asked=args.source)
+            status = _said_nothing_read(places, args.days)
+            say(err, "Nothing was sent.")
+            return status or 2
+        records = ignoring.split(records)
+        records, dropped = push_mod.sendable(records)
+        doc = push_mod.build(records, scanned=counts, unread=unread,
+                             ignored=ignoring.hidden, days=args.days,
+                             version=__version__)
+        try:
+            push_mod.check(doc)
+        except push_mod.Invalid as exc:
+            say(err, "ranwhat built a push the server's rules would refuse (%s). "
+                "That is a bug, not something you did. Nothing was sent." % exc)
+            return 1
+        if dropped:
+            say(err, "%d flagged action%s left out: push describes an action only "
+                "by an agent and a rule it knows." % (dropped, "" if dropped == 1 else "s"))
+
+        if args.dry_run:
+            err.write("  Dry run: this is the exact JSON push would send. Nothing "
+                      "was sent.\n")
+            out.write(push_mod.dumps(doc, indent=2) + "\n")
+            return 0
+
+        if not args.json:
+            out.write(push_mod.render_summary(doc))
+            out.flush()
+        if not args.yes:
+            asking = False
+            try:
+                asking = (sys.stdin.isatty() and out.isatty() and not args.json)
+            except (AttributeError, ValueError):
+                asking = False
+            if not asking:
+                err.write("  Not a terminal, so push will not send without --yes. "
+                          "--dry-run shows what it would send.\n")
+                return 1
+            try:
+                answer = input("  Send it? [y/N] ")
+            except EOFError:
+                answer = ""
+            if answer.strip().lower() not in ("y", "yes"):
+                err.write("  Cancelled. Nothing was sent.\n")
+                return 1
+
+        sending = True
+        try:
+            reply = push_mod.send(doc, tok)
+        except push_mod.Refused as exc:
+            say(err, str(exc))
+            return 1
+        sending = False
+    except KeyboardInterrupt:
+        out.write("\n")
+        if sending:
+            say(err, "Cancelled while sending. If it arrived, ranwhat push again "
+                "says nothing changed.")
+        else:
+            say(err, "Cancelled. Nothing was sent.")
+        return 130
+
+    account_mod = _module("account_mod")
+    org = account_mod._shown(reply.get("org"))
+    machine = account_mod._shown(reply.get("machine"), 80)
+    counts = doc["counts"]
+    if args.json:
+        received = reply.get("received_at")
+        out.write(json.dumps({
+            "sent": True, "status": reply["status"], "actions": counts["flagged"],
+            "ignored": counts["ignored"], "org": org, "machine": machine,
+            "received_at": received if isinstance(received, str)
+            and re.match(r"[0-9T:Z-]{1,25}\Z", received) else None}) + "\n")
+        return 0
+    where = org or "your organisation"
+    if reply["status"] == "unchanged":
+        say(out, "Nothing changed since this machine last pushed, so the server "
+            "kept what it had. Everyone in %s can read it at %s"
+            % (where, push_mod.FINDINGS_PAGE))
+        return 0
+    out.write("  Sent to %s%s: %s from %s.\n" % (
+        where, ' as "%s"' % machine if machine else "",
+        "1 action" if counts["flagged"] == 1 else "%d actions" % counts["flagged"],
+        push_mod._days(args.days)))
+    say(out, "Everyone in %s can read them at %s" % (where, push_mod.FINDINGS_PAGE))
+    return 0
 
 
 def _has_plus():
@@ -1019,13 +1160,16 @@ def _check(args):
 _CHECK_TITLE = ("  ranwhat check  ", "· watch and clean in one pass")
 
 
-def _watch_scan(args):
+def _watch_scan(args, unmasked=None):
     """watch's read of every agent's history, as check reads it for its
     watch section: (records, {source: how many it read}, {source: how many
     it could not}, the known.Matcher of every value clean finds). Every
     string of every record is masked by it, the subjects an ignore entry
     is matched against too, so watch, check and ranwhat ignore match the
-    same text."""
+    same text. `unmasked`, a function, names the strings that are left as
+    they are: push's rule ids, severities, agent ids and action ids, which
+    carry nothing to hide and which a mask built from fingerprints can
+    match (a rule id the length of a masked secret, say) and spoil."""
     bar, step = _progress_line(args)
     try:
         everywhere = _known(args, step)
@@ -1037,7 +1181,10 @@ def _watch_scan(args):
                 since_days=args.days, progress=step(_ACTIONS),
                 known=everywhere, paths=args.paths, unread=unread)
         if everywhere:
-            records = _masked_strings(records, everywhere.mask)
+            mask = everywhere.mask
+            if unmasked is not None:
+                mask = (lambda text, mask=mask: text if unmasked(text) else mask(text))
+            records = _masked_strings(records, mask)
     finally:
         bar.clear()
     return records, counts, unread, everywhere
@@ -1364,7 +1511,7 @@ def _takes_no_path(command, path):
     that reads transcripts, which flag reads that path: --root, or --root
     with its projects directory when that is where the transcripts are."""
     said = "%s takes no path" % command
-    if command not in ("check", "watch", "clean"):
+    if command not in ("check", "watch", "clean", "push"):
         return said
     root = _root_for(path)
     if os.path.isdir(root) and watch_mod._transcripts(root):
@@ -2471,7 +2618,7 @@ def _main(argv=None):
                    choices=["check", "demo", "bench", "scan", "live",
                             "callers", "revoke", "watch", "clean", "sources",
                             "reach", "update", "login", "whoami", "logout",
-                            "hook", "ignore"])
+                            "push", "hook", "ignore"])
     p.add_argument("profile", nargs="?",
                    help="scan: path to a profile JSON. reach: a project "
                         "directory to look at. hook: install, uninstall or "
@@ -2508,8 +2655,9 @@ def _main(argv=None):
     p.add_argument("--window-days", type=int, default=_DEFAULT_WINDOW_DAYS,
                    help="usage lookback window (default 90)")
     p.add_argument("--days", type=int, default=DEFAULT_DAYS,
-                   help="check, watch, clean, ignore: how far back to read "
-                        "local agent history (default 30)")
+                   help="check, watch, clean, ignore, push: how far back to "
+                        "read local agent history (default 30; push: 1 to "
+                        "365)")
     p.add_argument("--seed", type=int, default=None, metavar="N",
                    help="bench: draw the made-up secrets from this seed "
                         "(default %d), so a run can be repeated. Another seed "
@@ -2517,22 +2665,22 @@ def _main(argv=None):
                         "status %d when an expectation is not met, 1 on an "
                         "error" % (_BENCH_SEED, FAIL_STATUS))
     p.add_argument("--root", metavar="PATH",
-                   help="check, watch, clean, ignore: Claude Code transcript "
+                   help="check, watch, clean, ignore, push: Claude Code transcript "
                         "directory "
                         "(default ~/.claude/projects); the same as "
                         "--path claude-code=PATH")
     p.add_argument("--state-dir", metavar="PATH",
-                   help="check, watch, clean, ignore: OpenClaw state directory "
+                   help="check, watch, clean, ignore, push: OpenClaw state directory "
                         "(default ~/.openclaw); the same as "
                         "--path openclaw=PATH")
     p.add_argument("--source", action="append", choices=list(sources_mod.ids()),
                    metavar="ID",
-                   help="check, watch, clean, ignore, sources: read only this "
+                   help="check, watch, clean, ignore, push, sources: read only this "
                         "agent "
                         "(repeatable; default every one). IDs: %s"
                         % ", ".join(sources_mod.ids()))
     p.add_argument("--path", action="append", metavar="ID=PATH", default=[],
-                   help="check, watch, clean, ignore, sources: read this "
+                   help="check, watch, clean, ignore, push, sources: read this "
                         "agent's "
                         "history from PATH instead of its default place "
                         "(repeatable, one per agent; ranwhat sources says "
@@ -2557,7 +2705,7 @@ def _main(argv=None):
                    help="clean: report and exit instead of opening the review "
                         "session; ignore: add the id without asking")
     p.add_argument("--ignore", metavar="PATH",
-                   help="check, watch, ignore: use PATH instead of "
+                   help="check, watch, ignore, push: use PATH instead of "
                         "~/.ranwhat/ignore ($RANWHAT_HOME/ignore)")
     p.add_argument("--no-ignore", action="store_true",
                    help="check, watch: leave nothing out; mark each action the "
@@ -2568,6 +2716,12 @@ def _main(argv=None):
                         "update --save-token: a value passed here is visible "
                         "to every user on this machine via ps, and lands in "
                         "your shell history.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="push: print the exact JSON that would be sent and "
+                        "exit. Nothing is sent, and no login is needed")
+    p.add_argument("--yes", action="store_true",
+                   help="push: send without asking. Without it, push asks on "
+                        "a terminal and refuses to send anywhere else")
     p.add_argument("--save-token", action="store_true",
                    help="update: write the token to ~/.ranwhat/token (0600) "
                         "so later runs need no flag")
@@ -2598,6 +2752,9 @@ def _main(argv=None):
     # refused the path as an unrecognized argument.
     args = p.parse_intermixed_args(argv)
 
+    for flag, value in (("--dry-run", args.dry_run), ("--yes", args.yes)):
+        if value and args.command != "push":
+            p.error("%s is only for push" % flag)
     if args.command == "hook":
         return _hook(p, args)
     if args.command == "revoke":
@@ -2628,12 +2785,14 @@ def _main(argv=None):
             # Accepted and ignored, a CI step would pass on any history.
             p.error("%s is only for check, watch and clean" % flag)
     if args.ignore is not None and args.command not in ("check", "watch",
-                                                        "ignore"):
-        p.error("--ignore is only for check, watch and ignore"
+                                                        "ignore", "push"):
+        p.error("--ignore is only for check, watch, ignore and push"
                 + ("; clean leaves a secret alone with keep, in its review"
                    if args.command == "clean" else ""))
     if args.no_ignore and args.command not in ("check", "watch"):
-        p.error("--no-ignore is only for check and watch")
+        p.error("--no-ignore is only for check and watch"
+                + ("; push never sends what the ignore file leaves out"
+                   if args.command == "push" else ""))
 
     if args.command is None:
         _overview(p)
@@ -2678,6 +2837,9 @@ def _main(argv=None):
 
     if args.command == "ignore":
         return _ignore(p, args)
+
+    if args.command == "push":
+        return _push(p, args)
 
     # After the --days check: check dispatched first scanned the future for
     # --days -1 and printed an all-clear.
