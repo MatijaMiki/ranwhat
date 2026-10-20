@@ -43,6 +43,22 @@ mcp__<server>__<tool> and any other name is unknown, so watch judges it by
 name. NotebookRead and LS are not given paths: their argument names were not
 verified.
 
+DeferExecuteTool is the wrapper through which a deferred tool is called when
+deferred tool loading is on: arguments {toolName, params}. It is unwrapped,
+so the call is judged and read as the inner tool (tool name toolName,
+arguments params); with no usable toolName it stays an unknown call. REPL
+is not mapped and so is unknown. Read from the 2.170.0 bundle, not from a
+captured record.
+
+/fork and /branch write a new <newId>.jsonl whose items are structured
+clones of the parent's (same callId and timestamp, new ids) and whose
+session-meta line carries forkedFrom and forkedAt; its subagent files are
+copied too. Read from the 2.170.0 bundle, not from a captured record. A
+call stamped at or before forkedAt in such a session (or in the subagents
+under it) is a copy and is not reported again: the parent's file reports
+it. A call with no timestamp cannot be told and is kept. Clean still
+searches every copy.
+
 A call is "declined" (it never ran) when its result says so in the agent's
 own fields: status "incomplete" with providerData.skipRun true (a rejection
 or interruption), or providerData.toolResult.terminal.reason
@@ -75,6 +91,7 @@ format is relied on, and fields not listed above are not read.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -103,6 +120,7 @@ TYPES = ("message", "assistant", "function_call", "function_call_result",
          "session-meta", "file-history-snapshot")
 RESULTS = ("function_call_result", "function_call_output")
 
+DEFER = "DeferExecuteTool"      # wraps a deferred tool: {toolName, params}
 USER_SHELL = "bash_input"       # the tool name of a command the user ran
 _INPUT = re.compile(r"<bash-input>(.*?)</bash-input>", re.S)
 _STDOUT = re.compile(r"<bash-stdout>(.*?)</bash-stdout>", re.S)
@@ -207,6 +225,60 @@ def _line_reader(fh):
             yield None, done
             continue
         yield raw, raw.endswith(b"\n")
+
+
+def _ms(value):
+    """An epoch-millisecond number, digit string or ISO string as
+    milliseconds since the epoch, or None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        when = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    try:
+        return when.timestamp() * 1000
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _fork_cut(path):
+    """forkedAt (ms) from the session-meta line among the first lines of
+    the transcript at `path` when it names forkedFrom, else None."""
+    try:
+        with open(path, "rb") as fh:
+            for index in range(_HEAD_LINES):
+                raw = fh.readline(_HEAD_BYTES)
+                if not raw:
+                    break
+                if not raw.endswith(b"\n") and len(raw) >= _HEAD_BYTES:
+                    continue
+                try:
+                    obj = json.loads(_lines.decode_line(raw, first=index == 0))
+                except (ValueError, RecursionError):
+                    continue
+                if isinstance(obj, dict) and obj.get("type") == "session-meta":
+                    meta = obj
+                    for key in ("data", "meta", "metadata"):
+                        if isinstance(obj.get(key), dict) and (
+                                "forkedFrom" in obj[key]):
+                            meta = obj[key]
+                    if meta.get("forkedFrom") is not None:
+                        return _ms(meta.get("forkedAt"))
+    except OSError:
+        pass
+    return None
 
 
 def _cwd_of(path):
@@ -369,8 +441,13 @@ class CodeBuddySource(Source):
         """The ToolCall for one function_call item."""
         name = item.get("name")
         name = name if isinstance(name, str) else ""
-        kind, known = _kind(name)
         args = base.decode_input(item.get("arguments"))
+        if name == DEFER:
+            inner = args.get("toolName")
+            if isinstance(inner, str) and inner.strip():
+                name = inner.strip()
+                args = base.decode_input(args.get("params"))
+        kind, known = _kind(name)
         cwd = _string(item.get("cwd"))
         command, paths, consumed, workdir = None, (), (), None
         if name in SHELL:
@@ -424,6 +501,24 @@ class CodeBuddySource(Source):
             workdir=_string(item.get("cwd")), consumed=("command",),
             **self._where(store, item))
 
+    @staticmethod
+    def _cut(store):
+        """forkedAt for a forked session's transcript (or a subagent's, by
+        the main transcript beside its folder), else None."""
+        path = store.path
+        if store.unit == "subagent":
+            parent = os.path.dirname(os.path.dirname(os.path.dirname(path)))
+            path = os.path.join(parent, (store.session or "") + ".jsonl")
+        return _fork_cut(path)
+
+    @staticmethod
+    def _copied(item, cut):
+        """True for an item stamped at or before the fork: a copy."""
+        if cut is None:
+            return False
+        stamp = _ms(item.get("timestamp"))
+        return stamp is not None and stamp <= cut
+
     def tool_calls(self, store):
         """Every function_call of a transcript, once per callId (the first
         copy), with its result's text as output; and every command the user
@@ -434,6 +529,7 @@ class CodeBuddySource(Source):
             return
         pending = {}
         done = set()
+        cut = self._cut(store)
         shell = None            # a user command waiting for its output
         for _line_no, item in self._records(store):
             kind = item.get("type")
@@ -449,6 +545,8 @@ class CodeBuddySource(Source):
                 yield shell
                 shell = None
             if kind == "function_call":
+                if self._copied(item, cut):
+                    continue
                 call = self._call(store, item)
                 cid = call.tool_call_id
                 if cid is None:
@@ -467,7 +565,8 @@ class CodeBuddySource(Source):
                     yield call
             elif text is not None:
                 m = _INPUT.search(text) if "<bash-input>" in text else None
-                if m and m.group(1).strip():
+                if (m and m.group(1).strip()
+                        and not self._copied(item, cut)):
                     shell = self._user_call(store, item, m.group(1).strip())
         if shell is not None:
             yield shell

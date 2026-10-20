@@ -835,5 +835,68 @@ class Performance(Case):
         self.assertLess(large, max(small * 8 * 4, 2.0))
 
 
+class ForksAndDeferredTools(Case):
+
+    FORK = "0199fe1a-ffff-7d4e-8f50-1a2b3c4d5e6f"
+
+    def meta(self, at):
+        return {"id": _id(950), "type": "session-meta", "cwd": CWD,
+                "forkedFrom": SID, "forkedAt": at}
+
+    def test_a_forked_session_does_not_report_the_copied_calls_again(self):
+        parent = self.session(
+            exchange(2, "c1", "Bash", {"command": "rm -rf build"}, "ok"))
+        copied = exchange(12, "c1", "Bash", {"command": "rm -rf build"}, "ok")
+        fresh = exchange(14, "c2", "Bash", {"command": "ls"}, "ok",
+                         ts=T0 + 90000)
+        fresh[0]["timestamp"] = T0 + 90000
+        fork = self.session([self.meta(T0 + 50000)] + copied + fresh,
+                            sid=self.FORK)
+        self.assertEqual([c.command for c in self.calls(parent)],
+                         ["rm -rf build"])
+        self.assertEqual([c.command for c in self.calls(fork)], ["ls"])
+
+    def test_forkedAt_may_be_an_iso_string_and_stamp_less_calls_stay(self):
+        lines = [self.meta("2025-10-20T09:00:50Z"),
+                 call(2, "a", "Bash", {"command": "old"}, ts=T0 + 2000),
+                 call(3, "b", "Bash", {"command": "unknown"}, ts=None),
+                 call(4, "c", "Bash", {"command": "new"}, ts=T0 + 60000)]
+        fork = self.session(lines, sid=self.FORK)
+        self.assertEqual([c.command for c in self.calls(fork)],
+                         ["unknown", "new"])
+
+    def test_a_session_without_forkedFrom_is_read_whole(self):
+        meta = {"id": _id(950), "type": "session-meta", "cwd": CWD}
+        path = self.session([meta, call(2, "a", "Bash", {"command": "x"})])
+        self.assertEqual(len(self.calls(path)), 1)
+
+    def test_a_forked_session_s_subagent_copies_are_skipped_too(self):
+        self.session([self.meta(T0 + 50000)], sid=self.FORK)
+        sub = self.write("projects/%s/%s/subagents/agent-1.jsonl"
+                         % (ENC, self.FORK),
+                         [call(2, "a", "Bash", {"command": "old"}),
+                          call(3, "b", "Bash", {"command": "new"},
+                               ts=T0 + 70000)])
+        self.assertEqual([c.command for c in self.calls(sub)], ["new"])
+
+    def test_a_deferred_tool_is_read_as_the_inner_tool(self):
+        wrapped = {"toolName": "Write", "params": {
+            "file_path": "/home/u/.ssh/authorized_keys", "content": "x"}}
+        shell = {"toolName": "Bash", "params": {"command": "id"}}
+        path = self.session([
+            call(2, "a", "DeferExecuteTool", wrapped),
+            call(3, "b", "DeferExecuteTool", shell),
+            call(4, "c", "DeferExecuteTool", {"toolName": "mcp__x__y",
+                                              "params": {}}),
+            call(5, "d", "DeferExecuteTool", {"params": {}})])
+        got = self.by_id(path)
+        self.assertEqual((got["a"].kind, got["a"].known, got["a"].paths),
+                         ("write", True, ("/home/u/.ssh/authorized_keys",)))
+        self.assertEqual((got["b"].kind, got["b"].command), ("shell", "id"))
+        self.assertEqual((got["c"].kind, got["c"].known), ("other", False))
+        self.assertEqual((got["d"].tool_name, got["d"].known),
+                         ("DeferExecuteTool", False))
+
+
 if __name__ == "__main__":
     unittest.main()
