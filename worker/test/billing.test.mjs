@@ -343,7 +343,7 @@ async function upgraded(b, s, e, plan = "yearly") {
 /* Every account page's HTML, one after another, for what may be on any of them. */
 async function everyPage(b) {
   let html = "";
-  for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) {
+  for (const path of ["/", "/machines", "/findings", "/members", "/billing", "/security", "/activity"]) {
     const r = await b.get(path);
     assert.equal(r.status, 200, `${path}: ${r.status}`);
     html += r.text;
@@ -431,7 +431,7 @@ test("an owner's upgrade is a Checkout bound to the organisation, at the pricing
   const org = orgOf(e, "ana@example.com");
 
   const page = await ana.get("/upgrade");
-  assert.match(page.text, /Catalogue feed and CI tokens now/);
+  assert.match(page.text, /Catalogue feed, CI tokens, Push and Cross-machine view now/);
   assert.match(page.text, /<input type="hidden" name="plan" value="monthly">[^]*?<span class="choice-price">€12 a month<\/span>[^]*?<button type="submit">Choose monthly<\/button><\/form>/);
   assert.match(page.text, /<input type="hidden" name="plan" value="yearly">[^]*?<span class="choice-price">€120 a year<\/span>[^]*?<button type="submit" class="primary">Choose yearly<\/button><\/form>/);
   assert.match(page.headers.get("content-security-policy"), /form-action 'self' https:\/\/checkout\.stripe\.com; /);

@@ -21,7 +21,7 @@
  * fresh code, as making a CI token does, and sets tokens.revoked_at, the
  * one switch every feed token has: from the next request on, the feed
  * refuses it. The machines row stays, so the organisation's history
- * keeps naming it.
+ * keeps naming it; what it pushed (push.js) is deleted with it.
  *
  * Last use. auth.js's identify() writes the start of the UTC day a
  * terminal or CI token was last accepted, at most once a day, in one
@@ -122,8 +122,8 @@ export async function renameMachine(env, who, machine, label) {
   return done[1].meta.changes === 1;
 }
 
-/* Revokes its token. The event is written only by the request that
-   revoked it. true when this request did. */
+/* Revokes its token, and deletes what it pushed. The event is written
+   only by the request that revoked it. true when this request did. */
 export async function revokeMachine(env, who, machine) {
   const db = env.LIST;
   const t = now();
@@ -135,6 +135,8 @@ export async function revokeMachine(env, who, machine) {
       .bind(who.org.id, who.user, machine.id, t, machine.id, who.org.id),
     db.prepare(`UPDATE tokens SET revoked_at = ? WHERE revoked_at IS NULL AND hash IN (${live})`)
       .bind(t, machine.id, who.org.id),
+    /* What it pushed (push.js) goes with its token. */
+    db.prepare("DELETE FROM pushes WHERE machine_id = ? AND org_id = ?").bind(machine.id, who.org.id),
   ]);
   return done[1].meta.changes === 1;
 }

@@ -59,6 +59,15 @@ name = "DEVICE_RL"
 namespace_id = "8628"
 simple = { limit = 10, period = 60 }
 
+# Turns away a burst of pushes from one network before the database is
+# touched (src/push.js): thirty a minute. namespace_id is any number not used
+# by another rate limit on this Cloudflare account. Without it, as in a
+# Preview, the counts in D1 still hold.
+[[ratelimits]]
+name = "PUSH_RL"
+namespace_id = "8629"
+simple = { limit = 30, period = 60 }
+
 # TURNSTILE_SECRET, X_PIXEL_TOKEN, RESEND_API_KEY and LIST_SECRET are
 # encrypted secrets, set with `npx wrangler secret put <NAME>`, never here.
 # RESEND_API_KEY: a Full access key (the list makes contacts, a segment and

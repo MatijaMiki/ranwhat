@@ -6,7 +6,7 @@
  * run as one. */
 import assert from "node:assert/strict";
 
-export const ACCOUNT_PAGES = Object.freeze(["/", "/machines", "/members", "/billing", "/security", "/activity"]);
+export const ACCOUNT_PAGES = Object.freeze(["/", "/machines", "/findings", "/members", "/billing", "/security", "/activity"]);
 
 /* Every account page as `b` sees it now, each drawn (200): { path, text, csp }. */
 export async function eachPage(b) {

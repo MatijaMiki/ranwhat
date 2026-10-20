@@ -994,7 +994,7 @@ test("a database the first deploy made: the account page, adding a passkey, sign
   for (const sql of WAVE_1) e.LIST.sql.exec(sql);
   const b = new Browser(e);
   await signInByCode(b, s, "ana@example.com");
-  for (const path of ["/", "/machines", "/members", "/billing", "/activity"]) {
+  for (const path of ["/", "/machines", "/findings", "/members", "/billing", "/activity"]) {
     const shown = await b.get(path);
     assert.equal(shown.status, 200, `${path}: ${shown.text}`);
   }

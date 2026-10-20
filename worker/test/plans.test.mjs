@@ -121,6 +121,10 @@ test("each plan has what its map says, and nothing unknown is let through", () =
   }
   for (const key of ["hash_chain", "underwriter_export"]) assert.equal(FEATURES[key].plan, "team", key);
   assert.equal(FEATURES.feed.status, "live");
+  for (const key of ["push", "machines"]) assert.equal(FEATURES[key].status, "live", key);
+  for (const key of ["alerts", "history", "drift", "digest", "signed_reports", "hash_chain", "underwriter_export"]) {
+    assert.equal(FEATURES[key].status, "coming", key);
+  }
   for (const [p, f] of [["plus", "nonsense"], ["team", "constructor"], ["admin", "feed"], [undefined, "feed"],
                         ["constructor", "feed"], ["team", "__proto__"]]) {
     assert.equal(allows(p, f), false, `${p} ${f}`);
@@ -135,8 +139,9 @@ test("no command that runs on a machine is ever a feature, so none is ever locke
   const block = cli.match(/^COMMANDS = \(\n([\s\S]*?)^\)/m)[1];
   const commands = [...block.matchAll(/^\s+\("([a-z-]+)",/gm)].map((m) => m[1]);
   assert.ok(commands.includes("check") && commands.includes("clean"), commands.join(" "));
-  // update is the one command that asks the server: it is the feed.
-  const local = commands.filter((c) => c !== "update");
+  // update and push are the commands that ask the server: the feed, and
+  // sending findings to the account.
+  const local = commands.filter((c) => c !== "update" && c !== "push");
   for (const [key, f] of Object.entries(FEATURES)) {
     for (const c of local) {
       assert.notEqual(key, c);
@@ -351,7 +356,7 @@ async function signedIn(e) {
   /* Every account page, one after another. */
   const all = async () => {
     let html = "";
-    for (const path of ["/", "/machines", "/members", "/billing", "/security", "/activity"]) html += await get(path);
+    for (const path of ["/", "/machines", "/findings", "/members", "/billing", "/security", "/activity"]) html += await get(path);
     return html;
   };
   return { org: o.id, home, all };
@@ -377,8 +382,10 @@ test("a Free organisation's dashboard shows Plus and Team locked, from the map, 
   assert.match(html, /id="plan">Free</);
   const plus = section(html, "plus"), team = section(html, "team");
   assert.deepEqual([plus.locked, team.locked], [true, true]);
-  assert.deepEqual(plus.features, featuresOf("plus").map((f) => f.key));
-  assert.deepEqual(team.features, featuresOf("team").map((f) => f.key));
+  // Live ones first, then what is coming, each in the map's order.
+  const ordered = (tier) => [...featuresOf(tier).filter((f) => f.status === "live"), ...featuresOf(tier).filter((f) => f.status !== "live")];
+  assert.deepEqual(plus.features, ordered("plus").map((f) => f.key));
+  assert.deepEqual(team.features, ordered("team").map((f) => f.key));
   for (const f of featuresOf("plus")) {
     assert.ok(tile(plus.html, f.key).includes(`<strong>${f.name}</strong>`), f.key);
     assert.match(tile(plus.html, f.key), f.status === "live" ? /<span class="pill brand">Needs Plus<\/span>/ : /<span class="pill">Coming<\/span>/, f.key);
@@ -441,7 +448,7 @@ function lockedPanels(html) {
 }
 
 const SRC = join(ROOT, "worker", "src");
-const SOURCES = ["auth.js", "feed.js", "dashboard.js", "machines.js", "members.js", "billing.js", "device.js"]
+const SOURCES = ["auth.js", "feed.js", "dashboard.js", "machines.js", "members.js", "billing.js", "device.js", "push.js"]
   .map((f) => readFileSync(join(SRC, f), "utf8")).join("\n");
 
 test("locks: every locked panel names a server-side feature, and a live one is refused on the server", async () => {
@@ -463,7 +470,7 @@ test("locks: every locked panel names a server-side feature, and a live one is r
           /* Drawn locked because the server refuses it: a handler works the
              plan out at request time and asks the map about this feature. */
           assert.match(SOURCES, new RegExp(
-            `allows\\(await plan\\([^)]*\\), "${key}"\\)|entitled\\(request, env, "${key}"\\)`),
+            `allows\\(await plan\\([^)]*\\), "${key}"\\)|entitled(?:Who)?\\(request, env, "${key}"\\)|allows\\(who\\.plan, "${key}"\\)|allows\\(onPlan, "${key}"\\)`),
             `${key} is drawn locked but nothing on the server refuses it`);
         }
       }
@@ -474,8 +481,8 @@ test("locks: every locked panel names a server-side feature, and a live one is r
     return panels.map(({ attrs }) => (/\bid="([^"]+)"/.exec(attrs) || [])[1]);
   };
 
-  // Free: Plus and Team, and the two Plus features with panels of their own.
-  assert.deepEqual(check(await all()).sort(), ["ci-tokens", "members", "plus", "team"]);
+  // Free: Plus and Team, and the Plus features with panels of their own.
+  assert.deepEqual(check(await all()).sort(), ["ci-tokens", "findings", "members", "plus", "team"]);
   // Plus: only Team stays locked.
   const { sub } = subscription(e, "active", o);
   assert.deepEqual(check(await all()), ["team"]);
@@ -484,5 +491,5 @@ test("locks: every locked panel names a server-side feature, and a live one is r
   assert.deepEqual(check(await all()), []);
   run(e, "DELETE FROM grants");
   run(e, "UPDATE subscriptions SET status = 'canceled' WHERE id = ?", sub);
-  assert.deepEqual(check(await all()).sort(), ["ci-tokens", "members", "plus", "team"]);
+  assert.deepEqual(check(await all()).sort(), ["ci-tokens", "findings", "members", "plus", "team"]);
 });

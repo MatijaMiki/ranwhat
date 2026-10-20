@@ -386,7 +386,7 @@ async function upgradeForm(env, who, { error = "", status = 200 } = {}) {
   const live = featuresOf("plus").filter((f) => f.status === "live");
   const served = live.filter((f) => f.key !== "members").map((f) => escape(f.name));
   const about = `<p class="lead">Plus adds what needs a server, for everyone in <strong>${name}</strong>:
-       ${served.join(" and ")} now, and the rest of <a href="/#plus">what Plus has</a> as it comes.
+       ${served.join(", ").replace(/, ([^,]*)$/, " and $1")} now, and the rest of <a href="/#plus">what Plus has</a> as it comes.
        Invite as many of your team as you like. Everything ranwhat does on your machines stays free.</p>
     <ul class="checks">
       ${live.map((f) => `<li class="on">${icon("check")}<div><strong>${escape(f.name)}</strong><p>${escape(f.says)}</p></div></li>`).join("\n      ")}
