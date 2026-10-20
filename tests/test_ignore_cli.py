@@ -510,6 +510,9 @@ class EveryLineFits(_Cli):
                     for line in out.split("\n"):
                         if line.startswith("    ranwhat check --json"):
                             continue                # a command to paste
+                        if line.strip().rstrip(":.") in (self.file,
+                                                        ignore.shown(self.file)):
+                            continue                # a path, never cut
                         self.assertLessEqual(len(line), limit, (width, line))
                 self.assertIn("(ignored by line 1)", runs[1][1])
                 self.assertIn("(ignored by line 5)", runs[1][1])
@@ -638,6 +641,8 @@ class ReviewRoundOne(_Cli):
         self.assertEqual(rc, 3)
         self.assertNotIn("\N{HORIZONTAL ELLIPSIS}", out)
         for line in out.split("\n"):
+            if line.strip().rstrip(":.") in (self.file, ignore.shown(self.file)):
+                continue                            # a path, never cut
             self.assertLessEqual(len(line), 80, line)
         said = " ".join(out.split())
         self.assertIn("in=%s until=2027-01-31" % long_in, said)

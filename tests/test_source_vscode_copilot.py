@@ -1221,10 +1221,11 @@ class Secrets(Case):
 class UriHelpers(unittest.TestCase):
 
     def test_uri_forms(self):
-        self.assertEqual(uri_to_path(uri("/a/b")), "/a/b")
-        self.assertEqual(uri_to_path("file:///a/b%20c"), "/a/b c")
+        # Asked as Linux: on Windows the same file: URI is a backslash path.
+        self.assertEqual(uri_to_path(uri("/a/b"), "linux"), "/a/b")
+        self.assertEqual(uri_to_path("file:///a/b%20c", "linux"), "/a/b c")
         self.assertEqual(uri_to_path({"path": "/a", "scheme": "vscode-remote",
-                                      "authority": "h"}), "/a")
+                                      "authority": "h"}, "linux"), "/a")
         self.assertIsNone(uri_to_path(5))
         self.assertIsNone(uri_to_path({"scheme": "file"}))
         self.assertIsNone(uri_to_path("/plain/path"))

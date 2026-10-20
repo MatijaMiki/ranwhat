@@ -1492,11 +1492,15 @@ class Secrets(VibeCase):
 class Performance(VibeCase):
 
     def test_many_entries_and_a_long_journal_read_in_linear_time(self):
+        # A file per chunk: 4000 files cost a Windows runner 40 s or more
+        # in opens alone, so there it reads a quarter as many. The reader
+        # opens each file once on every platform.
+        n = 1000 if sys.platform.startswith("win") else 4000
         s = self.session()
         entries = [bash("a%d" % i, "echo %d" % i, output="o" * 50, n=i)
-                   for i in range(4000)]
+                   for i in range(n)]
         ops = [op_replace(bash("a%d" % i, "echo %d" % i, output="new"))
-               for i in range(0, 4000, 2)]
+               for i in range(0, n, 2)]
         journal = []
         for i in range(0, len(ops), 100):
             journal.append(delta(30 + len(journal), ops[i:i + 100]))
@@ -1505,7 +1509,7 @@ class Performance(VibeCase):
         got = self.calls(path)
         list(self.src.secret_texts(self.store(path)))
         self.assertLess(time.time() - t0, 20)
-        self.assertEqual(len(got), 4000)
+        self.assertEqual(len(got), n)
         self.assertEqual(got[0].output, "new")
         self.assertEqual(got[1].output, "o" * 50)
 

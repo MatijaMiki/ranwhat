@@ -1054,6 +1054,10 @@ class AbsentAgentsCostAStatOrTwo(_Cli):
                     # One stat for each editor's User folder: VS Code and
                     # the five forks _paths probes.
                     limit = 6
+                if source.id == "warp" and sys.platform == "darwin":
+                    # Five channels, each in the group container and in
+                    # Application Support: a stat of each of the ten.
+                    limit = 10
                 self.assertLessEqual(n, limit)
 
     def test_a_whole_run(self):

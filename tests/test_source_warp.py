@@ -490,11 +490,16 @@ class Stores(WarpCase):
         self.assertEqual([s.path for s in self.stores(db)], [db])
         self.assertEqual(self.stores(os.path.join(self.home, "nowhere")), [])
 
+    @unittest.skipIf(sys.platform.startswith("win"),
+                     "XDG_STATE_HOME is a POSIX path, read on Linux only")
     def test_the_variable_is_read_at_call_time(self):
         elsewhere = os.path.join(self.home, "xdg")
         db = self.database(path=os.path.join(elsewhere, "warp-terminal",
                                              "warp.sqlite"))
-        with mock.patch.dict(os.environ, {warp_module.ENV: elsewhere}):
+        # Only Linux reads the variable; macOS and Windows have their own
+        # folders, so the test asks as Linux.
+        with mock.patch.dict(os.environ, {warp_module.ENV: elsewhere}), \
+                mock.patch.object(sys, "platform", "linux"):
             locs = self.src.locations()
         self.assertEqual(locs[0].how, "env XDG_STATE_HOME")
         self.assertEqual(locs[0].found, 1)

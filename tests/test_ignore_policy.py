@@ -145,8 +145,10 @@ class TheWholeCommand(unittest.TestCase):
                               (MYLIB + "/.env*", MYLIB + "/.env.test")):
             with self.subTest(pattern=pattern, path=path):
                 rec = judged(None, tool="Read", file_path=path)
+                # The file is read shell-style, where \ escapes: a Windows
+                # path goes in as the file's own writers write it, with /.
                 entry, = ignoring("cred.read %s until=2027-04-01"
-                                  % pattern).parsed.entries
+                                  % pattern.replace("\\", "/")).parsed.entries
                 self.assertEqual(entry.matches(ignore._Facts(rec, rec["hits"][0]), TODAY),
                                  ignore.match_path(pattern, path))
 
@@ -280,19 +282,21 @@ class Notes(unittest.TestCase):
                 "publsh\n" % (recs[1]["id"], recs[2]["id"]))
         found = ignoring(text)
         found.path = os.path.join(HOME, ".ranwhat", "ignore")
+        label = os.path.join("~", ".ranwhat", "ignore")     # as the platform spells it
+        self.assertEqual(ignore.shown(found.path), label)
         self.assertEqual(found.split(recs), [])
         notes = found.notes()
         self.assertEqual(notes[0], (
-            "3 actions are not listed: ~/.ranwhat/ignore leaves out 2 by id and "
+            "3 actions are not listed: %s leaves out 2 by id and "
             "1 by line 3 (git.destructive 'git push --force origin main'). 1 of "
-            "them is critical. --no-ignore lists them."))
-        self.assertIn("Line 4 of ~/.ranwhat/ignore is not an entry (there is no "
-                      "rule publsh), and was skipped.", notes)
+            "them is critical. --no-ignore lists them." % label))
+        self.assertIn("Line 4 of %s is not an entry (there is no "
+                      "rule publsh), and was skipped." % label, notes)
         lines = found.stderr_lines()
         self.assertEqual(lines[0], (
-            "ranwhat: 3 actions are not in this output: ~/.ranwhat/ignore leaves "
+            "ranwhat: 3 actions are not in this output: %s leaves "
             "them out (2 by id, 1 by line 3; 1 critical). --no-ignore includes "
-            "them."))
+            "them." % label))
         summary = found.summary()
         self.assertEqual((summary["actions"], summary["critical"], summary["by_id"]),
                          (3, 1, 2))
