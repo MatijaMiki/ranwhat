@@ -28,8 +28,13 @@ Under the save folder:
         meta.json, messages.jsonl      read as they are; 3.0 only imports
                                        them into a new unified session
 
-Not read: active/ (live-session leases), plugins/, unified/.session-index.json,
-a unified session's scratchpad/, anything else under the save folder, and
+Also read, as side stores so clean finds typed secrets: VIBE_HOME/vibehistory
+(plain text, one typed prompt per line; masking rewrites it) and
+unified/.session-index.json (a cache holding each session's first-message
+"preview"; searched but read-only, since whether Vibe accepts an edited copy
+is unverified).
+
+Not read: active/ (live-session leases), plugins/, a unified session's scratchpad/, anything else under the save folder, and
 the ACP wire log ~/.vibe/logs/acp/messages.jsonl (off unless
 VIBE_ACP_LOGGING_ENABLED=1; its format is raw JSON-RPC and was not checked).
 
@@ -126,6 +131,8 @@ HOME_DIR = ".vibe"
 SAVE_PARTS = ("logs", "session")
 UNIFIED = "unified"
 MESSAGES = "messages.jsonl"
+HISTORY = "vibehistory"
+SESSION_INDEX = ".session-index.json"
 META = "meta.json"
 
 STORE_FORMAT = "mistral.vibe.unified-session-store/v1"
@@ -164,6 +171,9 @@ _REPLAYED = frozenset(("projection_delta", "projection_advanced",
 # Folders of the save folder that are not 2.x sessions.
 _NOT_SESSIONS = frozenset((UNIFIED, "active", "plugins"))
 
+WHY_INDEX = ("unified/.session-index.json is a cache Vibe rebuilds, but "
+             "whether Vibe accepts an edited copy is not verified; "
+             "delete it to have Vibe rebuild it.")
 WHY_SEALED = ("Vibe seals each unified session with SHA-256 digests; "
               "changing a byte would make it refuse the session. "
               "ranwhat only reads it.")
@@ -511,6 +521,7 @@ class MistralVibeSource(Source):
             for base in bases:
                 if not os.path.isdir(base):
                     continue
+                self._prompt_stores(loc.path, base, add)
                 for entry in _scandir(os.path.join(base, UNIFIED)):
                     if _is_dir(entry) and _SESSION_ID.match(entry.name):
                         add(self._unified_store(entry.path, entry.name))
@@ -521,6 +532,31 @@ class MistralVibeSource(Source):
                                                          entry.name):
                             add(store)
         return newest_first(found, since_days)
+
+    def _prompt_stores(self, given, base, add):
+        """The two copies of typed prompt text outside the sessions:
+        VIBE_HOME/vibehistory (one prompt per line; Vibe's bootstrap
+        creates it to "record typed prompts") and the unified session
+        index (a "preview" of each session's first message). VIBE_HOME is
+        the given path when base is its logs/session, or two levels above
+        a given save folder."""
+        if base != given:
+            home = given
+        else:
+            parts = os.path.normpath(given).split(os.sep)
+            if tuple(parts[-2:]) != SAVE_PARTS:
+                return
+            home = os.path.dirname(os.path.dirname(os.path.normpath(given)))
+        history = os.path.join(home, HISTORY)
+        try:
+            if os.path.isfile(history) and not os.path.islink(history):
+                add(self.store(history, "text", role="side"))
+            index = os.path.join(base, UNIFIED, SESSION_INDEX)
+            if os.path.isfile(index) and not os.path.islink(index):
+                add(self.store(index, "json", role="side",
+                               masking="read-only", why_read_only=WHY_INDEX))
+        except OSError:
+            pass
 
     @staticmethod
     def _meta(folder):
@@ -875,10 +911,12 @@ class MistralVibeSource(Source):
                 fn = tc.get("function")
                 fn = fn if isinstance(fn, dict) else {}
                 cid = _string(tc.get("id"))
-                if cid and cid in latest:
-                    continue            # the same call written again
                 call = self._legacy_call(store, fn.get("name"),
                                          fn.get("arguments"), cid, not_after)
+                prior = latest.get(cid) if cid else None
+                if (prior is not None and prior.tool_name == call.tool_name
+                        and prior.tool_input == call.tool_input):
+                    continue            # the same call written again
                 if not _string(fn.get("name")) and first:
                     self.count("unreadable_calls")
                 calls.append(call)
@@ -910,8 +948,7 @@ class MistralVibeSource(Source):
     def secret_texts(self, store):
         try:
             if store.role != "transcript":
-                items = self._doc_texts(store, store.path,
-                                        os.path.basename(store.path), {})
+                items = self._side_texts(store)
             elif store.format == "jsonl":
                 items = self._legacy_texts(store)
             else:
@@ -920,6 +957,34 @@ class MistralVibeSource(Source):
                 yield item
         except OSError as e:
             self._unreadable(store, e.strerror or type(e).__name__)
+        except (TypeError, ValueError, RecursionError):
+            if self._once(("odd", os.path.normcase(store.path))):
+                self.count("unparsed")
+
+    def _side_texts(self, store):
+        if store.format == "text":
+            return self._prompt_lines(store)
+        return self._doc_texts(store, store.path,
+                               os.path.basename(store.path), {})
+
+    @staticmethod
+    def _prompt_lines(store):
+        """vibehistory, in blocks of whole lines."""
+        block, chars, first, line_no = [], 0, 1, 0
+        with open(store.path, "rb") as fh:
+            for line_no, raw in enumerate(fh, 1):
+                if not block:
+                    first = line_no
+                text = raw.decode("utf-8", "surrogateescape")
+                block.append(text)
+                chars += len(text)
+                if chars >= 1 << 20:
+                    yield SecretText("".join(block),
+                                     where="lines %d-%d" % (first, line_no))
+                    block, chars = [], 0
+        if block:
+            yield SecretText("".join(block),
+                             where="lines %d-%d" % (first, line_no))
 
     def _legacy_texts(self, store):
         _calls, owners = self._legacy(store)
@@ -951,7 +1016,8 @@ class MistralVibeSource(Source):
     def _entry_texts(entry, calls, where):
         """An effect entry as two texts, its state credited to its call (a
         call's own input never is), or the entry whole."""
-        call = calls.get(entry.get("id")) if isinstance(entry, dict) else None
+        cid = entry.get("id") if isinstance(entry, dict) else None
+        call = calls.get(cid) if isinstance(cid, str) else None
         if call is not None and isinstance(entry.get("state"), dict):
             rest = dict((k, v) for k, v in entry.items() if k != "state")
             yield SecretText(rest, where=where)
