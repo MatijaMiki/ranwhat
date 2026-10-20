@@ -1064,6 +1064,16 @@ def _ignore_notes(ignoring, mask=None):
     return [mask(n) for n in notes] if mask else notes
 
 
+def _ignore_cmd(args, target):
+    """`ranwhat ignore TARGET`, with this run's own --days, --root,
+    --state-dir, --source, --path and --ignore, as shell words. Suggested
+    bare, it would baseline 30 days when the report listed 90, and write
+    the default file when the report read another: the next run would list
+    the same actions again."""
+    return " ".join([invocation(), "ignore", target] + _carried(
+        args, "days", "root", "state_dir", "source", "path", "ignore_file"))
+
+
 def _ignore_hint(args, listed):
     """Under a report that listed anything, on a terminal, once: how to
     stop listing what was expected. Not when the report itself went to a
@@ -1075,11 +1085,11 @@ def _ignore_hint(args, listed):
             return
     except Exception:             # no isatty, or a closed stream
         return
-    cmd = invocation()
     hints.hint("ignore-howto", term.wrap(
-        "Expected one of these? %s ignore ID stops listing it. %s ignore all "
-        "stops listing every one above, so later runs list only what is new."
-        % (cmd, cmd), stream=sys.stderr), json=args.json)
+        "Expected one of these? %s stops listing it. %s stops listing every "
+        "one above, so later runs list only what is new."
+        % (_ignore_cmd(args, "ID"), _ignore_cmd(args, "all")),
+        stream=sys.stderr), json=args.json)
 
 
 def _notes(args):
@@ -1109,12 +1119,15 @@ def _carried(args, *names):
         for source_id, path in sorted(args.pointed.items()):
             # ~ there is expanded by ranwhat, whether or not the shell does.
             words += ["--path", "%s=%s" % (source_id, _shell_path(path))]
-    if "ignore" in names:
+    if "ignore" in names or "ignore_file" in names:
         # The same ignore file, or none: a command suggested under a report
-        # must leave out what the report left out.
-        if getattr(args, "ignore", None):
+        # must leave out what the report left out. "ignore_file" is for
+        # ranwhat ignore itself, which refuses --no-ignore.
+        # Not the Action's own temporary file: the path would not exist on
+        # the machine where the command is read.
+        if getattr(args, "ignore", None) and not ignore_mod.action_label(args.ignore):
             words += ["--ignore", _shell_path(os.path.expanduser(args.ignore))]
-        if getattr(args, "no_ignore", False):
+        if "ignore" in names and getattr(args, "no_ignore", False):
             words += ["--no-ignore"]
     return words
 
@@ -1897,8 +1910,8 @@ def _ignore_one(args, path, current, record):
         if not interactive:
             sys.stderr.write("\n".join(term.wrap(
                 "ranwhat ignore: that action changed ranwhat's own settings; "
-                "acknowledge it on a terminal, with %s ignore %s."
-                % (invocation(), ids[0]), indent="", stream=sys.stderr)) + "\n")
+                "acknowledge it on a terminal, with %s."
+                % _ignore_cmd(args, ids[0]), indent="", stream=sys.stderr)) + "\n")
             return 1
         return _ignore_ack(args, path, current, record)
     if interactive:
@@ -1911,7 +1924,7 @@ def _ignore_one(args, path, current, record):
         _ignore_json(path, first, last, present=present)
         return 0
     worst, title, evidence, _where = _action_head(record)
-    secret = any(h.get("rule") == ignore_mod.SECRET for h in record["hits"])
+    secret = _holds_secret(record)
     print("%s %s  %s" % ("Added:" if secret else "Left out:",
                          worst.get("title"), title[1]))
     print("    " + watch_mod._fit(evidence, term.width() - 4))
@@ -1922,8 +1935,7 @@ def _ignore_one(args, path, current, record):
          "--no-ignore lists it again, and deleting that line undoes this."
          % (show, _span(first, last)))
     if secret:
-        _say("It holds a secret, so watch and check list it until ranwhat "
-             "clean masks it, or keeps it if it is no secret.")
+        _say(_SECRET_LISTED)
         return 0
     found, _why = ignore_mod.proposal(record)
     if found:
@@ -1962,6 +1974,18 @@ def _proposal_choice(found):
     return said + (", until %s" % until.isoformat() if until else "")
 
 
+_SECRET_LISTED = ("It holds a secret, so watch and check list it until "
+                  "ranwhat clean masks it, or keeps it if it is no secret.")
+
+
+def _holds_secret(record):
+    """Whether any hit of the record is a secret, which no ignore line
+    hides: the one test every ignore message that says "no longer listed"
+    must make first, so the words cannot say what verdict() will not do."""
+    return any(h.get("rule") == ignore_mod.SECRET
+               for h in record.get("hits") or ())
+
+
 def _ignore_menu(args, path, current, record):
     """ranwhat ignore ID on a terminal: this action only, or every action
     like it (ignore.proposal), or nothing."""
@@ -1976,7 +2000,9 @@ def _ignore_menu(args, path, current, record):
     found, why = ignore_mod.proposal(record)
     print()
     print("  Leave out of later reports:")
-    print("    1  this action only")
+    secret = _holds_secret(record)
+    print("    1  this action only" + (
+        " (it holds a secret, so it stays listed)" if secret else ""))
     if found:
         for line in term.wrap(_proposal_choice(found), indent=" " * 7,
                               first="    2  "):
@@ -2014,6 +2040,10 @@ def _ignore_menu(args, path, current, record):
         print("  Already in %s." % current.show)
         return 0
     if answer == "1":
+        if secret:
+            _say("Added to %s (%s). %s" % (current.show, _span(first, last),
+                                           _SECRET_LISTED), indent="  ")
+            return 0
         _say("Added to %s (%s). watch and check no longer list this action; "
              "--no-ignore lists it again, and deleting that line undoes this."
              % (current.show, _span(first, last)), indent="  ")
@@ -2085,19 +2115,18 @@ def _severities(records):
                      if counts.get(k))
 
 
-def _guard_sentence(guards):
+def _guard_sentence(args, guards):
     """What ranwhat ignore all and - say of the actions they did not add:
     each changed ranwhat's own settings, and only an ack names it."""
     ids = [ignore_mod._ids_of(r)[0] for r in guards if ignore_mod._ids_of(r)]
-    cmd = invocation()
     if len(guards) == 1:
         return ("1 action that changed ranwhat's own settings was not added: "
-                "acknowledge it on a terminal with %s ignore %s."
-                % (cmd, ids[0] if ids else "ID"))
+                "acknowledge it on a terminal with %s."
+                % _ignore_cmd(args, ids[0] if ids else "ID"))
     return ("%d actions that changed ranwhat's own settings were not added: "
-            "acknowledge each on a terminal with %s ignore ID (%s)."
-            % (len(guards), cmd, ", ".join(ids[:5]) + (", ..." if len(ids) > 5
-                                                        else "")))
+            "acknowledge each on a terminal with %s (%s)."
+            % (len(guards), _ignore_cmd(args, "ID"),
+               ", ".join(ids[:5]) + (", ..." if len(ids) > 5 else "")))
 
 
 def _ignore_all(args, path, current, records):
@@ -2118,8 +2147,17 @@ def _ignore_all(args, path, current, records):
              "already." % days if not guards else
              "Nothing to add: every other action from the last %s is left "
              "out already." % days)
+        # In the file, and listed all the same: a secret is never hidden.
+        # Without this, the line above reads as a lie beside watch.
+        held = sum(1 for r in listed if not ignore_mod._guarded(r)
+                   and _holds_secret(r))
+        if held:
+            _say(("%d of them holds a secret, and stays listed" if held == 1
+                  else "%d of them hold a secret, and stay listed") % held
+                 + " until ranwhat clean masks it, or keeps it if it is no "
+                 "secret.")
         if guards:
-            _say(_guard_sentence(guards))
+            _say(_guard_sentence(args, guards))
         return 0
     items = [(ignore_mod._ids_of(r), ignore_mod.id_line(r)) for r in todo]
     heading = ignore_mod.now_heading("all", args.days, len(todo))
@@ -2141,14 +2179,13 @@ def _ignore_all(args, path, current, records):
          "new since; --no-ignore lists %s again, and deleting %s undoes this."
          % (current.show, _span(first, last), "it" if n == 1 else "these",
             "that line" if n == 1 else "those lines"))
-    secret = sum(1 for r in todo if any(h.get("rule") == ignore_mod.SECRET
-                                        for h in r.get("hits") or ()))
+    secret = sum(1 for r in todo if _holds_secret(r))
     if secret:
         _say(("%d of them holds a secret, and stays listed" if secret == 1
               else "%d of them hold a secret, and stay listed") % secret
              + " until ranwhat clean masks it, or keeps it if it is no secret.")
     if guards:
-        _say(_guard_sentence(guards))
+        _say(_guard_sentence(args, guards))
     return 0
 
 
@@ -2181,8 +2218,31 @@ def _ignore_report(args, path, current):
             agents_mod.plural(last - first + 1, "action"), current.show,
             _span(first, last)))
     if guards:
-        _say(_guard_sentence(guards))
+        _say(_guard_sentence(args, guards))
     return 0
+
+
+def _fold(text, room):
+    """text in lines of at most room characters, broken at single spaces
+    and keeping every other character, so an entry shown folded still reads
+    as the line in the file. A word longer than the line is cut."""
+    lines, line = [], ""
+    for word in text.split(" "):
+        while len(word) > room:
+            if line:
+                lines.append(line)
+                line = ""
+            lines.append(word[:room])
+            word = word[room:]
+        if not line:
+            line = word
+        elif len(line) + 1 + len(word) <= room:
+            line += " " + word
+        else:
+            lines.append(line)
+            line = word
+    lines.append(line)
+    return lines
 
 
 def _ignore_list(args, path):
@@ -2257,11 +2317,15 @@ def _ignore_list(args, path):
     pad = max([len(label) for _n, label, _t, _note in rows] + [6])
     for _n, label, text, note in rows:
         head = "    %-*s  " % (pad, label)
-        line = head + text
-        if note and len(line) + 3 + len(note) <= width:
-            L.append(line + DIM("   " + note))
+        pieces = _fold(text, max(width - len(head), 20))
+        if note and len(pieces) == 1 and len(head + text) + 3 + len(note) <= width:
+            L.append(head + text + DIM("   " + note))
             continue
-        L.append(watch_mod._fit(line, width))
+        # Folded, never cut: this command is the one place that shows the
+        # file, and the until= date or the way to mend a skipped line is
+        # at the end of the row.
+        L.append(head + pieces[0])
+        L += [" " * len(head) + piece for piece in pieces[1:]]
         if note:
             L += [DIM(l) for l in term.wrap(note, indent=" " * len(head))]
     cmd = invocation()

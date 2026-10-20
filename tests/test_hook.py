@@ -101,7 +101,18 @@ class Decisions(unittest.TestCase):
                                                        "kept.json"), "content": "{}"}),
                   ("Edit", {"file_path": "/repo/.ranwhatignore", "old_string": "a",
                             "new_string": "b"}),
-                  ("Read", {"file_path": os.path.join(home, ".ranwhat", "token")})]
+                  ("Read", {"file_path": os.path.join(home, ".ranwhat", "token")}),
+                  # the same files, spelt by a path that walks to them
+                  ("Write", {"file_path": os.path.join(home, ".ranwhat", ".", "ignore"),
+                             "content": "publish\n"}),
+                  ("Write", {"file_path": os.path.join(home, ".ranwhat", "x", "..",
+                                                       "known", "kept.json"),
+                             "content": "{}"}),
+                  ("Write", {"file_path": "/repo/.RANWHATIGNORE", "content": "x"}),
+                  ("Read", {"file_path": home + "/.ranwhat//known/key"}),
+                  ("Read", {"file_path": os.path.join(os.environ["RANWHAT_HOME"],
+                                                      "known", "key")}),
+                  ("Bash", {"command": "python3 -m ranwhat.cli ignore all"})]
         for tool, tool_input in calls:
             with self.subTest(call=str(tool_input)[:80]):
                 decision, reason = hook.decide(tool, tool_input)

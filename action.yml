@@ -121,6 +121,8 @@ runs:
         # which comes later, wins.
         if [ "$RANWHAT_COMMAND" != clean ]; then
           ignore_file=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ranwhat-ignore.XXXXXX")
+          # What reports call that file: a name to print, never a place.
+          export RANWHAT_IGNORE_LABEL="no ignore file" RANWHAT_IGNORE_LABEL_FILE="$ignore_file"
           if [ -n "$RANWHAT_IGNORE" ]; then
             case "$RANWHAT_IGNORE" in
               /*|-*|*..*) echo "::error::ignore-file must be a path inside the repository, not '$RANWHAT_IGNORE'"; exit 1 ;;
@@ -130,7 +132,11 @@ runs:
             git -C "$ws" cat-file -e "$ref^{commit}" 2>/dev/null \
               || git -C "$ws" fetch --quiet --no-tags --depth=1 origin "$ref" 2>/dev/null || true
             if git -C "$ws" show "$ref:$RANWHAT_IGNORE" > "$ignore_file" 2>/dev/null; then
-              if [ -f "$ws/$RANWHAT_IGNORE" ] && ! cmp -s "$ignore_file" "$ws/$RANWHAT_IGNORE"; then
+              export RANWHAT_IGNORE_LABEL="$RANWHAT_IGNORE at ${ref:0:12}"
+              # Line endings are not a change: Git for Windows checks out
+              # CRLF, the blob has LF, and a warning that fires on every
+              # windows-latest run teaches nobody to read it.
+              if [ -f "$ws/$RANWHAT_IGNORE" ] && ! cmp -s <(tr -d '\r' < "$ignore_file") <(tr -d '\r' < "$ws/$RANWHAT_IGNORE"); then
                 echo "::warning::$RANWHAT_IGNORE was changed after ${ref:0:12}; ranwhat uses it as it was there, not as this job left it."
               fi
             else

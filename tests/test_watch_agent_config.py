@@ -766,6 +766,29 @@ class WhatRanwhatReports(Cases):
                 "ln -sf /tmp/x %s" % path,
                 "cat >> %s <<'EOF'\npublish\nEOF" % path)
 
+    def test_a_path_that_walks_to_its_files_is_still_its_files(self):
+        # A . or .. part, a doubled /, or another case, spells the same file.
+        for path in ("~/.ranwhat/./ignore", "/home/dev/.ranwhat/x/../ignore",
+                     "/home/dev/.ranwhat//ignore",
+                     "/home/dev/.ranwhat/known/x/../kept.json",
+                     "/home/dev/.ranwhat/known/./key",
+                     os.path.join(self.STATE, ".", "ignore"),
+                     "/repo/.RANWHATIGNORE", "/repo/.RanwhatIgnore",
+                     "C:\\Users\\dev\\.ranwhat\\.\\ignore"):
+            self.assertState(
+                ("Write", {"file_path": path, "content": "publish\n"}))
+        self.assertState("printf 'publish\\n' >> ~/.ranwhat/./ignore",
+                         "echo publish >> ~/.ranwhat/x/../ignore")
+        # ... and a path that walks away from them is not
+        self.assertQuiet(("Write", {"file_path": "/home/dev/.ranwhat/../notes.txt",
+                                    "content": "x"}))
+
+    def test_python_m_ranwhat_cli_is_ranwhat(self):
+        self.assertState("python3 -m ranwhat.cli ignore all",
+                         "python -m ranwhat.__main__ ignore -")
+        self.assertQuiet("python3 -m ranwhat.cli ignore",
+                         "python3 -m ranwhat.cli watch --ignore ignore")
+
     def test_its_folder_given_something_no_call_shows(self):
         self.assertState(
             "cp -r x ~/.ranwhat", "cp -r /tmp/state/. ~/.ranwhat/",
@@ -906,6 +929,22 @@ class RanwhatsOwnCredentials(Cases):
                 hits = watch.evaluate(tool, tool_input)[0]
                 self.assertIn(("cred.read", CRITICAL),
                               [(h["rule"], h["severity"]) for h in hits])
+
+    def test_a_read_by_a_path_that_walks_or_names_the_folder_in_full(self):
+        for path in ("/home/dev/.ranwhat//known/key", "/home/dev/.ranwhat/./token",
+                     "/home/dev/.ranwhat/x/../known/key",
+                     os.path.join(os.environ["RANWHAT_HOME"], "known", "key"),
+                     os.path.join(os.environ["RANWHAT_HOME"], "token"),
+                     os.path.join(os.environ["RANWHAT_HOME"], ".", "token")):
+            with self.subTest(path=path):
+                hits = watch.evaluate("Read", {"file_path": path})[0]
+                self.assertIn(("cred.read", CRITICAL),
+                              [(h["rule"], h["severity"]) for h in hits])
+        for path in (os.path.join(os.environ["RANWHAT_HOME"], "known", "kept.json"),
+                     "/home/dev/.ranwhat/known/../ignore", "/repo/known/key"):
+            with self.subTest(path=path):
+                hits = watch.evaluate("Read", {"file_path": path})[0]
+                self.assertNotIn("cred.read", [h["rule"] for h in hits])
 
     def test_what_reads_nothing_or_another_file_is_not(self):
         for command in ("ls -la ~/.ranwhat/known/key ~/.ranwhat/token",

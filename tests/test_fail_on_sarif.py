@@ -736,6 +736,40 @@ class ActionSteps(_Base):
         self.assertIn("::warning::ranwhat could not read .ranwhatignore at ffffffffffff, "
                       "so nothing is left out.", self.said)
 
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_crlf_line_endings_are_not_a_change(self):
+        # Git for Windows checks out CRLF; the blob has LF.
+        root = self.root(DELETE)
+        repo, base, head = self.repo("fs.destructive\n", "fs.destructive\n", "")
+        with open(os.path.join(repo, ".ranwhatignore"), "w", encoding="utf-8",
+                  newline="") as fh:
+            fh.write("fs.destructive\r\n")
+        _rc, outputs, _gate, _work = self.act(
+            root, GITHUB_WORKSPACE=repo, GITHUB_SHA=head, RANWHAT_IGNORE_REF=base,
+            RANWHAT_IGNORE=".ranwhatignore")
+        self.assertNotIn("was changed after", self.said)
+        with open(os.path.join(repo, ".ranwhatignore"), "w", encoding="utf-8",
+                  newline="") as fh:
+            fh.write("git.destructive\r\n")
+        self.act(root, GITHUB_WORKSPACE=repo, GITHUB_SHA=head, RANWHAT_IGNORE_REF=base,
+                 RANWHAT_IGNORE=".ranwhatignore")
+        self.assertIn("was changed after", self.said)
+
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_reports_name_the_committed_file_and_never_the_temporary_one(self):
+        root = self.root(DELETE)
+        repo, base, head = self.repo("fs.destructive\npubish x\n", "", "")
+        _rc, outputs, _gate, _work = self.act(
+            root, GITHUB_WORKSPACE=repo, GITHUB_SHA=head, RANWHAT_IGNORE_REF=base,
+            RANWHAT_IGNORE=".ranwhatignore")
+        self.assertIn("Line 2 of .ranwhatignore at %s is not an entry" % base[:12],
+                      " ".join(self.said.split()))
+        self.assertNotIn("ranwhat-ignore.", self.said)
+        # and with no ignore-file, the tail of a suggested command holds none
+        self.act(root)
+        self.assertNotIn("ranwhat-ignore.", self.said)
+        self.assertNotIn("--ignore", self.said)
+
     def test_with_no_input_the_runners_own_file_is_never_read(self):
         root = self.root(DELETE)
         home = os.environ["RANWHAT_HOME"]

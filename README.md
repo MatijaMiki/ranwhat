@@ -287,8 +287,11 @@ A change to ranwhat's own settings is never added by `ignore all` or
 watch and the hook judge what a call shows, so a script that rewrites the
 file is not seen. An id changes when a later ranwhat flags a call for
 something more, or rates it otherwise, and the action is listed once more:
-run `ranwhat ignore all` again after an upgrade for a fresh baseline. The
-comment ranwhat writes after each id holds the command, masked as the
+run `ranwhat ignore all` again after an upgrade for a fresh baseline. An
+agent that records neither a call id nor a time for a call (Windsurf) is
+named by what the call held, as ranwhat masks it, so its action is listed
+once more if another agent's history later shows a value from its command;
+`ranwhat ignore all` leaves it out again. The comment ranwhat writes after each id holds the command, masked as the
 report masks it, and where it ran; read a `.ranwhatignore` before you
 commit it.
 
@@ -623,9 +626,11 @@ ranwhat hook uninstall
   moved or linked into `~/.ranwhat`; `RANWHAT_HOME` set for good, in a
   startup file, in Claude Code's settings, or with `setx`, `launchctl
   setenv` or `systemctl set-environment`; and `ranwhat ignore` given an
-  action to add. Reading one of those files, or taking it out, only means
-  more is reported, and is not asked about; nor is a one-off
-  `RANWHAT_HOME=/tmp/x ranwhat watch`, which changes that run alone. A
+  action to add. Reading the ignore file or `kept.json`, or taking one out,
+  only means more is reported, and is not asked about; reading the key is,
+  as a credential read (below). A one-off
+  `RANWHAT_HOME=/tmp/x ranwhat watch`, which changes that run alone, is not
+  asked about either. A
   state folder set with `RANWHAT_HOME` to a path without the word ranwhat in
   it is recognised in a file tool's path, and not in a shell command.
 - The hook does not read the ignore file: what you ignore is left out of

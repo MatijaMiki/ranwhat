@@ -69,11 +69,10 @@ from . import known
 from . import watch
 
 FILE = "ignore"
-# The name a repository's own file goes by, by convention. Read only when
-# named (--ignore .ranwhatignore, or the Action's ignore-file input); the
-# agent.config rule lists a write to one anywhere.
-REPO_NAME = ".ranwhatignore"
 MAX_BYTES = 16 << 20
+# How many skipped lines a report names, and how many check --json keeps.
+SKIPPED_SHOWN = 5
+SKIPPED_KEPT = 50
 MAX_LINE = 8192
 # A pattern past these is no command anyone types and means to match word
 # for word.
@@ -163,6 +162,24 @@ class IgnoreError(Exception):
 def default_path():
     """$RANWHAT_HOME/ignore, ~/.ranwhat/ignore by default."""
     return os.path.join(known.home(), FILE)
+
+
+LABEL_ENV = "RANWHAT_IGNORE_LABEL"
+LABEL_FILE_ENV = "RANWHAT_IGNORE_LABEL_FILE"
+
+
+def action_label(path):
+    """What the GitHub Action calls the file it handed --ignore, or "" for
+    any other file. The Action reads the committed file as it was at the
+    base into a new temporary file, so a report that named that path would
+    name something nobody can open once the job ends. The label is a name
+    to print and nothing else: it is never opened, it applies to that one
+    temporary file (an --ignore of the job's own, in args, keeps its path),
+    and it is cut to one short printable line."""
+    if not path or os.environ.get(LABEL_FILE_ENV) != path:
+        return ""
+    label = " ".join(os.environ.get(LABEL_ENV, "").split())[:120]
+    return watch._printable(label) if label else ""
 
 
 def shown(path):
@@ -281,7 +298,11 @@ def match_words(pattern_words, subject_words):
 def match_path(pattern, subject, cwd=None):
     """Whether the path a tool read or wrote is the pattern's: both from
     the root (a relative one under cwd, the call's folder), as many
-    components, each matched by its own. A * stays within its component."""
+    components, each matched by its own. A * stays within its component.
+
+    Production matches through Entry.matches, which compares parts split
+    once per entry and once per hit; this is the same rule in one call,
+    kept as the reference form the tests hold Entry.matches to."""
     p = _absolute(pattern)
     if p is None or not isinstance(subject, str) or not subject:
         return False
@@ -746,6 +767,7 @@ class Ignore(object):
         self.today = today or datetime.date.today()
         self.exists = bool(parsed) if exists is None else exists
         self.mark = False
+        self.label = action_label(path) if explicit else ""
         self._reset()
 
     def _reset(self):
@@ -760,6 +782,8 @@ class Ignore(object):
 
     @property
     def show(self):
+        if self.label:
+            return self.label
         return shown(self.path) if self.path else ""
 
     @classmethod
@@ -1023,9 +1047,18 @@ class Ignore(object):
             out.append("Line %d of %s (%s) expired on %s, and leaves nothing "
                        "out now." % (line, show, self._entry_text(line),
                                      until.isoformat()))
-        for line, why in self.parsed.skipped:
+        skipped = self.parsed.skipped
+        for line, why in skipped[:SKIPPED_SHOWN]:
             out.append("Line %d of %s is not an entry (%s), and was skipped."
                        % (line, show, why))
+        if len(skipped) > SKIPPED_SHOWN:
+            # A file of junk, or a link to some other text file, would
+            # otherwise put a sentence a line in every report, each one
+            # masked: the first few say what is wrong, ranwhat ignore the rest.
+            more = len(skipped) - SKIPPED_SHOWN
+            out.append("%d more %s of %s %s skipped too; ranwhat ignore lists "
+                       "them." % (more, "line" if more == 1 else "lines", show,
+                                  "was" if more == 1 else "were"))
         return out
 
     def stderr_lines(self):
@@ -1072,8 +1105,10 @@ class Ignore(object):
                "expired": [{"line": line, "until": until.isoformat()}
                            for line, until in self.expired()],
                "skipped": [{"line": line, "why": why}
-                           for line, why in self.parsed.skipped],
+                           for line, why in self.parsed.skipped[:SKIPPED_KEPT]],
                "unused": self.unused}
+        if len(self.parsed.skipped) > SKIPPED_KEPT:
+            doc["skipped_total"] = len(self.parsed.skipped)
         if not (self.left or self.anyway or self.secret_listed or self.guard_listed
                 or doc["expired"] or doc["skipped"] or self.unused):
             return None
@@ -1252,6 +1287,10 @@ class Proposal(object):
         self.lines, self.parts = lines, parts   # parts: (kind, what, dir, until)
 
 
+# A drive letter before a backslash, or a UNC share: a Windows path.
+_WINDOWS_WORD = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\|(?:^|\s)\\\\\S")
+
+
 def proposal(record, today=None):
     """(Proposal, None), or (None, why ranwhat cannot write one). Not
     offered for a hit with no command or path to match (a secret, all of a
@@ -1274,11 +1313,23 @@ def proposal(record, today=None):
         if on == "decoded":
             return None, ("part of what it ran was decoded first, from "
                           "base64 or the like, and only its id names that")
+        if hit.get("_several"):
+            return None, ("the call ran more than one command that trips this "
+                          "rule, and only its id names all of them")
         if on not in ("command", "path") or not isinstance(subject, str) or not subject:
             return None, "ranwhat has no command or path of it to match"
         if _UNSAFE.search(subject) or "\x85" in subject:
             return None, "its command holds a control character"
         until = today + datetime.timedelta(days=PROPOSE_DAYS) if critical else None
+        if on == "command" and _WINDOWS_WORD.search(subject):
+            # The file is split as a POSIX shell splits, which reads a
+            # backslash as an escape and drops it: C:\\data\\old would be
+            # written C:dataold, and the entry would leave out any command
+            # that differs from it only in where the backslashes were. The
+            # read-back below splits the same way, so it cannot catch this.
+            return None, ("its command holds a Windows path, whose backslashes "
+                          "the file's quoting would take for escapes, and "
+                          "only its id names it")
         if on == "command":
             words = watch._argv(subject)
             if not words:

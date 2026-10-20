@@ -183,7 +183,7 @@ class OneAction(_Cli):
         rc, _out, err = self.cli("ignore", rec["id"], *self.flags())
         self.assertEqual(rc, 1)
         self.assertIn("ranwhat ignore: that action changed ranwhat's own settings; "
-                      "acknowledge it on a terminal, with ranwhat ignore %s."
+                      "acknowledge it on a terminal, with ranwhat ignore %s --root"
                       % rec["id"], " ".join(err.split()))
         rc, _out, _err = self.cli("ignore", rec["id"], "--no-interactive",
                                   *self.flags(), replies=["y"])
@@ -575,6 +575,116 @@ class Reports(_Cli):
         rc, out, _err = self.cli("check", "--ignore", committed, *self.flags())
         self.assertIn("check --json", out)
         self.assertIn("--ignore %s" % committed, " ".join(out.split()))
+
+
+class ReviewRoundOne(_Cli):
+    """What the first review of ranwhat ignore found, one test each."""
+
+    def test_a_suggested_command_reads_and_writes_what_the_run_did(self):
+        # Bare, `ignore all` after `watch --days 90` baselined 30 days, and
+        # an ack after `--ignore X` was written to the default file.
+        args = cli.argparse.Namespace(days=90, root=self.claude, state_dir=None,
+                                      source=[], pointed={}, ignore=self.file,
+                                      no_ignore=True)
+        said = cli._ignore_cmd(args, "all")
+        self.assertIn("ranwhat ignore all --days 90 --root", said)
+        self.assertIn("--ignore %s" % self.file, said)
+        self.assertNotIn("--no-ignore", said)         # ignore refuses it
+        self.history("echo publish >> ~/.ranwhat/ignore")
+        os.makedirs(self.state, exist_ok=True)
+        with open(self.file, "w", encoding="utf-8") as fh:
+            fh.write(ignore.HEADER)
+        (rec,), _err = self.watched("--ignore", self.file)
+        extra = ["--days", "90", "--ignore", self.file]
+        rc, _out, err = self.cli("ignore", rec["id"], *(extra + self.flags()))
+        self.assertEqual(rc, 1)
+        self.assertIn("with ranwhat ignore %s --days 90 --root" % rec["id"],
+                      " ".join(err.split()))
+        self.assertIn("--ignore %s" % self.file, " ".join(err.split()))
+        rc, out, _err = self.cli("ignore", "all", *(extra + self.flags()))
+        self.assertIn("acknowledge it on a terminal with ranwhat ignore %s --days 90"
+                      % rec["id"], " ".join(out.split()))
+
+    def test_option_1_on_a_secret_does_not_say_it_is_no_longer_listed(self):
+        self.history("rm -rf ~/Documents/x; echo %s" % STRIPE)
+        (rec,), _err = self.watched()
+        rc, out, _err = self.cli("ignore", rec["id"], *self.flags(), replies=["1"])
+        said = " ".join(out.split())
+        self.assertIn("1 this action only (it holds a secret, so it stays listed)", said)
+        self.assertIn("It holds a secret, so watch and check list it until ranwhat "
+                      "clean masks it", said)
+        self.assertNotIn("no longer list this action", said)
+        self.assertEqual(len(self.watched()[0]), 1)
+
+    def test_ignore_all_says_what_it_left_listed_the_second_time(self):
+        self.history("rm -rf ~/Documents/x; echo %s" % STRIPE)
+        self.cli("ignore", "all", *self.flags())
+        rc, out, _err = self.cli("ignore", "all", *self.flags())
+        said = " ".join(out.split())
+        self.assertIn("Nothing to add: every action from the last 30 days is left "
+                      "out already.", said)
+        self.assertIn("1 of them holds a secret, and stays listed until ranwhat "
+                      "clean masks it", said)
+
+    def test_the_list_folds_an_entry_and_never_cuts_it(self):
+        os.makedirs(self.state, exist_ok=True)
+        long_in = "~/work/mylib/packages/some/very/deeply/nested/package/folder"
+        with open(self.file, "w", encoding="utf-8") as fh:
+            fh.write(ignore.HEADER
+                     + "publish 'npm publish --access public --tag latest' in=%s "
+                       "until=2027-01-31\n" % long_in
+                     + "exec.remote 'curl -s https://example.com/install.sh | sh' extra\n")
+        rc, out, _err = self.cli("ignore")
+        self.assertEqual(rc, 3)
+        self.assertNotIn("\N{HORIZONTAL ELLIPSIS}", out)
+        for line in out.split("\n"):
+            self.assertLessEqual(len(line), 80, line)
+        said = " ".join(out.split())
+        self.assertIn("in=%s until=2027-01-31" % long_in, said)
+        rc, js, _err = self.cli("ignore", "--json")
+        (skipped,) = json.loads(js)["skipped"]
+        self.assertIn(skipped["why"], said)
+
+    def test_a_report_names_the_actions_file_by_its_label_and_suggests_no_temp_path(self):
+        self.history("git push --force origin main", "rm -rf ~/Documents/x")
+        temp = os.path.join(self.tmp, "ranwhat-ignore.AbC123")
+        with open(temp, "w", encoding="utf-8") as fh:
+            fh.write("git.destructive\npubish x\n")
+        env = {ignore.LABEL_ENV: ".ranwhatignore at 0123456789ab",
+               ignore.LABEL_FILE_ENV: temp}
+        with mock.patch.dict(os.environ, env):
+            rc, out, _err = self.cli("check", "--ignore", temp, *self.flags())
+        said = " ".join(out.split())
+        self.assertIn("Line 2 of .ranwhatignore at 0123456789ab is not an entry", said)
+        self.assertNotIn(temp, said)
+        self.assertNotIn("--ignore", said)            # no temporary path to paste
+        # not in the Action, or another file named in its args: the path
+        rc, out, _err = self.cli("check", "--ignore", temp, *self.flags())
+        self.assertIn("--ignore %s" % temp, " ".join(out.split()))
+        other = temp + "2"
+        with open(other, "w", encoding="utf-8") as fh:
+            fh.write("pubish x\n")
+        with mock.patch.dict(os.environ, env):
+            rc, out, _err = self.cli("check", "--ignore", other, *self.flags())
+        self.assertIn("Line 1 of %s is not an entry" % ignore.shown(other),
+                      " ".join(out.split()))
+
+    def test_a_file_of_junk_names_a_few_lines_and_counts_the_rest(self):
+        self.history("git push --force origin main", "rm -rf ~/Documents/x")
+        os.makedirs(self.state, exist_ok=True)
+        with open(self.file, "w", encoding="utf-8") as fh:
+            fh.write("".join("bogus%d x\n" % i for i in range(300)))
+        rc, out, _err = self.cli("watch", *self.flags())
+        said = " ".join(out.split())
+        self.assertEqual(said.count("was skipped"), ignore.SKIPPED_SHOWN)
+        self.assertIn("295 more lines of", said)
+        self.assertLess(len(out.split("\n")), 120)
+        rc, _out, err = self.cli("watch", "--json", *self.flags())
+        self.assertLess(len(err.split("\n")), 20)
+        rc, js, _err = self.cli("check", "--json", *self.flags())
+        doc = json.loads(js)["ignored"]
+        self.assertEqual((len(doc["skipped"]), doc["skipped_total"]),
+                         (ignore.SKIPPED_KEPT, 300))
 
 
 if __name__ == "__main__":

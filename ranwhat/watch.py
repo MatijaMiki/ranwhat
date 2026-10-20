@@ -4238,6 +4238,9 @@ def _launched(words):
         if name.startswith("python") or name == "py":
             module = _python_module(words, i)
             if module:
+                # The package's own modules run ranwhat as `-m ranwhat` does.
+                if module[0] in ("ranwhat.cli", "ranwhat.__main__"):
+                    return "ranwhat", words[module[1]:], assigns
                 return module[0], words[module[1]:], assigns
         return name, words[i + 1:], assigns
     return None, [], assigns
@@ -4856,6 +4859,19 @@ def _starts_shells(path, t, name):
         rel.startswith(".config/environment.d/") and rel.endswith(".conf"))
 
 
+def _flat(path):
+    """path with the // and the . and .. parts a shell or a file system
+    takes out taken out, as a file tool opens it: ~/.ranwhat/./ignore and
+    ~/.ranwhat/x/../ignore are the ignore file. Only when there is one, so
+    a path with a variable in it is otherwise left as written."""
+    if "//" not in path and "/." not in path:
+        return path
+    flat = posixpath.normpath(path)
+    if flat.startswith("//"):
+        flat = flat[1:]
+    return path if flat == "." else flat
+
+
 def _config_kind(path):
     """(kind, scope) of an agent's configuration file, or None. kind is
     claude, codex, gemini, mcp (a file of MCP servers) or rc (a shell's
@@ -4863,7 +4879,7 @@ def _config_kind(path):
     Named by its file and the folder it sits in, so .claude/worktrees/,
     .claude/agents/ and a settings.json under tests/fixtures/ are none. A
     path relative to an unknown directory is a project's."""
-    t = _slashed(path.strip()).replace('"', "").replace("'", "")
+    t = _flat(_slashed(path.strip()).replace('"', "").replace("'", ""))
     folder, _sep, name = t.rstrip("/").rpartition("/")
     holder, _sep, parent = folder.rpartition("/")
     low_parent = parent.lower()
@@ -4898,7 +4914,10 @@ def _config_kind(path):
     # repository keeps, which is read only when named but may be named in
     # CI; and the secrets clean was told to keep, with the key that makes
     # an entry in that file, beside the index in known/.
-    if name == ".ranwhatignore" or (name == "ignore" and _ranwhat_home_folder(folder)):
+    # (the base name compared in lower case: macOS and Windows keep their
+    # file names case-insensitively, so .RANWHATIGNORE is the same file)
+    if name.lower() == ".ranwhatignore" or (
+            name == "ignore" and _ranwhat_home_folder(folder)):
         return "ranwhat", "ignore"
     if name in ("kept.json", "key") and parent == "known" \
             and _ranwhat_home_folder(holder):
@@ -4938,6 +4957,7 @@ def _config_folder_kind(path):
     t = _slashed(path.strip()).replace('"', "").replace("'", "")
     if t.endswith("/*"):
         t = t[:-2]
+    t = _flat(t)
     holder, _sep, name = t.rstrip("/").rpartition("/")
     low = name.lower()
     if name == ".claude" or low in _CLAUDE_DIRS:
@@ -6118,8 +6138,20 @@ def _read_paths(tool_name, tool_input):
         value = tool_input.get(key)
         for path in (value if isinstance(value, (list, tuple)) else [value]):
             if isinstance(path, str) and path:
-                found.append(path)
+                found.append(_read_path_as_named(path))
     return "\n".join(found)[:MAX_SCAN_CHARS]
+
+
+def _read_path_as_named(path):
+    """A path a file tool read, written as the credential rule names
+    ranwhat's own: with its // and . and .. parts taken out, and under
+    $RANWHAT_HOME when it is a file in the folder RANWHAT_HOME names on
+    this machine, which only a literal path can say."""
+    flat = _flat(_slashed(path))
+    for tail in ("/known/key", "/token"):
+        if flat.endswith(tail) and _ranwhat_home_folder(flat[:-len(tail)]):
+            return "$RANWHAT_HOME" + tail
+    return flat if flat != _slashed(path) else path
 
 
 # Tools that write or edit a file, and those of them that are given a
@@ -6448,30 +6480,66 @@ def _runs_a_shell(words):
     return False
 
 
-def _moved(stage, where):
+# Words that may stand before the command a stage runs: a variable put in
+# its environment, `!`, `time`, and the keywords a compound statement's
+# parts begin with. A cd behind any of them still moves the shell (`X= cd
+# /x`, `if true; then cd /x; fi`, `! cd /x`), and is not told by its first
+# word.
+_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+_LEADING = frozenset(("!", "time", "if", "then", "do", "else", "elif", "while",
+                      "until", "case", "for", "select", "function", "in"))
+
+
+def _bare(word):
+    """word as the shell reads it once its quotes and escapes are taken
+    out: c''d and c\\d are cd."""
+    return _QUOTING.sub("", word)
+
+
+def _moved(stage, where, cdpath=False):
     """Where the shell is after one command of a call, given where it was
-    before it ("" where the call started, None not known): a cd or pushd
-    to a directory written out in full moves it, there or below where it
-    was; a ~ is the home directory. Anything that may move it in a way the
-    text does not show (cd alone, cd -, popd, source, eval, a subshell or a
-    group, a shell given a command of its own) leaves it not known. Every
-    other command leaves it where it was. Only a cd's own words are split,
-    so a long call costs what it is long."""
+    before it ("" where the call started, None not known): a plain cd or
+    pushd to a directory written out in full moves it, there or below
+    where it was; a ~ is the home directory. Anything that may move it in
+    a way the text does not show (cd alone, cd -, popd, source, eval, a
+    subshell or a group, a shell given a command of its own, a cd behind a
+    variable, a keyword, a `!` or `time`, or quoted so that it does not
+    read as cd, a relative cd when the call sets CDPATH) leaves it not
+    known: the fail-open choice here is the one that fails to leave an
+    action out. Every other command leaves it where it was. Only the words
+    before a command are looked at, so a long call costs what it is long."""
     head = stage.strip()
     if not head:
         return where
     if head[0] in "({":
         return None
-    words = head.split(None, 3)
-    name = words[0].strip("'\"\\")
-    if name in ("builtin", "command") and len(words) > 1:
-        if words[1].strip("'\"\\") in _CHDIR | _LOSES_DIR:
+    words = head.split(None, 12)
+    # The command word: what follows the words that only prepare for it.
+    k = 0
+    while k < len(words):
+        bare = _bare(words[k])
+        if _ASSIGN.match(words[k]) or bare in _LEADING or (
+                bare.endswith(")") and k + 1 < len(words)):
+            k += 1
+            continue
+        break
+    prefixed = k > 0
+    if k >= len(words):
+        return where
+    name = _bare(words[k])
+    if name in ("builtin", "command") and k + 1 < len(words):
+        if _bare(words[k + 1]) in _CHDIR | _LOSES_DIR:
             return None
         return where
     if name in _LOSES_DIR or _runs_a_shell(head.split()):
         return None
     if name not in _CHDIR:
+        if words[0] in ("case", "for", "select") and any(
+                _bare(w) in _CHDIR | _LOSES_DIR for w in words[1:]):
+            return None
         return where
+    if prefixed or words[k] not in _CHDIR:
+        return None
     argv = _argv(head)
     if not argv or len(argv) != 2 or argv[0] not in _CHDIR:
         return None
@@ -6483,7 +6551,7 @@ def _moved(stage, where):
     elif target.startswith("~"):
         return None                         # another user's home
     if not target.startswith("/"):
-        if where is None:
+        if where is None or cdpath:
             return None
         target = posixpath.join(where, target) if where else target
     if len(target) > _LONGEST_DIR:
@@ -6498,9 +6566,11 @@ def _directories(text):
     as _moved tells it. Each hit on the same call asks it of the same
     text, so each call's commands are walked once."""
     out, where = [], ""
+    # CDPATH may send a relative cd anywhere: its effect cannot be read.
+    cdpath = "CDPATH" in text
     for start, end, _op in _command_spans(text):
         out.append(where)
-        where = _moved(text[start:end], where)
+        where = _moved(text[start:end], where, cdpath)
     return tuple(out)
 
 
@@ -6529,9 +6599,10 @@ def _shown_whole(text, lo, hi, known):
     return known.mask(shown) if known else shown
 
 
-def _subject_of(hit, on, text, span, known):
+def _subject_of(hit, on, text, span, known, later=None):
     """hit with what it is about: _on, and for a command or a path its
-    _subject, and for a command its _cd (see above)."""
+    _subject, and for a command its _cd (see above). later is where the
+    same rule matches again further on in text, or None."""
     hit["_on"] = on
     lo, hi = span
     last = max(lo, hi - 1)
@@ -6540,6 +6611,16 @@ def _subject_of(hit, on, text, span, known):
         starts = [s for s, _e, _op in spans]
         first = max(0, bisect.bisect_right(starts, lo) - 1)
         end = max(first, bisect.bisect_right(starts, last) - 1)
+        if later is not None and bisect.bisect_right(starts, later) - 1 > end:
+            # The rule is tripped again by a later command of the call. The
+            # scan keeps one hit a rule, and an entry written for the first
+            # command must not leave out the second with it: `npm publish
+            # && npm publish --registry <elsewhere>` is one hit. Said of
+            # neither, so that only an action's id names it, and in= has
+            # nowhere to be judged from.
+            hit["_several"] = True
+            hit["_cd"] = None
+            return hit
         subject = _shown_whole(text, spans[first][0], spans[end][1], known)
         where = _directories(text)[first]
         if where:
@@ -6550,6 +6631,9 @@ def _subject_of(hit, on, text, span, known):
     elif on == "path":
         start = text.rfind("\n", 0, lo) + 1
         stop = text.find("\n", last)
+        if later is not None and stop != -1 and later > stop:
+            hit["_several"] = True      # as for a command, above
+            return hit
         subject = _shown_whole(text, start, len(text) if stop == -1 else stop,
                                known)
     else:
@@ -6557,6 +6641,23 @@ def _subject_of(hit, on, text, span, known):
     if subject is not None:
         hit["_subject"] = subject
     return hit
+
+
+def _matches_again(rule, match, refine, seen, span, tool_input):
+    """Where in seen the rule matches again after the span it hit, or None:
+    one more scan of the rest of the text, so a call costs two matches a
+    rule and never more, however often the command repeats. A refiner that
+    would drop that match drops it here too."""
+    cut = span[1]
+    if cut >= len(seen):
+        return None
+    rest = seen[cut:]
+    again = match(rest)
+    if not again:
+        return None
+    if refine and refine(rest, rule.severity, tool_input) is None:
+        return None
+    return cut + again[0]
 
 
 def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
@@ -6612,7 +6713,10 @@ def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
             hit = {"rule": rule.id, "severity": severity,
                    "title": rule.title, "why": why, "evidence": evidence}
             if subjects:
-                _subject_of(hit, on, subject, span, known)
+                _subject_of(hit, on, subject, span, known,
+                            _matches_again(rule, match, refine, seen, span,
+                                           tool_input) if on in (
+                                "command", "path") else None)
             hits.append(hit)
             break
     return hits
