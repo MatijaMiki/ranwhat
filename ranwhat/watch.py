@@ -23,6 +23,7 @@ import datetime
 import functools
 import shlex
 import hashlib
+import itertools
 import json
 import ntpath
 import os
@@ -1429,11 +1430,11 @@ def _file_piped_out(text):
     for start, end, op in _command_spans(text):
         at = _SPACES.match(text, start, end).end()
         if reader is not None:
-            sender = _NETWORK_SENDER.match(text, at, end)
+            sender = _NETWORK_SENDER.match(text, _peel(text, at, end), end)
             if sender:
                 return reader, sender.end()
         else:
-            found = _FILE_READER.match(text, at, end)
+            found = _FILE_READER.match(text, _peel(text, at, end), end)
             if found and _reads_a_file(found.group("reader"),
                                        text[found.start("reader"):end]):
                 reader = at
@@ -1773,7 +1774,16 @@ def _reads_script(words, at=0):
 # read as sh given & and next), and a quoted -c string (sh -lc 'curl ... |
 # sh') is not read as a command of its own here.
 def _runs_stdin(stage):
-    """Whether a stage runs what it is piped as a program."""
+    """Whether a stage runs what it is piped as a program, as it stands or
+    behind the wrappers that _peel reads, timeout and nice among them,
+    which what stands before a shell (_HANDS_ON) does not."""
+    if _runs_stdin_here(stage):
+        return True
+    at = _peel(stage)
+    return at > 0 and _runs_stdin_here(stage[at:])
+
+
+def _runs_stdin_here(stage):
     # A redirection that replaces the standard input, anywhere in the stage
     # (`sh < file`, `sudo -E <<<x -H bash -s`), leaves nothing piped to read.
     if _without_redirects(_argv(stage) or stage.split())[1]:
@@ -1813,22 +1823,34 @@ def _runs_stdin(stage):
     return False
 
 
-def _remote_run(text):
+def _remote_run(text, depth=0):
     """Span from a fetcher to the shell or interpreter that runs what it
     fetched, or None. Each stage is read as the command it runs, so the &
     that puts the shell in the background (`curl ... | sh &`), the ( ) of a
-    subshell and a leading time or timeout hide neither."""
+    subshell and a wrapper in front (timeout, nohup, env, sudo ...) hide
+    neither. A shell's -c string is a command of its own: bash -c 'curl ... |
+    sh', which the text reduces to `bash -c curl ... | sh`, is a fetch, and
+    one still quoted is read two deep."""
     fetched, substitution = None, _runs_substitution()
     for start, end, op in _command_spans(text):
         at = _SPACES.match(text, start, end).end()
         found = substitution.match(text, at, end)
+        if found is None:
+            found = substitution.match(text, _peel(text, at, end), end)
         if found:
             return at, found.end()
         stage = _normalised(text[at:end])
+        if depth < 2:
+            name = _command_word(stage)
+            if name in _STDIN_SHELLS and _remote_run(
+                    _shell_string(name, _stage_words(stage)) or "", depth + 1):
+                return at, end
         if fetched is not None and stage and _runs_stdin(stage):
             return fetched, end
-        if fetched is None and _FETCHER.match(stage):
-            fetched = at
+        if fetched is None:
+            run = _normalised(_unwrap_c(stage))
+            if _FETCHER.match(run) or _FETCHER.match(run, _peel(run)):
+                fetched = at
         if op != "|":
             fetched = None
     return None
@@ -1893,7 +1915,8 @@ def _chmod_open(text):
     """Span of the first chmod that opens files to every user, or None."""
     for start, end, _op in _command_spans(text):
         at = _SPACES.match(text, start, end).end()
-        if _CHMOD.match(text, at, end) and _chmod_parse(text[at:end]):
+        run = _peel(text, at, end)
+        if _CHMOD.match(text, run, end) and _chmod_parse(text[run:end]):
             return at, end
     return None
 
@@ -1905,7 +1928,8 @@ def _refine_permissions(text, severity, tool_input=None):
     scratch path under /tmp, where a world-writable mode is ordinary."""
     for start, end, _op in _command_spans(text):
         at = _SPACES.match(text, start, end).end()
-        parsed = _CHMOD.match(text, at, end) and _chmod_parse(text[at:end])
+        run = _peel(text, at, end)
+        parsed = _CHMOD.match(text, run, end) and _chmod_parse(text[run:end])
         if parsed:
             break
     else:
@@ -1936,7 +1960,8 @@ def _wipes_container_data(stage):
     away."""
     if not _CONTAINER_HINT.search(stage):
         return False
-    rest = stage[re.match(_STAGE_PREFIX, stage).end():]
+    rest = stage[_peel(stage):]
+    rest = rest[re.match(_STAGE_PREFIX, rest).end():]
     words = _argv(rest) or rest.split()
     if not words:
         return False
@@ -2051,27 +2076,28 @@ def _flatten_substitutions(text):
     return "".join(out)
 
 
-# time with -p, the one option the shell's time takes. A timeout whose -k or
-# -s is given its value as the next word is left on: that value is no
-# duration, and _launched reads timeout with its own options (_LEAD_VALUES).
+# time with -p, the one option the shell's time takes. What else stands in
+# front of the command is peeled by _peel, with the options of each.
 _ENC_LEADING = re.compile(
     r"(?:\s*(?:\(|\{(?=\s)|(?:then|do|else|elif|if|while|until|time(?:\s+-p)?)"
     r"(?=\s)))+\s*")
-_ENC_WRAPPERS = re.compile(
-    r"(?:(?:time(?:\s+-p)?|setsid)\s+"
-    r"|timeout(?:\s+-(?![ks]\b)[A-Za-z]+)*\s+\d[\w.]*\s+)+")
+
+
+# The wrappers _normalised leaves on a stage: what sudo and env give the
+# command that follows (a user, a variable) is what other rules judge.
+_KEPT_WRAPPERS = frozenset(("sudo", "doas", "env"))
 
 
 def _normalised(stage):
     """The command a stage runs: without the ( or { that groups it, a
-    leading then, do, else, if, while or time, a timeout or setsid in front,
-    a trailing &, and the ) or } that closes a group opened before it."""
+    leading then, do, else, if, while or time, the wrappers in front of it
+    (nice, timeout, setsid, nohup ... with their options, but not sudo or
+    env), a
+    trailing &, and the ) or } that closes a group opened before it."""
     found = _ENC_LEADING.match(stage)
     if found:
         stage = stage[found.end():]
-    found = _ENC_WRAPPERS.match(stage)
-    if found:
-        stage = stage[found.end():]
+    stage = stage[_peel(stage, keep=_KEPT_WRAPPERS):]
     stage = stage.rstrip(" \t\r\n&")
     extra = stage.count(")") - stage.count("(")
     if extra > 0:
@@ -2109,9 +2135,12 @@ def _unwrap_c(stage):
 
 
 def _after_prefix(stage):
-    """stage without the sudo, env, VAR=value and directory in front of
-    its command."""
-    rest = stage[_hands_on().match(stage).end():]
+    """stage without the wrappers (sudo, env, timeout ...), VAR=value and
+    directory in front of its command."""
+    rest = stage[_peel(stage):]
+    rest = rest[_ENC_PREFIX.match(rest).end():]
+    # what stood before the wrappers, assignments, may have hidden them
+    rest = rest[_peel(rest):]
     return rest[_ENC_PREFIX.match(rest).end():]
 
 
@@ -4080,7 +4109,10 @@ _LEAD_VALUES = {
     "exec": frozenset(("-a",)),
     "time": frozenset(("-f", "-o", "--format", "--output")),
     "caffeinate": frozenset(("-t", "-w")),
-    "command": frozenset(), "nohup": frozenset(), "stdbuf": frozenset()}
+    "ionice": frozenset(("-c", "-n", "-p", "-P", "-u", "--class",
+                         "--classdata", "--pid", "--pgid", "--uid")),
+    "stdbuf": frozenset(("-i", "-o", "-e", "--input", "--output", "--error")),
+    "command": frozenset(), "nohup": frozenset(), "setsid": frozenset()}
 # Runners that fetch a package and run its program, and their options that
 # take a value. The first word after them is the package, or the program
 # when an option named the package: either way it is read as a program.
@@ -4198,52 +4230,92 @@ def _python_module(words, i):
     return None
 
 
-def _launched(words):
-    """(program, args, assignments) of what a stage's words run: past its
-    assignments, sudo, env, nohup, nice, time, timeout, command and exec
-    with their options, a runner that fetches a package, and python -m.
-    Read a word at a time, as _AfterHandsOn reads what stands before a
-    shell, so no reading of the words is ever tried twice. program is None
-    when the words run nothing."""
-    assigns, i, n = {}, 0, len(words)
+def _lead_end(words, i=0, bare=False, keep=()):
+    """(where the program of a stage's words starts, its assignments): past
+    the VAR=value words and the wrappers of _LEAD_VALUES with their options.
+    The one step every rule that reads a stage's program word takes, so a
+    wrapper is peeled in the same way by all of them: sudo -u root and
+    sudo --, env -i VAR=x, nice -n 10, ionice -c 3, timeout -k 5 -s INT 60,
+    stdbuf -oL. Read a word at a time, as _AfterHandsOn reads what stands
+    before a shell, so no reading of the words is ever tried twice. With
+    `bare`, assignments that start the stage are left in it (an assignment
+    is a command of its own), and only those after a wrapper are skipped.
+    The wrappers named in `keep` are left in the stage, where they end the
+    peeling: the rules that judge what sudo or env gives a command read them."""
+    assigns, n, wrapped = {}, len(words), False
     while i < n:
         word = words[i]
         found = _ASSIGNMENT.match(word)
+        if found and bare and not wrapped:
+            break
         if found:
             assigns[found.group(1)] = found.group(2)
             i += 1
             continue
         name = _program(word)
-        if name in _LEAD_VALUES:
-            values, i = _LEAD_VALUES[name], i + 1
-            while i < n and words[i][:1] == "-" and words[i] != "-":
-                if words[i] == "--":
-                    i += 1
-                    break
-                i += 2 if words[i] in values else 1
-            if name == "timeout" and i < n:
-                i += 1                         # the duration
-            continue
-        end = _runner_end(name, words, i)
-        if end is not None:
-            i = end
-            while i < n and words[i][:1] == "-":
-                if words[i] == "--":
-                    i += 1
-                    break
-                i += 2 if words[i] in _RUNNER_VALUES else 1
-            if i >= n:
-                return None, [], assigns
-            return _package_program(words[i]), words[i + 1:], assigns
-        if name.startswith("python") or name == "py":
-            module = _python_module(words, i)
-            if module:
-                # The package's own modules run ranwhat as `-m ranwhat` does.
-                if module[0] in ("ranwhat.cli", "ranwhat.__main__"):
-                    return "ranwhat", words[module[1]:], assigns
-                return module[0], words[module[1]:], assigns
-        return name, words[i + 1:], assigns
-    return None, [], assigns
+        if name not in _LEAD_VALUES or name in keep:
+            break
+        values, i, wrapped = _LEAD_VALUES[name], i + 1, True
+        # env - clears the environment: its one lone dash is an option
+        while i < n and words[i][:1] == "-" and (words[i] != "-"
+                                                 or name == "env"):
+            if words[i] == "--":
+                i += 1
+                break
+            i += 2 if words[i] in values else 1
+        if name == "timeout" and i < n:
+            i += 1                             # the duration
+    return i, assigns
+
+
+# How many of a stage's first words _peel reads: a stage with more wrappers
+# than this is judged by the wrappers it shows, and its cost stays constant.
+_MOST_LEAD_WORDS = 48
+_LEAD_WORD = re.compile(r"[^\s|;&]+")
+
+
+def _peel(text, pos=0, end=None, keep=()):
+    """Where the program of the stage that starts at text[pos] begins,
+    past the wrappers and assignments that _lead_end skips; pos when none
+    stands in front of it, or nothing follows them; `keep` as _lead_end
+    has it. Reads at most
+    _MOST_LEAD_WORDS words, whatever the length of the stage."""
+    found = list(itertools.islice(
+        _LEAD_WORD.finditer(text, pos, len(text) if end is None else end),
+        _MOST_LEAD_WORDS))
+    at = _lead_end([m.group() for m in found], 0, True, keep)[0]
+    return found[at].start() if 0 < at < len(found) else pos
+
+
+def _launched(words):
+    """(program, args, assignments) of what a stage's words run: past its
+    assignments, sudo, env, nohup, nice, time, timeout, command and exec
+    with their options (_lead_end), a runner that fetches a package, and
+    python -m. program is None when the words run nothing."""
+    i, assigns = _lead_end(words)
+    n = len(words)
+    if i >= n:
+        return None, [], assigns
+    name = _program(words[i])
+    end = _runner_end(name, words, i)
+    if end is not None:
+        i = end
+        while i < n and words[i][:1] == "-":
+            if words[i] == "--":
+                i += 1
+                break
+            i += 2 if words[i] in _RUNNER_VALUES else 1
+        if i >= n:
+            return None, [], assigns
+        return _package_program(words[i]), words[i + 1:], assigns
+    if name.startswith("python") or name == "py":
+        module = _python_module(words, i)
+        if module:
+            # The package's own modules run ranwhat as `-m ranwhat` does.
+            if module[0] in ("ranwhat.cli", "ranwhat.__main__"):
+                return "ranwhat", words[module[1]:], assigns
+            return module[0], words[module[1]:], assigns
+    return name, words[i + 1:], assigns
 
 
 def _is_ranwhat(word):
