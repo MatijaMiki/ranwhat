@@ -66,8 +66,9 @@ is judged by name). CLI (tools/mod.rs): execute_bash (execute_cmd on
 Windows) {command, summary?}, fs_read {operations: [{mode: Line |
 Directory | Search, path, ...} | {mode: Image, image_paths}]}, fs_write
 {command: create | str_replace | insert | append, path, ...}; use_aws,
-gh_issue, introspect, knowledge, thinking, todo_list, delegate and MCP
-tools are other. The fs_read operation `mode` strings are read from the
+gh_issue and report_issue (the model-facing name; gh_issue is the
+tool_index.json key), introspect, knowledge, thinking, todo_list,
+delegate and MCP tools are other. The fs_read operation `mode` strings are read from the
 Rust enum's names; their exact case on disk is not checked, so operations
 are read by their path keys, whatever the mode.
 
@@ -135,8 +136,8 @@ SHELL_TOOLS = ("executeBash", "execute_bash", "execute_cmd")
 IDE_READS = ("fsRead", "listDirectory", "grepSearch", "fileSearch")
 IDE_WRITES = ("fsWrite", "fsReplace")
 CLI_WRITES = ("fs_write",)
-OTHER_TOOLS = ("codeReview", "use_aws", "gh_issue", "introspect",
-               "knowledge", "thinking", "todo_list", "delegate")
+OTHER_TOOLS = ("codeReview", "use_aws", "gh_issue", "report_issue",
+               "introspect", "knowledge", "thinking", "todo_list", "delegate")
 
 
 # What _read_ide returns for a file with nothing to read (JSON null is
@@ -386,7 +387,7 @@ class AmazonQSource(Source):
                                 % (store.path, type(e).__name__))
                 return NOTHING
             text = raw.decode("utf-8", "surrogateescape")
-            if text.startswith("﻿"):
+            if text.startswith("\ufeff"):
                 text = text[1:]
             if not text.strip():
                 return NOTHING
@@ -635,21 +636,20 @@ class AmazonQSource(Source):
         seen = set()
         for key, state in self._rows(store, tally):
             session = _string(state.get("conversation_id"))
-            pending = []
+            pending = {}
             for entry in self._entries_of(state, tally, self.count):
                 for result in self._results_of(entry):
                     if not isinstance(result, dict):
                         continue
                     rid = result.get("tool_use_id")
-                    for i, call in enumerate(pending):
-                        if call.tool_call_id == rid:
-                            del pending[i]
-                            blocks = result.get("content")
-                            call.output = output_text(blocks)
-                            if never_ran(blocks, result.get("status")):
-                                call.status = DECLINED
-                            yield call
-                            break
+                    call = pending.pop(rid, None) \
+                        if isinstance(rid, str) else None
+                    if call is not None:
+                        blocks = result.get("content")
+                        call.output = output_text(blocks)
+                        if never_ran(blocks, result.get("status")):
+                            call.status = DECLINED
+                        yield call
                 assistant = entry.get("assistant")
                 use = assistant.get("ToolUse") \
                     if isinstance(assistant, dict) else None
@@ -666,10 +666,10 @@ class AmazonQSource(Source):
                         if marker in seen:
                             continue
                         seen.add(marker)
-                        pending.append(call)
+                        pending[call.tool_call_id] = call
                     else:
                         yield call
-            for call in pending:
+            for call in pending.values():
                 yield call
 
     def _cli_call(self, store, key, session, entry, item, tally):

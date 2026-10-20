@@ -816,6 +816,27 @@ class CliCalls(Base):
         self.assertEqual((got["o1"].kind, got["o1"].known), ("other", True))
         self.assertEqual((got["o2"].kind, got["o2"].known), ("other", False))
 
+    def test_report_issue_is_a_known_tool(self):
+        self.assertEqual(aq.classify("report_issue", {"title": "x"})[:2],
+                         ("other", True))
+        self.assertEqual(aq.classify("gh_issue", {})[:2], ("other", True))
+
+    def test_unmatched_results_stay_linear(self):
+        n = 20000
+        entries = []
+        for i in range(n):
+            res = {"ToolUseResults": {"tool_use_results": [
+                {"tool_use_id": "zz%d" % i,
+                 "content": [{"Text": "x"}]}]}}
+            entries.append(entry(res, cli_use("m%d" % i, cli_tool(
+                "u%d" % i, "execute_bash", command="ls")), ms=MS0))
+        path = self.cli([(CWD, state(entries))])
+        (store,) = self.stores(self.data)
+        t0 = time.monotonic()
+        calls = list(self.src.tool_calls(store))
+        self.assertEqual(len(calls), n)
+        self.assertLess(time.monotonic() - t0, 5)
+
     def test_no_request_metadata_time_uses_an_upper_bound(self):
         st = state([entry(cli_prompt("x"), cli_use("m", cli_tool(
             "n1", "execute_bash", command="ls")))])
