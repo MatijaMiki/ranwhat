@@ -516,8 +516,9 @@
           <h3>Sent</h3>
           <p>For each flagged action, at most 100 of them, the most severe
              first: the id of each rule it tripped and its severity, a
-             16-character action id (a hash made on your machine, from which
-             the action cannot be recovered), which agent ran it, and the
+             16-character action id (a hash made on your machine, not the action;
+             where an agent writes no call id, someone who guesses a plain
+             command can check the guess against it), which agent ran it, and the
              time in UTC. Then counts: flagged, left out by your ignore file
              (counted, never listed), not listed, transcripts read per agent,
              how many were unreadable, by severity, by rule and by agent;

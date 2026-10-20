@@ -5,7 +5,9 @@ It reads what `watch` reads, applies the ignore file as `watch` does, and
 sends feed.ranwhat.com (over HTTPS, with this machine's Bearer token) a
 document that holds, for each flagged action, only:
 
-  id      the 16 hex characters of watch.action_id: a hash, not the action
+  id      the 16 hex characters of watch.action_id: a hash, not the action. It does not
+          give an action away, but where the agent wrote no call id of its own, a
+          guess at a plain command can be checked against it (see ID_NOTE)
   agent   which agent ran it (one of ranwhat sources' ids)
   at      when, as UTC to the second, or null when the agent wrote no time
   hits    the rule id and severity of each rule it tripped
@@ -76,6 +78,13 @@ _FIELD = re.compile(r"/[A-Za-z0-9_/.-]{0,80}\Z")
 _LOOPBACK = ("localhost", "127.0.0.1", "::1")
 
 DAY = 86400
+
+# Said in the summary, and in the README, privacy and commands pages: the id
+# is not salted, because `ranwhat ignore ID` takes the id the Findings page
+# shows. Tests keep these four in step.
+ID_NOTE = ("The action id is a hash, not the action, but it is not secret: where "
+           "an agent writes no call id, a guess at a plain command can be checked "
+           "against it.")
 
 
 class Invalid(Exception):
@@ -484,6 +493,8 @@ def render_summary(doc, limit=12, width=None):
     out += term.wrap("Never sent: commands, paths, evidence, working directories, "
                      "session ids, file contents, secrets, your hostname or your "
                      "user name.", limit=width)
+    out.append("")
+    out += term.wrap(ID_NOTE, limit=width)
     out.append("")
     out += term.wrap("Everyone in the organisation this machine is linked to can read "
                      "it at %s. Plus keeps this machine's latest push, and a summary "

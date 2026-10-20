@@ -601,6 +601,12 @@ class Sending(_Cli):
             self.assertIn(text, said)
         self.assertRegex(out, r"(?m)^    [0-9a-f]{16}  \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC  claude-code  ")
 
+    def test_the_summary_says_the_action_id_can_confirm_a_guess(self):
+        self.history(*self.BAD)
+        self.stored()
+        out = " ".join(self.push("--yes")[1].split())
+        self.assertIn("a guess at a plain command can be checked against it", out)
+
     def test_the_ignore_line_appears_only_when_something_was_ignored(self):
         self.history(*self.BAD)
         self.stored()

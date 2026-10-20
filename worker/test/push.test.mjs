@@ -835,3 +835,23 @@ test("the page is the organisation's alone, for every member, and follows a swit
   // Back in his own organisation, nothing of hers.
   assert.doesNotMatch((await ben.get("/findings")).text, /ana-box-marker/);
 });
+
+test("the page dates a push by when it arrived: a relative time, Stale only after a week", async () => {
+  const e = await stand();
+  const s = await signedIn(e);
+  const dev = machine(e, s.org, "device", "Work laptop");
+  assert.equal((await pushed(e, dev.tok, snapshot({ n: 1, at: unix() - 60 }))).status, 200);
+  let page = await s.get("/findings");
+  assert.doesNotMatch(page.text, /1970-01-01/);
+  assert.doesNotMatch(page.text, /class="pill warn">Stale/);
+  assert.match(page.text, /last push just now/);
+  const today = iso(unix()).slice(0, 4);
+  assert.match(page.text, new RegExp(`<time datetime="${today}-`));
+  page = await s.get(`/findings?machine=${dev.id}`);
+  assert.doesNotMatch(page.text, /1970-01-01/);
+
+  run(e, "UPDATE pushes SET received_at = ?", unix() - 8 * DAY);
+  page = await s.get("/findings");
+  assert.match(page.text, /class="pill warn">Stale/);
+  assert.doesNotMatch(page.text, /1970-01-01/);
+});

@@ -625,7 +625,8 @@
       <p class="cmdnote">
         What it sends is derived metadata: for each flagged action, the rule
         id and severity of each rule it tripped, a 16-character action id
-        (a hash, not the action), the agent and the time in UTC, and
+        (a hash, not the action; where an agent writes no call id, a guess at a
+        plain command can be checked against it), the agent and the time in UTC, and
         counts, ranwhat's version and the window in days. The machine is the
         token that signs the request. It never sends a command, a path,
         evidence, a working directory, a session id, file contents, a secret,

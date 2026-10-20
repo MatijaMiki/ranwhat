@@ -167,7 +167,9 @@
           <p>Anything touching a secret runs locally. Introspection talks only
              to the credential's own issuer, and update sends only your token
              to our server. login, whoami and logout, which link a machine to
-             an optional account, are the only other commands that talk to it.
+             an optional account, are the only other commands that talk to it,
+             except push, which you run yourself and which sends derived
+             metadata only (rule, severity, agent, time, counts).
              This is an architecture rather than a promise, which is why it is
              short to review.</p>
         </div>

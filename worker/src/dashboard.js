@@ -2188,6 +2188,9 @@ const ACTION_ID = /^[0-9a-f]{16}$/;
 const STALE_AFTER = 7 * DAY;
 
 const count = (n) => (typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= 1_000_000_000 ? n : 0);
+/* A time, unix seconds: count() stops at a billion, which is 2001, so every
+   received_at went through it as 0 and read 1970 and Stale. */
+const pushTime = (n) => (typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n < 4e9 ? n : 0);
 const ruleTitle = (id) => (Object.hasOwn(RULES, id) && typeof RULES[id] === "string" ? RULES[id] : "an unknown rule");
 const agentName = (id) => (Object.hasOwn(AGENTS, id) && typeof AGENTS[id] === "string" ? AGENTS[id] : "an unknown agent");
 
@@ -2278,7 +2281,7 @@ async function findingsView(env, who, { status = 200, error = "" } = {}, url = n
     }
   }
   const latest = await latestPushes(env, org.id);
-  const pushed = latest.filter((p) => byId.has(p.machine_id)).sort((a, b) => count(b.received_at) - count(a.received_at));
+  const pushed = latest.filter((p) => byId.has(p.machine_id)).sort((a, b) => pushTime(b.received_at) - pushTime(a.received_at));
   const t = now();
   const label = (m) => (m.label ? m.label : UNNAMED[m.kind] || "Machine");
   const intro = `<p class="card-intro">What each machine chose to send with ranwhat push, as metadata only: the rule, its
@@ -2305,7 +2308,7 @@ async function findingsView(env, who, { status = 200, error = "" } = {}, url = n
       title: label(m), icon: "findings", attributes: 'id="findings"',
       aside: `${severityPill(count(p.critical), "crit")}${severityPill(count(p.high), "warn")}${severityPill(count(p.medium), "info")}`,
       body: `${up}${intro}
-        <p>Last push ${stamp(count(p.received_at))} &middot; ranwhat ${escape(String(p.version).slice(0, 24))} &middot;
+        <p>Last push ${stamp(pushTime(p.received_at))} &middot; ranwhat ${escape(String(p.version).slice(0, 24))} &middot;
            the last ${count(p.window_days)} days &middot; ${count(p.flagged)} flagged, ${count(p.ignored)} ignored</p>
         ${topRules(rules, 15).length ? `<ul class="events">${topRules(rules, 15).map(([id, n]) =>
           `<li><span>${escape(ruleTitle(id))} <code>${escape(id)}</code></span><span class="when">${n}</span></li>`).join("")}</ul>` : ""}`,
@@ -2322,7 +2325,7 @@ async function findingsView(env, who, { status = 200, error = "" } = {}, url = n
       title: "Recent pushes", icon: "clock",
       body: `<p class="card-intro">A summary of each push in the last ${RETENTION.plus.days} days; the actions of older pushes are not kept.</p>
         ${table([["Pushed"], ["Flagged"], ["Critical"], ["High"], ["Medium"], ["Ignored", "opt"]], recent.map((r) =>
-          `<tr>${cell("Pushed", stamp(count(r.received_at)))}${cell("Flagged", String(count(r.flagged)))}` +
+          `<tr>${cell("Pushed", stamp(pushTime(r.received_at)))}${cell("Flagged", String(count(r.flagged)))}` +
           `${cell("Critical", severityPill(count(r.critical), "crit"))}${cell("High", severityPill(count(r.high), "warn"))}` +
           `${cell("Medium", severityPill(count(r.medium), "info"))}${cell("Ignored", String(count(r.ignored)), "opt")}</tr>`),
           { label: "Recent pushes" })}${kept}`,
@@ -2336,7 +2339,7 @@ async function findingsView(env, who, { status = 200, error = "" } = {}, url = n
       ${stat({ label: "Machines pushing", value: String(pushed.length), sub: `of ${list.length} linked`, href: PATHS.machines, icon: "machines" })}
       ${stat({ label: "Critical", value: String(totals.critical), sub: "in the latest pushes", href: PATHS.findings, icon: "alert" })}
       ${stat({ label: "High", value: String(totals.high), sub: "in the latest pushes", href: PATHS.findings, icon: "alert" })}
-      ${stat({ label: "Medium", value: String(totals.medium), sub: pushed.length ? `last push ${ago(count(pushed[0].received_at), t)}` : "nothing pushed yet",
+      ${stat({ label: "Medium", value: String(totals.medium), sub: pushed.length ? `last push ${ago(pushTime(pushed[0].received_at), t)}` : "nothing pushed yet",
                href: PATHS.findings, icon: "info" })}
     </div>`;
 
@@ -2357,7 +2360,7 @@ async function findingsView(env, who, { status = 200, error = "" } = {}, url = n
         `${cell("Last push", `<span class="none">Never pushed</span>`)}${cell("Critical", "")}${cell("High", "")}${cell("Medium", "")}` +
         `${cell("Ignored", "", "opt")}${cell("Top rules", "")}${cell("ranwhat", "", "opt")}${cell("Window", "", "opt")}</tr>`;
     }
-    const received = count(p.received_at);
+    const received = pushTime(p.received_at);
     const old = t - received > STALE_AFTER ? pill("Stale", "warn") : "";
     const top = topRules(tallyOf(p.rules, RULES)).map(([id, n]) => `${escape(ruleTitle(id))} &times; ${n}`).join("<br>");
     return `<tr data-machine="${escape(m.id)}">${cell("", link, "cell-main")}${cell("Kind", pill(KINDS[m.kind], KIND_TONE[m.kind]))}` +

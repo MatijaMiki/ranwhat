@@ -1471,5 +1471,27 @@ class EmailSignup(unittest.TestCase):
             # Loaded from subscribe.js on first use, not by the page.
             self.assertNotIn("challenges.cloudflare.com/turnstile", text, name)
 
+class PushCopyTests(unittest.TestCase):
+    def test_every_page_listing_login_and_whoami_also_names_push(self):
+        for page in sorted(SITE.glob("*.html")):
+            text = re.sub(r"<[^>]+>", "", read(page))
+            if "whoami and logout" in text or "logout talk only" in text:
+                with self.subTest(page=page.name):
+                    self.assertRegex(text, r"\bpush\b")
+        self.assertIn("push", re.sub(r"<[^>]+>", "", read(SITE / "faq.html")))
+        self.assertIn('id="push"', read(SITE / "privacy.html"))
+
+    def test_the_action_id_is_not_called_unrecoverable(self):
+        from ranwhat import push
+        flat = lambda t: re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", t)))
+        for name, text in (("README.md", read(SITE.parent / "README.md")),
+                           ("privacy.html", read(SITE / "privacy.html")),
+                           ("commands.html", read(SITE / "commands.html"))):
+            with self.subTest(page=name):
+                self.assertNotIn("cannot be recovered", flat(text))
+                self.assertRegex(flat(text), r"guess\w* at a plain command can be checked|guesses a plain command can check the guess")
+        self.assertIn("a guess at a plain command can be checked", push.ID_NOTE)
+
+
 if __name__ == "__main__":
     unittest.main()

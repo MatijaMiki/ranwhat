@@ -625,7 +625,8 @@ uvx ranwhat push             # say what it will send, ask, then send
 
 - What it sends is derived metadata: for each flagged action (at most 100,
   most severe first) the rule id and severity of each rule it tripped, a
-  16-character action id (a hash, not the action), the agent and the time in
+  16-character action id (a hash, not the action; where an agent writes no
+  call id, a guess at a plain command can be checked against it), the agent and the time in
   UTC; then counts, ranwhat's version and the window in days. Actions your
   ignore file leaves out are counted and not listed. The machine is the token
   that signs the request, and the body has no field for anything else.
