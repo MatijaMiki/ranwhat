@@ -915,7 +915,8 @@ def _check(args):
     def finish(status):
         return _finish(args, status, records, secrets, shown)
     if args.json:
-        doc = {"days": args.days, "actions": records, "secrets": secrets}
+        doc = {"days": args.days, "actions": watch_mod.public(records),
+               "secrets": secrets}
         if kept:
             doc["kept"] = kept
         print(_json_text(doc))
@@ -2063,7 +2064,7 @@ def _main(argv=None):
             asked=args.source)
         shown = everywhere.mask if everywhere else None
         if args.json:
-            print(_json_text(records))
+            print(_json_text(watch_mod.public(records)))
             return _finish(args, _said_nothing_read(places, args.days),
                            records, (), shown)
         print(watch_mod.render(records, counts, args.days, locations=places,

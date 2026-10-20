@@ -134,6 +134,32 @@ def _id(*parts):
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
+# A finding's identity, from the id of the action it is about (watch's
+# action_id) and the rule it tripped.
+_FINDING_ID = "ranwhat-finding/1"
+
+
+def _fingerprints(record, hit):
+    """What tells a result apart from every other across runs, for code
+    scanning to keep one alert per finding. ranwhatAction/v1 stays as it
+    was, so alerts opened before keep their place. ranwhatAction/v2 is of
+    the action's id, which a call replayed into another session keeps, and
+    primaryLocationLineHash is made of it: code scanning computes one from
+    the line a result points at otherwise, and an agent's history is no
+    file in the repository, so it had none to compute. A record with no id
+    (one this version did not scan) gets neither."""
+    found = {"ranwhatAction/v1": _id(
+        record.get("source") or "claude-code", record.get("session"),
+        record.get("timestamp"), record.get("tool_call_id"),
+        record.get("tool_name"), hit.get("rule"))}
+    action = record.get("id")
+    if isinstance(action, str) and action:
+        v2 = _id(_FINDING_ID, action, hit.get("rule"))
+        found["ranwhatAction/v2"] = v2
+        found["primaryLocationLineHash"] = v2[:16] + ":1"
+    return found
+
+
 def _action_results(records, index, mask=None):
     out = []
     for record in records:
@@ -160,17 +186,18 @@ def _action_results(records, index, mask=None):
             location = {"logicalLocations": logical}
             if where:
                 location.update(_physical(where, mask))
+            properties = {"severity": severity, "agent": source,
+                          "tool": record.get("tool_name")}
+            if isinstance(record.get("id"), str) and record["id"]:
+                properties["actionId"] = record["id"]
             out.append({
                 "ruleId": hit.get("rule"),
                 "ruleIndex": index.get(hit.get("rule"), -1),
                 "level": _LEVEL[severity],
                 "message": {"text": text},
                 "locations": [location],
-                "partialFingerprints": {"ranwhatAction/v1": _id(
-                    source, session, when, record.get("tool_call_id"),
-                    record.get("tool_name"), hit.get("rule"))},
-                "properties": {"severity": severity, "agent": source,
-                               "tool": record.get("tool_name")},
+                "partialFingerprints": _fingerprints(record, hit),
+                "properties": properties,
             })
     return out
 

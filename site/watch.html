@@ -373,7 +373,9 @@
       </p>
       <div class="rows">
         <div class="row"><span class="k">Record</span>
-          <span class="v"><span class="icode">source</span>, <span class="icode">session</span>, <span class="icode">project</span>, <span class="icode">timestamp</span>, <span class="icode">tool_name</span>, <span class="icode">tool_call_id</span>, <span class="icode">payload_hash</span>, <span class="icode">severity</span>, and every rule the call tripped, each with its evidence.</span></div>
+          <span class="v"><span class="icode">id</span>, <span class="icode">source</span>, <span class="icode">session</span>, <span class="icode">project</span>, <span class="icode">cwd</span> when the agent wrote one down, <span class="icode">timestamp</span>, <span class="icode">tool_name</span>, <span class="icode">tool_call_id</span>, <span class="icode">payload_hash</span>, <span class="icode">severity</span>, and every rule the call tripped, each with its evidence.</span></div>
+        <div class="row"><span class="k">Its id</span>
+          <span class="v">16 characters, the same on every run over the same history, and new for a call run again or flagged for something more. A call read twice with no time of its own is one record, with each copy's id in <span class="icode">ids</span>.</span></div>
         <div class="row"><span class="k">Once each</span>
           <span class="v">A call replayed by a resumed session is reported once, not once per transcript that carries it.</span></div>
         <div class="row"><span class="k">Both halves</span>

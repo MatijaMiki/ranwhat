@@ -24,6 +24,7 @@ import functools
 import shlex
 import hashlib
 import json
+import ntpath
 import os
 import posixpath
 import re
@@ -303,12 +304,41 @@ def _evidence(text, span, before=20, after=70, known=None):
         elif m.start() >= end:
             hi = m.start()
             break
+    lo, hi, spans, shown = _masked_window(text, lo, hi, known)
+    snippet = _printable(shown).strip()
+    if not spans and lo == 0 and hi == len(text) and not _CONTROL.search(text):
+        # All of text, in which the rules found nothing: a second look at
+        # the same text finds the same. Once a value is masked the text is
+        # not the same, and a second look can read what its hint now
+        # stands apart from (<AKIA…>curl -u admin:...).
+        evidence = snippet
+    else:
+        evidence = clean.mask_for_display(
+            ("…" if lo > 0 else "") + snippet + ("…" if hi < len(text) else ""))
+    if known:
+        evidence = known.mask(evidence)
+    return _masked_here(evidence)
+
+
+def _masked_window(text, lo, hi, known=None, stretches=True):
+    """(lo, hi, spans, shown): text[lo:hi] with each secret in it given by
+    its hint, as clean shows it, once lo and hi are widened over any
+    secret they would cut. A window edge inside a value would show the half
+    it kept, which nothing reading the window alone can tell is a secret.
+    spans are where the secrets are in all of text.
+
+    What _evidence shows of a hit, and what a hit's subject holds
+    (_subject_of), so the two are masked the same way. `known`, a
+    known.Matcher, adds every copy of every value clean finds anywhere in
+    the history. With stretches, what is about to be shown is asked too
+    for a value known only by its mask, in every stretch, glued to letters
+    or not, and in what the window would cut (known.Matcher.merged): a
+    search with a budget for the whole run, which the evidence printed is
+    given all of."""
+    from . import clean
     spans = _secret_spans(text)
     if known:
-        # What is about to be shown is asked too for a value known only by
-        # its mask, in every stretch, glued to letters or not, and in what
-        # the window would cut (known.Matcher).
-        spans = known.merged(text, spans, shown=(lo, hi))
+        spans = known.merged(text, spans, shown=(lo, hi) if stretches else None)
     for s, e in spans:
         if s < lo < e:
             lo = s
@@ -322,19 +352,7 @@ def _evidence(text, span, before=20, after=70, known=None):
         out.append(clean.DISPLAY_MASK % clean._hint(text[s:e]))
         pos = e
     out.append(text[pos:hi])
-    snippet = _printable("".join(out)).strip()
-    if not spans and lo == 0 and hi == len(text) and not _CONTROL.search(text):
-        # All of text, in which the rules found nothing: a second look at
-        # the same text finds the same. Once a value is masked the text is
-        # not the same, and a second look can read what its hint now
-        # stands apart from (<AKIA…>curl -u admin:...).
-        evidence = snippet
-    else:
-        evidence = clean.mask_for_display(
-            ("…" if lo > 0 else "") + snippet + ("…" if hi < len(text) else ""))
-    if known:
-        evidence = known.mask(evidence)
-    return _masked_here(evidence)
+    return lo, hi, spans, "".join(out)
 
 
 def _masked_here(evidence):
@@ -6375,22 +6393,190 @@ MAX_RAW_CHARS = 4 * MAX_SCAN_CHARS
 MAX_WRITTEN_CHARS = 16 * MAX_SCAN_CHARS
 
 
+# ---------------------------------------------------------------------------
+# What a hit is about.
+#
+# A hit's evidence is a window of 90 characters, cut where it reads best:
+# `npm publish … --registry https://registry.npmjs.org/` and the same
+# command sent to another registry printed the same evidence, and so did
+# `cd /tmp/evil && npm publish` and a plain `npm publish`. What ranwhat
+# ignore matches an entry against must tell those apart, so the scan keeps
+# beside each hit what it was found in, whole (judge(subjects=True)):
+#
+#   _on       "command": a command the call ran (the shell text, the same
+#             with a one-liner's source kept, or the command as the rules
+#             that judge writes read it); "path": a path a tool read or
+#             wrote; "raw": any string the call carried; "decoded": a
+#             command the call decoded and ran.
+#   _subject  for a command, every command of the call the match touches,
+#             from the one it starts in to the one it ends in, each split
+#             where the shell splits it; for a path, its line. Masked as
+#             the evidence is, never cut, and left out over MAX_SUBJECT.
+#   _cd       for a command, where the commands before it in the same call
+#             moved: "" for nowhere, a path (absolute, or relative to where
+#             the call ran), or None when that cannot be told.
+#
+# They are the scan's own: public() takes them out of every record printed
+# as JSON, and evaluate(), which the hook calls, does not make them.
+# ---------------------------------------------------------------------------
+
+# Longer than this, a subject is no command anyone would match word for
+# word: it is left out, and only the action's id names it.
+MAX_SUBJECT = 4096
+
+# Moves the shell into a directory: cd DIR and pushd DIR.
+_CHDIR = frozenset(("cd", "pushd"))
+# After one of these, where the shell is cannot be told from the text:
+# popd goes back to a directory not named, source and . run a file, eval
+# runs text, and exec runs something else in the shell's place.
+_LOSES_DIR = frozenset(("popd", "source", ".", "eval", "exec"))
+# What a directory a cd names cannot hold and still be read as written: an
+# expansion, a substitution or a glob.
+_NOT_LITERAL_DIR = re.compile(r"[$`*?\[]")
+# Longer than this, a directory is none anyone keeps work in, and is not
+# known: `cd a && ` four thousand times, each joined to the one before,
+# made each join as long as all of them, and the call a quadratic cost.
+_LONGEST_DIR = 1024
+
+
+def _runs_a_shell(words):
+    """Whether these words, a command split on blanks, hand a shell a
+    command of its own (sudo bash -c 'cd /x && …'): _executable_text puts
+    that command inline after the shell's name, and a cd in it would read
+    as one this shell ran, though only that shell moved."""
+    for k, word in enumerate(words):
+        if posixpath.basename(word.strip("'\"")) in _SHELL_INTERPRETERS:
+            return any(w.startswith("-") and "c" in w for w in words[k + 1:k + 4])
+    return False
+
+
+def _moved(stage, where):
+    """Where the shell is after one command of a call, given where it was
+    before it ("" where the call started, None not known): a cd or pushd
+    to a directory written out in full moves it, there or below where it
+    was; a ~ is the home directory. Anything that may move it in a way the
+    text does not show (cd alone, cd -, popd, source, eval, a subshell or a
+    group, a shell given a command of its own) leaves it not known. Every
+    other command leaves it where it was. Only a cd's own words are split,
+    so a long call costs what it is long."""
+    head = stage.strip()
+    if not head:
+        return where
+    if head[0] in "({":
+        return None
+    words = head.split(None, 3)
+    name = words[0].strip("'\"\\")
+    if name in ("builtin", "command") and len(words) > 1:
+        if words[1].strip("'\"\\") in _CHDIR | _LOSES_DIR:
+            return None
+        return where
+    if name in _LOSES_DIR or _runs_a_shell(head.split()):
+        return None
+    if name not in _CHDIR:
+        return where
+    argv = _argv(head)
+    if not argv or len(argv) != 2 or argv[0] not in _CHDIR:
+        return None
+    target = argv[1]
+    if not target or target == "-" or _NOT_LITERAL_DIR.search(target):
+        return None
+    if target == "~" or target.startswith("~/"):
+        target = _home() + target[1:]
+    elif target.startswith("~"):
+        return None                         # another user's home
+    if not target.startswith("/"):
+        if where is None:
+            return None
+        target = posixpath.join(where, target) if where else target
+    if len(target) > _LONGEST_DIR:
+        return None
+    target = posixpath.normpath(target)
+    return "" if target == "." else target
+
+
+@functools.lru_cache(maxsize=64)
+def _directories(text):
+    """Where the shell is before each command of text (_command_spans),
+    as _moved tells it. Each hit on the same call asks it of the same
+    text, so each call's commands are walked once."""
+    out, where = [], ""
+    for start, end, _op in _command_spans(text):
+        out.append(where)
+        where = _moved(text[start:end], where)
+    return tuple(out)
+
+
+def _shown_whole(text, lo, hi, known):
+    """text[lo:hi] masked as _evidence masks a window, and never cut; None
+    when it is longer than MAX_SUBJECT. A second look at a part of text
+    that clean found a value in, or that is not all of text, can read what
+    a hint now stands apart from, as _evidence's does.
+
+    A value known only by its mask is found where it is a piece of the
+    text, and not looked for in every stretch: that search has a budget
+    for the whole run, so what it masks would depend on how much else the
+    run read before (watch over one agent or every one), and an entry
+    matched against it would hide an action in one report and not the
+    other. Nor does a subject, wider than evidence, spend what is left of
+    that budget for the evidence printed after it."""
+    from . import clean
+    if hi - lo > MAX_SUBJECT:
+        return None
+    lo, hi, spans, shown = _masked_window(text, lo, hi, known, stretches=False)
+    if hi - lo > MAX_SUBJECT:
+        return None
+    shown = shown.strip()
+    if spans or lo > 0 or hi < len(text):
+        shown = clean.mask_for_display(shown)
+    return known.mask(shown) if known else shown
+
+
+def _subject_of(hit, on, text, span, known):
+    """hit with what it is about: _on, and for a command or a path its
+    _subject, and for a command its _cd (see above)."""
+    hit["_on"] = on
+    lo, hi = span
+    last = max(lo, hi - 1)
+    if on == "command":
+        spans = _command_spans(text)
+        starts = [s for s, _e, _op in spans]
+        first = max(0, bisect.bisect_right(starts, lo) - 1)
+        end = max(first, bisect.bisect_right(starts, last) - 1)
+        subject = _shown_whole(text, spans[first][0], spans[end][1], known)
+        where = _directories(text)[first]
+        if where:
+            from . import clean
+            where = clean.mask_for_display(where)
+            where = known.mask(where) if known else where
+        hit["_cd"] = where
+    elif on == "path":
+        start = text.rfind("\n", 0, lo) + 1
+        stop = text.find("\n", last)
+        subject = _shown_whole(text, start, len(text) if stop == -1 else stop,
+                               known)
+    else:
+        return hit
+    if subject is not None:
+        hit["_subject"] = subject
+    return hit
+
+
 def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
-               writes=None, written=""):
+               writes=None, written="", subjects=False):
     """The hits of `rules` on a call: its judged shell text, the same text
     with the source of one-liners kept (source(), asked only by a rule that
     wants it), the paths a file-reading tool opened, every string the call
     carried, the command as the rules that judge writes read it (writes(),
     asked only by them) and the paths a file-writing tool wrote. One hit
-    per rule."""
+    per rule. With subjects, each hit says what it is about (_subject_of)."""
     hits = []
     for rule in rules:
-        # (subject, what the rule judges in it, refiners, how it is
-        # matched). The two texts differ only by what rule.hide blanks and
-        # by a Windows path's backslashes read as /, so a span in one is a
-        # span in both.
+        # (text, what the rule judges in it, refiners, how it is matched,
+        # what the text is). The two texts differ only by what rule.hide
+        # blanks and by a Windows path's backslashes read as /, so a span
+        # in one is a span in both.
         if rule.scan_raw:
-            subjects = [(s, s, REFINERS, rule.match) for s in raw]
+            texts = [(s, s, REFINERS, rule.match, "raw") for s in raw]
         else:
             if rule.keep_source:
                 text = source()
@@ -6399,13 +6585,14 @@ def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
             else:
                 text = shell
             seen = rule.hide(text) if rule.hide and text else text
-            subjects = [(text, seen, REFINERS, rule.match)]
+            texts = [(text, seen, REFINERS, rule.match, "command")]
             if rule.paths:
-                subjects.append((paths, _slashed(paths), PATH_REFINERS, rule.match))
+                texts.append((paths, _slashed(paths), PATH_REFINERS, rule.match,
+                              "path"))
             if rule.writes:
-                subjects.append((written, _slashed(written), WRITE_REFINERS,
-                                 rule.writes))
-        for subject, seen, refiners, match in subjects:
+                texts.append((written, _slashed(written), WRITE_REFINERS,
+                              rule.writes, "path"))
+        for subject, seen, refiners, match, on in texts:
             if not subject:
                 continue
             span = match(seen)
@@ -6424,9 +6611,11 @@ def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
             evidence = _evidence(subject, span, known=known)
             if rule.id == _ENCODED:
                 evidence = _elided(evidence, _encoded_findings(seen))
-            hits.append({"rule": rule.id, "severity": severity,
-                         "title": rule.title, "why": why,
-                         "evidence": evidence})
+            hit = {"rule": rule.id, "severity": severity,
+                   "title": rule.title, "why": why, "evidence": evidence}
+            if subjects:
+                _subject_of(hit, on, subject, span, known)
+            hits.append(hit)
             break
     return hits
 
@@ -6462,14 +6651,16 @@ def _no_source():
     return ""
 
 
-def _decoded_hits(source, seen, known):
+def _decoded_hits(source, seen, known, subjects=False):
     """What the text a call decoded and ran trips in the other rules, as
     hits whose evidence says where the text came from. Judged as the shell
     command it is, never run: decode.py reads it as text and the rules read
     it as they read any command, with no tool input to resolve a path by,
     so a target is judged as the worst it could be. At most MAX_PAYLOADS are
     decoded, to two levels (a payload that decodes to another). A rule the
-    call tripped already, `seen`, is not reported twice."""
+    call tripped already, `seen`, is not reported twice. With subjects,
+    each is about "decoded" text, and has no subject: what was hidden in an
+    encoding is no command the transcript shows, to be matched by one."""
     hits, budget, judged = [], [MAX_PAYLOADS], set()
     rules = [r for r in RULES if r.id != _ENCODED]
 
@@ -6499,6 +6690,8 @@ def _decoded_hits(source, seen, known):
                 seen.add(hit["rule"])
                 hit["evidence"] = _masked_here(
                     "decoded %s: %s" % (label, hit["evidence"]))
+                if subjects:
+                    hit["_on"] = "decoded"
                 hits.append(hit)
             left = levels - len(found.via)
             if left > 0 and _may_decode(decoded):
@@ -6510,13 +6703,15 @@ def _decoded_hits(source, seen, known):
     return hits
 
 
-def evaluate(tool_name, tool_input, known=None, written=None):
+def evaluate(tool_name, tool_input, known=None, written=None, subjects=False):
     """Return (hits, payload) for one tool call: the rules it trips, and the
     whole input as masked text for telling flagged calls apart ("" when
     nothing tripped, since then there is nothing to tell apart). `known`,
     a known.Matcher, is every value clean finds in the history, masked in
     both wherever a copy starts. `written`, the paths an adapter found the
-    call wrote, stands for the ones its tool name would give."""
+    call wrote, stands for the ones its tool name would give. With
+    subjects, each hit also says what it is about (_subject_of), for the
+    scan; the hook asks without, and pays nothing for it."""
     shell = _shell_text(tool_name, tool_input)
     paths = _read_paths(tool_name, tool_input)
     raw = _raw_strings(tool_input)
@@ -6540,9 +6735,10 @@ def evaluate(tool_name, tool_input, known=None, written=None):
         return views[0]
 
     hits = _rule_hits(RULES, shell, source, paths, raw, tool_input, known,
-                      writes, written)
+                      writes, written, subjects)
     if any(h["rule"] == _ENCODED for h in hits) and source():
-        hits.extend(_decoded_hits(source(), {h["rule"] for h in hits}, known))
+        hits.extend(_decoded_hits(source(), {h["rule"] for h in hits}, known,
+                                  subjects))
     return hits, (_payload(tool_input, known) if hits else "")
 
 
@@ -6563,21 +6759,25 @@ def judge(call, known=None):
     write, by the paths it wrote, with its input as it was, so a payload's
     hash stays what it was. Anything else, and a call whose command or
     paths were not found, answers only to the rules that read every
-    string: file content is not an action."""
+    string: file content is not an action.
+
+    Each hit says what it is about (_subject_of): what a record from the
+    scan is matched by."""
     if call.kind is None or not call.known:
-        return evaluate(call.tool_name, call.tool_input, known)
+        return evaluate(call.tool_name, call.tool_input, known, subjects=True)
     rest = {k: v for k, v in call.tool_input.items() if k not in call.consumed}
     if call.kind == "shell" and call.command:
         judged = dict(rest, command=call.command)
         if call.workdir:
             judged["workdir"] = call.workdir   # keeps _deletion_context conservative
-        return evaluate("Bash", judged, known)
+        return evaluate("Bash", judged, known, subjects=True)
     if call.kind == "read" and call.paths:
-        return evaluate("Read", dict(rest, paths=list(call.paths)), known)
+        return evaluate("Read", dict(rest, paths=list(call.paths)), known,
+                        subjects=True)
     if call.kind == "write" and call.paths:
         return evaluate(NEUTRAL % call.kind, call.tool_input, known,
-                        written=call.paths)
-    return evaluate(NEUTRAL % call.kind, call.tool_input, known)
+                        written=call.paths, subjects=True)
+    return evaluate(NEUTRAL % call.kind, call.tool_input, known, subjects=True)
 
 
 def _shallow(value, depth=0):
@@ -6593,22 +6793,153 @@ def _shallow(value, depth=0):
     return value
 
 
+# ---------------------------------------------------------------------------
+# Which action a record is.
+#
+# Each record has an id of 16 hex characters, the same on every run over
+# the same history, for ranwhat ignore to name it by. It is a hash of
+#
+#   - the agent and the tool's name;
+#   - when the call was made, as the agent wrote it, or the session where
+#     it wrote no time;
+#   - the call's id as the agent wrote it, or the hash of its input where
+#     it wrote none;
+#   - the rules it tripped, each with its severity, secret.literal aside.
+#
+# An agent that replays a call (a resumed session, a subagent's copy)
+# writes both its time and its id again as they were, and neither can be
+# chosen by what the model is told: an id the API issued, a time the
+# client stamped. The input's hash is the last resort, since it changes
+# when the index learns a value in it, or clean masks one. The session is
+# only for a call with no time: a call replayed into another session is
+# read from whichever file is newer first, so its session changes from
+# run to run where its time does not. What the call's text says, its
+# evidence and the transcript it is in are no part of it.
+#
+# The rules are there so that a later ranwhat that flags an old call for
+# something more, or rates it otherwise, lists it again: what was
+# expected of it before says nothing of what it is now. secret.literal is
+# not, since clean masking the value takes it away; no entry ever hides a
+# secret, so nothing is lost.
+#
+# A record stands for every copy of its call the scan found and kept one
+# of (scan_all, scan_source, scan_openclaw_db): copies with no time, read
+# from two sessions, or an OpenClaw call run again. Each copy has its own
+# id, and "ids" holds them all, in order, where there is more than one;
+# "id" is the first. Whichever copy is read first, the record's ids are
+# the same, and one more copy is a new id among them.
+# ---------------------------------------------------------------------------
+
+_ACTION_ID = "ranwhat-action/1"
+_SECRET_LITERAL = "secret.literal"
+
+
+def action_id(record):
+    """The id of one copy of an action, from what _record put in it."""
+    pairs = sorted({(str(h.get("rule")), str(h.get("severity")))
+                    for h in record.get("hits", ())
+                    if h.get("rule") != _SECRET_LITERAL})
+    stamp, call_id = record.get("timestamp"), record.get("tool_call_id")
+    when = (["t", stamp] if isinstance(stamp, str) and stamp
+            else ["s", record.get("session")])
+    which = (["c", call_id] if call_id not in (None, "", [], {})
+             else ["p", record.get("payload_hash")])
+    parts = [_ACTION_ID, record.get("source"), record.get("tool_name"),
+             when, which, [list(p) for p in pairs]]
+    try:
+        text = json.dumps(parts, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=True, default=str)
+    except (TypeError, ValueError):
+        # An id an adapter gave as an object keyed by more than strings,
+        # which sort_keys cannot order: as text, which still tells it apart.
+        text = json.dumps([str(p) for p in parts], ensure_ascii=True)
+    return hashlib.sha256(text.encode("ascii")).hexdigest()[:16]
+
+
+def _absolute_dir(path):
+    """Whether path names a directory from the root of the machine the
+    agent ran on, not this one: /x, X:\\x, X:/x or \\\\server\\share.
+    os.path.isabs on Linux calls C:\\proj relative."""
+    return isinstance(path, str) and (path.startswith(("/", "\\\\"))
+                                      or bool(_DRIVE.match(path)))
+
+
+def _cwd_of(call):
+    """The directory a call ran in, when its agent says: the working
+    directory it gave the call, joined to its project when it is relative,
+    or the project where it gave none. A Claude Code project is a slug of
+    the path, not the path, so only its own cwd is taken. None when no
+    absolute one is known."""
+    workdir, project = call.workdir, call.project
+    if _absolute_dir(workdir):
+        return workdir
+    if isinstance(workdir, str) and workdir and _absolute_dir(project):
+        joined = ntpath if not project.startswith("/") else posixpath
+        return joined.join(project, workdir)
+    if _absolute_dir(project) and call.source != "claude-code":
+        return project
+    return None
+
+
 def _record(call, hits, payload, source):
-    """The Action Record for a judged call that tripped a rule. Its id is
-    kept as the agent wrote it, an object too, so it is cut as a payload
-    is."""
-    return {
-        "source": source,
-        "session": call.session,
-        "project": call.project,
-        "timestamp": call.timestamp,
-        "tool_name": call.tool_name,
-        "tool_call_id": _shallow(call.tool_call_id),
-        "payload_hash": _hash(payload),
-        "severity": max(hits, key=lambda h: ["medium", "high", "critical"]
-                        .index(h["severity"]))["severity"],
-        "hits": hits,
-    }
+    """The Action Record for a judged call that tripped a rule. Its tool's
+    id is kept as the agent wrote it, an object too, so it is cut as a
+    payload is. Its own id comes first (action_id), and "cwd" is where it
+    ran, when that is known (_cwd_of)."""
+    record = {"source": source, "session": call.session,
+              "project": call.project}
+    cwd = _cwd_of(call)
+    if cwd:
+        record["cwd"] = cwd
+    record.update((
+        ("timestamp", call.timestamp),
+        ("tool_name", call.tool_name),
+        ("tool_call_id", _shallow(call.tool_call_id)),
+        ("payload_hash", _hash(payload)),
+        ("severity", max(hits, key=lambda h: ["medium", "high", "critical"]
+                         .index(h["severity"]))["severity"]),
+        ("hits", hits),
+    ))
+    out = {"id": action_id(record)}
+    out.update(record)
+    return out
+
+
+def _finish_ids(record, ids):
+    """record with the ids of every copy of it the scan kept it for: "ids",
+    sorted, after "id", which is the first of them. Nothing changes for a
+    record that is one copy."""
+    if len(ids) < 2:
+        return record
+    ids = sorted(ids)
+    rest = [(k, v) for k, v in record.items() if k not in ("id", "ids")]
+    record.clear()
+    record["id"] = ids[0]
+    record["ids"] = ids
+    record.update(rest)
+    return record
+
+
+def public(records):
+    """records as --json prints them: copies without the keys a scan keeps
+    for itself, on the record and on each hit (a hit's _on, _subject and
+    _cd). What a command matched is in its evidence already, masked; these
+    are for ranwhat ignore, and change with how a rule reads a command."""
+    out = []
+    for record in records:
+        if not isinstance(record, dict):
+            out.append(record)
+            continue
+        shown = {k: v for k, v in record.items()
+                 if not (isinstance(k, str) and k.startswith("_"))}
+        hits = shown.get("hits")
+        if isinstance(hits, list):
+            shown["hits"] = [
+                {k: v for k, v in hit.items()
+                 if not (isinstance(k, str) and k.startswith("_"))}
+                if isinstance(hit, dict) else hit for hit in hits]
+        out.append(shown)
+    return out
 
 
 def _adapter_record(call, hits, payload):
@@ -6710,8 +7041,10 @@ def scan_all(root=None, since_days=None, limit=None, progress=None, known=None,
     as a file not read (agents.notes names it) is not among them. `unread`,
     a dict, is then given under "claude-code" how many it went through
     that were, so a caller can tell none read from none there.
+
+    The record kept for a call has the id of every copy of it (_finish_ids).
     """
-    records, scanned, seen = [], 0, set()
+    records, scanned, seen = [], 0, {}
     cutoff = _cutoff(since_days)
     paths = discover(root, since_days)
     total = min(len(paths), limit) if limit else len(paths)
@@ -6726,10 +7059,14 @@ def scan_all(root=None, since_days=None, limit=None, progress=None, known=None,
                 continue
             key = (record["tool_name"], record["payload_hash"],
                    record.get("timestamp"))
-            if key in seen:
+            kept = seen.get(key)
+            if kept is not None:
+                kept[1].add(record["id"])
                 continue
-            seen.add(key)
+            seen[key] = (record, {record["id"]})
             records.append(record)
+    for record, ids in seen.values():
+        _finish_ids(record, ids)
     records.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
     read = _claude_source().read_of(paths[:scanned])
     if unread is not None:
@@ -7107,10 +7444,14 @@ def scan_openclaw_db(path, source="openclaw", known=None, src=None,
     record, its latest copy since `cutoff` (an epoch, or None for all of
     them). Kept as the first copy and windowed after, a call run again
     inside the window went unreported when it had also run before it.
-    `src` is the adapter that reads it, a fresh one by default."""
+    `src` is the adapter that reads it, a fresh one by default.
+
+    The record kept for a call has the id of every copy of it inside the
+    window, whichever copy it is (_finish_ids): each run is an action of
+    its own, so one run more is something new to list."""
     src = src or _openclaw.OpenClawSource()
     store = src.store_at(path)
-    records, seen = [], {}
+    records, seen, aliases = [], {}, []
     try:
         for call in src.tool_calls(store):
             hits, payload = judge(call, known)
@@ -7123,11 +7464,16 @@ def scan_openclaw_db(path, source="openclaw", known=None, src=None,
             at = seen.setdefault(key, len(records))
             if at == len(records):
                 records.append(record)
-            elif (_epoch(record["timestamp"]) or 0) > (
+                aliases.append({record["id"]})
+                continue
+            aliases[at].add(record["id"])
+            if (_epoch(record["timestamp"]) or 0) > (
                     _epoch(records[at]["timestamp"]) or 0):
                 records[at] = record
     except Exception as error:          # one database must not stop the rest
         src.stopped(store, error)
+    for record, ids in zip(records, aliases):
+        _finish_ids(record, ids)
     return records
 
 
@@ -7182,8 +7528,11 @@ def scan_source(source, stores, since_days=None, known=None, progress=None,
     each distinct action once, as scan_all reports Claude Code's. `stores`
     are its transcripts (agents.discover). `progress` is called with (done
     + i, total, path) before the i-th is read. An adapter that fails part
-    way warns once, and what it read until then is kept."""
-    records, seen = [], set()
+    way warns once, and what it read until then is kept. The record kept
+    for a call has the id of every copy of it, as scan_all's has: a call
+    with no time, read in two sessions, is one record whichever session is
+    read first."""
+    records, seen = [], {}
     cutoff = _cutoff(since_days)
     total = len(stores) + done if total is None else total
     for i, store in enumerate(stores, 1):
@@ -7199,12 +7548,16 @@ def scan_source(source, stores, since_days=None, known=None, progress=None,
                     continue
                 key = (record["tool_name"], record["payload_hash"],
                        record.get("timestamp"))
-                if key in seen:
+                kept = seen.get(key)
+                if kept is not None:
+                    kept[1].add(record["id"])
                     continue
-                seen.add(key)
+                seen[key] = (record, {record["id"]})
                 records.append(record)
         except Exception as error:      # one adapter must not stop the others
             source.stopped(store, error)
+    for record, ids in seen.values():
+        _finish_ids(record, ids)
     return records
 
 

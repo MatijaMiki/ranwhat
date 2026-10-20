@@ -323,8 +323,8 @@ class Gaps(_Bench):
     def test_a_gap_that_ranwhat_closes_does_not_fail_the_run(self):
         real = watch.evaluate
 
-        def evaluate(tool_name, tool_input, known=None):
-            hits, payload = real(tool_name, tool_input, known)
+        def evaluate(tool_name, tool_input, known=None, **kwargs):
+            hits, payload = real(tool_name, tool_input, known, **kwargs)
             if "grep -i token" in json.dumps(tool_input) and not hits:
                 hits = [{"rule": "cred.read", "severity": "high",
                          "title": "Credential read", "why": "It reads one.",
@@ -587,7 +587,7 @@ class Failing(_Bench):
         self.assertEqual(rc, cli.FAIL_STATUS)
         self.assertEqual(sorted(failed), ["decoy.git-sha", "decoy.sha256"])
 
-        def everything(tool_name, tool_input, known=None):
+        def everything(tool_name, tool_input, known=None, **kwargs):
             return ([{"rule": "cred.read", "severity": "critical",
                       "title": "t", "why": "w", "evidence": "x"}], "x")
         with mock.patch.object(watch, "evaluate", everything):

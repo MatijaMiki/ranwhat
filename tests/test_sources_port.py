@@ -43,7 +43,8 @@ class Judge(unittest.TestCase):
                                  ("Bash", "rm -rf ~/Documents/x"),
                                  ("exec", {"command": "cat ~/.aws/credentials"})):
             call = ToolCall("claude-code", "/p", name, tool_input, decode=False)
-            self.assertEqual(watch.judge(call), watch.evaluate(name, tool_input))
+            self.assertEqual(watch.judge(call),
+                             watch.evaluate(name, tool_input, subjects=True))
 
     def test_a_shell_call_is_judged_as_its_command(self):
         call = ToolCall("x", "/p", "exec_command",
@@ -59,7 +60,7 @@ class Judge(unittest.TestCase):
         # working directory, and not the argv the command came from
         self.assertEqual((hits, payload), watch.evaluate(
             "Bash", {"command": "rm -rf ~/Documents/x", "workdir": "/w",
-                     "justification": "tidy"}))
+                     "justification": "tidy"}, subjects=True))
 
     def test_a_read_call_is_judged_by_the_paths_it_opened(self):
         call = ToolCall("x", "/p", "read_file", {"target": "~/.ssh/id_rsa"},
@@ -90,7 +91,8 @@ class Judge(unittest.TestCase):
         tool_input = {"command": "rm -rf ~/x; echo " + typed}
         call = ToolCall("claude-code", "/p", "Bash", tool_input, decode=False)
         judged = watch.judge(call, matcher)
-        self.assertEqual(judged, watch.evaluate("Bash", tool_input, matcher))
+        self.assertEqual(judged, watch.evaluate("Bash", tool_input, matcher,
+                                                subjects=True))
         self.assertNotIn(typed, judged[1])
 
 

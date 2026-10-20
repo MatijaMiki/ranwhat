@@ -111,6 +111,8 @@ chars`), never its value or its fingerprint, and every value `clean`
 finds is masked wherever else it shows up there, as in the report. Agent
 history lives outside your repository, so each result points at the
 transcript or project directory it came from on the machine that ran it.
+An action's results carry its `id` (`actionId`), and fingerprints made from
+it, so code scanning can follow a finding from one run to the next.
 
 On a terminal, check, watch and clean keep one status line on stderr while
 they read, counting transcripts through each pass: `indexing secrets`
@@ -184,6 +186,13 @@ ranwhat sources                             # every agent, where it looked, what
 
 `--root` and `--state-dir` still work, as the names of
 `--path claude-code=` and `--path openclaw=`.
+
+With `--json`, each action has an `id`: 16 characters, the same on every
+run over the same history, and new for a call run again or flagged for
+something more. A call read more than once with no time of its own (two
+sessions holding it, or an OpenClaw call run again) is one action, with
+the id of each copy in `ids`. `cwd` is the directory it ran in, when the
+agent wrote one down.
 
 ### `ranwhat clean`: find secrets in Claude Code and other agents' transcripts
 
