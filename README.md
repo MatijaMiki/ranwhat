@@ -610,6 +610,40 @@ uvx ranwhat logout    # revokes this machine's token, then deletes it
   last heard for it, under the token's SHA-256, so the hints about Plus are
   right; `logout` deletes both.
 
+### `ranwhat push`: send this machine's findings to your account
+
+Plus, and only ever something you run. `ranwhat push` reads what `watch`
+reads, leaves out what your ignore file leaves out, and sends the result to
+your organisation's account, so every linked machine's findings can be read
+side by side at [account.ranwhat.com/findings](https://account.ranwhat.com/findings).
+Nothing runs it for you: not the hook, `check` or `watch`.
+
+```bash
+uvx ranwhat push --dry-run   # print the exact JSON; sends nothing, needs no account
+uvx ranwhat push             # say what it will send, ask, then send
+```
+
+- What it sends is derived metadata: for each flagged action (at most 100,
+  most severe first) the rule id and severity of each rule it tripped, a
+  16-character action id (a hash, not the action), the agent and the time in
+  UTC; then counts, ranwhat's version and the window in days. Actions your
+  ignore file leaves out are counted and not listed. The machine is the token
+  that signs the request, and the body has no field for anything else.
+- It never sends a command, a path, evidence, a working directory, a session
+  id, file contents, a secret, your hostname or your user name. The document
+  is built from those few facts and nothing else is read from a record, and
+  the server refuses a body with any other field.
+- It goes only to `feed.ranwhat.com`, over HTTPS, with this machine's token
+  (`ranwhat login`) or a CI token in `RANWHAT_TOKEN`. An organisation on Free
+  is refused, and nothing is stored. Without `--yes` it asks first, and on a
+  pipe it refuses. `--days N` sets the window; `--json` prints the answer.
+- Plus keeps each machine's latest push whole, and a summary of the counts of
+  earlier pushes for 30 days, at most 30, and nothing past 90 days. That is
+  not the 13-month record, a separate feature that is still being built. The
+  same findings pushed again change nothing. Every member of the organisation
+  can read them. `ranwhat logout`, or revoking the machine on the account
+  page, deletes what that machine pushed.
+
 ### `ranwhat hook install`: ask before a high-risk Claude Code call
 
 Every other command works after the fact, and the agent never knows.
@@ -764,8 +798,8 @@ as it rates a read of `~/.aws/credentials`, and the hook asks before one.
 ## What goes online
 
 No account needed. live, callers, --pull-usage and clean's revoke ask only the
-provider that issued each token, and update, login, whoami and logout talk only to ranwhat.com.
-Everything else reads locally and sends nothing.
+provider that issued each token, and update, login, whoami, logout and push talk only to ranwhat.com.
+push sends derived metadata only, and only when you run it. Everything else reads locally and sends nothing.
 
 - Provider credentials are held in memory for one call and never written down. The only token ranwhat stores is your own ranwhat token, at `~/.ranwhat/token` (mode 0600): the machine token from `ranwhat login`, or a subscription token saved with `update --save-token`.
 - Live introspection talks only to the credential's own issuer

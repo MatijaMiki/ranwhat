@@ -1111,8 +1111,9 @@ class CommandsPageMatchesTheCommands(unittest.TestCase):
         n = len(cli.COMMANDS)
         text = plain(read(SITE / "commands.html"))
         self.assertIn("%s commands in one tool" % WORDS[n].capitalize(), text)
-        # login, whoami and logout work with an account, and update with Plus.
-        self.assertIn("the other %s need neither" % WORDS[n - 4], text)
+        # login, whoami and logout work with an account, and update and push
+        # with Plus.
+        self.assertIn("the other %s need neither" % WORDS[n - 5], text)
         # watch, clean and scan have pages of their own.
         self.assertIn("The other %s are below" % WORDS[n - 3], text)
 

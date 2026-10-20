@@ -106,8 +106,9 @@
         </fieldset>
         <div class="price p-monthly">&euro;12<small> / month</small></div>
         <div class="price p-annual">&euro;10<small> / month, &euro;120 a year</small></div>
-        <p class="state">Live now: the catalogue feed, and CI tokens and
-           members on your account. The rest is being built, and comes at the
+        <p class="state">Live now: the catalogue feed, CI tokens and
+           members on your account, and pushing findings to see every
+           machine side by side. The rest is being built, and comes at the
            same price as it ships.</p>
         <p class="who">One price for the whole team, however many agents or people you run.</p>
         <ul>
@@ -117,8 +118,10 @@
               version</li>
           <li>CI tokens for your pipelines, and your team invited by email,
               on your account at account.ranwhat.com</li>
-          <li class="soon"><strong>One view across every machine and CI runner</strong>,
-              instead of a report per laptop</li>
+          <li><strong>One view across every machine and CI runner</strong>,
+              instead of a report per laptop: <span class="icode">ranwhat push</span>
+              sends each one's findings to your account as derived metadata
+              only, never a command or a path</li>
           <li class="soon">13-month retention, kept by us rather than by your backups</li>
           <li class="soon">Slack or email by severity, deduplicated across agents</li>
           <li class="soon">Authority drift alerts when an agent's scopes widen</li>
@@ -172,8 +175,8 @@
           <tr><td>Score what an agent's tokens allow</td><td data-label="Free">Yes, against the catalogue shipped with your version</td><td data-label="Plus">Against a catalogue kept current as providers add scopes</td></tr>
           <tr><td>HTML and JSON reports</td><td data-label="Free">Yes</td><td data-label="Plus">Same</td></tr>
           <tr><td>CI tokens, and teammates invited by email</td><td data-label="Free">No</td><td data-label="Plus">Yes, on your account</td></tr>
-          <tr><td>One view across machines and CI runners</td><td data-label="Free">One report per machine</td><td data-label="Plus">Being built</td></tr>
-          <tr><td>Retention, alerts and drift notices</td><td data-label="Free">Your own backups</td><td data-label="Plus">Being built</td></tr>
+          <tr><td>One view across machines and CI runners</td><td data-label="Free">One report per machine</td><td data-label="Plus">Yes: run <span class="icode">ranwhat push</span> on each, and read them side by side on your account. Metadata only; the latest push and 30 days of summaries are kept</td></tr>
+          <tr><td>13-month retention, alerts and drift notices</td><td data-label="Free">Your own backups</td><td data-label="Plus">Being built</td></tr>
           <tr><td>Price</td><td data-label="Free">Free, forever</td><td data-label="Plus">&euro;12 a month per organisation, or &euro;120 a year</td></tr>
         </tbody>
       </table>
