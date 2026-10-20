@@ -252,6 +252,10 @@ What is never left out:
 - A critical action, but by its id, or by an entry that names its program
   in full, with `in=` and an `until=` no more than 400 days ahead. The
   report says when an entry matches a critical action and lacks those.
+  An entry sees the words of the one command, not the state set before it
+  in the call or by an earlier one (an `export`, `npm config set`, an
+  `.npmrc` written a call ago), so a critical action you cannot afford to
+  see redirected is better left out by its id than by a pattern.
 - A change an agent made to what ranwhat reports (this file, the values
   `clean` was told to keep, the key, where ranwhat keeps them, or `ranwhat
   ignore` itself), until you acknowledge it on a terminal with `ranwhat

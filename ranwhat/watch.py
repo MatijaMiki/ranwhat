@@ -1015,8 +1015,8 @@ _NOT_SECRET_SUFFIXES = (".example", ".sample", ".template", ".dist",
 _CRED_PATH = re.compile(
     r"(?:^|[\s\"'=(])((?:[\w./~$%:-]*/)?(?:\.env[\w.-]*|credentials|"
     r"\.netrc|id_[a-z0-9]+(?:\.pub)?|[\w.-]*\.pem|[\w.-]*\.key|\.kube/config|"
-    r"\.ranwhat/(?:known/key|token)\b|"
-    r"(?:\$\{?|%|\$env:)RANWHAT_HOME[}%]?/(?:known/key|token)\b|"
+    r"\.ranwhat/+(?:known/+(?:\./)?key|token)\b|"
+    r"(?:\$\{?|%|\$env:)RANWHAT_HOME[}%]?/+(?:known/+(?:\./)?key|token)\b|"
     r"(?=(?P<account>[\w.-]*?service[-_]account))(?P=account)[\w.-]*\.json))",
     re.I)
 
@@ -4916,10 +4916,11 @@ def _config_kind(path):
     # an entry in that file, beside the index in known/.
     # (the base name compared in lower case: macOS and Windows keep their
     # file names case-insensitively, so .RANWHATIGNORE is the same file)
-    if name.lower() == ".ranwhatignore" or (
-            name == "ignore" and _ranwhat_home_folder(folder)):
+    low = name.lower()
+    if low == ".ranwhatignore" or (
+            low == "ignore" and _ranwhat_home_folder(folder)):
         return "ranwhat", "ignore"
-    if name in ("kept.json", "key") and parent == "known" \
+    if low in ("kept.json", "key") and low_parent == "known" \
             and _ranwhat_home_folder(holder):
         return "ranwhat", "state"
     if _starts_shells(path, t, name):
@@ -4966,7 +4967,7 @@ def _config_folder_kind(path):
         return "codex", "user"
     if name == ".gemini":
         return "gemini", "user"
-    if _ranwhat_home_folder(t) or (name == "known" and _ranwhat_home_folder(holder)):
+    if _ranwhat_home_folder(t) or (low == "known" and _ranwhat_home_folder(holder)):
         return "ranwhat", "home"
     return None
 
@@ -5449,8 +5450,9 @@ RULES = [
           r"security\s+find-generic-password", r"\.kube/config",
           # ranwhat's own: its account token, and the key kept secrets are
           # hashed under (see _CRED_PATH).
-          r"\.ranwhat/(?:known/key|token)\b",
-          r"RANWHAT_HOME[}%]?/(?:known/key|token)\b"],
+          # (a doubled / or a ./ in the path is the same file)
+          r"\.ranwhat/+(?:known/+(?:\./)?key|token)\b",
+          r"RANWHAT_HOME[}%]?/+(?:known/+(?:\./)?key|token)\b"],
          paths=True, hide=_credential_text),
 
     # clean's own rules decide what is a credential, fixtures and
@@ -6496,6 +6498,15 @@ def _bare(word):
     return _QUOTING.sub("", word)
 
 
+_CONTINUED = re.compile(r"\\\r?\n")
+
+# A stage that defines what a later word means: a function (f() { ... },
+# function f ...), a trap, an alias. What a name does after that cannot be
+# read from the text, so no folder after it is known.
+_REDEFINES = re.compile(
+    r"\s*(?:function\b|[\w.:@%+-]+\s*\(\s*\)|(?:builtin\s+|command\s+)?(?:trap|alias)\b)")
+
+
 def _moved(stage, where, cdpath=False):
     """Where the shell is after one command of a call, given where it was
     before it ("" where the call started, None not known): a plain cd or
@@ -6511,6 +6522,9 @@ def _moved(stage, where, cdpath=False):
     head = stage.strip()
     if not head:
         return where
+    if "\\\n" in head or "\\\r\n" in head:
+        # a backslash and a newline are taken out before a word is read
+        head = _CONTINUED.sub("", head)
     if head[0] in "({":
         return None
     words = head.split(None, 12)
@@ -6523,12 +6537,20 @@ def _moved(stage, where, cdpath=False):
             k += 1
             continue
         break
+    if k >= 12:
+        # twelve words were passed over and the command word is not among
+        # the ones split out: words[12] holds all the rest of the stage
+        return None
     prefixed = k > 0
     if k >= len(words):
         return where
     name = _bare(words[k])
-    if name in ("builtin", "command") and k + 1 < len(words):
-        if _bare(words[k + 1]) in _CHDIR | _LOSES_DIR:
+    if name in ("builtin", "command"):
+        # options between it and the command (command -p cd, builtin -- cd)
+        j = k + 1
+        while j < len(words) and _bare(words[j]).startswith("-"):
+            j += 1
+        if j < len(words) and _bare(words[j]) in _CHDIR | _LOSES_DIR:
             return None
         return where
     if name in _LOSES_DIR or _runs_a_shell(head.split()):
@@ -6568,9 +6590,14 @@ def _directories(text):
     out, where = [], ""
     # CDPATH may send a relative cd anywhere: its effect cannot be read.
     cdpath = "CDPATH" in text
+    redefined = False
     for start, end, _op in _command_spans(text):
         out.append(where)
-        where = _moved(text[start:end], where, cdpath)
+        stage = text[start:end]
+        if _REDEFINES.match(stage):
+            # from here on a name may mean anything, a cd included
+            redefined = True
+        where = None if redefined else _moved(stage, where, cdpath)
     return tuple(out)
 
 
@@ -6599,10 +6626,13 @@ def _shown_whole(text, lo, hi, known):
     return known.mask(shown) if known else shown
 
 
-def _subject_of(hit, on, text, span, known, later=None):
+def _subject_of(hit, on, text, span, known, later=None, earlier=None):
     """hit with what it is about: _on, and for a command or a path its
     _subject, and for a command its _cd (see above). later is where the
-    same rule matches again further on in text, or None."""
+    same rule matches again further on in text, or None; earlier is where
+    it matches before the span, or None. The rule's match is not always the
+    first command it trips (it may prefer one of its patterns to another),
+    so an earlier command is looked for as much as a later one."""
     hit["_on"] = on
     lo, hi = span
     last = max(lo, hi - 1)
@@ -6611,7 +6641,9 @@ def _subject_of(hit, on, text, span, known, later=None):
         starts = [s for s, _e, _op in spans]
         first = max(0, bisect.bisect_right(starts, lo) - 1)
         end = max(first, bisect.bisect_right(starts, last) - 1)
-        if later is not None and bisect.bisect_right(starts, later) - 1 > end:
+        if (later is not None and bisect.bisect_right(starts, later) - 1 > end
+                or earlier is not None
+                and bisect.bisect_right(starts, earlier) - 1 < first):
             # The rule is tripped again by a later command of the call. The
             # scan keeps one hit a rule, and an entry written for the first
             # command must not leave out the second with it: `npm publish
@@ -6631,7 +6663,8 @@ def _subject_of(hit, on, text, span, known, later=None):
     elif on == "path":
         start = text.rfind("\n", 0, lo) + 1
         stop = text.find("\n", last)
-        if later is not None and stop != -1 and later > stop:
+        if (later is not None and stop != -1 and later > stop
+                or earlier is not None and earlier < start):
             hit["_several"] = True      # as for a command, above
             return hit
         subject = _shown_whole(text, start, len(text) if stop == -1 else stop,
@@ -6645,9 +6678,8 @@ def _subject_of(hit, on, text, span, known, later=None):
 
 def _matches_again(rule, match, refine, seen, span, tool_input):
     """Where in seen the rule matches again after the span it hit, or None:
-    one more scan of the rest of the text, so a call costs two matches a
-    rule and never more, however often the command repeats. A refiner that
-    would drop that match drops it here too."""
+    one more scan of the rest of the text. A refiner that would drop that
+    match drops it here too."""
     cut = span[1]
     if cut >= len(seen):
         return None
@@ -6658,6 +6690,23 @@ def _matches_again(rule, match, refine, seen, span, tool_input):
     if refine and refine(rest, rule.severity, tool_input) is None:
         return None
     return cut + again[0]
+
+
+def _matches_before(rule, match, refine, seen, span, tool_input):
+    """Where in seen the rule matches before the span it hit, or None: one
+    scan of the text ahead of it, for the rule's match is not always the
+    first command it trips. Together with _matches_again a call costs three
+    matches a rule and never more, however often the command repeats."""
+    cut = span[0]
+    if cut <= 0:
+        return None
+    head = seen[:cut]
+    before = match(head)
+    if not before:
+        return None
+    if refine and refine(head, rule.severity, tool_input) is None:
+        return None
+    return before[0]
 
 
 def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
@@ -6713,10 +6762,12 @@ def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
             hit = {"rule": rule.id, "severity": severity,
                    "title": rule.title, "why": why, "evidence": evidence}
             if subjects:
+                around = on in ("command", "path")
                 _subject_of(hit, on, subject, span, known,
                             _matches_again(rule, match, refine, seen, span,
-                                           tool_input) if on in (
-                                "command", "path") else None)
+                                           tool_input) if around else None,
+                            _matches_before(rule, match, refine, seen, span,
+                                            tool_input) if around else None)
             hits.append(hit)
             break
     return hits

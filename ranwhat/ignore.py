@@ -1287,8 +1287,12 @@ class Proposal(object):
         self.lines, self.parts = lines, parts   # parts: (kind, what, dir, until)
 
 
-# A drive letter before a backslash, or a UNC share: a Windows path.
-_WINDOWS_WORD = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\|(?:^|\s)\\\\\S")
+# A Windows path: a drive letter before a backslash, a UNC share, or a
+# backslash between two characters of a name (data\old, .\build,
+# $HOME\data). A POSIX escape (a backslash before a blank, a quote, a $ or
+# another backslash) is none of these.
+_WINDOWS_WORD = re.compile(
+    r"(?<![A-Za-z0-9])[A-Za-z]:\\|(?:^|\s)\\\\\S|[\w.}]\\[\w.]")
 
 
 def proposal(record, today=None):
@@ -1334,6 +1338,12 @@ def proposal(record, today=None):
             words = watch._argv(subject)
             if not words:
                 return None, "its command cannot be split into words"
+            if any("*" in w for w in words):
+                # join_words leaves a * as it is and the file reads it as
+                # a wildcard for any run of characters, a / and a .. too:
+                # rm -rf /w/app/* would leave out rm -rf /w/app/../other.
+                return None, ("its command holds a *, which the file would "
+                              "read as a wildcard, and only its id names it")
             joined = join_words(words)
             if len(words) > MAX_WORDS or len(joined) > MAX_PATTERN:
                 return None, "its command is too long to match word for word"
