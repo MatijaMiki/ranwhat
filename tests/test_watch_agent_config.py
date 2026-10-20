@@ -8,6 +8,7 @@ that is often asked for (an MCP server or a hook added). And the look-alikes
 it must leave alone: a docs page that mentions --dangerously-skip-permissions,
 a deny rule added, settings read.
 """
+import argparse
 import os
 import sys
 import unittest
@@ -18,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import growth  # noqa: E402
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
-from ranwhat import hook, revoke, watch  # noqa: E402
+from ranwhat import cli, hook, revoke, watch  # noqa: E402
 from ranwhat.sources import ToolCall  # noqa: E402
 
 RULE = "agent.config"
@@ -712,6 +713,211 @@ class UserSettingsOnWindows(Cases):
                                "--dangerously-skip-permissions'\" >> /c/Users/me/.bashrc")
 
 
+class WhatRanwhatReports(Cases):
+    """An agent changing what ranwhat itself reports: its ignore file, the
+    secrets clean was told to keep and the key they are kept under, its
+    state folder, RANWHAT_HOME set for good, and ranwhat ignore given
+    something to add. Each is critical and always listed, since what it
+    leaves out is missing from every report after it. Taking one away
+    only means more is reported, and is let go."""
+
+    STATE = os.environ["RANWHAT_HOME"]        # isolated_home's
+    FILES = ("~/.ranwhat/ignore", "$RANWHAT_HOME/ignore", "${RANWHAT_HOME}/ignore",
+             "/repo/.ranwhatignore", ".ranwhatignore", "~/.ranwhat/known/kept.json",
+             "~/.ranwhat/known/key", "/home/dev/.ranwhat/ignore",
+             "/home/dev/.ranwhat/known/kept.json",
+             "C:\\Users\\dev\\.ranwhat\\ignore", "%RANWHAT_HOME%\\ignore",
+             "$env:RANWHAT_HOME\\known\\key")
+
+    def assertState(self, *calls):
+        self.assertRated(CRITICAL, *calls)
+        for call in calls:
+            tool, tool_input = call if isinstance(call, tuple) else ("Bash", call)
+            with self.subTest(call=str(tool_input)[:90]):
+                self.assertEqual(found(tool, tool_input)["why"], watch._STATE_WHY)
+
+    def test_a_file_tool_on_its_files(self):
+        paths = self.FILES + (os.path.join(self.STATE, "ignore"),
+                              os.path.join(self.STATE, "known", "key"))
+        for path in paths:
+            self.assertState(
+                ("Write", {"file_path": path, "content": "publish\n"}),
+                ("Edit", {"file_path": path, "old_string": "a", "new_string": "b"}),
+                ("MultiEdit", {"file_path": path, "edits": [
+                    {"old_string": "a", "new_string": "b"}]}))
+
+    def test_an_entry_widened_is_a_change_like_any_other(self):
+        # until= taken off keeps the entry past the day it was to end.
+        self.assertState(("Edit", {
+            "file_path": "/home/dev/.ranwhat/ignore",
+            "old_string": "publish 'npm publish' in=~/work/lib until=2027-01-31",
+            "new_string": "publish 'npm publish' in=~/work/lib"}))
+
+    def test_the_shell_onto_its_files(self):
+        for path in ("~/.ranwhat/ignore", "$RANWHAT_HOME/ignore", ".ranwhatignore",
+                     "~/.ranwhat/known/kept.json", "~/.ranwhat/known/key"):
+            self.assertState(
+                "echo 'publish' >> %s" % path,
+                "echo publish | tee -a %s" % path,
+                "printf 'publish\\n' > %s" % path,
+                "sed -i 's/ until=2027-01-31//' %s" % path,
+                "cp /tmp/x %s" % path,
+                "mv /tmp/x %s" % path,
+                "ln -sf /tmp/x %s" % path,
+                "cat >> %s <<'EOF'\npublish\nEOF" % path)
+
+    def test_its_folder_given_something_no_call_shows(self):
+        self.assertState(
+            "cp -r x ~/.ranwhat", "cp -r /tmp/state/. ~/.ranwhat/",
+            "ln -s /tmp/state ~/.ranwhat", "mv /tmp/f ~/.ranwhat",
+            "rsync -a /tmp/state/ ~/.ranwhat/", "cp kept.json ~/.ranwhat/known/",
+            "cp -r /tmp/known $RANWHAT_HOME",
+            # the folder RANWHAT_HOME names here, by its path: on Windows
+            # with its drive, and / for its backslashes
+            "mv /tmp/k %s" % self.STATE.replace("\\", "/"))
+
+    def test_ranwhat_ignore_given_something_to_add(self):
+        self.assertState(
+            "ranwhat ignore all", "ranwhat ignore 3fa9c2d81b7e4a06",
+            "ranwhat ignore -", "ranwhat ignore - < ~/new.json",
+            "ranwhat ignore --days 90 all", "ranwhat ignore all --days 365",
+            "ranwhat ignore --ignore .ranwhatignore all",
+            "ranwhat --json ignore all", "ranwhat --days=90 ignore all",
+            # argparse takes an option by a prefix no other shares
+            "ranwhat --da 90 ignore all", "ranwhat --sou codex ignore all",
+            "ranwhat -- ignore all",
+            "uvx ranwhat ignore all", "uvx ranwhat@latest ignore all",
+            "pipx run ranwhat ignore all", "python3 -m ranwhat ignore all",
+            "python3 -I -m ranwhat ignore all",
+            "RANWHAT_HOME=/tmp/x ranwhat ignore all",
+            'echo "$(ranwhat ignore all)"')
+
+    def test_ranwhat_home_moved_for_good(self):
+        self.assertState(
+            "echo 'export RANWHAT_HOME=/tmp/x' >> ~/.bashrc",
+            "echo 'export RANWHAT_HOME=\"$HOME/x\"' >> ~/.zshrc",
+            "echo ': ${RANWHAT_HOME:=/tmp/x}' >> ~/.profile",
+            "echo 'RANWHAT_HOME=/tmp/x' | sudo tee -a /etc/environment",
+            "echo 'set -gx RANWHAT_HOME /tmp/x' >> ~/.config/fish/config.fish",
+            "echo 'export RANWHAT_HOME=/tmp/x' >> .envrc",
+            ("Edit", {"file_path": "/home/dev/.bashrc",
+                      "old_string": "export RANWHAT_HOME=/home/dev/rw",
+                      "new_string": "export RANWHAT_HOME=/tmp/x"}),
+            ("Write", {"file_path": "C:/Users/dev/Documents/PowerShell/"
+                                    "Microsoft.PowerShell_profile.ps1",
+                       "content": '$env:RANWHAT_HOME = "C:\\x"\n'}),
+            ("Edit", {"file_path": USER, "old_string": '"env": {',
+                      "new_string": '"env": {\n    "RANWHAT_HOME": "/tmp/x",'}),
+            ("Write", {"file_path": "/repo/.claude/settings.local.json",
+                       "content": '{"env": {"RANWHAT_HOME": "/tmp/x"}}'}),
+            "setx RANWHAT_HOME C:\\x", "setx ranwhat_home C:\\x /M",
+            "launchctl setenv RANWHAT_HOME /tmp/x",
+            "systemctl --user set-environment RANWHAT_HOME=/tmp/x",
+            ("PowerShell", "[Environment]::SetEnvironmentVariable('RANWHAT_HOME', "
+                           "'C:\\my state', 'User')"),
+            ("PowerShell", '[System.Environment]::SetEnvironmentVariable("RANWHAT_HOME",'
+                           ' $env:TEMP, [System.EnvironmentVariableTarget]::Machine)'))
+
+    def test_hidden_in_an_encoding(self):
+        hit = found("Bash", "echo ZWNobyB4ID4+IH4vLnJhbndoYXQvaWdub3Jl | base64 -d | sh")
+        self.assertEqual((hit["severity"], hit["why"]), (CRITICAL, watch._STATE_WHY))
+        self.assertTrue(hit["evidence"].startswith("decoded base64: "), hit)
+
+    def test_what_only_means_more_is_reported(self):
+        # Read, listed, taken out or emptied: ranwhat then leaves out less.
+        self.assertQuiet(
+            "cat ~/.ranwhat/ignore", "grep publish .ranwhatignore",
+            ("Read", {"file_path": "/home/dev/.ranwhat/ignore"}),
+            "rm ~/.ranwhat/ignore", "rm -f .ranwhatignore ~/.ranwhat/known/kept.json",
+            "rm ~/.ranwhat/known/key", "mv ~/.ranwhat/ignore /tmp/",
+            ": > ~/.ranwhat/ignore", "cp /dev/null ~/.ranwhat/known/kept.json",
+            "truncate -s 0 ~/.ranwhat/ignore",
+            "cp ~/.ranwhat/ignore /tmp/ignore.backup",
+            # its other files are no report's
+            "echo x > ~/.ranwhat/notes.txt", "rm -rf ~/.ranwhat/backups/old",
+            # a folder of the same name that is not its state
+            "echo 'publish' >> ~/work/ranwhat/ignore",
+            ("Write", {"file_path": "/home/dev/work/ranwhat/ignore", "content": "x"}),
+            ("Write", {"file_path": "/repo/ignore", "content": "x"}),
+            ("Write", {"file_path": "/repo/known/key", "content": "x"}))
+        hits = watch.evaluate("Bash", {"command": "rm -rf ~/.ranwhat"})[0]
+        self.assertEqual([h["rule"] for h in hits], ["fs.destructive"])
+
+    def test_ranwhat_ignore_that_adds_nothing(self):
+        # Bare, it lists the file; a value given --ignore names a file.
+        self.assertQuiet(
+            "ranwhat ignore", "ranwhat ignore --json",
+            "ranwhat ignore --ignore .ranwhatignore", "ranwhat watch --no-ignore",
+            "ranwhat watch --ignore ignore", "ranwhat check --ignore=ignore",
+            "ranwhat watch --days 30 --source codex",
+            "ranwhat ignore all --help", "ranwhat ignore -h all",
+            "uvx ranwhat ignore", "echo ranwhat ignore all",
+            'git commit -m "watch: ranwhat ignore all is asked about"',
+            # a one-off changes only that run's report
+            "RANWHAT_HOME=/tmp/x ranwhat watch",
+            "export RANWHAT_HOME=/tmp/x; ranwhat watch")
+
+    def test_ranwhat_home_read_is_not_set(self):
+        self.assertQuiet(
+            "echo '[ -n \"$RANWHAT_HOME\" ] && echo set' >> ~/.bashrc",
+            "echo 'export X=${RANWHAT_HOME:-$HOME/.ranwhat}' >> ~/.bashrc",
+            "echo 'MY_RANWHAT_HOME=/tmp/x' >> ~/.bashrc",
+            "echo 'set -q RANWHAT_HOME && echo y' >> ~/.config/fish/config.fish",
+            ("Edit", {"file_path": "/home/dev/.bashrc",
+                      "old_string": "export RANWHAT_HOME=/home/dev/rw\n",
+                      "new_string": ""}),
+            ("Edit", {"file_path": USER, "old_string": '"model": "opus"',
+                      "new_string": '"model": "sonnet"'}),
+            "setx RANWHAT_HOOK 1", "launchctl setenv PATH /opt/bin",
+            ("PowerShell", "[Environment]::SetEnvironmentVariable('RANWHAT_HOME', "
+                           "'C:\\x', 'Process')"))
+
+    def test_the_hook_itself_is_still_its_own(self):
+        # Both in one call: the first is named, and each is critical.
+        hit = found("PowerShell", "[Environment]::SetEnvironmentVariable('RANWHAT_HOOK', "
+                                  "'0', 'User'); [Environment]::SetEnvironmentVariable("
+                                  "'RANWHAT_HOME', 'C:\\x', 'User')")
+        self.assertEqual((hit["severity"], hit["why"]), (CRITICAL, watch._GUARD_OFF_WHY))
+        self.assertEqual(found("Bash", "setx RANWHAT_HOOK 0")["why"],
+                         watch._GUARD_OFF_WHY)
+
+    def test_its_whys_are_the_ones_nothing_may_leave_out(self):
+        self.assertEqual(watch.UNIGNORABLE, frozenset((
+            watch._GUARD_OFF_WHY, watch._UNINSTALL_WHY, watch._STATE_WHY)))
+        self.assertNotIn("\N{EM DASH}", watch._STATE_WHY)
+
+
+class RanwhatsOwnCredentials(Cases):
+    """Its account token, and the key kept secrets are hashed under: with
+    it, kept.json can be written to keep any value out of every report."""
+
+    def test_a_read_is_critical(self):
+        for call in ("cat ~/.ranwhat/known/key", "cat ~/.ranwhat/token",
+                     "base64 < ~/.ranwhat/known/key", 'cat "$RANWHAT_HOME/token"',
+                     "cat ${RANWHAT_HOME}/known/key", "xxd /home/dev/.ranwhat/known/key",
+                     ("PowerShell", "Get-Content $env:RANWHAT_HOME\\token"),
+                     ("PowerShell", "type C:\\Users\\dev\\.ranwhat\\token"),
+                     ("Read", {"file_path": "/home/dev/.ranwhat/token"}),
+                     ("Read", {"file_path": "/home/dev/.ranwhat/known/key"})):
+            tool, tool_input = call if isinstance(call, tuple) else ("Bash", call)
+            if isinstance(tool_input, str):
+                tool_input = {"command": tool_input}
+            with self.subTest(call=str(tool_input)[:90]):
+                hits = watch.evaluate(tool, tool_input)[0]
+                self.assertIn(("cred.read", CRITICAL),
+                              [(h["rule"], h["severity"]) for h in hits])
+
+    def test_what_reads_nothing_or_another_file_is_not(self):
+        for command in ("ls -la ~/.ranwhat/known/key ~/.ranwhat/token",
+                        "rm ~/.ranwhat/token", "stat ~/.ranwhat/known/key",
+                        "cat tokens.txt", "cat ~/work/token", "cat known/key",
+                        "cat ~/.ranwhat/known/kept.json", "cat ~/.ranwhat/tokens",
+                        "ranwhat whoami", "ranwhat logout"):
+            with self.subTest(command=command):
+                hits = watch.evaluate("Bash", {"command": command})[0]
+                self.assertNotIn("cred.read", [h["rule"] for h in hits])
+
+
 class TheHookAsks(unittest.TestCase):
 
     def test_its_own_removal_is_asked_about_and_refused_in_deny_mode(self):
@@ -746,6 +952,42 @@ class TheSharedReadingsStayTheirOwners(unittest.TestCase):
         self.assertEqual(watch._ours([("ranwhat hook run", True)]), 2)
         self.assertEqual(watch._ours([("ranwhat", True)]), 1)
         self.assertEqual(watch._ours([("ranwhat-dev", True)]), 0)
+
+    def test_ranwhats_options_are_its_parsers(self):
+        # ranwhat ignore is told from ranwhat watch --ignore ignore by
+        # which of ranwhat's options take a value, and argparse takes one
+        # by any prefix no other shares: the two lists are the parser's.
+        # --ignore and --no-ignore are read ahead of the parser having them.
+        seen = {}
+
+        def parsed(parser, argv=None):
+            seen["parser"] = parser
+            raise SystemExit(0)
+
+        with mock.patch.object(argparse.ArgumentParser, "parse_intermixed_args",
+                               parsed):
+            with self.assertRaises(SystemExit):
+                cli._main([])
+        values, flags = set(), set()
+        for action in seen["parser"]._actions:
+            for option in action.option_strings:
+                if option.startswith("--"):
+                    (flags if action.nargs == 0 else values).add(option)
+        ahead = {"--ignore", "--no-ignore"}
+        self.assertEqual(values - watch._RANWHAT_VALUES, set())
+        self.assertEqual(flags - watch._RANWHAT_FLAGS, set())
+        self.assertLessEqual(watch._RANWHAT_VALUES - values, ahead)
+        self.assertLessEqual(watch._RANWHAT_FLAGS - flags, ahead)
+        self.assertTrue(seen["parser"].allow_abbrev)
+
+    def test_ranwhats_words_are_read_past_its_options(self):
+        read = watch._ranwhat_positionals
+        self.assertEqual(read(["--days", "90", "ignore", "all"]), ["ignore", "all"])
+        self.assertEqual(read(["watch", "--ignore", "ignore"]), ["watch"])
+        self.assertEqual(read(["watch", "--ignore=x", "--no-ignore"]), ["watch"])
+        self.assertEqual(read(["--wi", "7", "ignore"]), ["ignore"])     # --window-days
+        self.assertEqual(read(["--s", "x", "ignore", "-"]), ["x", "ignore", "-"])
+        self.assertEqual(read(["ignore", "--", "--days"]), ["ignore", "--days"])
 
     def test_revoke_decides_which_allow_rules_are_risky(self):
         self.assertTrue(revoke._risky_rule("Bash(curl:*)"))
@@ -814,7 +1056,31 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             lambda n: "python3 x.py " + '"$(sh -c \'echo claude\')" ' * n(1500),
             lambda n: 'timeout -k 5 60 sh -c "' + "$(claude " * n(4000) + '"',
             lambda n: "claude -p " + '"$(echo x)" ' * n(3000)
-            + "--dangerously-skip-permissions")
+            + "--dangerously-skip-permissions",
+            # ranwhat's own state: its options read a word at a time, each
+            # folder a copy reaches judged once, and each assignment once
+            lambda n: "ranwhat " + "--days 1 " * n(8000) + "ignore all",
+            lambda n: "ranwhat " + "--d " * n(12000) + "ignore all",
+            lambda n: "ranwhat --" + "a" * n(60000) + " ignore all",
+            lambda n: "cp " + "a " * n(20000) + "~/.ranwhat/",
+            lambda n: "cp " + "a " * n(20000) + "~/.ranwhat/known/",
+            lambda n: "echo '" + "RANWHAT_HOME=" * n(5000) + "' >> ~/.bashrc",
+            lambda n: "echo '" + "RANWHAT_HOME " * n(5000) + "' >> ~/.bashrc",
+            lambda n: "echo '" + "set -gx RANWHAT_HOME " * n(3000)
+            + "' >> ~/.config/fish/config.fish",
+            lambda n: "echo \"" + "[Environment]::SetEnvironmentVariable('RANWHAT_HOME', '"
+            * n(1200) + "\" > x",
+            lambda n: "setx " + "/s x " * n(10000) + "RANWHAT_HOME x")
+
+    def test_its_own_credentials_are_read_in_one_pass(self):
+        for build in (
+                lambda n: "cat " + "a/" * n(25000) + ".ranwhat/token",
+                lambda n: "cat " + ".ranwhat/" * n(6000) + "known/key",
+                lambda n: "cat " + "$RANWHAT_HOME/" * n(4000) + "token",
+                lambda n: "cat ~/.ranwhat/token " + "~/.ranwhat/x " * n(4000)):
+            measured = growth.measure(build, lambda text: watch.evaluate(
+                "Bash", {"command": text}))
+            growth.assert_linear(self, measured, build(growth.sized(1))[:40])
 
 
 if __name__ == "__main__":

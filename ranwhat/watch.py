@@ -989,9 +989,16 @@ _NOT_SECRET_SUFFIXES = (".example", ".sample", ".template", ".dist",
 # the words, every service_account in one long word read on to its end,
 # and 63K of them took two seconds. A path may start with a drive or a
 # variable (C:/, %USERPROFILE%/, $env:HOME/), once _slashed has read it.
+#
+# ranwhat's own two are named with their folder: a file called key or token
+# is anyone's. Its token is its account's credential, and its key is what a
+# kept secret is hashed under, so whoever holds it can write kept.json to
+# keep any value out of every report.
 _CRED_PATH = re.compile(
     r"(?:^|[\s\"'=(])((?:[\w./~$%:-]*/)?(?:\.env[\w.-]*|credentials|"
     r"\.netrc|id_[a-z0-9]+(?:\.pub)?|[\w.-]*\.pem|[\w.-]*\.key|\.kube/config|"
+    r"\.ranwhat/(?:known/key|token)\b|"
+    r"(?:\$\{?|%|\$env:)RANWHAT_HOME[}%]?/(?:known/key|token)\b|"
     r"(?=(?P<account>[\w.-]*?service[-_]account))(?P=account)[\w.-]*\.json))",
     re.I)
 
@@ -3997,6 +4004,16 @@ _LAUNCH_WHY = ("An agent was started with its approvals or its sandbox "
 _UNINSTALL_WHY = ("ranwhat itself was uninstalled. Claude Code lets a call "
                   "through when its hook fails to start, so the guard is off "
                   "until ranwhat is installed again.")
+_STATE_WHY = ("An agent changed what ranwhat reports: its ignore file, the "
+              "secrets clean was told to keep, its key, or where ranwhat "
+              "keeps them, or it ran ranwhat ignore. What a change like this "
+              "leaves out is missing from watch and check from then on, so "
+              "the change itself is always listed.")
+# The whys of a change to ranwhat's own guard or its own state. Whatever
+# later lets a report leave an action out must not let it leave out one of
+# these: an agent that could write the ignore file could otherwise write the
+# line that hides its own write.
+UNIGNORABLE = frozenset((_GUARD_OFF_WHY, _UNINSTALL_WHY, _STATE_WHY))
 
 
 def _may_loosen(text):
@@ -4070,11 +4087,16 @@ _AGENT_HEADS = frozenset((
     "launchctl", "systemctl"))
 # setx's options that take the next word as their value.
 _SETX_VALUES = frozenset(("/s", "/u", "/p", "/k", "/f", "/a", "/r", "/d"))
-# PowerShell's way to set a variable for the user, or the machine, for good.
+# PowerShell's way to set a variable for the user, or the machine, for good:
+# RANWHAT_HOOK, judged by its value, or RANWHAT_HOME, by being set at all.
+# The value is quoted, read to its closing quote, which a folder with a
+# blank in it needs, or bare, read to the comma: neither runs past a quote,
+# so a long run of them is read once.
 _SET_ENVIRONMENT = re.compile(
-    r"""setenvironmentvariable\s*\(\s*(['"])ranwhat_hook\1\s*,\s*(['"]?)"""
-    r"""([^'",)\s]*)\2\s*,\s*['"]?(?:\[(?:system\.)?environmentvariabletarget\]::)?"""
-    r"""(?:user|machine)\b""", re.I)
+    r"""setenvironmentvariable\s*\(\s*(['"])(ranwhat_hook|ranwhat_home)\1\s*,\s*"""
+    r"""(?:(['"])([^'"]*)\3|([^'",)]*))\s*,\s*['"]?"""
+    r"""(?:\[(?:system\.)?environmentvariabletarget\]::)?(?:user|machine)\b""",
+    re.I)
 
 
 def _switch_kept(program, args):
@@ -4083,7 +4105,9 @@ def _switch_kept(program, args):
     machine environment, which every new terminal reads), launchctl setenv
     (every app launchd starts) and systemctl set-environment (every unit
     the manager starts). RANWHAT_HOOK=0 set so turns the hook off for each
-    session that starts after it."""
+    session that starts after it, and RANWHAT_HOME set so moves ranwhat's
+    state, its ignore file and the secrets clean was told to keep among it,
+    for each ranwhat that starts after it."""
     if program == "setx":
         names, skip = [], False
         for word in args:
@@ -4205,6 +4229,54 @@ def _is_ranwhat(word):
     return _program(_VERSION_SPEC.split(word.lower(), 1)[0]) == "ranwhat"
 
 
+# ranwhat's own long options, as its parser has them (cli._main), those that
+# take a value and those that take none, which a test holds to the parser.
+# --ignore and --no-ignore are the ignore file's, read here ahead of the
+# command that takes them, so the rule is right the day it ships.
+_RANWHAT_VALUES = frozenset((
+    "--days", "--source", "--path", "--root", "--state-dir", "--ignore",
+    "--html", "--sarif", "--fail-on", "--scope", "--mode", "--controls",
+    "--window-days", "--seed", "--mine", "--aws-profile", "--aws-key-id",
+    "--aws-region", "--github-org", "--token", "--google", "--github",
+    "--slack", "--stripe"))
+_RANWHAT_FLAGS = frozenset((
+    "--help", "--json", "--pull-usage", "--apply", "--no-interactive",
+    "--save-token", "--status", "--force", "--no-browser", "--local",
+    "--no-ignore"))
+_RANWHAT_OPTIONS = tuple(sorted(_RANWHAT_VALUES | _RANWHAT_FLAGS))
+
+
+def _ranwhat_takes_value(option):
+    """Whether a --word given to ranwhat takes the next word as its value:
+    an option that does, by its name or by a prefix no other option shares,
+    which argparse takes for it. A prefix two share is refused by argparse,
+    and then nothing runs."""
+    if option in _RANWHAT_VALUES or option in _RANWHAT_FLAGS:
+        return option in _RANWHAT_VALUES
+    found = [o for o in _RANWHAT_OPTIONS if o.startswith(option)]
+    return len(found) == 1 and found[0] in _RANWHAT_VALUES
+
+
+def _ranwhat_positionals(args):
+    """The words ranwhat reads as its command and what follows it, in
+    order: past each option and the value it takes, given as the next word
+    or after =, and everything after --. One word at a time."""
+    found, i, n = [], 0, len(args)
+    while i < n:
+        word = args[i]
+        i += 1
+        if word == "--":
+            found.extend(args[i:])
+            break
+        if word[:2] == "--":
+            name, equals, _value = word.partition("=")
+            if not equals and _ranwhat_takes_value(name):
+                i += 1
+        elif word[:1] != "-" or word == "-":
+            found.append(word)
+    return found
+
+
 def _option_value(args, k, option):
     """The value of option at args[k], given as --option=value or as the
     next word; None when args[k] is not that option."""
@@ -4288,11 +4360,24 @@ def _launch_verdict(program, args, assigns, hook_off):
         # `ranwhat hook --sc user uninstall` uninstall too, and uninstall
         # takes no option but --scope, whose value is user, project or local.
         rest = args[args.index("hook") + 1:] if "hook" in args else []
-        return (CRITICAL, _GUARD_OFF_WHY) if "uninstall" in rest else None
+        if "uninstall" in rest:
+            return CRITICAL, _GUARD_OFF_WHY
+        # ranwhat ignore with an action's id, all or - adds to the ignore
+        # file; bare, or with only options, it lists the file and changes
+        # nothing. Read by place, past the options and their values, so
+        # `ranwhat watch --ignore ignore` names a file and adds nothing.
+        words = _ranwhat_positionals(args)
+        if words[:1] == ["ignore"] and len(words) > 1:
+            return CRITICAL, _STATE_WHY
+        return None
     if program in ("setx", "launchctl", "systemctl"):
-        return (CRITICAL, _GUARD_OFF_WHY) if any(
-            name == hook.OFF_ENV and hook.is_off(value)
-            for name, value in _switch_kept(program, args)) else None
+        verdict = None
+        for name, value in _switch_kept(program, args):
+            if name == "RANWHAT_HOME":
+                verdict = _worse(verdict, (CRITICAL, _STATE_WHY))
+            elif name == hook.OFF_ENV and hook.is_off(value):
+                verdict = _worse(verdict, (CRITICAL, _GUARD_OFF_WHY))
+        return verdict
     if program in ("pip", "pip3", "pipx") or (
             program == "uv" and args[:1] in (["pip"], ["tool"])):
         # No exemption for help here: pip's own options take values
@@ -4381,6 +4466,14 @@ _HOOK_SWITCH = re.compile(
 # fish sets a variable with no = in it: set -gx RANWHAT_HOOK 0.
 _FISH_HOOK_SWITCH = re.compile(
     r"""\bset[ \t]+(?:-[A-Za-z-]+[ \t]+)*RANWHAT_HOOK[ \t]+["']?([^\s"';]*)""")
+# RANWHAT_HOME set, and the folder it is set to, read as _HOOK_SWITCH reads
+# the hook's. Not ${RANWHAT_HOME:-x}, :+ or :?, which read it; ${RANWHAT_HOME:=x}
+# sets it. fish's set is read with a value only: `set -q RANWHAT_HOME &&`
+# asks whether it is set.
+_HOME_SWITCH = re.compile(
+    r"""(?<![\w$])RANWHAT_HOME["']?\s*(?:=|:(?![-+?]))\s*["']?([^\s"',;}]*)""")
+_FISH_HOME_SWITCH = re.compile(
+    r"""\bset[ \t]+(?:-[A-Za-z-]+[ \t]+)*RANWHAT_HOME[ \t]+["']?([^\s"';&|]+)""")
 # Case-sensitive: disableBypassPermissionsMode is a guardrail, not a hole.
 _BYPASS = re.compile(r"(?<![\w$])bypassPermissions(?!\w)")
 _ALL_PROJECT_SERVERS = re.compile(
@@ -4500,6 +4593,22 @@ def _switched_off(parts):
                for m in switch.finditer(text) if hook.is_off(m.group(1)))
 
 
+def _homes_set(parts):
+    return collections.Counter(
+        m.group(1) for text, _pattern in parts
+        for switch in (_HOME_SWITCH, _FISH_HOME_SWITCH) for m in switch.finditer(text))
+
+
+def _home_moved(change):
+    """Whether change sets RANWHAT_HOME to a folder it did not set it to
+    before: one put in, or one changed, as an Edit changes it. Every ranwhat
+    started where the file is read then keeps its state there, an ignore
+    file and the secrets clean was told to keep among it, and that folder
+    may be one the agent filled. One taken out only puts the state back in
+    ~/.ranwhat."""
+    return bool(_homes_set(change.new) - _homes_set(change.old))
+
+
 # ranwhat named as a word, in a pattern.
 _RANWHAT_WORD = re.compile(r"(?<![\w-])ranwhat(?![\w-])", re.I)
 
@@ -4564,6 +4673,10 @@ def _judge_claude(scope, change):
     if (_ours(old) > _ours(new) or _set(_DISABLE_ALL_HOOKS, change)
             or _switched_off(new) > _switched_off(old)):
         verdict = _worse(verdict, (CRITICAL, _GUARD_OFF_WHY))
+    # The settings' env reaches every ranwhat Claude Code starts: the
+    # plugin's own `uvx ranwhat watch` among them.
+    if _home_moved(change):
+        verdict = _worse(verdict, (CRITICAL, _STATE_WHY))
     if _set(_BYPASS, change):
         verdict = _worse(verdict, (CRITICAL if scope in ("user", "managed")
                                    else HIGH, _AGENT_WHY))
@@ -4623,10 +4736,24 @@ def _judge_config(kind, change):
                 _set(_HOOKS_KEY, change) or _set(_HOOK_ENTRY, change))):
             return MEDIUM, _AGENT_WHY
         return None
-    # A shell's startup file: only what turns the hook off, or makes an
-    # agent start with its approvals off every time it is typed.
+    if kind == "ranwhat":
+        # ranwhat's own state: its ignore file, the secrets clean was told
+        # to keep, the key they are kept under, or its folder. Any change an
+        # agent makes to one may leave something out of every later report,
+        # an append or an edit as much as a copy or a link put in its place:
+        # taking `until=` off a line widens it. Only the whole file or
+        # folder taken out, or emptied, is let go: then ranwhat leaves out
+        # less, never more.
+        if change.removed and not change.new and change.blind is None:
+            return None
+        return CRITICAL, _STATE_WHY
+    # A shell's startup file: only what turns the hook off, moves ranwhat's
+    # state, or makes an agent start with its approvals off every time it
+    # is typed.
     if _switched_off(change.new) > _switched_off(change.old):
         return CRITICAL, _GUARD_OFF_WHY
+    if _home_moved(change):
+        return CRITICAL, _STATE_WHY
     flagged = [sum(1 for text, _p in parts for line in text.split("\n")
                    if _BYPASS_FLAG.search(line) and _AGENT_WORD.search(line))
                for parts in (change.new, change.old)]
@@ -4751,15 +4878,47 @@ def _config_kind(path):
             return "codex", "user" if home else "project"
         if name.endswith(".config.toml"):
             return "codex", "profile"
+    # ranwhat's own: an ignore file, the one in its folder or one a
+    # repository keeps, which is read only when named but may be named in
+    # CI; and the secrets clean was told to keep, with the key that makes
+    # an entry in that file, beside the index in known/.
+    if name == ".ranwhatignore" or (name == "ignore" and _ranwhat_home_folder(folder)):
+        return "ranwhat", "ignore"
+    if name in ("kept.json", "key") and parent == "known" \
+            and _ranwhat_home_folder(holder):
+        return "ranwhat", "state"
     if _starts_shells(path, t, name):
         return "rc", "user"
     return None
 
 
+# ranwhat's state folder as a path names it under a variable ranwhat cannot
+# resolve: POSIX shells, cmd and PowerShell.
+_RANWHAT_DIRS = frozenset(("$ranwhat_home", "${ranwhat_home}", "%ranwhat_home%",
+                           "$env:ranwhat_home"))
+
+
+def _ranwhat_home_folder(folder):
+    """Whether folder is ranwhat's state folder: one named .ranwhat, where
+    ranwhat keeps it in any home, one named by RANWHAT_HOME, or the one
+    RANWHAT_HOME names on this machine, wherever that is. The last is read
+    only when a call names a file by a path; the shell's words reach this
+    rule only when they name ranwhat (_may_loosen)."""
+    name = folder.rstrip("/").rpartition("/")[2].lower()
+    if name == ".ranwhat" or name in _RANWHAT_DIRS:
+        return True
+    if not folder:
+        return False
+    from . import known
+    state = _undriven(os.path.abspath(known.home()).replace("\\", "/"))
+    return _same_folder(folder, posixpath.normpath("/" + state.lstrip("/")))
+
+
 def _config_folder_kind(path):
     """(kind, scope) of a folder that holds an agent's configuration
-    (.claude, .codex, .gemini, CLAUDE_CONFIG_DIR, CODEX_HOME), named with
-    or without a trailing / or /*, or None."""
+    (.claude, .codex, .gemini, CLAUDE_CONFIG_DIR, CODEX_HOME), or ranwhat's
+    own state (_ranwhat_home_folder, and the known/ in it), named with or
+    without a trailing / or /*, or None."""
     t = _slashed(path.strip()).replace('"', "").replace("'", "")
     if t.endswith("/*"):
         t = t[:-2]
@@ -4771,6 +4930,8 @@ def _config_folder_kind(path):
         return "codex", "user"
     if name == ".gemini":
         return "gemini", "user"
+    if _ranwhat_home_folder(t) or (name == "known" and _ranwhat_home_folder(holder)):
+        return "ranwhat", "home"
     return None
 
 
@@ -5114,9 +5275,11 @@ def _loosened_stage(stage, name, here, piped, files, hook_off, depth):
     from . import hook
     verdict = None
     if "SETENVIRONMENTVARIABLE" in stage.upper():
-        found = _SET_ENVIRONMENT.search(stage)
-        if found and hook.is_off(found.group(3)):
-            verdict = CRITICAL, _GUARD_OFF_WHY
+        for found in _SET_ENVIRONMENT.finditer(stage):
+            if found.group(2).upper() == "RANWHAT_HOME":
+                verdict = _worse(verdict, (CRITICAL, _STATE_WHY))
+            elif hook.is_off(found.group(4) if found.group(3) else found.group(5)):
+                verdict = _worse(verdict, (CRITICAL, _GUARD_OFF_WHY))
     # A stage that starts with one of _LEAD_VALUES's wrappers (caffeinate,
     # stdbuf, timeout with options) is read past it to what it runs:
     # _command_word only reads past sudo, env and their kin. So is one whose
@@ -5159,8 +5322,13 @@ def _loosened_stage(stage, name, here, piped, files, hook_off, depth):
                                               files)
         files[_file_key(wrote.target)] = change
         kind = _config_kind(wrote.target)
-        if kind is None and wrote.how == "remove":
-            kind = _config_folder_kind(wrote.target)
+        if kind is None:
+            # A folder is judged when it is removed, and ranwhat's own when
+            # anything is put there: cp -r, mv or ln -s onto ~/.ranwhat puts
+            # in place an ignore file, or kept secrets, no call shows.
+            folder = _config_folder_kind(wrote.target)
+            if folder and (wrote.how == "remove" or folder[0] == "ranwhat"):
+                kind = folder
         if kind:
             verdict = _worse(verdict, _judged(kind, change))
         if wrote.how == "move" and moved is None:
@@ -5242,7 +5410,11 @@ RULES = [
          [r"(?:^|[\s\"'=/])\.env(?:\.[\w-]+)?\b",
           r"\.aws/credentials", r"\.ssh/id_[\w]+", r"\.netrc",
           r"\.config/gcloud", _Gap(r"service[-_]account", r"\.json", "\n"),
-          r"security\s+find-generic-password", r"\.kube/config"],
+          r"security\s+find-generic-password", r"\.kube/config",
+          # ranwhat's own: its account token, and the key kept secrets are
+          # hashed under (see _CRED_PATH).
+          r"\.ranwhat/(?:known/key|token)\b",
+          r"RANWHAT_HOME[}%]?/(?:known/key|token)\b"],
          paths=True, hide=_credential_text),
 
     # clean's own rules decide what is a credential, fixtures and

@@ -86,6 +86,35 @@ class Decisions(unittest.TestCase):
         with mock.patch("ranwhat.watch.evaluate", side_effect=RecursionError):
             self.assertEqual(answer(event("cat .env")), (0, None))
 
+    def test_a_change_to_what_ranwhat_reports_is_asked_or_refused(self):
+        # The hook never reads what ranwhat leaves out of its reports; it
+        # asks before a call that changes it, and before a read of the key
+        # that lets kept.json be forged.
+        home = os.path.expanduser("~")
+        calls = [("Bash", {"command": command}) for command in (
+            "echo 'publish' >> ~/.ranwhat/ignore", "ranwhat ignore all",
+            "uvx ranwhat ignore 3fa9c2d81b7e4a06", "cp -r /tmp/state ~/.ranwhat",
+            "echo 'export RANWHAT_HOME=/tmp/x' >> ~/.bashrc",
+            "setx RANWHAT_HOME C:\\x", "cat ~/.ranwhat/known/key",
+            "cat ~/.ranwhat/token")]
+        calls += [("Write", {"file_path": os.path.join(home, ".ranwhat", "known",
+                                                       "kept.json"), "content": "{}"}),
+                  ("Edit", {"file_path": "/repo/.ranwhatignore", "old_string": "a",
+                            "new_string": "b"}),
+                  ("Read", {"file_path": os.path.join(home, ".ranwhat", "token")})]
+        for tool, tool_input in calls:
+            with self.subTest(call=str(tool_input)[:80]):
+                decision, reason = hook.decide(tool, tool_input)
+                self.assertEqual(decision, "ask", reason)
+                decision, reason = hook.decide(tool, tool_input, mode="deny")
+                self.assertEqual(decision, "deny", reason)
+                self.assertIn("Ask the user to run it themselves", reason)
+        for command in ("cat ~/.ranwhat/ignore", "ranwhat ignore", "ranwhat ignore --json",
+                        "ranwhat watch --no-ignore", "ranwhat watch --ignore x",
+                        "rm ~/.ranwhat/ignore", "RANWHAT_HOME=/tmp/x ranwhat watch"):
+            self.assertEqual(hook.decide("Bash", {"command": command}, mode="deny"),
+                             (None, ""), command)
+
     def test_other_events_are_not_judged(self):
         text = json.dumps({"hook_event_name": "PostToolUse", "tool_name": "Bash",
                            "tool_input": {"command": "cat .env"}})

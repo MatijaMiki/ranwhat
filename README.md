@@ -168,7 +168,9 @@ is judged by the same rules. A change to a shell startup file is medium; one
 that runs `curl … | sh` in every new shell is high. An edit to an agent's
 settings is judged by what it lets through: an MCP server added is medium,
 `bypassPermissions` in your user settings, or an edit that takes the ranwhat
-hook out, is critical.
+hook out, is critical. So is any change an agent makes to what ranwhat
+itself reports: the secrets `clean` was told to keep, the key they are kept
+under, the ignore file, or where ranwhat keeps them.
 Each agent's tool calls are judged by the same rules; every action says
 which agent ran it.
 
@@ -493,6 +495,19 @@ ranwhat hook uninstall
   not show what it replaced, is recorded as medium and not asked about, and
   a script that rewrites it is not seen: the hook judges what a call shows,
   and is no sandbox.
+- It asks in the same way before a call that changes what ranwhat itself
+  reports, since what such a change leaves out is missing from every report
+  after it: a write to `~/.ranwhat/known/kept.json`, which holds the secrets
+  `clean` was told to keep, or to the key beside it; a write to the ignore
+  file, `~/.ranwhat/ignore` or a `.ranwhatignore` anywhere; anything copied,
+  moved or linked into `~/.ranwhat`; `RANWHAT_HOME` set for good, in a
+  startup file, in Claude Code's settings, or with `setx`, `launchctl
+  setenv` or `systemctl set-environment`; and `ranwhat ignore` given an
+  action to add. Reading one of those files, or taking it out, only means
+  more is reported, and is not asked about; nor is a one-off
+  `RANWHAT_HOME=/tmp/x ranwhat watch`, which changes that run alone. A
+  state folder set with `RANWHAT_HOME` to a path without the word ranwhat in
+  it is recognised in a file tool's path, and not in a shell command.
 - Each check takes about a fifth of a second. The reason it gives Claude
   Code names the rule, never the value that tripped it.
 
@@ -583,6 +598,13 @@ prints a warning saying why it shouldn't.
 
 Reports are written mode `600` and never through a symlink: a report maps an
 agent's entire authority surface, which is useful to somebody other than you.
+
+ranwhat keeps two secrets of its own, each mode `600`: its account token,
+`~/.ranwhat/token`, and `~/.ranwhat/known/key`, the key the secrets index
+and the values `clean` was told to keep are hashed under. Whoever holds the
+key can write `kept.json` to keep any value out of every report. `watch`
+rates an agent's read of either as credential material accessed, critical,
+as it rates a read of `~/.aws/credentials`, and the hook asks before one.
 
 ## What goes online
 

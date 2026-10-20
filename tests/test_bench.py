@@ -55,8 +55,9 @@ DECOYS = {"decoy." + n for n in (
 RISKY = {"risky." + n for n in (
     "rm-rf-home git-force-push git-reset-hard npm-publish curl-pipe-sh "
     "chmod-777 s3-rm-recursive drop-table docker-prune-volumes "
-    "imds-credentials crontab-install hook-uninstall agent-no-prompts read-env "
-    "read-aws-credentials read-ssh-key read-ssh-key-tool stripe-payout "
+    "imds-credentials crontab-install hook-uninstall agent-no-prompts "
+    "ignore-file-append read-env read-aws-credentials read-ssh-key "
+    "read-ssh-key-tool read-ranwhat-key stripe-payout "
     "history-clear upload-env secret-in-header secret-in-export "
     "password-on-command-line").split()}
 BENIGN = {"benign." + n for n in (
@@ -64,7 +65,7 @@ BENIGN = {"benign." + n for n in (
     "echo-quoted-rm grep-for-force-push rm-node-modules rm-tmp-scratch "
     "chmod-plus-x chmod-755 curl-jq force-with-lease git-rm-cached "
     "cat-env-example docker-ps cat-public-key ssh-with-key read-readme "
-    "write-script").split()}
+    "cat-ranwhat-ignore ranwhat-ignore-list write-script").split()}
 GAPS = {"gap." + n for n in (
     "download-then-run env-grep-token docker-plain-prune "
     "git-push-plus-refspec rsync-delete python-rmtree python-imds "
@@ -249,7 +250,7 @@ class Scoring(_Bench):
         self.assertEqual([(g["id"], g["passed"], g["total"])
                           for g in result.groups()],
                          [("secrets", 12, 12), ("decoys", 9, 9),
-                          ("risky", 23, 23), ("benign", 22, 22)])
+                          ("risky", 25, 25), ("benign", 24, 24)])
 
     def test_every_must_case_passes_with_two_other_seeds(self):
         for seed in (7, 4242):
@@ -279,7 +280,7 @@ class Scoring(_Bench):
         ids = [c[0] for c in bench.build().listing()]
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(set(ids), SECRETS | DECOYS | RISKY | BENIGN)
-        self.assertEqual(len(ids), 66)
+        self.assertEqual(len(ids), 70)
         self.assertEqual(set(g.id for g in bench.build().gaps), GAPS)
 
     def test_every_risky_case_names_a_real_rule_and_floor(self):
@@ -304,7 +305,7 @@ class Gaps(_Bench):
             self.assertIn(g["kind"], ("miss", "false_alarm"))
             self.assertIn(g["state"], ("missed", "caught", "quiet", "flagged"))
             self.assertTrue(g["why"].endswith("."), g["id"])
-        self.assertEqual(sum(g["total"] for g in result.groups()), 66)
+        self.assertEqual(sum(g["total"] for g in result.groups()), 70)
         self.assertFalse([c for c in result.cases if c["id"].startswith("gap.")])
         text = bench.render(result)
         self.assertIn("Not counted", text)
@@ -337,7 +338,7 @@ class Gaps(_Bench):
         self.assertTrue(doc["passed"])
         states = dict((g["id"], g["state"]) for g in doc["gaps"])
         self.assertEqual(states["gap.env-grep-token"], "caught")
-        self.assertEqual([g["total"] for g in doc["groups"]], [12, 9, 23, 22])
+        self.assertEqual([g["total"] for g in doc["groups"]], [12, 9, 25, 24])
         with mock.patch.object(watch, "evaluate", evaluate):
             rc, out, _ = self.run_cli("bench")
         self.assertIn("now caught", out)
@@ -562,7 +563,7 @@ class Failing(_Bench):
         self.assertEqual([(g["id"], g["passed"], g["total"])
                           for g in doc["groups"]],
                          [("secrets", 0, 12), ("decoys", 9, 9),
-                          ("risky", 0, 23), ("benign", 22, 22)])
+                          ("risky", 0, 25), ("benign", 24, 24)])
         self.assertEqual(rc_text, cli.FAIL_STATUS)
         self.assertIn("FAIL", text)
         self.assertIn("not met", err)
