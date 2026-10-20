@@ -1049,7 +1049,9 @@ class GuidesHangTogether(unittest.TestCase):
 # Number words, as the site writes counts ("Nine rules", "twelve providers").
 WORDS = dict(enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve "
-    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty"
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty "
+    "twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six "
+    "twenty-seven twenty-eight twenty-nine thirty"
     .split()))
 
 

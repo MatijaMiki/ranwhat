@@ -1,7 +1,7 @@
 # ranwhat
 
 **A flight recorder for AI agents, and a scanner for the authority they hold.**
-AI coding agent security for Claude Code and nineteen other coding agents, run
+AI coding agent security for Claude Code and twenty-nine other coding agents, run
 on your own machine.
 No account, no telemetry, no dependencies.
 
@@ -133,22 +133,32 @@ machine is skipped.
 | Claude Code | `~/.claude/projects/*/*.jsonl` and each session's `subagents/**/agent-*.jsonl`, or the same under `$CLAUDE_CONFIG_DIR/projects` when set | JSONL |
 | Codex (CLI, IDE extension, desktop app) | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` and `archived_sessions/` (`$CODEX_HOME`); `history.jsonl`, `shell_snapshots/` and its SQLite thread index are searched for secrets | JSONL; SQLite read only; `.jsonl.zst` read only, on Python 3.14 or with the `zstd` command |
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.jsonl` and older `session-*.json` (`$GEMINI_CLI_HOME`) | JSONL, JSON |
+| Antigravity (`agy`, the app and the IDE) | `~/.gemini/antigravity-cli/brain/<conversation>/.system_generated/logs/transcript_full.jsonl`, and the same under `~/.gemini/antigravity` and `~/.gemini/antigravity-ide` | JSONL |
 | GitHub Copilot CLI | `~/.copilot/session-state/<session>/events.jsonl` (`$COPILOT_HOME`) | JSONL |
+| GitHub Copilot in VS Code | `<editor>/User/workspaceStorage/<workspace>/chatSessions/<session>.jsonl` and `globalStorage/emptyWindowChatSessions/` (`$VSCODE_PORTABLE`, `$VSCODE_APPDATA`) | JSONL, JSON |
 | Cursor (editor and `cursor-agent`) | the editor's `Cursor/User/globalStorage/state.vscdb` (under `~/Library/Application Support`, `%APPDATA%` or `~/.config`), and `~/.cursor/chats/*/*/store.db` | SQLite, read only |
 | Windsurf | `~/.windsurf/transcripts/*.jsonl`, which Windsurf writes when its `post_cascade_response_with_transcript` hook is on; Cascade's own history (`~/.codeium/windsurf/cascade/*.pb`) is encrypted, so it is counted, not read | JSONL |
 | Cline | `<editor>/User/globalStorage/saoudrizwan.claude-dev/tasks/<task>/`, and `~/.cline/data` (`$CLINE_DATA_DIR`) | JSON |
 | Roo Code | `<editor>/User/globalStorage/rooveterinaryinc.roo-cline/tasks/<task>/` | JSON, text |
+| Kilo Code (CLI and extensions) | `~/.local/share/kilo/kilo.db` and the older `storage/` JSON files (`$XDG_DATA_HOME/kilo`, `$KILO_DB`) | SQLite read only; JSON |
 | OpenCode | `~/.local/share/opencode/opencode.db` and the older `storage/` JSON files (`$XDG_DATA_HOME/opencode`, `$OPENCODE_DB`) | SQLite read only; JSON |
 | Continue (IDE extensions and `cn`) | `~/.continue/sessions/<session>.json` (`$CONTINUE_GLOBAL_DIR`) | JSON |
 | Aider | `.aider.chat.history.md` and `.aider.input.history` in the repository you run ranwhat in, and in your home folder (`$AIDER_CHAT_HISTORY_FILE`) | Text |
 | Goose (CLI and desktop) | `~/.local/share/goose/sessions/sessions.db` and older `*.jsonl` there (`$GOOSE_PATH_ROOT`; `%APPDATA%\Block\goose\data` on Windows) | SQLite read only; JSONL |
+| Zed | `~/.local/share/zed/threads/threads.db` (`$XDG_DATA_HOME/zed`) | SQLite, read only; zstd-compressed threads need Python 3.14 or the `zstd` command |
+| Warp | `~/.local/state/warp-terminal/warp.sqlite` (`$XDG_STATE_HOME`) | SQLite, read only |
+| Amazon Q (IDE plugins and `q chat`) | `~/.aws/amazonq/history/chat-history-*.json`, and the CLI's `data.sqlite3` under `~/.local/share/amazon-q` (`$XDG_DATA_HOME`) | JSON, SQLite; both read only |
 | Qwen Code | `~/.qwen/projects/<project>/chats/*.jsonl` and older `tmp/<hash>/chats/session-*.json` (`$QWEN_RUNTIME_DIR`, `$QWEN_HOME`) | JSONL, JSON |
+| CodeBuddy | `~/.codebuddy/projects/<project>/<session>.jsonl` (`$CODEBUDDY_CONFIG_DIR`) | JSONL |
 | Grok Build | `~/.grok/sessions/<folder>/<session>/updates.jsonl` (`$GROK_HOME`) | JSONL |
 | Droid | `~/.factory/sessions/*.jsonl`, and `-<cwd>/*.jsonl` and `btw/*.jsonl` below it (`$FACTORY_HOME_OVERRIDE`) | JSONL |
 | Kimi Code | `~/.kimi-code/sessions/<folder>/<session>/agents/*/wire.jsonl` (`$KIMI_CODE_HOME`) | JSONL |
 | Kimi CLI | `~/.kimi/sessions/<folder>/<session>/wire.jsonl` and `context*.jsonl` (`$KIMI_SHARE_DIR`) | JSONL |
 | Pi | `~/.pi/agent/sessions/--<cwd>--/*.jsonl` (`$PI_CODING_AGENT_DIR`) | JSONL |
+| Oh My Pi | `~/.omp/agent/sessions/<project>/*.jsonl` (`$PI_CODING_AGENT_DIR`, `$PI_CONFIG_DIR`, `$XDG_DATA_HOME/omp`) | JSONL |
 | Muse Code | `~/.local/share/muse/sessions/YYYY/MM/DD/<session>/session.jsonl` (`$XDG_DATA_HOME/muse`) | JSONL |
+| Mistral Vibe | `~/.vibe/logs/session/unified/<session>/` and the older `session_*/messages.jsonl` (`$VIBE_HOME`) | JSON, JSONL; unified sessions read only |
+| DeepSeek Harness (`dsh`) | `~/.dsh/sessions/<project>/<session>/session.jsonl.zstd` (`$DSH_HOME`) | JSONL; compressed read only, on Python 3.14 or with the `zstd` command |
 | OpenClaw | `$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite` | SQLite, read only |
 
 Meta Muse runs in Meta's cloud and keeps nothing on your machine, so there
@@ -156,6 +166,18 @@ is nothing to read; Muse Code, Meta's coding CLI, is supported.
 Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
 machine; Grok Build, xAI's coding CLI, is supported. The current Amp keeps
 its threads on ampcode.com.
+
+Antigravity, GitHub Copilot in VS Code, Kilo Code, Zed, Warp, Amazon Q,
+CodeBuddy, Oh My Pi, Mistral Vibe and DeepSeek Harness were written from each
+agent's own source code (and its documentation where it has any), not from a
+long-lived install: only Mistral Vibe and Antigravity's `agy` CLI were also
+run, and none of the ten publishes its history format, so a release of the
+agent can change it. Not checked on a real machine: Antigravity's app and
+IDE folders and its Windows path, the Preview folders of Warp, VS Code
+forks other than Code, and Flatpak Zed. A task that Kilo Code imported from
+Roo Code is read under both, so it can be listed twice. Zed's compressed
+threads and DeepSeek Harness's sessions need Python 3.14 or the `zstd`
+command to be read; without either, `ranwhat sources` counts them as unread.
 
 Sixteen rules: credential access, secret-shaped strings in tool calls, package
 publishing, cloud resource changes, financial API calls, log tampering,

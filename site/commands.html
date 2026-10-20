@@ -248,7 +248,7 @@
     <div>
       <h2>sources: every agent it reads, and where it looked.</h2>
       <p class="lede">
-        Twenty agents, each from where it keeps its history. <span class="icode">sources</span>
+        Thirty agents, each from where it keeps its history. <span class="icode">sources</span>
         says which it found on this machine, the folders it checked, and whether
         <span class="icode">clean</span> can mask secrets there or only read them.
       </p>
@@ -277,8 +277,8 @@
         <span class="icode">--path ID=PATH</span> reads one from somewhere else, a backup or a
         copy from another machine. The <a href="/watch">watch page</a> lists every agent.
         On one machine, <span class="icode">sources</span> also shows which of
-        those twenty agents have run here, going by the history each one left.
-        It does not see an agent ranwhat does not read, Kilo Code among them.
+        those thirty agents have run here, going by the history each one left.
+        It does not see an agent ranwhat does not read.
       </p>
       <p class="flaglist">Flags: <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
     </div>
@@ -663,7 +663,7 @@
               <td data-label="What it does">Draw the made-up secrets from this seed, a whole number from 0, so a run can be repeated. 2026 by default. Another seed gives other values and the same expectations.</td></tr>
           <tr><td><code id="flag-source">--source ID</code></td>
               <td data-label="Commands">check, watch, clean, ignore,&nbsp;sources</td>
-              <td data-label="What it does">Read only this agent, and repeat it for more; every agent by default. IDs: <span class="icode">claude-code</span>, <span class="icode">codex</span>, <span class="icode">gemini</span>, <span class="icode">copilot-cli</span>, <span class="icode">cursor</span>, <span class="icode">windsurf</span>, <span class="icode">cline</span>, <span class="icode">roo</span>, <span class="icode">opencode</span>, <span class="icode">continue</span>, <span class="icode">aider</span>, <span class="icode">goose</span>, <span class="icode">qwen</span>, <span class="icode">grok</span>, <span class="icode">droid</span>, <span class="icode">kimi-code</span>, <span class="icode">kimi</span>, <span class="icode">pi</span>, <span class="icode">muse-code</span>, <span class="icode">openclaw</span>.</td></tr>
+              <td data-label="What it does">Read only this agent, and repeat it for more; every agent by default. IDs: <span class="icode">claude-code</span>, <span class="icode">codex</span>, <span class="icode">gemini</span>, <span class="icode">antigravity</span>, <span class="icode">copilot-cli</span>, <span class="icode">vscode-copilot</span>, <span class="icode">cursor</span>, <span class="icode">windsurf</span>, <span class="icode">cline</span>, <span class="icode">roo</span>, <span class="icode">kilo</span>, <span class="icode">opencode</span>, <span class="icode">continue</span>, <span class="icode">aider</span>, <span class="icode">goose</span>, <span class="icode">zed</span>, <span class="icode">warp</span>, <span class="icode">amazon-q</span>, <span class="icode">qwen</span>, <span class="icode">codebuddy</span>, <span class="icode">grok</span>, <span class="icode">droid</span>, <span class="icode">kimi-code</span>, <span class="icode">kimi</span>, <span class="icode">pi</span>, <span class="icode">omp</span>, <span class="icode">muse-code</span>, <span class="icode">mistral-vibe</span>, <span class="icode">dsh</span>, <span class="icode">openclaw</span>.</td></tr>
           <tr><td><code id="flag-path">--path ID=PATH</code></td>
               <td data-label="Commands">check, watch, clean, ignore,&nbsp;sources</td>
               <td data-label="What it does">Read this agent's history from PATH instead of its default place, one per agent. <span class="icode">sources</span> says what each PATH is.</td></tr>

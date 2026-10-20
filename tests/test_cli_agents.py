@@ -482,7 +482,7 @@ class Flags(_Cli):
         return " ".join(err.split())
 
     def test_the_source_choices_are_the_registry_ids(self):
-        said = self.argparse_error("watch", "--source", "zed")
+        said = self.argparse_error("watch", "--source", "crush")
         listed = said.split("choose from ")[1].split(")")[0]
         self.assertEqual([c.strip(" '") for c in listed.split(",")],
                          list(sources.ids()))
@@ -505,8 +505,8 @@ class Flags(_Cli):
                     command, "--source", "meta-muse"))
 
     def test_path_for_an_agent_ranwhat_does_not_know_is_an_error(self):
-        said = self.argparse_error("watch", "--path", "zed=" + self.tmp)
-        self.assertIn("no agent 'zed'", said)
+        said = self.argparse_error("watch", "--path", "crush=" + self.tmp)
+        self.assertIn("no agent 'crush'", said)
         self.assertIn("codex", said)
 
     def test_path_takes_an_id_and_a_path(self):
@@ -1050,6 +1050,10 @@ class AbsentAgentsCostAStatOrTwo(_Cli):
                     # also looks at the current directory's git root: one
                     # stat of each folder on the way up to it.
                     limit += len(os.path.abspath(os.getcwd()).split(os.sep))
+                if source.id == "vscode-copilot":
+                    # One stat for each editor's User folder: VS Code and
+                    # the five forks _paths probes.
+                    limit = 6
                 self.assertLessEqual(n, limit)
 
     def test_a_whole_run(self):

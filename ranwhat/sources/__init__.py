@@ -23,10 +23,12 @@ __all__ = ["ADAPTERS", "CLOUD_ONLY", "NEXT", "REGISTRY", "Location",
            "ids", "register", "sources", "unregister"]
 
 # (module, class) under ranwhat.sources, in registry order (design 4.2):
-#   Claude Code, Codex, Gemini CLI, Copilot CLI, VS Code Copilot, Cursor,
-#   Windsurf, Cline, Roo Code, Kilo Code, OpenCode, Continue, Aider, Goose,
-#   Zed, Qwen Code, Grok Build, Droid, Amp, Crush, Kimi Code, Kimi CLI, Pi, Muse Code,
-#   Mistral Vibe, Zoo Code, cecli, OpenClaw, grok-dev.
+#   Claude Code, Codex, Gemini CLI, Antigravity, Copilot CLI, VS Code
+#   Copilot, Cursor, Windsurf, Cline, Roo Code, Kilo Code, OpenCode,
+#   Continue, Aider, Goose, Zed, Warp, Amazon Q, Qwen Code, CodeBuddy,
+#   Grok Build, Droid, Amp, Crush, Kimi Code, Kimi CLI, Pi, Oh My Pi,
+#   Muse Code, Mistral Vibe, DeepSeek Harness, Zoo Code, cecli, OpenClaw,
+#   grok-dev.
 # Only the adapters that exist are listed; a later one goes in at its place
 # in that order, not at the end. OpenClaw stays near the end on purpose
 # (decision 7): supported, not promoted.
@@ -34,22 +36,32 @@ ADAPTERS = (
     ("claude_code", "ClaudeCodeSource"),
     ("codex", "CodexSource"),
     ("gemini", "GeminiSource"),
+    ("antigravity", "AntigravitySource"),
     ("copilot_cli", "CopilotCliSource"),
+    ("vscode_copilot", "VSCodeCopilotSource"),
     ("cursor", "CursorSource"),
     ("windsurf", "WindsurfSource"),
     ("cline", "ClineSource"),
     ("roo", "RooSource"),
+    ("kilo", "KiloSource"),
     ("opencode", "OpenCodeSource"),
     ("continue_dev", "ContinueSource"),
     ("aider", "AiderSource"),
     ("goose", "GooseSource"),
+    ("zed", "ZedSource"),
+    ("warp", "WarpSource"),
+    ("amazon_q", "AmazonQSource"),
     ("qwen", "QwenSource"),
+    ("codebuddy", "CodeBuddySource"),
     ("grok", "GrokBuildSource"),
     ("droid", "DroidSource"),
     ("kimi_code", "KimiCodeSource"),
     ("kimi", "KimiSource"),
     ("pi", "PiSource"),
+    ("omp", "OhMyPiSource"),
     ("muse_code", "MuseCodeSource"),
+    ("mistral_vibe", "MistralVibeSource"),
+    ("dsh", "DshSource"),
     ("openclaw", "OpenClawSource"),
 )
 

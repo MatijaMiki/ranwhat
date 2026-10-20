@@ -404,7 +404,7 @@ class ZedSource(Source):
                 return _BAD
         try:
             doc = json.loads(data.decode("utf-8", "surrogateescape")
-                             .lstrip("﻿"))
+                             .lstrip("\ufeff"))
         except (ValueError, RecursionError):
             if tally:
                 self.count("unparsed")

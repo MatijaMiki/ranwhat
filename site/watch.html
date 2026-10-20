@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ranwhat watch: an AI agent audit trail for Claude Code</title>
-<meta name="description" content="Sixteen rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta name="description" content="Sixteen rules over the audit trail Claude Code, Codex, Gemini CLI and twenty-seven more coding agents keep: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="canonical" href="https://ranwhat.com/watch">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -19,7 +19,7 @@
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/watch">
 <meta property="og:title" content="ranwhat watch: an AI agent audit trail for Claude Code">
-<meta property="og:description" content="Sixteen rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta property="og:description" content="Sixteen rules over the audit trail Claude Code, Codex, Gemini CLI and twenty-seven more coding agents keep: credential reads, rm -rf, force pushes, npm publish.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -28,7 +28,7 @@
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta name="twitter:title" content="ranwhat watch: an AI agent audit trail for Claude Code">
-<meta name="twitter:description" content="Sixteen rules over the audit trail Claude Code, Codex, Gemini CLI and seventeen more coding agents keep: credential reads, rm -rf, force pushes, npm publish.">
+<meta name="twitter:description" content="Sixteen rules over the audit trail Claude Code, Codex, Gemini CLI and twenty-seven more coding agents keep: credential reads, rm -rf, force pushes, npm publish.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
@@ -95,7 +95,7 @@
     <p class="eyebrow">ranwhat watch</p>
     <h1>See the risky commands Claude Code already ran.</h1>
     <p class="lede">
-      ranwhat watch reads what Claude Code and nineteen other coding agents
+      ranwhat watch reads what Claude Code and twenty-nine other coding agents
       have already written to disk, the audit trail they keep anyway, and
       reports the sixteen kinds of action worth a second look. It changes
       nothing.
@@ -250,9 +250,17 @@
               <td data-label="Location"><code>~/.gemini/tmp/&lt;project&gt;/chats/</code> (<code>$GEMINI_CLI_HOME</code>)</td>
               <td data-label="Format">JSONL, JSON</td>
               <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Antigravity</strong></td>
+              <td data-label="Location"><code>~/.gemini/antigravity-cli/brain/</code>, and the same under <code>antigravity</code> and <code>antigravity-ide</code></td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>GitHub Copilot CLI</strong></td>
               <td data-label="Location"><code>~/.copilot/session-state/&lt;session&gt;/events.jsonl</code> (<code>$COPILOT_HOME</code>)</td>
               <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>GitHub Copilot in VS Code</strong></td>
+              <td data-label="Location"><code>&lt;editor&gt;/User/workspaceStorage/&lt;workspace&gt;/chatSessions/</code> and <code>globalStorage/emptyWindowChatSessions/</code> (<code>$VSCODE_PORTABLE</code>, <code>$VSCODE_APPDATA</code>)</td>
+              <td data-label="Format">JSONL, JSON</td>
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Cursor</strong></td>
               <td data-label="Location">The editor's <code>Cursor/User/globalStorage/state.vscdb</code>, and <code>~/.cursor/chats/</code> for <code>cursor-agent</code></td>
@@ -270,6 +278,10 @@
               <td data-label="Location">The editor's <code>globalStorage/rooveterinaryinc.roo-cline/tasks/</code></td>
               <td data-label="Format">JSON, text</td>
               <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Kilo Code</strong></td>
+              <td data-label="Location"><code>~/.local/share/kilo/kilo.db</code> and the older <code>storage/</code> JSON files (<code>$XDG_DATA_HOME/kilo</code>, <code>$KILO_DB</code>)</td>
+              <td data-label="Format">SQLite, read only; JSON</td>
+              <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>OpenCode</strong></td>
               <td data-label="Location"><code>~/.local/share/opencode/</code> (<code>$XDG_DATA_HOME/opencode</code>, <code>$OPENCODE_DB</code>)</td>
               <td data-label="Format">SQLite, read only; older JSON files</td>
@@ -286,9 +298,25 @@
               <td data-label="Location"><code>~/.local/share/goose/sessions/</code> (<code>$GOOSE_PATH_ROOT</code>)</td>
               <td data-label="Format">SQLite, read only; older JSONL</td>
               <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Zed</strong></td>
+              <td data-label="Location"><code>~/.local/share/zed/threads/threads.db</code> (<code>$XDG_DATA_HOME/zed</code>)</td>
+              <td data-label="Format">SQLite, read only</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Warp</strong></td>
+              <td data-label="Location"><code>~/.local/state/warp-terminal/warp.sqlite</code> (<code>$XDG_STATE_HOME</code>)</td>
+              <td data-label="Format">SQLite</td>
+              <td data-label="Status">Shipped, secrets read-only</td></tr>
+          <tr><td><strong>Amazon Q</strong></td>
+              <td data-label="Location"><code>~/.aws/amazonq/history/chat-history-*.json</code> for the IDE plugins, and the CLI's <code>data.sqlite3</code> under <code>~/.local/share/amazon-q</code> (<code>$XDG_DATA_HOME</code>)</td>
+              <td data-label="Format">JSON, read only; SQLite, read only</td>
+              <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Qwen Code</strong></td>
               <td data-label="Location"><code>~/.qwen/projects/&lt;project&gt;/chats/</code>, and older <code>tmp/&lt;hash&gt;/chats/</code> (<code>$QWEN_RUNTIME_DIR</code>, <code>$QWEN_HOME</code>)</td>
               <td data-label="Format">JSONL, JSON</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>CodeBuddy</strong></td>
+              <td data-label="Location"><code>~/.codebuddy/projects/</code> (<code>$CODEBUDDY_CONFIG_DIR</code>)</td>
+              <td data-label="Format">JSONL</td>
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Grok Build</strong></td>
               <td data-label="Location"><code>~/.grok/sessions/&lt;folder&gt;/&lt;session&gt;/updates.jsonl</code> (<code>$GROK_HOME</code>)</td>
@@ -310,9 +338,21 @@
               <td data-label="Location"><code>~/.pi/agent/sessions/</code> (<code>$PI_CODING_AGENT_DIR</code>)</td>
               <td data-label="Format">JSONL</td>
               <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Oh My Pi</strong></td>
+              <td data-label="Location"><code>~/.omp/agent/sessions/</code> (<code>$PI_CODING_AGENT_DIR</code>, <code>$PI_CONFIG_DIR</code>, <code>$XDG_DATA_HOME/omp</code>)</td>
+              <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>Muse Code</strong></td>
               <td data-label="Location"><code>~/.local/share/muse/sessions/</code> (<code>$XDG_DATA_HOME/muse</code>)</td>
               <td data-label="Format">JSONL</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>Mistral Vibe</strong></td>
+              <td data-label="Location"><code>~/.vibe/logs/session/</code> (<code>$VIBE_HOME</code>)</td>
+              <td data-label="Format">JSON, JSONL; unified sessions read only</td>
+              <td data-label="Status">Shipped</td></tr>
+          <tr><td><strong>DeepSeek Harness</strong></td>
+              <td data-label="Location"><code>~/.dsh/sessions/</code> (<code>$DSH_HOME</code>)</td>
+              <td data-label="Format">JSONL, compressed ones read only</td>
               <td data-label="Status">Shipped</td></tr>
           <tr><td><strong>OpenClaw</strong></td>
               <td data-label="Location"><code>$OPENCLAW_STATE_DIR/agents/*/agent/openclaw-agent.sqlite</code> (default <code>~/.openclaw</code>)</td>
@@ -342,9 +382,12 @@
         and what it found.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
-        Databases and compressed files are only ever read. Cursor and
-        OpenClaw keep their history in SQLite, so <a href="/clean">clean</a>
-        finds their secrets but cannot mask them there. Windsurf keeps
+        Databases and compressed files are only ever read. Cursor,
+        Warp and OpenClaw keep their history in SQLite, so <a href="/clean">clean</a>
+        finds their secrets but cannot mask them there; the same goes for the
+        databases Kilo Code, OpenCode, Goose, Zed and Amazon Q's CLI keep, and
+        for Mistral Vibe's unified sessions and DeepSeek Harness's compressed
+        ones. Windsurf keeps
         Cascade's own history encrypted, so ranwhat counts those files and
         reads the plaintext transcripts Windsurf's hook writes instead. Not read yet: the large tool outputs
         Claude Code stores in

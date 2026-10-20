@@ -511,12 +511,12 @@ class Discovery(VibeCase):
         self.session().write([REAL])
         for sub in ("active", "plugins", "unified/.hidden"):
             os.makedirs(os.path.join(self.save, *sub.split("/")), exist_ok=True)
-        with open(os.path.join(self.save, "active", "x.lock"), "w") as fh:
+        with open(os.path.join(self.save, "active", "x.lock"), "w", encoding="utf-8") as fh:
             fh.write("1")
         os.makedirs(os.path.join(self.save, "unified", "bad name!"))
         os.makedirs(os.path.join(self.save, "random-dir"))
         with open(os.path.join(self.save, "unified", ".session-index.json"),
-                  "w") as fh:
+                  "w", encoding="utf-8") as fh:
             fh.write("{}")
         stores = self.stores()
         self.assertEqual([x.role for x in stores if x.role == "transcript"],
@@ -915,14 +915,14 @@ class UnifiedJournal(VibeCase):
         s = self.session()
         path = s.write([bash("a", "ls")])
         gdir = os.path.join(s.root, "generations", GEN)
-        with open(os.path.join(gdir, "manifest.json")) as fh:
+        with open(os.path.join(gdir, "manifest.json"), encoding="utf-8") as fh:
             manifest = json.load(fh)
         manifest["recovery_journal_segment"]["path"] = "../../../secret.jsonl"
         manifest["projection_state"]["path"] = "../../CURRENT"
         outside = os.path.join(s.root, "..", "secret.jsonl")
-        with open(outside, "w") as fh:
+        with open(outside, "w", encoding="utf-8") as fh:
             fh.write(delta(30, [op_append(bash("x", "evil"))]) + "\n")
-        with open(os.path.join(gdir, "manifest.json"), "w") as fh:
+        with open(os.path.join(gdir, "manifest.json"), "w", encoding="utf-8") as fh:
             json.dump(manifest, fh)
         self.assertEqual([c.command for c in self.calls(path)], ["ls"])
 
@@ -1031,7 +1031,7 @@ class UnifiedDamaged(VibeCase):
         path = s.write([bash("a", "ls")])
         chunk = os.path.join(s.root, "chunks", os.listdir(
             os.path.join(s.root, "chunks"))[0])
-        with open(chunk, "w") as fh:
+        with open(chunk, "w", encoding="utf-8") as fh:
             fh.write('{"not": "a list"}')
         self.assertEqual(self._read(path)[0], [])
         self.assertEqual(self.src.counts["unreadable_stores"], 1)
@@ -1044,10 +1044,10 @@ class UnifiedDamaged(VibeCase):
         s = self.session()
         path = s.write([bash("a", "ls")])
         gdir = os.path.join(s.root, "generations", GEN)
-        with open(os.path.join(gdir, "manifest.json")) as fh:
+        with open(os.path.join(gdir, "manifest.json"), encoding="utf-8") as fh:
             manifest = json.load(fh)
         manifest["projection_state"]["chunks"] = ["../../meta"]
-        with open(os.path.join(gdir, "manifest.json"), "w") as fh:
+        with open(os.path.join(gdir, "manifest.json"), "w", encoding="utf-8") as fh:
             json.dump(manifest, fh)
         calls, _w = self._read(path)
         self.assertEqual(calls, [])
@@ -1071,10 +1071,10 @@ class UnifiedDamaged(VibeCase):
         path = s.write([], chunked=False)
         s.put("chunks/%s.json" % digest, body)
         gdir = os.path.join(s.root, "generations", GEN)
-        with open(os.path.join(gdir, "manifest.json")) as fh:
+        with open(os.path.join(gdir, "manifest.json"), encoding="utf-8") as fh:
             manifest = json.load(fh)
         manifest["projection_state"]["chunks"] = [digest]
-        with open(os.path.join(gdir, "manifest.json"), "w") as fh:
+        with open(os.path.join(gdir, "manifest.json"), "w", encoding="utf-8") as fh:
             json.dump(manifest, fh)
         line = delta(30, [op_append(bash("j", "echo ok"))]).encode("utf-8")
         s.put("journal/%016d.jsonl" % FIRST,
@@ -1104,7 +1104,7 @@ class UnifiedDamaged(VibeCase):
         s = self.session()
         path = s.write([bash("a", "ls")])
         gdir = os.path.join(s.root, "generations", GEN)
-        with open(os.path.join(gdir, "projection-state.json"), "w") as fh:
+        with open(os.path.join(gdir, "projection-state.json"), "w", encoding="utf-8") as fh:
             fh.write("[" * 100000 + "]" * 100000)
         calls, _w = self._read(path)
         self.assertEqual(calls, [])
@@ -1353,11 +1353,11 @@ class ReviewFindings(VibeCase):
                         bash("b", "cat .env", output="K=" + SECRET)])
         for name in os.listdir(os.path.join(s.root, "chunks")):
             cpath = os.path.join(s.root, "chunks", name)
-            with open(cpath) as fh:
+            with open(cpath, encoding="utf-8") as fh:
                 data = json.load(fh)
             data[-1]["id"] = [1]
             data[0]["id"] = {"x": 1}
-            with open(cpath, "w") as fh:
+            with open(cpath, "w", encoding="utf-8") as fh:
                 json.dump(data, fh)
         found = _found(self.src, [self.store(path)])
         self.assertIn(SECRET, found)
@@ -1365,11 +1365,11 @@ class ReviewFindings(VibeCase):
     def test_typed_prompt_history_and_index_are_searched(self):
         self.session().write([bash("a", "echo", output="x")])
         hist = os.path.join(self.vibe_home, "vibehistory")
-        with open(hist, "w") as fh:
+        with open(hist, "w", encoding="utf-8") as fh:
             fh.write("hello\nmy key " + SECRET + "\n")
         os.utime(hist, (time.time() - 3600,) * 2)
         index = os.path.join(self.save, "unified", ".session-index.json")
-        with open(index, "w") as fh:
+        with open(index, "w", encoding="utf-8") as fh:
             json.dump({SID: {"preview": "k " + SECRET}}, fh)
         for override in (None, self.save, self.vibe_home):
             stores = self.stores(override)
@@ -1381,7 +1381,7 @@ class ReviewFindings(VibeCase):
         self.assertEqual(side[index].masking, "read-only")
         res = self.src.mask(side[hist], [SECRET])
         self.assertTrue(res.changed)
-        with open(hist) as fh:
+        with open(hist, encoding="utf-8") as fh:
             self.assertNotIn(SECRET, fh.read())
 
 
@@ -1452,7 +1452,7 @@ class Secrets(VibeCase):
                 tool_row("a", "bash", "K=" + SECRET)]
         path = self.legacy(rows)
         meta = os.path.join(os.path.dirname(path), "meta.json")
-        with open(meta, "w") as fh:
+        with open(meta, "w", encoding="utf-8") as fh:
             json.dump({"session_id": "s", "title": SECRET}, fh)
         found = _found(self.src, [s for s in self.stores()])
         self.assertEqual(found[SECRET]["count"], 4)
