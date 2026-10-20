@@ -276,16 +276,17 @@ def _keys(obj, names, path):
         raise Invalid(path, "type")
     for key in obj:
         if key not in names:
-            raise Invalid("%s/%s" % (path, key) if _FIELD.match("%s/%s" % (path, key)) else path,
-                          "unknown_key")
+            # The pointer names the containing object, never the key: a key
+            # name is request data, and the server does not echo it.
+            raise Invalid(path or "/", "unknown_key")
     for key in names:
         if key not in obj:
             raise Invalid("%s/%s" % (path, key), "missing")
 
 
 def _int(value, path, lo, hi):
-    if not _is_int(value):
-        raise Invalid(path, "type")
+    if not _is_int(value) or abs(value) > 9007199254740991:
+        raise Invalid(path, "type")     # Number.isSafeInteger, as the server has it
     if value < lo or value > hi:
         raise Invalid(path, "range")
 

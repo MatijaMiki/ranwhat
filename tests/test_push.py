@@ -297,10 +297,11 @@ class TheAllowListHere(unittest.TestCase):
         push.check(self.good(), now=NOW)
 
     def test_an_unknown_key_at_every_level(self):
-        for path, field in ((("",), "/hostname"), (("counts",), "/counts/hostname"),
-                            (("counts", "severity"), "/counts/severity/hostname"),
-                            (("actions", 0), "/actions/0/hostname"),
-                            (("actions", 0, "hits", 0), "/actions/0/hits/0/hostname")):
+        # The pointer is the containing object's: a key name is request data.
+        for path, field in ((("",), "/"), (("counts",), "/counts"),
+                            (("counts", "severity"), "/counts/severity"),
+                            (("actions", 0), "/actions/0"),
+                            (("actions", 0, "hits", 0), "/actions/0/hits/0")):
             doc = self.good()
             node = doc
             for step in path:
