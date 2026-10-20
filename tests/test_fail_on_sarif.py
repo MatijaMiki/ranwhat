@@ -180,6 +180,30 @@ class FailOn(_Base):
         self.assertEqual(rc, 2)
         self.assertIn("invalid choice", err)
 
+    def test_what_the_ignore_file_leaves_out_is_not_counted_and_is_said(self):
+        root = self.root(DELETE)
+        rc, out, _err = self.cmd("watch", root, "--json")
+        action, = json.loads(out)
+        home = os.environ["RANWHAT_HOME"]
+        os.makedirs(home, exist_ok=True)
+        with open(os.path.join(home, "ignore"), "w", encoding="utf-8") as fh:
+            fh.write(action["id"] + "\n")
+        for extra in ((), ("--json",)):
+            rc, _out, err = self.cmd("watch", root, "--fail-on", "high", *extra)
+            self.assertEqual(rc, 0, extra)
+            self.assertIn("Nothing listed is at or above high (--fail-on high); 1 at "
+                          "or above it is left out by", " ".join(err.split()))
+        rc, _out, err = self.cmd("watch", root, "--fail-on", "high", "--no-ignore")
+        self.assertEqual(rc, 3)
+        self.assertNotIn("left out", err)
+        # a new action fails the build, and the one left out is said
+        root = self.root(DELETE + [tool_use("git push --force origin main", 4)])
+        rc, _out, err = self.cmd("check", root, "--fail-on", "high")
+        self.assertEqual(rc, 3)
+        said = " ".join(err.split())
+        self.assertIn("1 finding at or above high (--fail-on high): exit status 3.", said)
+        self.assertIn("1 more finding at or above high is left out by", said)
+
     def test_at_least(self):
         self.assertTrue(sarif.at_least("critical", "medium"))
         self.assertTrue(sarif.at_least("high", "high"))
@@ -297,6 +321,32 @@ class Sarif(_Base):
             "runs"][0]["results"]
         self.assertEqual(result["properties"]["actionId"], "0123456789abcdef")
         self.assertIn("ranwhatAction/v2", result["partialFingerprints"])
+
+    def test_what_the_ignore_file_leaves_out_is_not_in_it(self):
+        rows = DELETE + [tool_use("git push --force origin main", 4)]
+        root = self.root(rows)
+        rc, out, _err = self.cmd("watch", root, "--json")
+        by_rule = {r["hits"][0]["rule"]: r["id"] for r in json.loads(out)}
+        home = os.environ["RANWHAT_HOME"]
+        os.makedirs(home, exist_ok=True)
+        with open(os.path.join(home, "ignore"), "w", encoding="utf-8") as fh:
+            fh.write("git.destructive\n")
+        rc, raw, doc = self.sarif("watch", rows)
+        run = doc["runs"][0]
+        self.assertEqual([r["ruleId"] for r in run["results"]], ["fs.destructive"])
+        self.assertEqual(run["properties"]["ignored"],
+                         {"actions": 1, "critical": 0, "acknowledged": 0})
+        result, = run["results"]
+        self.assertEqual(result["properties"]["actionId"], by_rule["fs.destructive"])
+        self.assertEqual(sorted(result["partialFingerprints"]),
+                         ["primaryLocationLineHash", "ranwhatAction/v1",
+                          "ranwhatAction/v2"])
+        self.assertNotIn("ignoredBy", result["properties"])
+        rc, raw, doc = self.sarif("watch", rows, "--no-ignore")
+        run = doc["runs"][0]
+        self.assertNotIn("properties", run)
+        marked = {r["ruleId"]: r["properties"].get("ignoredBy") for r in run["results"]}
+        self.assertEqual(marked, {"git.destructive": [1], "fs.destructive": None})
 
     def test_an_empty_history_writes_an_empty_log(self):
         empty = os.path.join(self.tmp, "empty")
@@ -578,16 +628,20 @@ class ActionSteps(_Base):
         here, (run, gate) = self.steps()
         work = os.path.join(self.tmp, "work")
         os.makedirs(work, exist_ok=True)
+        runner = os.path.join(self.tmp, "runner")
+        os.makedirs(runner, exist_ok=True)
         output = os.path.join(self.tmp, "github_output")
         env = dict(os.environ, GITHUB_OUTPUT=output, RANWHAT_ACTION_PATH=here,
                    RANWHAT_COMMAND="check", RANWHAT_FAIL_ON="high",
                    RANWHAT_DAYS="30", RANWHAT_SARIF="ranwhat.sarif",
-                   RANWHAT_ARGS="--source claude-code --root %s" % root)
+                   RANWHAT_ARGS="--source claude-code --root %s" % root,
+                   RUNNER_TEMP=runner, RANWHAT_IGNORE="", RANWHAT_IGNORE_REF="")
         env.update(inputs)
         open(output, "w", encoding="utf-8").close()
         done = subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=work,
                               env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, timeout=120)
+        self.said = done.stdout.decode("utf-8", "replace")
         with open(output, encoding="utf-8") as fh:
             outputs = dict(line.split("=", 1) for line in fh.read().split())
         status = outputs.get("exit-code")
@@ -627,6 +681,89 @@ class ActionSteps(_Base):
         self.assertEqual((outputs["exit-code"], gate), ("2", 0))
         _rc, outputs, gate, _work = self.act(empty, allow_empty="false")
         self.assertEqual((outputs["exit-code"], gate), ("2", 2))
+
+    def repo(self, base, head, tree):
+        """A repository whose .ranwhatignore is base in its first commit,
+        head in its second, and tree in the working tree: (path, base sha,
+        head sha)."""
+        repo = os.path.join(self.tmp, "repo")
+        os.makedirs(repo)
+
+        def git(*argv):
+            return subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com",
+                 "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"]
+                + list(argv), cwd=repo, check=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE).stdout.decode().strip()
+        git("init", "-q")
+        shas = []
+        for text in (base, head):
+            with open(os.path.join(repo, ".ranwhatignore"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+            git("add", ".ranwhatignore")
+            git("commit", "-q", "--allow-empty", "-m", "x")
+            shas.append(git("rev-parse", "HEAD"))
+        with open(os.path.join(repo, ".ranwhatignore"), "w", encoding="utf-8") as fh:
+            fh.write(tree)
+        return repo, shas[0], shas[1]
+
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_the_ignore_file_is_read_as_committed_at_the_base(self):
+        root = self.root(DELETE)
+        repo, base, head = self.repo("fs.destructive\n", "", "git.destructive\n")
+        inputs = dict(GITHUB_WORKSPACE=repo, GITHUB_SHA=head,
+                      RANWHAT_IGNORE=".ranwhatignore")
+        _rc, outputs, gate, _work = self.act(root, RANWHAT_IGNORE_REF=base, **inputs)
+        self.assertEqual((outputs["exit-code"], gate), ("0", 0), self.said)
+        self.assertIn("::warning::.ranwhatignore was changed after %s; ranwhat uses it "
+                      "as it was there" % base[:12], self.said)
+        # the head's copy, which leaves nothing out, at a push's own commit
+        _rc, outputs, gate, _work = self.act(root, RANWHAT_IGNORE_REF=head, **inputs)
+        self.assertEqual(outputs["exit-code"], "3", self.said)
+        # a ref that is no commit's falls back to the job's own
+        _rc, outputs, _gate, _work = self.act(root, RANWHAT_IGNORE_REF="0" * 40, **inputs)
+        self.assertEqual(outputs["exit-code"], "3", self.said)
+
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_a_ref_that_cannot_be_read_leaves_nothing_out(self):
+        root = self.root(DELETE)
+        repo, base, head = self.repo("fs.destructive\n", "fs.destructive\n",
+                                     "fs.destructive\n")
+        _rc, outputs, gate, _work = self.act(
+            root, GITHUB_WORKSPACE=repo, GITHUB_SHA=head,
+            RANWHAT_IGNORE=".ranwhatignore", RANWHAT_IGNORE_REF="f" * 40)
+        self.assertEqual((outputs["exit-code"], gate), ("3", 3), self.said)
+        self.assertIn("::warning::ranwhat could not read .ranwhatignore at ffffffffffff, "
+                      "so nothing is left out.", self.said)
+
+    def test_with_no_input_the_runners_own_file_is_never_read(self):
+        root = self.root(DELETE)
+        home = os.environ["RANWHAT_HOME"]
+        os.makedirs(home, exist_ok=True)
+        with open(os.path.join(home, "ignore"), "w", encoding="utf-8") as fh:
+            fh.write("fs.destructive\n")
+        self.assertEqual(self.cmd("watch", root, "--fail-on", "high")[0], 0)
+        _rc, outputs, gate, _work = self.act(root)
+        self.assertEqual((outputs["exit-code"], gate), ("3", 3), self.said)
+        # and args may name one, which wins
+        mine = os.path.join(self.tmp, "mine")
+        with open(mine, "w", encoding="utf-8") as fh:
+            fh.write("fs.destructive\n")
+        _rc, outputs, gate, _work = self.act(
+            root, RANWHAT_ARGS="--source claude-code --root %s --ignore %s" % (root, mine))
+        self.assertEqual((outputs["exit-code"], gate), ("0", 0), self.said)
+        # clean takes no ignore file at all
+        _rc, outputs, _gate, _work = self.act(root, RANWHAT_COMMAND="clean")
+        self.assertEqual(outputs["exit-code"], "0", self.said)
+
+    def test_a_path_outside_the_repository_is_refused(self):
+        root = self.root(DELETE)
+        for path in ("/etc/ranwhat", "a/../../b", "..", "-x"):
+            rc, outputs, _gate, _work = self.act(root, RANWHAT_IGNORE=path)
+            self.assertEqual(rc, 1, path)
+            self.assertNotIn("exit-code", outputs, path)
+            self.assertIn("::error::ignore-file must be a path inside the repository",
+                          self.said)
 
 
 if __name__ == "__main__":

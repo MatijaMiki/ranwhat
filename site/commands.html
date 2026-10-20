@@ -74,6 +74,7 @@
   <ul>
     <li><a class="cmdname" href="/commands#check">check</a></li>
     <li><a class="cmdname" href="/watch">watch</a></li>
+    <li><a class="cmdname" href="/commands#ignore">ignore</a></li>
     <li><a class="cmdname" href="/clean">clean</a></li>
     <li><a class="cmdname" href="/commands#sources">sources</a></li>
     <li><a class="cmdname" href="/commands#reach">reach</a></li>
@@ -99,10 +100,10 @@
     <p class="eyebrow">Commands</p>
     <h1>Every ranwhat command</h1>
     <p class="lede">
-      Sixteen commands in one tool. Only <span class="icode">login</span>,
+      Seventeen commands in one tool. Only <span class="icode">login</span>,
       <span class="icode">whoami</span> and <span class="icode">logout</span> work with
       an account, <span class="icode">update</span> needs a Plus token, and the other
-      twelve need neither.
+      thirteen need neither.
       Start with <span class="icode">check</span>: it reads what your agents ran and what they
       left on disk, and changes nothing.
     </p>
@@ -116,7 +117,7 @@
       <h2>A bare ranwhat lists them all.</h2>
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
-        page of their own. The other thirteen are below, and every flag is at the end.
+        page of their own. The other fourteen are below, and every flag is at the end.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -124,6 +125,7 @@
 
   <span class="c-b">check</span>    watch and clean in one pass, changing nothing
   <span class="c-b">watch</span>    what your agents already ran on this machine
+  <span class="c-b">ignore</span>   stop listing actions you expected; all: only new ones from now on
   <span class="c-b">clean</span>    credentials sitting in plaintext in agent transcripts
   <span class="c-b">sources</span>  every agent ranwhat reads, and where it looked
   <span class="c-b">reach</span>    MCP servers and credential files your agents can reach
@@ -180,14 +182,69 @@
         <a href="https://github.com/MatijaMiki/ranwhat#in-ci-the-github-action">GitHub Action</a>
         runs it with both.
       </p>
-      <p class="flaglist">Flags: <a href="#flag-days"><span class="icode">--days N</span></a>, <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-root"><span class="icode">--root PATH</span></a>, <a href="#flag-state-dir"><span class="icode">--state-dir PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>, <a href="#flag-fail-on"><span class="icode">--fail-on SEVERITY</span></a>, <a href="#flag-sarif"><span class="icode">--sarif PATH</span></a>.</p>
+      <p class="flaglist">Flags: <a href="#flag-days"><span class="icode">--days N</span></a>, <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-root"><span class="icode">--root PATH</span></a>, <a href="#flag-state-dir"><span class="icode">--state-dir PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>, <a href="#flag-fail-on"><span class="icode">--fail-on SEVERITY</span></a>, <a href="#flag-sarif"><span class="icode">--sarif PATH</span></a>, <a href="#flag-ignore"><span class="icode">--ignore PATH</span></a>, <a href="#flag-no-ignore"><span class="icode">--no-ignore</span></a>.</p>
     </div>
   </div>
 </section>
 
-<section class="mark-3" id="sources">
+<section class="mark-3" id="ignore">
   <div class="shell band split">
-    <div class="marginal">03 / sources</div>
+    <div class="marginal">03 / ignore</div>
+    <div>
+      <h2>ignore: stop listing what you expected.</h2>
+      <p class="lede">
+        Every action <a href="/watch">watch</a> and check list has an id, the 16
+        characters at the end of its line. <span class="icode">ignore ID</span> leaves that
+        action out of later reports, and <span class="icode">ignore all</span> leaves out
+        every action listed now, so later runs list only what is new.
+      </p>
+      <div class="term" aria-label="Leaving out one action, and every one like it">
+        <div class="term-bar"><span>ranwhat ignore</span></div>
+        <div class="term-body"><pre><span class="c-mut">$</span> ranwhat ignore 3fa9c2d81b7e4a06
+
+  Package or release published  (publish, critical)
+      2026-10-20 03:33  Claude Code
+<span class="c-mut">      npm publish
+      ran in ~/work/mylib</span>
+
+  Leave out of later reports:
+    1  this action only
+    2  `npm publish` run in ~/work/mylib or below it, until 2027-10-20
+    c  cancel
+  ranwhat&gt; 2
+  Added to ~/.ranwhat/ignore (line 14):
+      publish 'npm publish' in=~/work/mylib until=2027-10-20</pre></div>
+      </div>
+      <p class="cmdnote">
+        Both write <span class="icode">~/.ranwhat/ignore</span>, a plain-text file you can read
+        and edit, one entry a line: an action's id, or a rule with the command it
+        leaves out, word for word, where it ran (<span class="icode">in=</span>) and until
+        when (<span class="icode">until=</span>). A <span class="icode">*</span> stands for
+        any run of characters within one word. <span class="icode">ignore</span> alone lists
+        the file, and exits 3 when a line in it cannot be read;
+        <span class="icode">ignore -</span> reads the ids from <span class="icode">watch --json</span>
+        on stdin, so a cron job alerts on each new action once.
+      </p>
+      <p class="cmdnote">
+        Every report says how many actions the file left out, and by which line,
+        <span class="icode">--no-ignore</span> lists them all again, and
+        <span class="icode">--fail-on</span> counts only what is listed. A secret is never
+        left out: clean masks it, or keeps it. A critical action is left out only
+        by its id, or by an entry that names the program in full, with
+        <span class="icode">in=</span> and an <span class="icode">until=</span> no more than
+        400 days ahead. A change an agent makes to the file, or to anything else
+        that decides what ranwhat reports, is always listed, until you acknowledge
+        it on a terminal. The <a href="#hook">hook</a> never reads the file, so a call
+        you left out of reports is still asked about.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-days"><span class="icode">--days N</span></a>, <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-root"><span class="icode">--root PATH</span></a>, <a href="#flag-state-dir"><span class="icode">--state-dir PATH</span></a>, <a href="#flag-ignore"><span class="icode">--ignore PATH</span></a>, <a href="#flag-no-interactive"><span class="icode">--no-interactive</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4" id="sources">
+  <div class="shell band split">
+    <div class="marginal">04 / sources</div>
     <div>
       <h2>sources: every agent it reads, and where it looked.</h2>
       <p class="lede">
@@ -230,7 +287,7 @@
 
 <section class="mark-4" id="reach">
   <div class="shell band split">
-    <div class="marginal">04 / reach</div>
+    <div class="marginal">05 / reach</div>
     <div>
       <h2>reach: MCP servers and credential files your agents can reach.</h2>
       <p class="lede">
@@ -305,7 +362,7 @@
 
 <section class="mark-5" id="live">
   <div class="shell band split">
-    <div class="marginal">05 / live</div>
+    <div class="marginal">06 / live</div>
     <div>
       <h2>live: the same scan, asked of each token's provider.</h2>
       <p class="lede">
@@ -334,7 +391,7 @@
 
 <section class="mark-1" id="callers">
   <div class="shell band split">
-    <div class="marginal">06 / callers</div>
+    <div class="marginal">07 / callers</div>
     <div>
       <h2>callers: was the key used by someone else?</h2>
       <p class="lede">
@@ -369,7 +426,7 @@
 
 <section class="mark-2" id="revoke">
   <div class="shell band split">
-    <div class="marginal">07 / revoke</div>
+    <div class="marginal">08 / revoke</div>
     <div>
       <h2>revoke: take back what an agent was allowed.</h2>
       <p class="lede">
@@ -401,7 +458,7 @@
 
 <section class="mark-2" id="demo">
   <div class="shell band split">
-    <div class="marginal">08 / demo</div>
+    <div class="marginal">09 / demo</div>
     <div>
       <h2>demo: a whole report, with nothing to set up.</h2>
       <p class="lede">
@@ -427,7 +484,7 @@
 
 <section class="mark-3" id="bench">
   <div class="shell band split">
-    <div class="marginal">09 / bench</div>
+    <div class="marginal">10 / bench</div>
     <div>
       <h2>bench: what ranwhat catches, on made-up data.</h2>
       <p class="lede">
@@ -461,7 +518,7 @@
 
 <section class="mark-2" id="update">
   <div class="shell band split">
-    <div class="marginal">10 / update</div>
+    <div class="marginal">11 / update</div>
     <div>
       <h2>update: a newer capability catalogue.</h2>
       <p class="lede">
@@ -498,7 +555,7 @@
 
 <section class="mark-3" id="login">
   <div class="shell band split">
-    <div class="marginal">11 / login</div>
+    <div class="marginal">12 / login</div>
     <div>
       <h2>login, whoami, logout: link a machine to an account.</h2>
       <p class="lede">
@@ -546,7 +603,7 @@
 
 <section class="mark-4" id="hook">
   <div class="shell band split">
-    <div class="marginal">12 / hook</div>
+    <div class="marginal">13 / hook</div>
     <div>
       <h2>hook: ask before the call, not after.</h2>
       <p class="lede">
@@ -588,7 +645,7 @@
 
 <section class="mark-5" id="flags">
   <div class="shell band split">
-    <div class="marginal">13 / Flags</div>
+    <div class="marginal">14 / Flags</div>
     <div>
       <h2>Every flag, and the commands that take it.</h2>
       <p class="lede">
@@ -599,22 +656,22 @@
         <thead><tr><th>Flag</th><th>Commands</th><th>What it does</th></tr></thead>
         <tbody>
           <tr><td><code id="flag-days">--days N</code></td>
-              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="Commands">check, watch, clean, ignore</td>
               <td data-label="What it does">How far back to read each agent's history, in days. 30 by default.</td></tr>
           <tr><td><code id="flag-seed">--seed N</code></td>
               <td data-label="Commands">bench</td>
               <td data-label="What it does">Draw the made-up secrets from this seed, a whole number from 0, so a run can be repeated. 2026 by default. Another seed gives other values and the same expectations.</td></tr>
           <tr><td><code id="flag-source">--source ID</code></td>
-              <td data-label="Commands">check, watch, clean,&nbsp;sources</td>
+              <td data-label="Commands">check, watch, clean, ignore,&nbsp;sources</td>
               <td data-label="What it does">Read only this agent, and repeat it for more; every agent by default. IDs: <span class="icode">claude-code</span>, <span class="icode">codex</span>, <span class="icode">gemini</span>, <span class="icode">copilot-cli</span>, <span class="icode">cursor</span>, <span class="icode">windsurf</span>, <span class="icode">cline</span>, <span class="icode">roo</span>, <span class="icode">opencode</span>, <span class="icode">continue</span>, <span class="icode">aider</span>, <span class="icode">goose</span>, <span class="icode">qwen</span>, <span class="icode">grok</span>, <span class="icode">droid</span>, <span class="icode">kimi-code</span>, <span class="icode">kimi</span>, <span class="icode">pi</span>, <span class="icode">muse-code</span>, <span class="icode">openclaw</span>.</td></tr>
           <tr><td><code id="flag-path">--path ID=PATH</code></td>
-              <td data-label="Commands">check, watch, clean,&nbsp;sources</td>
+              <td data-label="Commands">check, watch, clean, ignore,&nbsp;sources</td>
               <td data-label="What it does">Read this agent's history from PATH instead of its default place, one per agent. <span class="icode">sources</span> says what each PATH is.</td></tr>
           <tr><td><code id="flag-root">--root PATH</code></td>
-              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="Commands">check, watch, clean, ignore</td>
               <td data-label="What it does">Claude Code's transcript directory, <span class="icode">~/.claude/projects</span> by default. The same as <span class="icode">--path claude-code=PATH</span>.</td></tr>
           <tr><td><code id="flag-state-dir">--state-dir PATH</code></td>
-              <td data-label="Commands">check, watch, clean</td>
+              <td data-label="Commands">check, watch, clean, ignore</td>
               <td data-label="What it does">OpenClaw's state directory, <span class="icode">~/.openclaw</span> by default. The same as <span class="icode">--path openclaw=PATH</span>.</td></tr>
           <tr><td><code id="flag-json">--json</code></td>
               <td data-label="Commands">every command but update, login, whoami and logout; hook only with status</td>
@@ -623,8 +680,14 @@
               <td data-label="Commands">clean, revoke</td>
               <td data-label="What it does">clean: mask everything found without asking, after a backup to <span class="icode">~/.ranwhat/backups</span>. <span class="icode">check</span> refuses it. revoke: take back what it lists, keeping a copy of each settings file beside it.</td></tr>
           <tr><td><code id="flag-no-interactive">--no-interactive</code></td>
-              <td data-label="Commands">clean</td>
-              <td data-label="What it does">Report and exit, instead of opening the review session.</td></tr>
+              <td data-label="Commands">clean, ignore</td>
+              <td data-label="What it does">clean: report and exit, instead of opening the review session. ignore: add the action's id without asking.</td></tr>
+          <tr><td><code id="flag-ignore">--ignore PATH</code></td>
+              <td data-label="Commands">check, watch, ignore</td>
+              <td data-label="What it does">Use the ignore file at PATH, such as a repository's <span class="icode">.ranwhatignore</span>, instead of <span class="icode">~/.ranwhat/ignore</span>. check and watch exit 1 when it cannot be read; ignore makes it.</td></tr>
+          <tr><td><code id="flag-no-ignore">--no-ignore</code></td>
+              <td data-label="Commands">check, watch</td>
+              <td data-label="What it does">Leave nothing out, and mark each action the ignore file would leave out with the line that does.</td></tr>
           <tr><td><code id="flag-fail-on">--fail-on SEVERITY</code></td>
               <td data-label="Commands">check, watch, clean</td>
               <td data-label="What it does">Exit with status 3 when anything at or above <span class="icode">medium</span>, <span class="icode">high</span> or <span class="icode">critical</span> is found. Every secret clean finds is critical, masked or not. 1 stays an error and 2 nothing read, and either wins over 3.</td></tr>

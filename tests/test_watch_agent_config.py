@@ -957,7 +957,6 @@ class TheSharedReadingsStayTheirOwners(unittest.TestCase):
         # ranwhat ignore is told from ranwhat watch --ignore ignore by
         # which of ranwhat's options take a value, and argparse takes one
         # by any prefix no other shares: the two lists are the parser's.
-        # --ignore and --no-ignore are read ahead of the parser having them.
         seen = {}
 
         def parsed(parser, argv=None):
@@ -973,11 +972,10 @@ class TheSharedReadingsStayTheirOwners(unittest.TestCase):
             for option in action.option_strings:
                 if option.startswith("--"):
                     (flags if action.nargs == 0 else values).add(option)
-        ahead = {"--ignore", "--no-ignore"}
-        self.assertEqual(values - watch._RANWHAT_VALUES, set())
-        self.assertEqual(flags - watch._RANWHAT_FLAGS, set())
-        self.assertLessEqual(watch._RANWHAT_VALUES - values, ahead)
-        self.assertLessEqual(watch._RANWHAT_FLAGS - flags, ahead)
+        self.assertEqual(values, set(watch._RANWHAT_VALUES))
+        self.assertEqual(flags, set(watch._RANWHAT_FLAGS))
+        self.assertIn("--ignore", values)
+        self.assertIn("--no-ignore", flags)
         self.assertTrue(seen["parser"].allow_abbrev)
 
     def test_ranwhats_words_are_read_past_its_options(self):

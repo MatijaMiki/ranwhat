@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import growth  # noqa: E402
 import isolated_home  # noqa: E402,F401  ranwhat's state, never ~/.ranwhat
-from ranwhat import catalog, clean, feed, score  # noqa: E402
+from ranwhat import catalog, clean, feed, ignore, score  # noqa: E402
 
 
 class Linear(growth.Assertions, unittest.TestCase):
@@ -127,6 +127,61 @@ class EmbeddedImages(growth.Assertions, unittest.TestCase):
         text = "export STRIPE_KEY=sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc" + " and done"
         labels = [label for _, label in clean.find_secrets(text)]
         self.assertTrue(labels, "a live-shaped key in prose was missed")
+
+
+class IgnoreFile(growth.Assertions, unittest.TestCase):
+    """watch and check ask the ignore file of every action they read, on
+    every run. A baseline holds an id for every action ever listed, and a
+    file a team keeps may hold hundreds of entries: 10,000 actions against
+    500 entries and 100,000 ids, all growing together, must cost what they
+    are long, not actions times entries. Entries are looked up by rule,
+    word count and the command's first two words, and ids by a dict."""
+
+    ACTIONS, ENTRIES, IDS = 10000, 500, 100000
+    TODAY = __import__("datetime").date(2026, 10, 20)
+    RULES = ("publish", "git.destructive", "fs.destructive", "cloud.destructive",
+             "persist", "exec.remote")
+
+    def text(self, n):
+        lines = ["%s 'tool%d sub%d arg%d' in=/w/p%d until=2027-01-01"
+                 % (self.RULES[i % len(self.RULES)], i, i, i % 7, i)
+                 for i in range(n(self.ENTRIES))]
+        lines += ["%016x  # publish 'npm publish' in=~/w  (Claude Code, "
+                  "2026-10-19 10:00)" % (i * 7919) for i in range(n(self.IDS))]
+        return "\n".join(lines) + "\n"
+
+    def records(self, n):
+        out = []
+        for i in range(n(self.ACTIONS)):
+            k = i % n(self.ENTRIES)
+            out.append({"id": "%016x" % (10 ** 12 + i), "severity": "critical",
+                        "cwd": "/w/p%d/sub" % k, "hits": [{
+                            "rule": self.RULES[k % len(self.RULES)],
+                            "severity": "critical", "why": "w", "_on": "command",
+                            "_subject": "tool%d sub%d arg%d" % (k, k, i % 7),
+                            "_cd": ""}]})
+        return out
+
+    def against_a_file(self, n):
+        found = ignore.Ignore(parsed=ignore.parse(self.text(n), self.TODAY),
+                              today=self.TODAY, exists=True)
+        return found, self.records(n)
+
+    def test_split_costs_what_the_report_and_the_file_are_long(self):
+        listed = self.assertScalesLinearly(
+            self.against_a_file, lambda pair: pair[0].split(pair[1]), rebuild=True)
+        # each action whose command its entry names is left out, and only
+        # those: its last word is the entry's for one action in seven or so
+        hidden = sum(1 for i in range(self.ACTIONS)
+                     if i % 7 == (i % self.ENTRIES) % 7)
+        self.assertGreater(hidden, 1000)
+        self.assertEqual(len(listed), self.ACTIONS - hidden)
+
+    def test_reading_a_large_baseline_is_linear(self):
+        parsed = self.assertScalesLinearly(
+            self.text, lambda text: ignore.parse(text, self.TODAY))
+        self.assertEqual((len(parsed.ids), len(parsed.entries)),
+                         (self.IDS, self.ENTRIES))
 
 
 class FeedLookups(growth.Assertions, unittest.TestCase):

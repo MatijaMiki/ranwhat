@@ -56,6 +56,14 @@ inputs:
       2). Off by default, so a step pointed at the wrong place says so.
     required: false
     default: "false"
+  ignore-file:
+    description: >-
+      A file in this repository, such as .ranwhatignore, of actions to leave
+      out (ranwhat ignore). Read as committed at the pull request's base, or
+      before the push, never as the job left it. Empty: nothing is left out,
+      and the runner's own ~/.ranwhat/ignore is never read.
+    required: false
+    default: ""
 
 outputs:
   exit-code:
@@ -82,6 +90,8 @@ runs:
         RANWHAT_DAYS: ${{ inputs.days }}
         RANWHAT_ARGS: ${{ inputs.args }}
         RANWHAT_SARIF: ${{ inputs.sarif-file }}
+        RANWHAT_IGNORE: ${{ inputs.ignore-file }}
+        RANWHAT_IGNORE_REF: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
         RANWHAT_NO_HINTS: "1"
       run: |
         case "$RANWHAT_COMMAND" in
@@ -102,6 +112,34 @@ runs:
         argv=("$RANWHAT_COMMAND" --days "$RANWHAT_DAYS" --sarif "$RANWHAT_SARIF")
         if [ "$RANWHAT_COMMAND" = clean ]; then argv+=(--no-interactive); fi
         if [ -n "$RANWHAT_FAIL_ON" ]; then argv+=(--fail-on "$RANWHAT_FAIL_ON"); fi
+        # check and watch always get --ignore, of a file made here: empty,
+        # or ignore-file as it was committed at the pull request's base or
+        # before the push. A step earlier in the job, an agent's among
+        # them, cannot widen it, and the runner's ~/.ranwhat/ignore is
+        # never read. mktemp's name is new, so nothing planted at a fixed
+        # name in RUNNER_TEMP is followed. Before args, so --ignore there,
+        # which comes later, wins.
+        if [ "$RANWHAT_COMMAND" != clean ]; then
+          ignore_file=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ranwhat-ignore.XXXXXX")
+          if [ -n "$RANWHAT_IGNORE" ]; then
+            case "$RANWHAT_IGNORE" in
+              /*|-*|*..*) echo "::error::ignore-file must be a path inside the repository, not '$RANWHAT_IGNORE'"; exit 1 ;;
+            esac
+            ws="${GITHUB_WORKSPACE:-$PWD}"; ref="$RANWHAT_IGNORE_REF"
+            case "$ref" in ""|*[!0-9a-f]*|0000000000000000000000000000000000000000) ref="${GITHUB_SHA:-HEAD}" ;; esac
+            git -C "$ws" cat-file -e "$ref^{commit}" 2>/dev/null \
+              || git -C "$ws" fetch --quiet --no-tags --depth=1 origin "$ref" 2>/dev/null || true
+            if git -C "$ws" show "$ref:$RANWHAT_IGNORE" > "$ignore_file" 2>/dev/null; then
+              if [ -f "$ws/$RANWHAT_IGNORE" ] && ! cmp -s "$ignore_file" "$ws/$RANWHAT_IGNORE"; then
+                echo "::warning::$RANWHAT_IGNORE was changed after ${ref:0:12}; ranwhat uses it as it was there, not as this job left it."
+              fi
+            else
+              : > "$ignore_file"
+              echo "::warning::ranwhat could not read $RANWHAT_IGNORE at ${ref:0:12}, so nothing is left out. Check the repository out first (actions/checkout)."
+            fi
+          fi
+          argv+=(--ignore "$ignore_file")
+        fi
         read -r -a extra <<< "$RANWHAT_ARGS"
         argv+=("${extra[@]}")
         # -I: neither the workspace nor PYTHONPATH is on the path, so a

@@ -14,6 +14,11 @@ through without a word, as it would have been without the hook.
 
 Nothing here touches the network. `run` reads stdin and writes stdout;
 `install` and `uninstall` change one settings file, and nothing else.
+
+It never reads the ignore file (ignore.py): what someone leaves out of
+watch's reports after the fact is still asked about here, before it runs,
+and a call that changes that file, or runs ranwhat ignore, is asked about
+like any other change to what ranwhat reports.
 """
 
 from __future__ import annotations

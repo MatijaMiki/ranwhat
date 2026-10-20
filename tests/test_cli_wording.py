@@ -55,6 +55,12 @@ class Overview(unittest.TestCase):
             self.assertTrue(re.search(r"^  %s +\S" % command, text, re.M),
                             command)
 
+    def test_names_ignore_and_what_it_is_for(self):
+        self.assertIn("ignore", [name for name, _ in cli.COMMANDS])
+        said = " ".join(overview().split())
+        self.assertIn("ignore stop listing actions you expected; all: only new "
+                      "ones from now on", said)
+
     def test_names_what_goes_online(self):
         prose = " ".join(overview().split())
         self.assertNotIn("nothing is transmitted", prose.lower())

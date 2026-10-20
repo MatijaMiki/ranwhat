@@ -344,6 +344,101 @@ class Aliases(_Home):
         self.assertEqual(r["id"], min(r["ids"]))
 
 
+class Baselines(_Home):
+    """An action left out by its ids stays left out whichever copy of it a
+    run reads first, and comes back only when it ran again."""
+
+    def ignore_file(self):
+        return os.path.join(self.tmp, "state", "ignore")
+
+    def test_ignoring_a_replayed_call_hides_both_copies(self):
+        first = [bash("toolu_1", "rm -rf ~/Documents/x", self.now)]
+        s1 = self.transcript(first, "s1", age=3600)
+        s2 = self.transcript(first, "s2", age=1800)
+        rec, = self.scan()
+        rc, _out, _err = self.run_cli("ignore", rec["id"], "--no-interactive",
+                                      *self.flags())
+        self.assertEqual(rc, 0)
+        for older, newer in ((s1, s2), (s2, s1)):
+            _age(older, 7200)
+            _age(newer, 600)
+            _rc, out, _err = self.run_cli("watch", "--json", *self.flags())
+            self.assertEqual(json.loads(out), [])
+
+    def test_untimed_copies_in_any_order_give_nothing_new(self):
+        for agent in af.AGENTS:
+            if agent.timed:
+                continue
+            with self.subTest(agent=agent.id):
+                root = agent.root(os.path.join(self.home, agent.id))
+                calls = [("c1", "shell", "rm -rf ~/Documents/x", "ok\n", self.now)]
+                a = agent.write(root, calls, name="a", age=3600)
+                b = agent.write(root, calls, name="b", age=1800)
+                argv = ["--source", agent.id, "--path", "%s=%s" % (agent.id, root)]
+                rc, _out, _err = self.run_cli("ignore", "all", *argv)
+                self.assertEqual(rc, 0)
+                _age(a, 600)
+                _age(b, 7200)
+                _rc, out, _err = self.run_cli("watch", "--json", *argv)
+                self.assertEqual(json.loads(out), [])
+                # a third copy is new
+                agent.write(root, calls, name="c", age=300)
+                _rc, out, _err = self.run_cli("watch", "--json", *argv)
+                self.assertEqual(len(json.loads(out)), 1)
+                os.remove(self.ignore_file())
+
+    def test_an_openclaw_baseline_settles(self):
+        # The regression: a baseline of the copy kept (the latest) left the
+        # earlier copies' ids out, and a later run that kept another copy
+        # listed it again. Every copy's id is in the baseline, so the call
+        # is new only when it runs again.
+        body = json.dumps({"content": [{"type": "tool_use", "name": "bash",
+                                        "input": {"command": "rm -rf ~/old"}}]})
+        t = int(self.now)
+
+        def rows(runs):
+            """A state folder of its own for each, so that no file a
+            reader may still hold open is written over."""
+            state = tempfile.mkdtemp(prefix="oc-", dir=self.tmp)
+            path = os.path.join(state, "agents", "a1", "agent",
+                                "openclaw-agent.sqlite")
+            os.makedirs(os.path.dirname(path))
+            conn = sqlite3.connect(path)
+            conn.execute('CREATE TABLE "log" (id TEXT, body TEXT, createdAt INTEGER)')
+            conn.executemany('INSERT INTO "log" VALUES (?, ?, ?)',
+                             [(str(i), body, w) for i, w in enumerate(runs)])
+            conn.commit()
+            conn.close()
+            return ["--source", "openclaw", "--state-dir", state]
+        argv = rows([t, t + 60])
+        rc, _out, _err = self.run_cli("ignore", "all", *argv)
+        self.assertEqual(rc, 0)
+        _rc, out, _err = self.run_cli("watch", "--json", *argv)
+        self.assertEqual(json.loads(out), [])
+        argv = rows([t + 60, t])                   # in another order
+        _rc, out, _err = self.run_cli("watch", "--json", *argv)
+        self.assertEqual(json.loads(out), [])
+        argv = rows([t, t + 60, t + 120])          # run again
+        _rc, out, _err = self.run_cli("watch", "--json", *argv)
+        again, = json.loads(out)
+        self.assertEqual(len(again["ids"]), 3)
+
+    def test_the_ignore_commands_scan_gives_the_ids_watch_and_check_give(self):
+        self.transcript([bash("toolu_1", "rm -rf ~/Documents/x", self.now),
+                         bash("toolu_2", "cat .env", self.now + 1)])
+        _rc, out, _err = self.run_cli("watch", "--json", *self.flags())
+        watched = json.loads(out)
+        _rc, out, _err = self.run_cli("check", "--json", *self.flags())
+        checked = json.loads(out)["actions"]
+        rc, _out, _err = self.run_cli("ignore", "all", *self.flags())
+        self.assertEqual(rc, 0)
+        with open(self.ignore_file(), encoding="utf-8") as fh:
+            written = sorted(line.split()[0] for line in fh.read().split("\n")
+                             if line and not line.startswith("#"))
+        self.assertEqual(written, sorted(r["id"] for r in watched))
+        self.assertEqual(_shown(watched), _shown(checked))
+
+
 class WhereItRan(_Home):
 
     def test_claude_code_records_say_where_the_session_was(self):

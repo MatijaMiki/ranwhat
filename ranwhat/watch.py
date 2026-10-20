@@ -4249,8 +4249,6 @@ def _is_ranwhat(word):
 
 # ranwhat's own long options, as its parser has them (cli._main), those that
 # take a value and those that take none, which a test holds to the parser.
-# --ignore and --no-ignore are the ignore file's, read here ahead of the
-# command that takes them, so the rule is right the day it ships.
 _RANWHAT_VALUES = frozenset((
     "--days", "--source", "--path", "--root", "--state-dir", "--ignore",
     "--html", "--sarif", "--fail-on", "--scope", "--mode", "--controls",
@@ -7267,9 +7265,17 @@ TITLE = ("  ranwhat watch  ", "· local agent flight recorder")
 
 
 def render(records, scanned, days, footer=True, locations=None, notes=None,
-           title=TITLE, complete=True, unread=0):
+           title=TITLE, complete=True, unread=0, ignored=0):
     """`footer=False` is for check, which prints one footer for all sections.
     It gates only the closing rule and footer line, never a finding.
+
+    `ignored` is how many actions the ignore file left out of `records`
+    (ignore.py): the count line says so, and with none left to list the
+    report says that nothing flagged is not ignored, never a bare "Nothing
+    flagged", which would read as nothing having happened. Each record
+    carries its id at the end of its line, for ranwhat ignore to name it
+    by, and under --no-ignore the lines of the file that would leave it out
+    ("ignored"); neither is ever cut.
 
     `complete` is False when a store, line or call went unread this run
     (agents.all_read): then nothing flagged is not said to be everything.
@@ -7321,10 +7327,19 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
         L += _nothing_read(days, locations, width)
         return "\n".join(L)
     if not records:
-        said = ("Every call was read; none tripped a rule." if complete else
-                "No call that was read tripped a rule, but some could not be "
-                "read.")
-        L += ["  " + GRN("Nothing flagged.")]
+        if ignored:
+            said = ("Every call was read; each one that tripped a rule is "
+                    "left out by your ignore file, as the note below says."
+                    if complete else
+                    "Each call that was read and tripped a rule is left out "
+                    "by your ignore file, as the note below says, but some "
+                    "could not be read.")
+            L += ["  " + GRN("Nothing flagged that is not ignored.")]
+        else:
+            said = ("Every call was read; none tripped a rule." if complete else
+                    "No call that was read tripped a rule, but some could not "
+                    "be read.")
+            L += ["  " + GRN("Nothing flagged.")]
         L += [DIM(line) for line in term.wrap(said, limit=width)] + [""]
         if notes:
             L += notes + [""]
@@ -7334,7 +7349,8 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
     for r in records:
         counts[r["severity"]] = counts.get(r["severity"], 0) + 1
     L.append("  " + "  ".join(colour[k](BOLD("%d %s" % (v, k)))
-                              for k, v in sorted(counts.items())))
+                              for k, v in sorted(counts.items()))
+             + (DIM("   (%d ignored)" % ignored) if ignored else ""))
     undated = sum(1 for r in records if _epoch(r.get("timestamp")) is None)
     if undated and days:
         # Kept by the window, since it cannot be placed in it or out of it,
@@ -7353,24 +7369,33 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
             _local_time(r.get("timestamp")),
             _SOURCE_NAMES.get(r.get("source"), "") if labelled else "",
             _printable(str(r.get("tool_name") or ""))) if p)
-        ran = "  ".join(p for p in (_RAN.get(r.get("actor")),
-                                    _RAN.get(r.get("status"))) if p)
+        marks = [p for p in (_RAN.get(r.get("actor")), _RAN.get(r.get("status")),
+                             _ignored_by(r.get("ignored")), _shown_id(r)) if p]
+        ran = "  ".join(marks)
         meta = "  ".join(p for p in (where, ran) if p)
         paint = colour.get(r["severity"], DIM)
         if meta and len("  * %s   %s" % (title, meta)) <= width:
             L.append("  " + paint("* ") + BOLD(title) + DIM("   " + meta))
         else:
             # Too long for one line: when and where go on the next, and
-            # who ran it on its own line when they do not fit there, since
-            # a cut there read a declined deletion as one that ran.
+            # who ran it, the lines that leave it out and its id on lines
+            # of their own when they do not fit there, never cut: a cut
+            # there read a declined deletion as one that ran, and an id
+            # cut short names no action.
             L.append("  " + paint("* ") + BOLD(_fit(title, width - 4)))
             if meta and len("      " + meta) <= width:
                 L.append(DIM("      " + meta))
             else:
                 if where:
                     L.append(DIM(_fit("      " + where, width)))
-                if ran:
-                    L.append(DIM("      " + ran))
+                line = ""
+                for mark in marks:
+                    if line and len("      " + line + "  " + mark) > width:
+                        L.append(DIM("      " + line))
+                        line = ""
+                    line = line + "  " + mark if line else mark
+                if line:
+                    L.append(DIM("      " + line))
         for i, h in enumerate(hits):
             if i:
                 label = "%s (%s)" % (h["title"], h["severity"])
@@ -7395,6 +7420,26 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
 # What the meta line of a record adds for a command the user typed into
 # the agent, and for one the agent says never ran (design 3.5).
 _RAN = {"user": "(you ran this)", "declined": "(declined, did not run)"}
+_ID_SHAPE = re.compile(r"[0-9a-f]{16}\Z")
+
+
+def _ignored_by(lines):
+    """What the meta line says of an action --no-ignore lists that the
+    ignore file would leave out: the lines that do."""
+    if not isinstance(lines, list) or not lines:
+        return ""
+    lines = [str(n) for n in lines if isinstance(n, int)]
+    if not lines:
+        return ""
+    return "(ignored by line%s %s)" % ("s" if len(lines) > 1 else "",
+                                       ", ".join(lines))
+
+
+def _shown_id(record):
+    """An action's id, as ranwhat ignore takes it; "" for a record no scan
+    gave one."""
+    found = record.get("id")
+    return found if isinstance(found, str) and _ID_SHAPE.match(found) else ""
 
 
 def _head(scanned, days):

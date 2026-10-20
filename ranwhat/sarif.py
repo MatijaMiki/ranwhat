@@ -190,6 +190,10 @@ def _action_results(records, index, mask=None):
                           "tool": record.get("tool_name")}
             if isinstance(record.get("id"), str) and record["id"]:
                 properties["actionId"] = record["id"]
+            if record.get("ignored"):
+                # --no-ignore: listed, and marked with the lines of the
+                # ignore file that would leave it out.
+                properties["ignoredBy"] = record["ignored"]
             out.append({
                 "ruleId": hit.get("rule"),
                 "ruleIndex": index.get(hit.get("rule"), -1),
@@ -230,10 +234,17 @@ def _secret_results(findings, index, mask=None):
     return out
 
 
-def document(records=(), findings=(), mask=None):
+def document(records=(), findings=(), mask=None, ignored=None):
     """The SARIF log for watch's records and clean's findings (each a
     finding as cli._finding_json gives it, or as clean keeps it), every
-    string in it put through mask."""
+    string in it put through mask.
+
+    records are the ones the report lists: what the ignore file left out
+    is not in it at all. Code scanning reads neither a result's
+    suppressions nor its baselineState, so a result there would stay an
+    open alert, and a result left out closes the alert it had. `ignored`,
+    {"actions", "critical", "acknowledged"} (ignore.Ignore.sarif), says
+    how many were left out, as the report does."""
     rules = _rules()
     index = {r["id"]: i for i, r in enumerate(rules)}
     results = (_action_results(records, index, mask)
@@ -246,15 +257,17 @@ def document(records=(), findings=(), mask=None):
         "results": results,
         "columnKind": "unicodeCodePoints",
     }]}
+    if ignored:
+        doc["runs"][0]["properties"] = {"ignored": dict(ignored)}
     if mask is not None:
         from .cli import _masked_strings
         doc = _masked_strings(doc, mask)
     return _unmarked(doc)
 
 
-def write(path, records=(), findings=(), mask=None):
+def write(path, records=(), findings=(), mask=None, ignored=None):
     """Write the SARIF log to path. Raises OSError where it cannot."""
-    doc = document(records, findings, mask)
+    doc = document(records, findings, mask, ignored)
     data = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(data)

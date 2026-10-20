@@ -1139,7 +1139,7 @@ class OpenClawIsSearchedForSecrets(_Base):
                 cli.main(["--help"])
             except SystemExit:
                 pass
-        self.assertIn("check, watch, clean: OpenClaw state directory",
+        self.assertIn("check, watch, clean, ignore: OpenClaw state directory",
                       " ".join(shown.getvalue().split()))
 
 

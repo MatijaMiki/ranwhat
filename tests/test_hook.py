@@ -115,6 +115,42 @@ class Decisions(unittest.TestCase):
             self.assertEqual(hook.decide("Bash", {"command": command}, mode="deny"),
                              (None, ""), command)
 
+    def test_the_ignore_file_is_never_read(self):
+        # What someone leaves out of watch's reports is still asked about:
+        # a file that leaves out everything changes no answer, and is not
+        # even opened.
+        state = tempfile.mkdtemp(prefix="hook-ignore-")
+        self.addCleanup(__import__("shutil").rmtree, state, True)
+        path = os.path.join(state, "ignore")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("".join("%s\n" % rule for rule in (
+                "publish", "cred.read", "agent.config", "git.destructive",
+                "fs.destructive", "exec.remote")))
+        calls = [("Bash", {"command": c}) for c in (
+            "npm publish", "cat ~/.aws/credentials", "git push --force origin main",
+            "echo publish >> ~/.ranwhat/ignore")]
+        before = [hook.decide(t, i) for t, i in calls]
+        opened = []
+        real_open, real_os_open = open, os.open
+
+        def watching(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)) and "ignore" in os.fsdecode(file):
+                opened.append(file)
+            return real_open(file, *args, **kwargs)
+
+        def watching_os(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)) and "ignore" in os.fsdecode(file):
+                opened.append(file)
+            return real_os_open(file, *args, **kwargs)
+        with mock.patch.dict(os.environ, {"RANWHAT_HOME": state}), \
+                mock.patch("builtins.open", watching), mock.patch("os.open", watching_os):
+            after = [hook.decide(t, i) for t, i in calls]
+            status, out = answer(event("npm publish"))
+        self.assertEqual(before, after)
+        self.assertEqual(out["permissionDecision"], "ask")
+        self.assertEqual(opened, [])
+        self.assertTrue(all(decision for decision, _reason in after))
+
     def test_other_events_are_not_judged(self):
         text = json.dumps({"hook_event_name": "PostToolUse", "tool_name": "Bash",
                            "tool_input": {"command": "cat .env"}})

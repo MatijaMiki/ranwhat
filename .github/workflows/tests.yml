@@ -90,12 +90,39 @@ jobs:
           upload-sarif: "false"
           sarif-file: critical.sarif
           args: --source claude-code --root ${{ runner.temp }}/projects
+      # The same action, left out by an ignore file args names: it comes
+      # after the Action's own --ignore, and wins.
+      - run: |
+          printf '%s\n' "fs.destructive 'rm -rf ~/Documents/archive'" > "$RUNNER_TEMP/ranwhat-ignore"
+      - id: ignored
+        uses: ./
+        with:
+          fail-on: high
+          upload-sarif: "false"
+          sarif-file: ignored.sarif
+          args: --source claude-code --root ${{ runner.temp }}/projects --ignore ${{ runner.temp }}/ranwhat-ignore
+      # ignore-file names a file no commit holds: a warning, nothing is
+      # left out, and the step fails on the action as before.
+      - id: unread
+        uses: ./
+        continue-on-error: true
+        with:
+          fail-on: high
+          upload-sarif: "false"
+          sarif-file: unread.sarif
+          ignore-file: no/such/.ranwhatignore
+          args: --source claude-code --root ${{ runner.temp }}/projects
       - env:
           HIGH_OUTCOME: ${{ steps.high.outcome }}
           HIGH_CODE: ${{ steps.high.outputs.exit-code }}
           CRITICAL_CODE: ${{ steps.critical.outputs.exit-code }}
+          IGNORED_CODE: ${{ steps.ignored.outputs.exit-code }}
+          UNREAD_CODE: ${{ steps.unread.outputs.exit-code }}
         run: |
           test "$HIGH_OUTCOME" = failure
           test "$HIGH_CODE" = 3
           test "$CRITICAL_CODE" = 0
+          test "$IGNORED_CODE" = 0
+          test "$UNREAD_CODE" = 3
           python3 -c "import json; r = json.load(open('ranwhat.sarif'))['runs'][0]['results']; assert [x['ruleId'] for x in r] == ['fs.destructive'], r"
+          python3 -c "import json; run = json.load(open('ignored.sarif'))['runs'][0]; assert run['results'] == [] and run['properties']['ignored']['actions'] == 1, run.get('properties')"

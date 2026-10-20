@@ -33,6 +33,7 @@ from . import sources as sources_mod
 from . import sarif as sarif_mod
 from . import hints
 from . import hook as hook_mod
+from . import ignore as ignore_mod
 from . import term
 
 # introspect, usage, feed and account talk to providers and to ranwhat's
@@ -240,6 +241,7 @@ NETWORK = ("No account needed. live, callers, --pull-usage and clean's "
 COMMANDS = (
     ("check", "watch and clean in one pass, changing nothing"),
     ("watch", "what your agents already ran on this machine"),
+    ("ignore", "stop listing actions you expected; all: only new ones from now on"),
     ("clean", "credentials sitting in plaintext in agent transcripts"),
     ("sources", "every agent ranwhat reads, and where it looked"),
     ("reach", "MCP servers and credential files your agents can reach"),
@@ -822,15 +824,21 @@ def _kept_note(n):
                 "it" if n == 1 else "them"))
 
 
-def _finish(args, status, records=(), findings=(), mask=None):
+def _finish(args, status, records=(), findings=(), mask=None, ignored=None):
     """The exit status of check, watch or clean, once --sarif is written:
     1 when it could not be, else `status` when it is not 0 (2: nothing
     read), else FAIL_STATUS when --fail-on finds anything at or above its
     severity. `findings` are clean's, each of severity sarif.SECRET, and
-    `mask` masks every string of the SARIF log as the report is masked."""
+    `mask` masks every string of the SARIF log as the report is masked.
+
+    `records` are the actions the report lists; `ignored`, the ignore file
+    in force (ignore.Ignore), left out the rest. Only what is listed
+    counts, and what the file left out at or above the severity is said in
+    one line, so a build that passes says what it did not count."""
     if getattr(args, "sarif", None):
         try:
-            sarif_mod.write(args.sarif, records, findings, mask)
+            sarif_mod.write(args.sarif, records, findings, mask,
+                            ignored.sarif() if ignored else None)
         except OSError as error:
             sys.stderr.write("ranwhat: cannot write %s (%s)\n"
                              % (args.sarif, error.strerror or error))
@@ -842,13 +850,25 @@ def _finish(args, status, records=(), findings=(), mask=None):
                   if sarif_mod.at_least(r.get("severity"), floor))
     if sarif_mod.at_least(sarif_mod.SECRET, floor):
         failing += len(findings)
-    if not failing:
-        return status
-    sys.stderr.write("\n".join(term.wrap(
-        "%s at or above %s (--fail-on %s): exit status %d."
-        % (agents_mod.plural(failing, "finding"), floor, floor, FAIL_STATUS),
-        stream=sys.stderr)) + "\n")
-    return FAIL_STATUS
+    left = ignored.failing(floor) if ignored else 0
+    said = []
+    if failing:
+        said.append("%s at or above %s (--fail-on %s): exit status %d."
+                    % (agents_mod.plural(failing, "finding"), floor, floor,
+                       FAIL_STATUS))
+        if left:
+            said.append("%s more %s at or above %s %s left out by %s, and not "
+                        "counted." % (left, "finding" if left == 1 else "findings",
+                                      floor, "is" if left == 1 else "are",
+                                      ignored.show))
+    elif left:
+        said.append("Nothing listed is at or above %s (--fail-on %s); %d at or "
+                    "above it %s left out by %s, and not counted."
+                    % (floor, floor, left, "is" if left == 1 else "are",
+                       ignored.show))
+    for text in said:
+        sys.stderr.write("\n".join(term.wrap(text, stream=sys.stderr)) + "\n")
+    return FAIL_STATUS if failing else status
 
 
 def _check(args):
@@ -861,6 +881,9 @@ def _check(args):
     under `clean`.
     """
     _agent_defaults(args)
+    ignoring = _ignoring(args)
+    if ignoring is None:
+        return 1
     # Up from the first transcript, and down before anything is printed:
     # reading every transcript for its actions took five seconds on a real
     # history, and showed nothing.
@@ -911,14 +934,20 @@ def _check(args):
     nothing = places is not None and not scanned
     secrets = [_finding_json(f) for f in findings.values()]
     shown = everywhere.mask if everywhere else None
+    # What the ignore file leaves out, once every string is masked as it
+    # is printed: an entry is matched against what the report would show.
+    records = ignoring.split(records, mark=getattr(args, "no_ignore", False))
 
     def finish(status):
-        return _finish(args, status, records, secrets, shown)
+        return _finish(args, status, records, secrets, shown, ignoring)
     if args.json:
         doc = {"days": args.days, "actions": watch_mod.public(records),
                "secrets": secrets}
         if kept:
             doc["kept"] = kept
+        left = ignoring.summary()
+        if left:
+            doc["ignored"] = _masked_strings(left, shown) if shown else left
         print(_json_text(doc))
         return finish(_said_nothing_read(places if nothing else None, args.days))
 
@@ -931,7 +960,9 @@ def _check(args):
                            locations=places,
                            title=_CHECK_TITLE if nothing else watch_mod.TITLE,
                            complete=agents_mod.all_read(args.sources),
-                           unread=sum(unread.values())).rstrip("\n"))
+                           unread=sum(unread.values()),
+                           notes=_ignore_notes(ignoring, shown),
+                           ignored=ignoring.hidden).rstrip("\n"))
     if scanned:
         print(clean_mod.render(findings, searched.counts, [], False, footer=False,
                                advice=False, others=searched.others,
@@ -957,7 +988,7 @@ def _check(args):
         # here, it printed whole the passwords this report had just hidden.
         steps.append((["check", "--json"]
                       + _carried(args, "days", "root", "state_dir", "source",
-                                 "path"),
+                                 "path", "ignore"),
                       "the actions and secrets, machine readable"))
     steps.append((["reach"], "MCP servers and credential files agents can reach"))
     # Not `scan profile.json`: nothing writes one, so on a first run it
@@ -979,12 +1010,76 @@ def _check(args):
             tail += term.wrap(why, indent="      ")
     tail += ["", term.rule("-"), term.FOOTER, ""]
     print("\n".join(tail))
+    _ignore_hint(args, records)
     return finish(2 if nothing else 0)
 
 
 # The header of check's report when it read nothing: watch's section,
 # under check's name, is all of it.
 _CHECK_TITLE = ("  ranwhat check  ", "· watch and clean in one pass")
+
+
+def _watch_scan(args):
+    """watch's read of every agent's history, as check reads it for its
+    watch section: (records, {source: how many it read}, {source: how many
+    it could not}, the known.Matcher of every value clean finds). Every
+    string of every record is masked by it, the subjects an ignore entry
+    is matched against too, so watch, check and ranwhat ignore match the
+    same text."""
+    bar, step = _progress_line(args)
+    try:
+        everywhere = _known(args, step)
+        unread = {}
+        keeping = known_mod.Kept.open()
+        with watch_mod.sparing(keeping.__contains__ if keeping else None):
+            records, counts = watch_mod.scan_sources_counted(
+                sources=args.sources, root=args.root, state_dir=args.state_dir,
+                since_days=args.days, progress=step(_ACTIONS),
+                known=everywhere, paths=args.paths, unread=unread)
+        if everywhere:
+            records = _masked_strings(records, everywhere.mask)
+    finally:
+        bar.clear()
+    return records, counts, unread, everywhere
+
+
+def _ignoring(args):
+    """The ignore file in force for check or watch (ignore.py): the one
+    --ignore names, or $RANWHAT_HOME/ignore when there is one. None, said on
+    stderr, when --ignore names one that cannot be used: exit status 1,
+    before a long read, rather than a report that leaves out nothing it
+    was told to leave out."""
+    path = getattr(args, "ignore", None)
+    try:
+        return ignore_mod.Ignore.open(path, explicit=bool(path))
+    except ignore_mod.IgnoreError as error:
+        sys.stderr.write("ranwhat: %s\n" % error)
+        return None
+
+
+def _ignore_notes(ignoring, mask=None):
+    """What the report says of what the ignore file left out, masked as
+    the report is: an entry's own text is quoted in it."""
+    notes = ignoring.notes()
+    return [mask(n) for n in notes] if mask else notes
+
+
+def _ignore_hint(args, listed):
+    """Under a report that listed anything, on a terminal, once: how to
+    stop listing what was expected. Not when the report itself went to a
+    file or a pipe: nobody is reading it where the hint would be."""
+    if not listed or not hints.allowed("ignore-howto", json=args.json):
+        return
+    try:
+        if not sys.stdout.isatty():
+            return
+    except Exception:             # no isatty, or a closed stream
+        return
+    cmd = invocation()
+    hints.hint("ignore-howto", term.wrap(
+        "Expected one of these? %s ignore ID stops listing it. %s ignore all "
+        "stops listing every one above, so later runs list only what is new."
+        % (cmd, cmd), stream=sys.stderr), json=args.json)
 
 
 def _notes(args):
@@ -1014,6 +1109,13 @@ def _carried(args, *names):
         for source_id, path in sorted(args.pointed.items()):
             # ~ there is expanded by ranwhat, whether or not the shell does.
             words += ["--path", "%s=%s" % (source_id, _shell_path(path))]
+    if "ignore" in names:
+        # The same ignore file, or none: a command suggested under a report
+        # must leave out what the report left out.
+        if getattr(args, "ignore", None):
+            words += ["--ignore", _shell_path(os.path.expanduser(args.ignore))]
+        if getattr(args, "no_ignore", False):
+            words += ["--no-ignore"]
     return words
 
 
@@ -1647,6 +1749,530 @@ def _bench(p, args):
     return 0
 
 
+# What ranwhat ignore takes besides its action, and says it takes.
+_IGNORE_FLAGS = {"command", "profile", "json", "days", "root", "state_dir",
+                 "source", "path", "ignore", "no_interactive"}
+
+
+def _ignore(p, args):
+    """ranwhat ignore: what watch and check leave out (ignore.py).
+
+    With no action it lists the ignore file and changes nothing. Given an
+    action's id it leaves that action out, or on a terminal asks whether to
+    leave out every action like it instead; all leaves out every action
+    listed now, so later runs list only what is new (a baseline); - leaves
+    out every action in what watch --json or check --json printed, read
+    from stdin, so a cron job that alerts on what is new alerts on each
+    action once. Each reads history as watch does, with its --days,
+    --source and --path, and adds to the file under a lock."""
+    stray = [a.option_strings[-1] for a in p._actions
+             if a.option_strings and a.dest not in _IGNORE_FLAGS
+             and a.dest != "help"
+             and getattr(args, a.dest, a.default) != a.default]
+    if stray:
+        p.error("ignore takes only --days, --source, --path, --root, "
+                "--state-dir, --ignore, --no-interactive and --json, not %s"
+                % ", ".join(stray))
+    target = args.profile
+    path = (os.path.expanduser(args.ignore) if args.ignore
+            else ignore_mod.default_path())
+    if target is None:
+        return _ignore_list(args, path)
+    if target not in ("all", "-") and not ignore_mod._ID.match(target):
+        shown = watch_mod._fit(watch_mod._printable(target), 40)
+        if ignore_mod._HEXISH.match(target):
+            p.error("%s is not an action id: an id is the 16 characters watch "
+                    "prints beside an action's time" % shown)
+        p.error("ranwhat ignore takes an action's id (the 16 characters watch "
+                "prints beside it), all, or -; not '%s'" % shown)
+    current = ignore_mod.Ignore.open(path)
+    if current.unused:
+        sys.stderr.write("%s\n" % ignore_mod.unusable(current.show,
+                                                     current.unused))
+        return 1
+    if target == "-":
+        return _ignore_report(args, path, current)
+    records, counts, unread, _everywhere = _watch_scan(args)
+    if not sum(counts.values()) + sum(unread.values()):
+        return _said_nothing_read(watch_mod.locations(
+            args.sources, root=args.root, state_dir=args.state_dir,
+            paths=args.paths, asked=args.source), args.days)
+    if target == "all":
+        return _ignore_all(args, path, current, records)
+    target = target.lower()
+    record = next((r for r in records
+                   if target in ignore_mod._ids_of(r)), None)
+    if record is None:
+        sys.stderr.write("\n".join(term.wrap(
+            "ranwhat ignore: no action with id %s in the last %s of history; "
+            "give the --days, --source and --path it was listed with."
+            % (target, watch_mod._days(args.days)), indent="",
+            stream=sys.stderr)) + "\n")
+        return 1
+    return _ignore_one(args, path, current, record)
+
+
+def _say(text, indent=""):
+    """A sentence or two of ranwhat ignore's, folded to the terminal."""
+    for line in term.wrap(text, indent=indent):
+        print(line)
+
+
+def _ignore_json(path, first, last, guard=0, present=0):
+    print(_json_text({"file": path, "added": 0 if first is None else last - first + 1,
+                      "lines": [] if first is None else [first, last],
+                      "skipped": {"guard": guard, "present": present}}))
+
+
+def _ignore_added(args, path, items, heading=None):
+    """ignore.add, with what went wrong said on stderr: (first, last,
+    present), or None when nothing could be written."""
+    try:
+        return ignore_mod.add(path, items, heading, default=not args.ignore)
+    except ignore_mod.IgnoreError as error:
+        sys.stderr.write("\n".join(term.wrap(str(error), indent="",
+                                             stream=sys.stderr)) + "\n")
+        return None
+
+
+def _span(first, last):
+    return ("line %d" % first if first == last
+            else "lines %d-%d" % (first, last))
+
+
+def _action_head(record):
+    """An action as ranwhat ignore names it: its title, its rule and
+    severity, when, and which agent ran it; then its evidence and where it
+    ran, each a line."""
+    hits = sorted(record.get("hits") or (),
+                  key=lambda h: -watch_mod._RANK.get(h.get("severity"), -1))
+    worst = hits[0] if hits else {}
+    when = (watch_mod._local_time(record.get("timestamp"))[:16]
+            if watch_mod._epoch(record.get("timestamp")) is not None
+            else "time unknown")
+    agent = agents_mod.name(record.get("source") or "claude-code")
+    title = "%s  (%s, %s)" % (worst.get("title"), worst.get("rule"),
+                              worst.get("severity"))
+    evidence = watch_mod._printable(worst.get("evidence") or "")
+    where = ignore_mod._directory(record, worst)
+    return worst, (title, "%s  %s" % (when, agent)), evidence, where
+
+
+def _head_lines(title, width):
+    """An action's title and when it ran, on one line when they fit, the
+    time and agent on the next when they do not."""
+    name, when = title
+    if len("  %s  %s" % (name, when)) <= width:
+        return ["  %s  %s" % (name, when)]
+    return ["  " + watch_mod._fit(name, width - 2), "      " + when]
+
+
+def _ignore_one(args, path, current, record):
+    """ranwhat ignore ID, for the action found."""
+    show = current.show
+    verdict = current.verdict(record)
+    if verdict.hidden:
+        if args.json:
+            _ignore_json(path, None, None, present=1)
+        else:
+            print("Already left out by line %d of %s." % (verdict.lines[0], show))
+        return 0
+    ids = ignore_mod._ids_of(record)
+    there = set(current.parsed.ids) | set(current.parsed.acks)
+    guarded = ignore_mod._guarded(record)
+    if ids and all(i in there for i in ids) and not guarded:
+        # Named already, and listed all the same: it holds a secret.
+        if args.json:
+            _ignore_json(path, None, None, present=1)
+            return 0
+        line = min(current.parsed.ids.get(i) or current.parsed.acks.get(i)
+                   for i in ids)
+        _say("Already in %s (line %d), and listed all the same: it holds a "
+             "secret, which ranwhat clean masks, or keeps if it is no secret."
+             % (show, line))
+        return 0
+    interactive = (sys.stdin.isatty() and not args.no_interactive
+                   and not args.json)
+    if guarded:
+        if not interactive:
+            sys.stderr.write("\n".join(term.wrap(
+                "ranwhat ignore: that action changed ranwhat's own settings; "
+                "acknowledge it on a terminal, with %s ignore %s."
+                % (invocation(), ids[0]), indent="", stream=sys.stderr)) + "\n")
+            return 1
+        return _ignore_ack(args, path, current, record)
+    if interactive:
+        return _ignore_menu(args, path, current, record)
+    added = _ignore_added(args, path, [(ids, ignore_mod.id_line(record))])
+    if added is None:
+        return 1
+    first, last, present = added
+    if args.json:
+        _ignore_json(path, first, last, present=present)
+        return 0
+    worst, title, evidence, _where = _action_head(record)
+    secret = any(h.get("rule") == ignore_mod.SECRET for h in record["hits"])
+    print("%s %s  %s" % ("Added:" if secret else "Left out:",
+                         worst.get("title"), title[1]))
+    print("    " + watch_mod._fit(evidence, term.width() - 4))
+    if first is None:
+        print("Already in %s." % show)
+        return 0
+    _say("Added to %s (%s). watch and check no longer list this action; "
+         "--no-ignore lists it again, and deleting that line undoes this."
+         % (show, _span(first, last)))
+    if secret:
+        _say("It holds a secret, so watch and check list it until ranwhat "
+             "clean masks it, or keeps it if it is no secret.")
+        return 0
+    found, _why = ignore_mod.proposal(record)
+    if found:
+        _say("To leave out every %s instead, add %s:" % (
+            _proposal_words(found), "this line" if len(found.lines) == 1
+            else "these lines"))
+        for line in found.lines:
+            print("    " + line)
+    return 0
+
+
+def _proposal_words(found):
+    """What a proposal leaves out, in words: "`npm publish` run in
+    ~/work/mylib", or "action like it" for more than one entry."""
+    if len(found.parts) != 1:
+        return "action like it"
+    kind, what, where, _until = found.parts[0]
+    if kind == "path":
+        return "read or write of %s" % ignore_mod.shown(what)
+    if where:
+        return "`%s` run in %s" % (what, ignore_mod.shown(where))
+    return "`%s`" % what
+
+
+def _proposal_choice(found):
+    """Option 2 of ranwhat ignore's menu, in words."""
+    if len(found.parts) != 1:
+        return "every action like it, by these lines:"
+    kind, what, where, until = found.parts[0]
+    if kind == "path":
+        said = "every read or write of %s" % ignore_mod.shown(what)
+    elif where:
+        said = "`%s` run in %s or below it" % (what, ignore_mod.shown(where))
+    else:
+        said = "`%s`, wherever it runs" % what
+    return said + (", until %s" % until.isoformat() if until else "")
+
+
+def _ignore_menu(args, path, current, record):
+    """ranwhat ignore ID on a terminal: this action only, or every action
+    like it (ignore.proposal), or nothing."""
+    from .report import DIM
+    worst, title, evidence, where = _action_head(record)
+    width = term.width()
+    print()
+    print("\n".join(_head_lines(title, width)))
+    print(DIM("      " + watch_mod._fit(evidence, width - 6)))
+    if where:
+        print(DIM("      ran in %s" % ignore_mod.shown(where)))
+    found, why = ignore_mod.proposal(record)
+    print()
+    print("  Leave out of later reports:")
+    print("    1  this action only")
+    if found:
+        for line in term.wrap(_proposal_choice(found), indent=" " * 7,
+                              first="    2  "):
+            print(line)
+        if len(found.parts) != 1:
+            for line in found.lines:
+                print("         " + line)
+    print("    c  cancel")
+    if not found:
+        for line in term.wrap("Every action like it cannot be left out by one "
+                              "entry: %s." % why, indent="  "):
+            print(DIM(line))
+    choices = ("1", "2") if found else ("1",)
+    while True:
+        try:
+            answer = input("  ranwhat> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "c"
+        if answer in ("", "c", "cancel", "q", "quit"):
+            print("  Nothing was added.")
+            return 0
+        if answer in choices:
+            break
+        print("  Answer %s or c." % ", ".join(choices))
+    ids = ignore_mod._ids_of(record)
+    if answer == "1":
+        items = [(ids, ignore_mod.id_line(record))]
+    else:
+        items = [(None, line) for line in found.lines]
+    added = _ignore_added(args, path, items)
+    if added is None:
+        return 1
+    first, last, _present = added
+    if first is None:
+        print("  Already in %s." % current.show)
+        return 0
+    if answer == "1":
+        _say("Added to %s (%s). watch and check no longer list this action; "
+             "--no-ignore lists it again, and deleting that line undoes this."
+             % (current.show, _span(first, last)), indent="  ")
+        return 0
+    print("  Added to %s (%s):" % (current.show, _span(first, last)))
+    for line in found.lines:
+        print("      " + line)
+    _say("watch and check no longer list what %s; --no-ignore lists it "
+         "again, and deleting %s undoes this." % (
+             "it matches" if len(found.lines) == 1 else "they match",
+             "that line" if first == last else "those lines"), indent="  ")
+    return 0
+
+
+def _ignore_ack(args, path, current, record):
+    """ranwhat ignore ID for an action that changed ranwhat's own settings:
+    on a terminal only, said for what it is, and written as an ack line."""
+    from .report import DIM
+    worst, title, evidence, _where = _action_head(record)
+    width = term.width()
+    print()
+    print("\n".join(_head_lines(title, width)))
+    print(DIM("      " + watch_mod._fit(evidence, width - 6)))
+    print()
+    show = current.show
+    if current.exists:
+        parsed = current.parsed
+        try:
+            changed = time.strftime("%Y-%m-%d %H:%M",
+                                    time.localtime(os.stat(path).st_mtime))
+        except OSError:
+            changed = "at a time not known"
+        state = ("%s holds %s and %s, and last changed %s." % (
+            show, agents_mod.plural(len(parsed.entries) + len(parsed.skipped),
+                                    "entry"),
+            agents_mod.plural(parsed.id_lines, "action id"), changed))
+    else:
+        state = "%s does not exist yet." % show
+    _say("This action changed what ranwhat reports. " + state, indent="  ")
+    _say("Acknowledge it? watch and check stop listing it, and every report "
+         "still says one acknowledged change is left out. [y/N]", indent="  ")
+    try:
+        answer = input("  ranwhat> ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+    if answer not in ("y", "yes"):
+        print("  Nothing was added.")
+        return 0
+    added = _ignore_added(args, path, [(ignore_mod._ids_of(record),
+                                        ignore_mod.id_line(record, ack=True))])
+    if added is None:
+        return 1
+    first, last, _present = added
+    if first is None:
+        print("  Already acknowledged in %s." % show)
+        return 0
+    _say("Acknowledged in %s (%s). watch and check no longer list it, and "
+         "each report says so; deleting that line lists it again."
+         % (show, _span(first, last)), indent="  ")
+    return 0
+
+
+def _severities(records):
+    """"3 critical, 5 high, 4 medium": how many of each, worst first."""
+    counts = {}
+    for r in records:
+        counts[r.get("severity")] = counts.get(r.get("severity"), 0) + 1
+    return ", ".join("%d %s" % (counts[k], k) for k in ("critical", "high", "medium")
+                     if counts.get(k))
+
+
+def _guard_sentence(guards):
+    """What ranwhat ignore all and - say of the actions they did not add:
+    each changed ranwhat's own settings, and only an ack names it."""
+    ids = [ignore_mod._ids_of(r)[0] for r in guards if ignore_mod._ids_of(r)]
+    cmd = invocation()
+    if len(guards) == 1:
+        return ("1 action that changed ranwhat's own settings was not added: "
+                "acknowledge it on a terminal with %s ignore %s."
+                % (cmd, ids[0] if ids else "ID"))
+    return ("%d actions that changed ranwhat's own settings were not added: "
+            "acknowledge each on a terminal with %s ignore ID (%s)."
+            % (len(guards), cmd, ", ".join(ids[:5]) + (", ..." if len(ids) > 5
+                                                        else "")))
+
+
+def _ignore_all(args, path, current, records):
+    """ranwhat ignore all: every action listed now, by its ids, in one
+    dated block, but each that changed ranwhat's own settings."""
+    listed = current.split(records)
+    there = set(current.parsed.ids) | set(current.parsed.acks)
+    guards = [r for r in listed if ignore_mod._guarded(r)]
+    todo = [r for r in listed if not ignore_mod._guarded(r)
+            and not all(i in there for i in ignore_mod._ids_of(r))]
+    todo = [r for r in todo if ignore_mod._ids_of(r)]
+    days = watch_mod._days(args.days)
+    if not todo:
+        if args.json:
+            _ignore_json(path, None, None, guard=len(guards))
+            return 0
+        _say("Nothing to add: every action from the last %s is left out "
+             "already." % days if not guards else
+             "Nothing to add: every other action from the last %s is left "
+             "out already." % days)
+        if guards:
+            _say(_guard_sentence(guards))
+        return 0
+    items = [(ignore_mod._ids_of(r), ignore_mod.id_line(r)) for r in todo]
+    heading = ignore_mod.now_heading("all", args.days, len(todo))
+    added = _ignore_added(args, path, items, heading)
+    if added is None:
+        return 1
+    first, last, present = added
+    if args.json:
+        _ignore_json(path, first, last, guard=len(guards), present=present)
+        return 0
+    if first is None:
+        _say("Nothing to add: every action from the last %s is left out "
+             "already." % days)
+        return 0
+    n = last - first + 1
+    _say("Left out %s from the last %s (%s)." % (agents_mod.plural(n, "action"),
+                                                 days, _severities(todo)))
+    _say("Added to %s (%s). From now on watch and check list only what is "
+         "new since; --no-ignore lists %s again, and deleting %s undoes this."
+         % (current.show, _span(first, last), "it" if n == 1 else "these",
+            "that line" if n == 1 else "those lines"))
+    secret = sum(1 for r in todo if any(h.get("rule") == ignore_mod.SECRET
+                                        for h in r.get("hits") or ()))
+    if secret:
+        _say(("%d of them holds a secret, and stays listed" if secret == 1
+              else "%d of them hold a secret, and stay listed") % secret
+             + " until ranwhat clean masks it, or keeps it if it is no secret.")
+    if guards:
+        _say(_guard_sentence(guards))
+    return 0
+
+
+def _ignore_report(args, path, current):
+    """ranwhat ignore -: every action in watch --json or check --json, read
+    from stdin, but each that changed ranwhat's own settings."""
+    try:
+        found = ignore_mod.read_report(sys.stdin)
+    except ignore_mod.IgnoreError as error:
+        sys.stderr.write("%s\n" % error)
+        return 1
+    guards = [record for _ids, guarded, record in found if guarded]
+    items = [(ids, ignore_mod.id_line(record)) for ids, guarded, record in found
+             if not guarded]
+    added = (None, None, 0)
+    if items:
+        added = _ignore_added(args, path, items,
+                              ignore_mod.now_heading("-", n=len(items)))
+        if added is None:
+            return 1
+    first, last, present = added
+    if args.json:
+        _ignore_json(path, first, last, guard=len(guards), present=present)
+        return 0
+    if first is None:
+        print("Nothing to add: each action on stdin is in %s already."
+              % current.show if found else "Nothing to add: stdin holds no action.")
+    else:
+        _say("Added %s to %s (%s)." % (
+            agents_mod.plural(last - first + 1, "action"), current.show,
+            _span(first, last)))
+    if guards:
+        _say(_guard_sentence(guards))
+    return 0
+
+
+def _ignore_list(args, path):
+    """ranwhat ignore with no action: the file, an entry a line, read and
+    never written. Exit status 3 when a line is skipped or the file is not
+    used, so a CI job can check a committed file; 1 when --ignore names one
+    that is not there."""
+    from .report import BOLD, DIM
+    try:
+        current = ignore_mod.Ignore.open(args.ignore, explicit=bool(args.ignore))
+    except ignore_mod.IgnoreError as error:
+        sys.stderr.write("ranwhat: %s\n" % error)
+        return 1
+    show, parsed, today = current.show, current.parsed, current.today
+    if args.json:
+        entries = []
+        for e in parsed.entries:
+            missing = e.missing(e.kind() or "command", today)
+            entries.append({"line": e.line, "rule": e.rule, "pattern": e.pattern,
+                            "in": e.within_text, "until": e.until and e.until.isoformat(),
+                            "hides_critical": not missing,
+                            "missing": [ignore_mod._json_missing(m) for m in missing],
+                            "expired": e.expired(today)})
+        print(_json_text({"file": path, "used": current.exists and not current.unused,
+                          "unused": current.unused, "entries": entries,
+                          "ids": parsed.id_lines, "acks": parsed.ack_lines,
+                          "skipped": [{"line": n, "why": why}
+                                      for n, why in parsed.skipped]}))
+        return 3 if current.unused or parsed.skipped else 0
+    if not current.exists:
+        _say("No ignore file: %s does not exist, so watch and check list "
+             "everything." % show)
+        return 0
+    if current.unused:
+        _say("%s %s, so watch and check do not use it: nothing is ignored."
+             % (show, current.unused))
+        return 3
+    width = term.width()
+    name, tagline = "  ranwhat ignore  ", "· what watch and check leave out"
+    if len(name + tagline) <= width:
+        L = ["", BOLD(name) + DIM(tagline)]
+    else:
+        L = ["", BOLD(name.rstrip()), DIM("  " + tagline[2:])]
+    L += [DIM(term.rule("-"))]
+    L += term.wrap("%s: %s, %s" % (show, agents_mod.plural(
+        len(parsed.entries) + len(parsed.skipped), "entry"),
+        agents_mod.plural(parsed.id_lines, "action id")))
+    rows = []
+    rules = {r.id: r.severity for r in watch_mod.RULES}
+    for e in parsed.entries:
+        note = ""
+        if e.expired(today):
+            note = "expired %s" % e.until.isoformat()
+        else:
+            missing = e.missing(e.kind() or "command", today)
+            if missing and (e.pattern is None or rules.get(e.rule) == watch_mod.CRITICAL):
+                note = "medium and high only: %s" % ignore_mod._missing_words(missing)
+        rows.append((e.line, "line %d" % e.line,
+                     watch_mod._printable(e.text), note))
+    for n, why in parsed.skipped:
+        rows.append((n, "line %d" % n, "skipped: %s" % why, ""))
+    for first, last, count, label, ack in parsed.blocks:
+        if ack:
+            text = "%s, acknowledged" % agents_mod.plural(
+                count, "change to ranwhat's own settings")
+        else:
+            text = "%s by id" % agents_mod.plural(count, "action")
+            if label:
+                text += " (%s)" % label
+        rows.append((first, _span(first, last), text, ""))
+    rows.sort()
+    pad = max([len(label) for _n, label, _t, _note in rows] + [6])
+    for _n, label, text, note in rows:
+        head = "    %-*s  " % (pad, label)
+        line = head + text
+        if note and len(line) + 3 + len(note) <= width:
+            L.append(line + DIM("   " + note))
+            continue
+        L.append(watch_mod._fit(line, width))
+        if note:
+            L += [DIM(l) for l in term.wrap(note, indent=" " * len(head))]
+    cmd = invocation()
+    L += term.wrap("Leave out one more by the id watch prints beside it: %s "
+                   "ignore ID." % cmd)
+    L += term.wrap("%s watch --no-ignore lists everything again." % cmd)
+    L.append("")
+    print("\n".join(L))
+    return 3 if parsed.skipped else 0
+
+
 def _callers(p, args):
     """ranwhat callers: the calls made with a key, from the provider's own
     log, grouped by where they came from. Read-only. AWS is read through the
@@ -1781,11 +2407,12 @@ def _main(argv=None):
                    choices=["check", "demo", "bench", "scan", "live",
                             "callers", "revoke", "watch", "clean", "sources",
                             "reach", "update", "login", "whoami", "logout",
-                            "hook"])
+                            "hook", "ignore"])
     p.add_argument("profile", nargs="?",
                    help="scan: path to a profile JSON. reach: a project "
                         "directory to look at. hook: install, uninstall or "
-                        "status")
+                        "status. ignore: an action's id, all, or - (ids from "
+                        "--json on stdin)")
     p.add_argument("--json", action="store_true", help="emit raw JSON")
     p.add_argument("--html", metavar="PATH",
                    help="demo, scan, live: also write the report as HTML")
@@ -1817,8 +2444,8 @@ def _main(argv=None):
     p.add_argument("--window-days", type=int, default=_DEFAULT_WINDOW_DAYS,
                    help="usage lookback window (default 90)")
     p.add_argument("--days", type=int, default=DEFAULT_DAYS,
-                   help="check, watch, clean: how far back to read local "
-                        "agent history (default 30)")
+                   help="check, watch, clean, ignore: how far back to read "
+                        "local agent history (default 30)")
     p.add_argument("--seed", type=int, default=None, metavar="N",
                    help="bench: draw the made-up secrets from this seed "
                         "(default %d), so a run can be repeated. Another seed "
@@ -1826,20 +2453,23 @@ def _main(argv=None):
                         "status %d when an expectation is not met, 1 on an "
                         "error" % (_BENCH_SEED, FAIL_STATUS))
     p.add_argument("--root", metavar="PATH",
-                   help="check, watch, clean: Claude Code transcript directory "
+                   help="check, watch, clean, ignore: Claude Code transcript "
+                        "directory "
                         "(default ~/.claude/projects); the same as "
                         "--path claude-code=PATH")
     p.add_argument("--state-dir", metavar="PATH",
-                   help="check, watch, clean: OpenClaw state directory "
+                   help="check, watch, clean, ignore: OpenClaw state directory "
                         "(default ~/.openclaw); the same as "
                         "--path openclaw=PATH")
     p.add_argument("--source", action="append", choices=list(sources_mod.ids()),
                    metavar="ID",
-                   help="check, watch, clean, sources: read only this agent "
+                   help="check, watch, clean, ignore, sources: read only this "
+                        "agent "
                         "(repeatable; default every one). IDs: %s"
                         % ", ".join(sources_mod.ids()))
     p.add_argument("--path", action="append", metavar="ID=PATH", default=[],
-                   help="check, watch, clean, sources: read this agent's "
+                   help="check, watch, clean, ignore, sources: read this "
+                        "agent's "
                         "history from PATH instead of its default place "
                         "(repeatable, one per agent; ranwhat sources says "
                         "what each PATH is)")
@@ -1861,7 +2491,13 @@ def _main(argv=None):
                         "appear masked, as the report shows them")
     p.add_argument("--no-interactive", action="store_true",
                    help="clean: report and exit instead of opening the review "
-                        "session")
+                        "session; ignore: add the id without asking")
+    p.add_argument("--ignore", metavar="PATH",
+                   help="check, watch, ignore: use PATH instead of "
+                        "~/.ranwhat/ignore ($RANWHAT_HOME/ignore)")
+    p.add_argument("--no-ignore", action="store_true",
+                   help="check, watch: leave nothing out; mark each action the "
+                        "ignore file would leave out")
     p.add_argument("--token", metavar="TOKEN",
                    help="update, whoami: subscription or CI token. Prefer "
                         "RANWHAT_TOKEN in the environment, ranwhat login, or "
@@ -1911,7 +2547,8 @@ def _main(argv=None):
         # Taken and ignored, `check --seed 1` looked like a repeatable run.
         p.error("--seed is only for bench")
 
-    if args.profile is not None and args.command not in ("scan", "reach"):
+    if args.profile is not None and args.command not in ("scan", "reach",
+                                                         "ignore"):
         # Taken and ignored, `check DIR` reported on the default history as
         # if it were DIR, and `clean DIR --apply` would have masked it.
         p.error(_takes_no_path(args.command, args.profile))
@@ -1926,6 +2563,13 @@ def _main(argv=None):
         if value is not None and args.command not in _FINDING_COMMANDS:
             # Accepted and ignored, a CI step would pass on any history.
             p.error("%s is only for check, watch and clean" % flag)
+    if args.ignore is not None and args.command not in ("check", "watch",
+                                                        "ignore"):
+        p.error("--ignore is only for check, watch and ignore"
+                + ("; clean leaves a secret alone with keep, in its review"
+                   if args.command == "clean" else ""))
+    if args.no_ignore and args.command not in ("check", "watch"):
+        p.error("--no-ignore is only for check and watch")
 
     if args.command is None:
         _overview(p)
@@ -1967,6 +2611,9 @@ def _main(argv=None):
 
     if args.command == "sources":
         return _sources(args)
+
+    if args.command == "ignore":
+        return _ignore(p, args)
 
     # After the --days check: check dispatched first scanned the future for
     # --days -1 and printed an all-clear.
@@ -2043,35 +2690,32 @@ def _main(argv=None):
         return finish(0)
 
     if args.command == "watch":
-        sources = args.sources
-        bar, step = _progress_line(args)
-        try:
-            everywhere = _known(args, step)
-            unread = {}
-            keeping = known_mod.Kept.open()
-            with watch_mod.sparing(keeping.__contains__ if keeping else None):
-                records, counts = watch_mod.scan_sources_counted(
-                    sources=sources, root=args.root, state_dir=args.state_dir,
-                    since_days=args.days, progress=step(_ACTIONS),
-                    known=everywhere, paths=args.paths, unread=unread)
-            if everywhere:
-                records = _masked_strings(records, everywhere.mask)
-        finally:
-            bar.clear()
+        ignoring = _ignoring(args)
+        if ignoring is None:
+            return 1
+        records, counts, unread, everywhere = _watch_scan(args)
         n = sum(counts.values()) + sum(unread.values())
         places = None if n else watch_mod.locations(
-            sources, root=args.root, state_dir=args.state_dir, paths=args.paths,
-            asked=args.source)
+            args.sources, root=args.root, state_dir=args.state_dir,
+            paths=args.paths, asked=args.source)
         shown = everywhere.mask if everywhere else None
+        records = ignoring.split(records, mark=args.no_ignore)
         if args.json:
+            # stdout stays the bare list it was; what the ignore file left
+            # out is said on stderr, a sentence a line.
             print(_json_text(watch_mod.public(records)))
+            for line in ignoring.stderr_lines():
+                sys.stderr.write((shown(line) if shown else line) + "\n")
             return _finish(args, _said_nothing_read(places, args.days),
-                           records, (), shown)
+                           records, (), shown, ignoring)
         print(watch_mod.render(records, counts, args.days, locations=places,
-                               notes=_notes(args),
+                               notes=_notes(args) + _ignore_notes(ignoring, shown),
                                complete=agents_mod.all_read(args.sources),
-                               unread=sum(unread.values())))
-        return _finish(args, 2 if places is not None else 0, records, (), shown)
+                               unread=sum(unread.values()),
+                               ignored=ignoring.hidden))
+        _ignore_hint(args, records)
+        return _finish(args, 2 if places is not None else 0, records, (), shown,
+                       ignoring)
 
     if args.command == "demo":
         _emit(run_scan(_bundled("support-copilot.json")), args)

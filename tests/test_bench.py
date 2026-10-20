@@ -433,6 +433,19 @@ class Isolation(_Bench):
         self.assertEqual(os.listdir(self.home), [])
         self.assertFalse(os.path.exists(self.state))
 
+    def test_an_ignore_file_that_leaves_out_everything_changes_nothing(self):
+        # bench runs in a state folder of its own: the ignore file of the
+        # machine it runs on, however wide, is never read.
+        before = bench.run().as_json()
+        os.makedirs(self.state)
+        with open(os.path.join(self.state, "ignore"), "w", encoding="utf-8") as fh:
+            fh.write("".join("%s\n" % rule.id for rule in watch.RULES
+                             if rule.id != "secret.literal"))
+        self.assertEqual(bench.run().as_json(), before)
+        rc, out, _err = self.run_cli("bench", "--json")
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out), before)
+
     def test_the_environment_is_restored(self):
         def snapshot():
             return (dict(os.environ), sys.stdout, sys.stderr, clean.BACKUP_ROOT)
