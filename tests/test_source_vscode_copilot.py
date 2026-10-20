@@ -661,13 +661,45 @@ class Terminal(Case):
     def test_every_approval_that_ran(self):
         for confirmed in ({"type": 1}, {"type": 2, "id": "chat.tools"},
                           {"type": 3, "scope": "session"},
-                          {"type": 4, "selectedButton": "allow"}, True, None):
+                          {"type": 4, "selectedButton": "allow"}, True):
             part = terminal_part()
-            if confirmed is None:
-                part.pop("isConfirmed")
-            else:
-                part["isConfirmed"] = confirmed
+            part["isConfirmed"] = confirmed
             self.assertIsNone(self.one(part).status, confirmed)
+
+    def test_a_part_still_waiting_for_confirmation_did_not_run(self):
+        part = terminal_part("w1", "rm -rf build")
+        part.pop("isConfirmed")
+        part["summary"] = {"kind": "incomplete"}
+        call = self.one(part)
+        self.assertEqual((call.kind, call.command, call.status),
+                         ("shell", "rm -rf build", "declined"))
+
+    def test_a_part_without_isconfirmed_but_with_a_result_ran(self):
+        part = terminal_part("w1", "ls")
+        part.pop("isConfirmed")
+        call = self.one(part, rounds(("w1", "run_in_terminal",
+                                      {"command": "ls"}), results=("w1",)))
+        self.assertIsNone(call.status)
+
+    def test_a_part_without_isconfirmed_but_with_a_state_ran(self):
+        part = terminal_part("w1", "ls", state={"exitCode": 0,
+                                                "timestamp": BASE_MS + 63000})
+        part.pop("isConfirmed")
+        self.assertIsNone(self.one(part).status)
+
+    def test_post_approval_skipped_with_a_result_already_ran(self):
+        part = tool_part("f1", "copilot_fetchWebPage", confirmed={"type": 5})
+        result = rounds(("f1", "fetch_webpage", {"urls": ["http://x"]}),
+                        results=("f1",))
+        call = OtherTools.one(self, [part], result)[0]
+        self.assertEqual(call.kind, "fetch")
+        self.assertIsNone(call.status)
+
+    def test_skipped_without_a_result_is_declined(self):
+        part = tool_part("f1", "copilot_fetchWebPage", confirmed={"type": 5})
+        result = rounds(("f1", "fetch_webpage", {"urls": ["http://x"]}))
+        call = OtherTools.one(self, [part], result)[0]
+        self.assertEqual(call.status, "declined")
 
     def test_a_command_state_is_proof_it_ran(self):
         call = self.one(terminal_part(confirmed=False, state={

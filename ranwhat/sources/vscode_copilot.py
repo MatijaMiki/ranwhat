@@ -126,7 +126,12 @@ MCP tools).
 A call that did not run is "declined": isConfirmed.type 0 (denied) or 5
 (skipped), or isConfirmed false (a boolean before 1.104; that false means
 denied is the research reading and was not confirmed on data). A
-terminalCommandState in the part is proof the command ran, and wins. A call
+terminalCommandState in the part is proof the command ran, and wins.
+Skipped (5) is ambiguous: VS Code also writes it for a tool that already
+ran and awaits post-approval (fetch_webpage, MCP), so a type 5 part whose id
+has a toolCallResults entry is not declined. A part with no isConfirmed key
+(or summary.kind "incomplete") is still streaming or waiting on the approval
+prompt: it is declined unless a result or terminalCommandState shows it ran. A call
 that is only in toolCallRounds (no part, so nothing says it was shown to
 the user) is yielded with the status its result gives: "declined" when
 toolCallResults holds no result for it. Exit code, duration, the
@@ -886,7 +891,8 @@ class VSCodeCopilotSource(Source):
             timestamp=stamp,
             not_after=None if stamp else _stamps.iso_utc(store.mtime, "s"))
 
-    def _part_call(self, store, state, request, part, rounds, fallback):
+    def _part_call(self, store, state, request, part, rounds, fallback,
+                   results=frozenset()):
         cid = _string(part.get("toolCallId"))
         info = rounds.get(_base_id(cid)) or {}
         tool_id = _string(part.get("toolId")) or ""
@@ -923,9 +929,27 @@ class VSCodeCopilotSource(Source):
             consumed = ("command",)
         if kind == "read" and not paths:
             paths = _result_paths(details)
-        status = DECLINED if _not_run(part.get("isConfirmed")) else None
-        if run and (_is_int(run.get("exitCode")) or _is_int(run.get("timestamp"))):
+        confirmed = part.get("isConfirmed")
+        ran = bool(run and (_is_int(run.get("exitCode"))
+                            or _is_int(run.get("timestamp"))))
+        has_result = _base_id(cid) in results
+        summary = part.get("summary")
+        incomplete = (isinstance(summary, dict)
+                      and summary.get("kind") == "incomplete")
+        if ran:
             status = None               # it ran
+        elif _not_run(confirmed):
+            # Skipped (5) is also written for a tool that already ran and
+            # awaits post-approval (fetch_webpage, MCP): a result proves it.
+            skipped = (isinstance(confirmed, dict)
+                       and confirmed.get("type") == 5)
+            status = None if skipped and has_result else DECLINED
+        elif (confirmed is None or incomplete) and not has_result:
+            # isConfirmed is absent while a call is streaming or waiting on
+            # the approval prompt: never approved, never ran.
+            status = DECLINED
+        else:
+            status = None
         project = store.project or fallback or workdir
         return ToolCall(
             self.id, store.path, name, arguments, kind=kind, known=known,
@@ -961,7 +985,7 @@ class VSCodeCopilotSource(Source):
                 if not isinstance(part, dict) or part.get("kind") != PART:
                     continue
                 call = self._part_call(store, state, request, part, rounds,
-                                       fallback)
+                                       fallback, results)
                 matched.add(_base_id(call.tool_call_id))
                 yield call
             for cid, info in rounds.items():
