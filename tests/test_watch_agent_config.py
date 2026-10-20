@@ -11,6 +11,7 @@ a deny rule added, settings read.
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -176,6 +177,34 @@ class TheGuardItself(Cases):
             # for the process that runs it and its children only
             ("PowerShell", "[Environment]::SetEnvironmentVariable('RANWHAT_HOOK', '0', "
                            "'Process')"))
+
+    def test_its_usage_asked_for_removes_nothing(self):
+        # argparse prints the usage and exits on -h or --help, before any
+        # verb runs.
+        self.assertQuiet(
+            "ranwhat hook uninstall --help", "ranwhat hook uninstall -h",
+            "ranwhat --help hook uninstall", "uvx ranwhat hook uninstall -h",
+            "python3 -m ranwhat hook uninstall --help")
+        # After -- it is an operand. pip's options take values, and its -v
+        # and --version inside a subcommand stop nothing: these uninstall.
+        self.assertRated(CRITICAL, "ranwhat hook uninstall -- --help")
+        self.assertRated(
+            HIGH, "pip uninstall -y ranwhat --version", "pip uninstall -y -v ranwhat",
+            "pip --log --help uninstall -y ranwhat")
+
+    def test_set_by_powershell_however_it_is_spaced_or_cased(self):
+        self.assertRated(
+            CRITICAL,
+            ("PowerShell", '$env:RANWHAT_HOOK="0"; claude -p "fix it"'),
+            ("PowerShell", "$env:RANWHAT_HOOK='off'\nclaude"),
+            ("PowerShell", '$env:ranwhat_hook = "0"; claude -p "fix it"'),
+            ("PowerShell", '$env:RANWHAT_HOOK= "0"; claude'))
+        self.assertQuiet(
+            ("PowerShell", '$env:RANWHAT_HOOK="1"; claude'),
+            ("PowerShell", '$env:RANWHAT_HOOK="0"; python -m pytest'),
+            ("PowerShell", '$env:RANWHAT_HOOK="0"; $env:RANWHAT_HOOK="1"; claude'),
+            # A POSIX shell's names are cased: this one is another variable.
+            'ranwhat_hook=0 claude -p "fix it"')
 
     def test_it_says_why(self):
         for command in ("ranwhat hook uninstall",
@@ -394,6 +423,20 @@ class OneAgentOrOneRule(Cases):
         self.assertIn("started with its approvals or its sandbox switched off",
                       found("Bash", "codex exec --yolo x")["why"])
 
+    def test_a_launch_behind_a_wrapper(self):
+        self.assertRated(
+            HIGH,
+            "caffeinate -i claude --dangerously-skip-permissions",
+            "stdbuf -oL codex --dangerously-bypass-approvals-and-sandbox",
+            "timeout --foreground 600 claude --dangerously-skip-permissions",
+            "timeout -s INT 60 claude --dangerously-skip-permissions",
+            "timeout -k 5 600 claude --dangerously-skip-permissions",
+            "time -p claude --dangerously-skip-permissions",
+            "sudo -- claude --dangerously-skip-permissions",
+            "nice --adjustment=5 gemini --yolo")
+        self.assertRated(CRITICAL, "stdbuf -oL ranwhat hook uninstall",
+                         "caffeinate -i ranwhat hook uninstall")
+
     def test_a_launch_hidden_in_an_encoding(self):
         hit = found("Bash", "echo Y2xhdWRlIC0tZGFuZ2Vyb3VzbHktc2tpcC1wZXJtaXNzaW9ucy"
                             "AtcCB4 | base64 -d | sh")
@@ -535,6 +578,30 @@ class ReadsAndMentions(Cases):
             "python3 <<'EOF' | tee .claude/settings.json\nprint('bypassPermissions')\n"
             "EOF")
 
+    def test_the_variable_read_is_not_set(self):
+        # A prompt, a warning or a status line that shows the guard is off
+        # reads RANWHAT_HOOK; MY_RANWHAT_HOOK is another name.
+        self.assertQuiet(
+            ("Edit", {"file_path": "/home/dev/.bashrc", "old_string": "# end\n",
+                      "new_string": '[ "$RANWHAT_HOOK" = "0" ] && PS1="[unguarded] '
+                                    '$PS1"\n# end\n'}),
+            ("Write", {"file_path": "/home/dev/proj/.envrc",
+                       "content": 'test "$RANWHAT_HOOK" = "0" && echo "warning: '
+                                  'ranwhat hook is off"\n'}),
+            ("Edit", {"file_path": "/home/dev/.config/fish/config.fish",
+                      "old_string": "# end\n",
+                      "new_string": 'if test "$RANWHAT_HOOK" = 0\n  echo off\nend\n'
+                                    "# end\n"}),
+            "echo '[ $RANWHAT_HOOK = 0 ] && echo unguarded' >> ~/.bashrc",
+            "echo 'export MY_RANWHAT_HOOK=0' >> ~/.bashrc")
+        # a status line runs a command of its own, as a hook does
+        self.assertRated(MEDIUM, ("Edit", {
+            "file_path": USER, "old_string": "{\n",
+            "new_string": '{\n  "statusLine": {"type": "command", "command": '
+                          '"[ $RANWHAT_HOOK = 0 ] && echo unguarded"},\n'}))
+        self.assertRated(CRITICAL, "echo ': ${RANWHAT_HOOK=0}' >> ~/.bashrc",
+                         "echo 'export RANWHAT_HOOK=\"0\"' >> ~/.bashrc")
+
     def test_files_that_are_not_an_agents_settings(self):
         self.assertQuiet(
             ("Write", {"file_path": "/repo/README.md",
@@ -558,6 +625,54 @@ class ReadsAndMentions(Cases):
             "echo \"alias cc='claude --dangerously-skip-permissions'\" >> docker/.bashrc",
             "echo \"alias cc='claude --dangerously-skip-permissions'\" >> "
             ".devcontainer/.zshrc")
+
+
+class UserSettingsOnWindows(Cases):
+    """On Windows the home is USERPROFILE, and CLAUDE_CONFIG_DIR a drive's
+    path: read as POSIX paths, the file `ranwhat hook install` writes was
+    no agent's settings at all, and a home not spelled X:\\Users\\<name> no
+    home. Git Bash, which Claude Code runs Bash through there, spells the
+    home /c/Users/<name>."""
+
+    def judged_under(self, home, settings):
+        user = lambda scope, *a, **k: settings  # noqa: E731
+        with mock.patch.object(watch, "_home", lambda: home), \
+                mock.patch.object(hook, "settings_path", user):
+            growth.forget()
+            try:
+                return (watch._config_kind(settings),
+                        severity("Edit", {"file_path": settings, "old_string": OURS,
+                                          "new_string": ""}),
+                        severity("Write", {"file_path": settings,
+                                           "content": '{"permissions": {"defaultMode": '
+                                                      '"bypassPermissions"}}'}))
+            finally:
+                growth.forget()
+
+    def test_claude_config_dir_and_a_home_of_any_shape(self):
+        for home, settings in (
+                ("C:\\Users\\me", "C:\\Users\\me\\claude-work\\settings.json"),
+                ("C:\\Users\\me", "D:\\claude\\settings.json"),
+                ("C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\ranwhat-userhome-k2",
+                 "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\ranwhat-userhome-k2\\"
+                 ".claude\\settings.json"),
+                ("E:\\profiles\\me", "E:\\profiles\\me\\.claude\\settings.json")):
+            with self.subTest(home=home, settings=settings):
+                self.assertEqual(self.judged_under(home, settings),
+                                 (("claude", "user"), CRITICAL, CRITICAL))
+        # Windows' file names are read in any case
+        self.assertEqual(self.judged_under(
+            "C:\\Users\\me", "C:\\Users\\me\\Claude-Work\\settings.json")[0],
+            ("claude", "user"))
+
+    def test_git_bash_spells_the_home_with_its_drive_as_a_folder(self):
+        self.assertRated(
+            CRITICAL,
+            "cat > /c/Users/me/.claude/settings.json <<'EOF'\n{\"permissions\": "
+            "{\"defaultMode\": \"bypassPermissions\"}}\nEOF",
+            "echo 'export RANWHAT_HOOK=0' >> /c/Users/me/.bashrc")
+        self.assertRated(HIGH, "echo \"alias claude='claude "
+                               "--dangerously-skip-permissions'\" >> /c/Users/me/.bashrc")
 
 
 class TheHookAsks(unittest.TestCase):

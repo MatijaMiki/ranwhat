@@ -156,6 +156,15 @@ class _Gap(object):
                 return None
             pos = stop.end()
 
+    def match(self, text, pos=0):
+        """What search finds, when its head starts at pos; else None."""
+        head = self.head.match(text, pos)
+        if not head:
+            return None
+        stop = self.stop.search(text, head.end())
+        tail = self.tail.search(text, head.end(), stop.start() if stop else len(text))
+        return _Found(head.start(), tail.end()) if tail else None
+
 
 # Commands whose arguments are literal text, never a path being acted on.
 # `cat` is deliberately absent: `cat ~/.aws/credentials` really is a read.
@@ -2017,10 +2026,15 @@ def _flatten_substitutions(text):
     return "".join(out)
 
 
+# time with -p, the one option the shell's time takes. A timeout whose -k or
+# -s is given its value as the next word is left on: that value is no
+# duration, and _launched reads timeout with its own options (_LEAD_VALUES).
 _ENC_LEADING = re.compile(
-    r"(?:\s*(?:\(|\{(?=\s)|(?:then|do|else|elif|if|while|until|time)(?=\s)))+\s*")
+    r"(?:\s*(?:\(|\{(?=\s)|(?:then|do|else|elif|if|while|until|time(?:\s+-p)?)"
+    r"(?=\s)))+\s*")
 _ENC_WRAPPERS = re.compile(
-    r"(?:(?:time|setsid)\s+|timeout(?:\s+-[A-Za-z]+)*\s+\d[\w.]*\s+)+")
+    r"(?:(?:time(?:\s+-p)?|setsid)\s+"
+    r"|timeout(?:\s+-(?![ks]\b)[A-Za-z]+)*\s+\d[\w.]*\s+)+")
 
 
 def _normalised(stage):
@@ -2094,7 +2108,8 @@ def _stage_words(stage):
 
 _ENC_CLUSTER = re.compile(r"-[A-Za-z0-9]+")
 _ENC_XXD = re.compile(r"-[abCcdEeghilnoprRsuv]{1,4}")
-_ENC_ECHO_FLAGS = re.compile(r"-[neE]+")
+# echo's options, which the decoders and the rules that judge writes skip.
+_ECHO_FLAGS = re.compile(r"-[neE]+")
 _ENC_PRINTF_ARGUMENT = re.compile(r"%s(?:\\n)?")
 
 
@@ -2151,7 +2166,7 @@ def _escape_decoder(name, words):
             return None
     elif name == "echo":
         escapes, i = False, 0
-        while i < len(args) and _ENC_ECHO_FLAGS.fullmatch(args[i]):
+        while i < len(args) and _ECHO_FLAGS.fullmatch(args[i]):
             for letter in args[i][1:]:
                 if letter in "eE":
                     escapes = letter == "e"
@@ -2184,7 +2199,7 @@ def _produced_literal(stage):
     name = words[0].rsplit("/", 1)[-1].lower()
     if name == "echo":
         i = 1
-        while i < len(words) and _ENC_ECHO_FLAGS.fullmatch(words[i]):
+        while i < len(words) and _ECHO_FLAGS.fullmatch(words[i]):
             i += 1
         literal = " ".join(words[i:])
     elif name == "printf":
@@ -2611,9 +2626,16 @@ def _encoded_run(text):
 # PowerShell's `$r = Invoke-WebRequest ...`, the form Microsoft's managed
 # identity docs give. The host must be a literal in the same word as the
 # credential path: that is what tells the metadata service from an API with
-# iam/security-credentials in a path of its own. Not seen: a host reached
-# only through a variable, a fetch in another language's source, and one run
-# somewhere else (ssh, kubectl exec, docker exec), whose words are not read.
+# iam/security-credentials in a path of its own. And that word must be one
+# the fetcher fetches, starting with the URL (_URL_LEAD): the same URL in a
+# -d body, a --data-urlencode query or an httpie item is data the request
+# carries, as when a SIEM or log search looks for SSRF attempts, or an
+# issue is filed about one. So an SSRF payload handed to another app as a
+# parameter (?url=http://169.254.169.254/...) is not reported either: it
+# would reach that app's machine's credentials, not this one's. Not seen: a
+# host reached only through a variable, a fetch in another language's
+# source, and one run somewhere else (ssh, kubectl exec, docker exec), whose
+# words are not read.
 _METADATA_FETCHER = re.compile(
     _STAGE_PREFIX + r"(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod"
     r"|http|https|xh)(?:\.exe)?(?![\w.-])", re.I)
@@ -2650,6 +2672,11 @@ _CREDENTIALS_ENDPOINT = re.compile(
     r"|IDENTITY_ENDPOINT|MSI_ENDPOINT)\b", re.I)
 _METADATA_SIGNALS = (_METADATA_CREDENTIALS, _CONTAINER_CREDENTIALS,
                      _CREDENTIALS_ENDPOINT)
+# Where a fetched URL starts in its word: past curl's --url= or
+# PowerShell's -Uri:, a scheme, and the user a URL may name, since
+# http://user@169.254.169.254/ asks the same service.
+_URL_LEAD = re.compile(
+    r"(?:--url=|-uri:)?(?:[a-z][a-z0-9+.-]*://(?:[^/@\s]*@)?)?", re.I)
 
 
 # What each of _METADATA_SIGNALS holds, in lower case: a call that holds
@@ -2657,6 +2684,20 @@ _METADATA_SIGNALS = (_METADATA_CREDENTIALS, _CONTAINER_CREDENTIALS,
 _METADATA_HINTS = ("169.254.", "100.100.100.200", "metadata", "fd00:ec2",
                    "2852039166", "0xa9fea9fe", "credentials_", "identity_endpoint",
                    "msi_endpoint")
+
+
+def _fetched_credentials(stage):
+    """Where the first word of a fetch's stage that is a credential URL, or
+    a credential endpoint's variable, ends; or None. A word counts only
+    when one starts it, past _URL_LEAD, as read by the shell: one met inside
+    another word is data the request carries. Each word is read once, by
+    regexes anchored where it starts."""
+    for word in _WORD_ANYWHERE.finditer(stage):
+        read = _dequoted(word.group())
+        lead = _URL_LEAD.match(read).end()
+        if any(signal.match(read, lead) for signal in _METADATA_SIGNALS):
+            return word.end()
+    return None
 
 
 def _metadata_fetch(text, depth=0):
@@ -2677,10 +2718,9 @@ def _metadata_fetch(text, depth=0):
         # bash -c "curl ..." is reduced to `bash -c curl ...`.
         run = _after_prefix(_unwrap_c(_after_prefix(command)))
         if _METADATA_FETCHER.match(run):
-            for signal in _METADATA_SIGNALS:
-                found = signal.search(stage)
-                if found:
-                    return at, at + found.span()[1]
+            found = _fetched_credentials(stage)
+            if found is not None:
+                return at, at + found
         if depth >= 3:
             continue
         name = _command_word(command)
@@ -2758,7 +2798,6 @@ _WORD_ANYWHERE = re.compile(_SHELL_WORD)
 _WORD_PART = re.compile(
     r"""'([^']*)'?|"((?:[^"\\]|\\[\s\S])*)"?|\\([\s\S]?)|([^'"\\]+)""")
 _DOUBLE_QUOTED_ESCAPE = re.compile(r'\\([$`"\\])')
-_ECHO_OPTIONS = re.compile(r"-[neE]+\Z")
 
 
 def _unquoted(text):
@@ -2846,7 +2885,7 @@ def _printed(stage):
     first = 1
     program = words[0].rsplit("/", 1)[-1].lower() if words else ""
     if program == "echo":
-        while first < len(words) and _ECHO_OPTIONS.match(words[first]):
+        while first < len(words) and _ECHO_FLAGS.fullmatch(words[first]):
             first += 1
     return ("\n" if program == "printf" else " ").join(words[first:])
 
@@ -2881,9 +2920,7 @@ def _posix_home():
     home = _home()
     if home.startswith("/"):
         return home
-    home = _slashed(home).replace("\\", "/")
-    drive = _DRIVE_LETTER.match(home)
-    return home[drive.end():] if drive else home
+    return _undriven(_slashed(home).replace("\\", "/"))
 
 
 def _home_relative(path):
@@ -2896,7 +2933,9 @@ def _home_relative(path):
     return path[found.end():] if found else None
 
 
-_OTHER_HOME = re.compile(r"/(?:home|Users)/[^/]+/|/(?:var/)?root/")
+# Git Bash, which Claude Code runs Bash through on Windows, spells a home
+# /c/Users/<name>: its drive as a folder of one letter.
+_OTHER_HOME = re.compile(r"(?:/[A-Za-z])?/(?:home|Users)/[^/]+/|/(?:var/)?root/")
 _REMOTE_PATH = re.compile(r"[^/\s]{2,}:")
 
 
@@ -3132,8 +3171,9 @@ def _powershell_written(name, args, stage):
             value = given[0] if given else None
     found = [(target, value)] if target else []
     # PowerShell does not escape with \, and a path that ends in \" is cut
-    # wrong by a POSIX split: the Startup folder is found in the text too.
-    if name != "remove-item" and _STARTUP_FOLDER in _slashed(stage).lower():
+    # wrong by a POSIX split: the Startup folder is found in the text too,
+    # which both callers have already slashed (_as_written).
+    if name != "remove-item" and _STARTUP_FOLDER in stage.lower():
         found.append(("shell:startup", value))
     return found
 
@@ -3294,6 +3334,13 @@ _PROFILE_VARIABLE = re.compile(
 _PS_PROFILE_FOLDERS = frozenset(("powershell", "windowspowershell"))
 
 
+def _undriven(path):
+    """A slashed path without the drive it starts with: C:/Users/me is
+    /Users/me, as _posix_home reads this user's home on Windows."""
+    drive = _DRIVE_LETTER.match(path)
+    return path[drive.end():] if drive else path
+
+
 def _persist_place(target):
     """"job" when target is where a scheduler or service manager finds what
     it runs, "startup" when it is a shell's startup file, else None. A
@@ -3309,10 +3356,7 @@ def _persist_place(target):
             and (name == "profile.ps1" or (name.startswith("microsoft.")
                                            and name.endswith("_profile.ps1")))):
         return "startup"
-    drive = _DRIVE_LETTER.match(t)
-    if drive:
-        t = t[drive.end():]
-    path = _as_absolute(t, _posix_home())
+    path = _as_absolute(_undriven(t), _posix_home())
     if path is None:
         return None
     if path in _JOB_FILES or (path + "/").startswith(_JOB_DIRS):
@@ -3341,11 +3385,12 @@ _SLASHES = re.compile(r"[\\/]+")
 _SYSTEMCTL_VALUES = frozenset((
     "-M", "-H", "--host", "--machine", "-t", "--type", "-p", "--property",
     "--root", "-o", "--output", "-n", "--lines", "-s", "--signal", "--state"))
-# Programs that schedule or enable by a verb of their own.
+# Programs that schedule or enable by a verb of their own, by the name
+# _writer_name gives them: sc.exe is sc.
 _PERSIST_VERBS = frozenset((
-    "crontab", "launchctl", "systemctl", "brew", "schtasks", "schtasks.exe",
-    "reg", "reg.exe", "register-scheduledtask", "new-itemproperty",
-    "set-itemproperty", "sc", "sc.exe", "new-service", "set-service"))
+    "crontab", "launchctl", "systemctl", "brew", "schtasks", "reg",
+    "register-scheduledtask", "new-itemproperty", "set-itemproperty", "sc",
+    "new-service", "set-service"))
 # PowerShell's start types that start a service at boot.
 _AUTOMATIC = frozenset(("automatic", "automaticdelayedstart"))
 
@@ -3371,6 +3416,167 @@ def _crontab_installs(args):
             if set(word[1:]) & set("lreTVh"):
                 return False
     return True
+
+
+# crontab -l | grep -v job | crontab -: the way to take a line out of a
+# table without crontab -e, whose editor an agent has no terminal for. What
+# reaches crontab - is the table it already had with lines dropped and none
+# added or changed, so it schedules nothing new. Read strictly, and what is
+# not known to only drop lines leaves crontab - an install: grep's -o, -n or
+# -c, a sed script with s, a, r or e in it, a file read as well, or a table
+# listed for one user (or through sudo) and put back for another, can each
+# hand crontab a line it did not have.
+_TABLE_STAGES = frozenset(("crontab", "grep", "egrep", "sed", "gsed"))
+# grep's options that only choose which lines it keeps; -e and -f give the
+# patterns, and with them no word is the pattern.
+_GREP_KEEPS = frozenset("vEFGPiwxs")
+_GREP_KEEPS_LONG = frozenset((
+    "--invert-match", "--extended-regexp", "--fixed-strings", "--basic-regexp",
+    "--perl-regexp", "--ignore-case", "--word-regexp", "--line-regexp",
+    "--no-messages"))
+_SED_KEEPS = frozenset("nErsu")
+_SED_KEEPS_LONG = frozenset((
+    "--quiet", "--silent", "--regexp-extended", "--posix", "--separate",
+    "--unbuffered", "--sandbox"))
+# One sed command that deletes: an address, or two (a line, $, /regex/,
+# first~step, +N), maybe negated, then d, then ; or a newline. Anchored and
+# read one after another, so a script is read once.
+_SED_ADDRESS = r"(?:\d+(?:~\d+)?|\$|/(?:[^/\\\n]|\\.)*/[IM]*)"
+_SED_DELETE = re.compile(
+    _SED_ADDRESS + r"(?:[ \t]*,[ \t]*(?:" + _SED_ADDRESS + r"|[+~]\d+))?"
+    r"[ \t]*!?[ \t]*d[ \t]*(?:[;\n][\s;]*|\Z)")
+_SED_GAP = re.compile(r"[\s;]*")
+
+
+def _only_deletes(script):
+    """Whether a sed script is nothing but lines deleted by address. An
+    empty one, as a script read from a file (-f) is given, is not known to
+    be."""
+    pos = _SED_GAP.match(script).end()
+    if pos == len(script):
+        return False
+    while pos < len(script):
+        found = _SED_DELETE.match(script, pos)
+        if not found:
+            return False
+        pos = found.end()
+    return True
+
+
+def _crontab_form(args):
+    """(user, rest) of crontab's args: the user -u names, "" for none, and
+    the other words."""
+    user, rest, k = "", [], 0
+    while k < len(args):
+        word = args[k]
+        if word == "-u":
+            user, k = (args[k + 1] if k + 1 < len(args) else ""), k + 2
+            continue
+        if word.startswith("-u"):
+            user = word[2:]
+        else:
+            rest.append(word)
+        k += 1
+    return user, rest
+
+
+def _grep_drops(args):
+    """Whether grep, given args, only drops lines of what it is piped: no
+    option but those that choose which lines it keeps, and no file."""
+    patterns, operands, k = False, 0, 0
+    while k < len(args):
+        word = args[k]
+        k += 1
+        if word == "--":
+            operands += len(args) - k
+            break
+        if word in ("--regexp", "--file"):
+            patterns, k = True, k + 1
+        elif word.startswith(("--regexp=", "--file=")):
+            patterns = True
+        elif word[:2] == "--":
+            if word not in _GREP_KEEPS_LONG:
+                return False
+        elif word[:1] == "-" and len(word) > 1:
+            for j, letter in enumerate(word[1:], 1):
+                if letter in "ef":
+                    patterns = True
+                    k += 1 if j + 1 == len(word) else 0
+                    break
+                if letter not in _GREP_KEEPS:
+                    return False
+        else:
+            operands += 1
+    return operands == (0 if patterns else 1)
+
+
+def _sed_drops(args):
+    """Whether sed, given args, only drops lines of what it is piped: each
+    script nothing but deletes (_only_deletes), no file, not in place."""
+    scripts, operands, k = [], [], 0
+    while k < len(args):
+        word = args[k]
+        k += 1
+        if word == "--":
+            operands += args[k:]
+            break
+        if word == "--expression":
+            scripts.append(args[k] if k < len(args) else "")
+            k += 1
+        elif word.startswith("--expression="):
+            scripts.append(word[13:])
+        elif word[:2] == "--":
+            if word not in _SED_KEEPS_LONG:
+                return False
+        elif word[:1] == "-" and len(word) > 1:
+            for j, letter in enumerate(word[1:], 1):
+                if letter == "e":
+                    value = word[j + 1:]
+                    if not value and k < len(args):
+                        value, k = args[k], k + 1
+                    scripts.append(value)
+                    break
+                if letter not in _SED_KEEPS:
+                    return False
+        else:
+            operands.append(word)
+    if not scripts:
+        scripts, operands = operands[:1], operands[1:]
+    return bool(scripts) and not operands and all(map(_only_deletes, scripts))
+
+
+def _table_piped(stage, first, table):
+    """(table, refilled) for one stage of crontab -l | grep -v job |
+    crontab -. table: whose crontab, unchanged but for lines dropped, the
+    pipe out of this stage carries: (what stands before crontab, the user
+    -u names), or None. refilled: the stage is the crontab - that installs
+    that same table back. first: the stage starts a pipeline."""
+    if not first and table is None:
+        return None, False
+    name = _writer_name(_command_word(stage))
+    if name not in _TABLE_STAGES:
+        return None, False
+    words = _stage_words(stage)
+    args, replaced = _without_redirects(words[1:])
+    if replaced:
+        return None, False                     # it reads a file, not the pipe
+    if name == "crontab":
+        user, rest = _crontab_form(args)
+        mine = (tuple(stage[:len(stage) - len(_after_prefix(stage))].split()), user)
+        if first:
+            return (mine if rest == ["-l"] else None), False
+        return None, rest == ["-"] and mine == table
+    if first:
+        return None, False
+    drops = _grep_drops(args) if name in ("grep", "egrep") else _sed_drops(args)
+    return (table if drops else None), False
+
+
+def _deletes_only(name, wrote):
+    """Whether a sed told to edit a file in place only deletes lines from
+    it: sed '/old-job/d' /etc/crontab takes a job out, and adds none."""
+    return (name in ("sed", "gsed") and wrote.how == "sed" and bool(wrote.detail)
+            and all(map(_only_deletes, wrote.detail)))
 
 
 def _persist_verb(name, args):
@@ -3404,19 +3610,19 @@ def _persist_verb(name, args):
     if name == "brew":
         plain = [w for w in args if w[:1] != "-"]
         return (MEDIUM, "service") if plain[:2] == ["services", "start"] else None
-    if name in ("schtasks", "schtasks.exe"):
+    if name == "schtasks":
         # /create, or //create from Git Bash, which reads /c as a path.
         return (HIGH, "job") if any(
             w[:1] in "/-" and w.lstrip("/-").lower() == "create"
             for w in args) else None
-    if name in ("reg", "reg.exe"):
+    if name == "reg":
         return (HIGH, "job") if first == "add" and any(
             _is_run_key(w) for w in args[1:2]) else None
     if name == "register-scheduledtask":
         return HIGH, "job"
     if name in ("new-itemproperty", "set-itemproperty"):
         return (HIGH, "job") if any(_is_run_key(w) for w in args) else None
-    if name in ("sc", "sc.exe"):
+    if name == "sc":
         return _sc_verb(first, [w.lower() for w in args])
     if name == "new-service":
         return HIGH, "job"             # it starts automatically by default
@@ -3517,12 +3723,6 @@ _Persisted = collections.namedtuple("_Persisted",
 _PERSIST_HEADS = _PERSIST_VERBS | _WRITERS
 
 
-def _strongest(found):
-    """The first high finding of found, else its first, else None."""
-    return next((f for f in found if f.severity == HIGH),
-                found[0] if found else None)
-
-
 @functools.lru_cache(maxsize=32)
 def _persistence(text, depth=0):
     """_Persisted(start, end, severity, kind, fed_from) for each stage of a
@@ -3534,16 +3734,19 @@ def _persistence(text, depth=0):
 
     Linear: a word of the command is read only by a regex anchored where it
     starts, a stage is split into words only when its program is one of
-    _PERSIST_HEADS or a shell, and what a startup file is given is judged
-    once, on that stage's own text."""
+    _PERSIST_HEADS or a shell, or a filter in a pipe that crontab -l starts
+    (_table_piped), and what a startup file is given is judged once, on
+    that stage's own text."""
     if not text or depth > 3 or not _may_persist(text):
         return ()
-    found, before, fetched, piped = [], None, None, None
+    found, before, fetched, piped, table = [], None, None, None, None
     for start, end, op in _command_spans(text):
         at = _SPACES.match(text, start, end).end()
         stage = _normalised(_unwrap_c(_uncommented(text[at:end])))
         if stage:
-            finding = _persisted_stage(stage, at, end, before, fetched, depth)
+            table, refilled = _table_piped(stage, before is None, table)
+            finding = _persisted_stage(stage, at, end, before, fetched, depth,
+                                       refilled)
             if finding and finding.fed_from is None and before is not None:
                 finding = finding._replace(fed_from=piped)
             if finding:
@@ -3553,12 +3756,14 @@ def _persistence(text, depth=0):
         if op == "|":
             before, piped = stage, at if piped is None else piped
         else:
-            before = fetched = piped = None
+            before = fetched = piped = table = None
     return tuple(found)
 
 
-def _persisted_stage(stage, at, end, before, fetched, depth):
-    """The _Persisted of one stage, or None: see _persistence."""
+def _persisted_stage(stage, at, end, before, fetched, depth, refilled=False):
+    """The _Persisted of one stage, or None: see _persistence. refilled:
+    the stage is a crontab - given back its own table, lines dropped
+    (_table_piped)."""
     name = _writer_name(_command_word(stage))
     stage = _as_written(name, stage)
     words = (_stage_words(stage)
@@ -3571,11 +3776,11 @@ def _persisted_stage(stage, at, end, before, fetched, depth):
         elif "$(" in stage or "`" in stage:
             inner = tuple(f for lo, hi in _substitution_spans(stage)
                           for f in _persistence(stage[lo:hi], depth + 1))
-        top = _strongest(inner)
+        top = _worst(inner)
         if top:
             return _Persisted(at, end, top.severity, top.kind, None)
     args = _without_redirects(words[1:])[0] if words else None
-    if name in _PERSIST_VERBS:
+    if name in _PERSIST_VERBS and not refilled:
         verb = _persist_verb(name, args)
         if verb:
             return _Persisted(at, end, verb[0], verb[1], None)
@@ -3585,6 +3790,8 @@ def _persisted_stage(stage, at, end, before, fetched, depth):
     for wrote in _stage_writes(name, args if name in _WRITERS else None, stage):
         if wrote.how != "remove":
             here = _persist_place(wrote.target)
+            if here == "job" and _deletes_only(name, wrote):
+                continue
             if here == "job":
                 return _Persisted(at, end, HIGH, "job", None)
             if here == "startup":
@@ -3629,9 +3836,9 @@ def _may_persist(text):
 
 
 def _persist_run(text):
-    """Span of the first stage that persists something high, from the fetch
-    that feeds it when one does; else of the first that persists anything."""
-    top = _strongest(_persistence(text))
+    """Span of the first of the stages that persist the worst, from the
+    fetch that feeds it when one does."""
+    top = _worst(_persistence(text))
     if top is None:
         return None
     return (top.start if top.fed_from is None else top.fed_from), top.end
@@ -3759,6 +3966,15 @@ def _worse(a, b):
     if a is None or (b is not None and _RANK[b[0]] > _RANK[a[0]]):
         return b
     return a
+
+
+def _worst(found):
+    """The first of the worst of found, or None."""
+    top = None
+    for f in found:
+        if top is None or _RANK[f.severity] > _RANK[top.severity]:
+            top = f
+    return top
 
 
 def _program(word):
@@ -4013,6 +4229,14 @@ def _launch_verdict(program, args, assigns, hook_off):
     or None. hook_off: RANWHAT_HOOK was set off by an earlier statement."""
     from . import hook
     if program == "ranwhat":
+        # argparse prints its usage and exits on -h or --help before any
+        # verb runs, and never takes either for an option's value, so
+        # `ranwhat hook uninstall --help`, which an agent asked how to
+        # remove the hook may well run, removes nothing. After -- it is an
+        # operand.
+        head = args[:args.index("--")] if "--" in args else args
+        if "-h" in head or "--help" in head:
+            return None
         # The verb is looked for after "hook", not at a place: ranwhat reads
         # its options anywhere, `ranwhat --scope project hook uninstall` and
         # `ranwhat hook --sc user uninstall` uninstall too, and uninstall
@@ -4025,6 +4249,10 @@ def _launch_verdict(program, args, assigns, hook_off):
             for name, value in _switch_kept(program, args)) else None
     if program in ("pip", "pip3", "pipx") or (
             program == "uv" and args[:1] in (["pip"], ["tool"])):
+        # No exemption for help here: pip's own options take values
+        # (`pip --log --help uninstall -y ranwhat` logs to a file named
+        # --help, and uninstalls), and -v and --version inside its
+        # subcommand print nothing and stop nothing.
         if "uninstall" in args and any(_is_ranwhat(a) for a in args):
             return HIGH, _UNINSTALL_WHY
         return None
@@ -4044,6 +4272,9 @@ def _launch_verdict(program, args, assigns, hook_off):
     return _codex_launch(args) if program == "codex" else _gemini_launch(args)
 
 
+_PS_HOOK_SET = re.compile(r"\$env:RANWHAT_HOOK=(.*)\Z", re.I | re.S)
+
+
 def _hook_state(words, off):
     """Whether RANWHAT_HOOK is off after a statement that only sets or
     unsets variables (export and its kin, or bare assignments), given
@@ -4052,8 +4283,12 @@ def _hook_state(words, off):
     head = words[0] if words else ""
     if head == "unset":
         return False if hook.OFF_ENV in words[1:] else off
-    if head.lower() == "$env:" + hook.OFF_ENV.lower() and words[1:2] == ["="]:
-        return hook.is_off(words[2] if len(words) > 2 else "")
+    if head[:5].lower() == "$env:":
+        # PowerShell takes $env:NAME = "v" with blanks around the = or
+        # without, $env:NAME="v" being the usual one-liner, and reads a
+        # variable's name in any case: the words are read joined.
+        found = _PS_HOOK_SET.match("".join(words))
+        return hook.is_off(found.group(1)) if found else off
     items = ([w for w in words[1:] if w[:1] != "-"]
              if head in ("export", "declare", "typeset", "local", "readonly")
              else words)
@@ -4091,7 +4326,12 @@ class _Change(object):
 # The markers a change is judged by. Each starts with a literal, so each is
 # one pass.
 _DISABLE_ALL_HOOKS = re.compile(r"""disableAllHooks["']?\s*[:=]\s*true\b""")
-_HOOK_SWITCH = re.compile(r"""RANWHAT_HOOK["']?\s*[:=]\s*["']?([^\s"',;}]*)""")
+# Not after $ or a word character: [ "$RANWHAT_HOOK" = "0" ], a prompt or a
+# status line that shows the guard is off, reads the variable and sets
+# nothing, and MY_RANWHAT_HOOK is another name. ${RANWHAT_HOOK=0} does set
+# it, so { is let through.
+_HOOK_SWITCH = re.compile(
+    r"""(?<![\w$])RANWHAT_HOOK["']?\s*[:=]\s*["']?([^\s"',;}]*)""")
 # fish sets a variable with no = in it: set -gx RANWHAT_HOOK 0.
 _FISH_HOOK_SWITCH = re.compile(
     r"""\bset[ \t]+(?:-[A-Za-z-]+[ \t]+)*RANWHAT_HOOK[ \t]+["']?([^\s"';]*)""")
@@ -4369,7 +4609,8 @@ _RC_FILES = frozenset((".bashrc", ".bash_profile", ".bash_login", ".profile",
                        ".zlogin"))
 _HOME_WORDS = frozenset(("~", "$home", "${home}", "%userprofile%",
                          "$env:userprofile", "$env:home"))
-_A_HOME = re.compile(r"(?:[a-z]:)?/(?:home|users)/[^/]+\Z|/(?:var/)?root\Z")
+# C:/Users/<name>, and Git Bash's /c/Users/<name> (see _OTHER_HOME).
+_A_HOME = re.compile(r"(?:[a-z]:|/[a-z])?/(?:home|users)/[^/]+\Z|/(?:var/)?root\Z")
 
 
 def _is_home(folder):
@@ -4377,17 +4618,32 @@ def _is_home(folder):
     low = folder.lower()
     if low in _HOME_WORDS or _A_HOME.match(low):
         return True
-    path = _as_absolute(folder, _home())
-    return path is not None and path == posixpath.normpath("/" + _home().lstrip("/"))
+    home = _posix_home()
+    return _same_folder(folder, posixpath.normpath("/" + home.lstrip("/")))
 
 
 def _user_settings_folder(folder):
     """Whether folder is where this machine's Claude Code keeps its user
     settings, CLAUDE_CONFIG_DIR's when that is set."""
     from . import hook
-    path = _as_absolute(folder, _home())
-    return path is not None and path == posixpath.dirname(
-        hook.settings_path("user").replace("\\", "/"))
+    settings = _undriven(hook.settings_path("user").replace("\\", "/"))
+    return _same_folder(folder, posixpath.dirname(settings))
+
+
+def _same_folder(folder, path):
+    """Whether folder, as a write names it, is path, an absolute path with
+    no drive. Read as persist reads a path (_persist_place), its drive taken
+    off and ~ put in from _posix_home: left to _as_absolute as it was, a
+    Windows path (C:/Users/me/claude-work, the CLAUDE_CONFIG_DIR that
+    `ranwhat hook install` wrote to) was no path at all, and a home not
+    spelled X:/Users/<name> no home. In any case under a Windows home,
+    since Windows' file names are."""
+    found = _as_absolute(_undriven(_slashed(folder)), _posix_home())
+    if found is None:
+        return False
+    if not _home().startswith("/"):
+        return found.lower() == path.lower()
+    return found == path
 
 
 def _starts_shells(path, t, name):
@@ -4764,15 +5020,6 @@ def _change_of(wrote, name, produced, piped, here, files):
 _Loosened = collections.namedtuple("_Loosened", "start end severity why")
 
 
-def _worst(found):
-    """The first of the worst of found, or None."""
-    top = None
-    for f in found:
-        if top is None or _RANK[f.severity] > _RANK[top.severity]:
-            top = f
-    return top
-
-
 @functools.lru_cache(maxsize=32)
 def _loosened(text, bodies=(), depth=0):
     """_Loosened(start, end, severity, why) for each stage of a write view
@@ -4795,7 +5042,7 @@ def _loosened(text, bodies=(), depth=0):
         if stage:
             here = [body for _pos, body in bodies[
                 bisect.bisect_left(positions, at):bisect.bisect_right(positions, end)]]
-            name = _writer_name(_program(_command_word(stage)))
+            name = _writer_name(_command_word(stage))
             verdict, produced = _loosened_stage(stage, name, here, piped, files,
                                                 hook_off, depth)
             if name == "cat" and here and op == "|":
@@ -4804,7 +5051,8 @@ def _loosened(text, bodies=(), depth=0):
                 # or sed given a here-document puts out something else.
                 produced = (produced[0] + [(body, False) for body in here],
                             produced[1], produced[2])
-            if "RANWHAT_HOOK" in stage:
+            # In any case: PowerShell's $env:ranwhat_hook is the same name.
+            if "RANWHAT_HOOK" in stage.upper():
                 hook_off = _hook_state(_argv(stage) or stage.split(), hook_off)
             if verdict:
                 found.append(_Loosened(at, end, verdict[0], verdict[1]))
@@ -4823,7 +5071,14 @@ def _loosened_stage(stage, name, here, piped, files, hook_off, depth):
         found = _SET_ENVIRONMENT.search(stage)
         if found and hook.is_off(found.group(3)):
             verdict = CRITICAL, _GUARD_OFF_WHY
-    if name in _AGENT_HEADS or name.startswith("python") or name in _SHELL_STRING_HEADS:
+    # A stage that starts with one of _LEAD_VALUES's wrappers (caffeinate,
+    # stdbuf, timeout with options) is read past it to what it runs:
+    # _command_word only reads past sudo, env and their kin. So is one whose
+    # command word is an option, which no program's name is: what is left
+    # when _command_word read a wrapper's options wrong (`sudo -- claude`,
+    # `nice --adjustment=5 claude`), and _launched reads them right.
+    if (name in _AGENT_HEADS or name in _LEAD_VALUES or name[:1] == "-"
+            or name.startswith("python") or name in _SHELL_STRING_HEADS):
         program, args, assigns = _launched(_argv(stage) or stage.split())
         operand = _shell_string(program, [program] + args) if program else None
         if operand and depth < 3:
@@ -4897,14 +5152,13 @@ def _refine_agent_config(text, severity, tool_input=None):
     content and edits put in, the same for each, is judged once for each
     kind of file, and a patch's sections once for each file they name.
     Read again for each path, 256 paths written with one 64KB content took
-    17 seconds."""
+    17 seconds. Run only after _agent_config_path found one of the paths,
+    so at least one is an agent's configuration."""
     kinds = {}
     for line in text.split("\n"):
         kind = _config_kind(line) if line else None
         if kind:
             kinds.setdefault(line, kind)
-    if not kinds:
-        return None
     common, sections = _written_parts(tool_input)
     for section in sections:
         if section.header is None:

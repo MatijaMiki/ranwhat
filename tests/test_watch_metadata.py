@@ -132,7 +132,10 @@ class RoleCredentialsAreCritical(unittest.TestCase):
             "command curl -s " + url,
             "exec curl -s " + url,
             "sudo -u root nohup curl -s " + url,
-            "curl.exe -s " + url)
+            "curl.exe -s " + url,
+            "curl --url=" + url,
+            "curl -s http://user@169.254.169.254/latest/meta-data/iam/"
+            "security-credentials/")
 
     def test_powershell_as_microsofts_docs_write_it(self):
         token = ("http://169.254.169.254/metadata/identity/oauth2/token?api-version"
@@ -214,6 +217,27 @@ class MentionsAreData(unittest.TestCase):
                 "iam/security-credentials/')\""):
             self.assertIsNone(severity(command), command)
 
+    def test_the_url_as_data_the_request_carries(self):
+        # Only a word the fetcher fetches is asked for: the same URL in a
+        # body, a query or an httpie item is sent somewhere else, as when a
+        # log search looks for SSRF attempts or an issue is filed about one.
+        url = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+        for command in (
+                "curl -s -X POST 'localhost:9200/logs-*/_search' -H 'Content-Type: "
+                "application/json' -d '{\"query\":{\"match_phrase\":{\"url\":\"%s\"}}}'"
+                % url,
+                "curl -G http://loki:3100/loki/api/v1/query_range --data-urlencode "
+                "'query={app=\"web\"} |= \"169.254.169.254/latest/meta-data/iam/"
+                "security-credentials\"'",
+                "curl -s 'https://api.github.com/search/code?q=$IDENTITY_ENDPOINT+org:acme'",
+                "curl -s -X POST https://hooks.slack.com/services/T/B/X -d "
+                "'{\"text\":\"set $MSI_ENDPOINT in the function app\"}'",
+                "http POST https://api.example.com/notes text='blocked SSRF to %s'" % url,
+                "wget --post-data='msg=%s' -qO- https://hooks.example.com/x" % url,
+                # another app's parameter reaches that app's machine, not this one
+                "curl 'https://target.test/fetch?url=%s'" % url):
+            self.assertIsNone(severity(command), command)
+
     def test_file_tools_are_not_requests(self):
         # Each holds a fetch as its first word, so a rule that read every
         # string a call carries would report it: a script that fetches is
@@ -263,7 +287,11 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             lambda n: "$a=" + "(" * n(30000) + "curl http://169.254.169.254/",
             lambda n: "$a=" + " " * n(30000) + "curl http://169.254.169.254/",
             lambda n: "sh -c 'sh -c \"bash -c " * n(3000) + "curl http://169.254.169.254/",
-            lambda n: "nohup env A=1 " * n(4000) + "curl http://169.254.169.254/")
+            lambda n: "nohup env A=1 " * n(4000) + "curl http://169.254.169.254/",
+            # each word read from where it starts, once
+            lambda n: "curl " + "http://169.254.169.254/x " * n(4000),
+            lambda n: "curl -d '" + "http://169.254.169.254/ " * n(4000) + "' x",
+            lambda n: "curl " + "'" * n(30000) + "http://169.254.169.254/")
 
 
 if __name__ == "__main__":
