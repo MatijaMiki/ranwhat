@@ -93,6 +93,38 @@ class RoleCredentialsAreCritical(unittest.TestCase):
             'irm "$env:IDENTITY_ENDPOINT?resource=https://vault.azure.net"',
             tool="PowerShell")
 
+    def test_a_url_the_shell_expands_at_the_start_of_the_word(self):
+        # What the shell puts at the start of the word is the URL the
+        # fetcher is given: a default, a brace list, ANSI-C quotes, a
+        # substitution that prints it, and a variable before the one that
+        # names the endpoint.
+        path = "/latest/meta-data/iam/security-credentials/"
+        self.assertCritical(
+            'curl "${IMDS:-http://169.254.169.254}%s$ROLE"' % path,
+            'curl -s "${IMDS_HOST:-169.254.169.254}%s"' % path,
+            'curl -s "${IMDS_HOST=169.254.169.254}%s"' % path,
+            'curl -s "http://${ECS_HOST}$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"',
+            'curl -s "$ECS_AGENT$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"',
+            "curl $'http://169.254.169.254%s'" % path,
+            'curl -s "$(printf \'http://169.254.169.254%s%%s\' "$ROLE")"' % path,
+            'curl -s "$(echo -n http://169.254.169.254%s)"' % path,
+            "curl -sS {http://169.254.169.254%s,http://x}" % path,
+            "curl --url={http://169.254.169.254%s,http://x}" % path)
+
+    def test_powershell_expands_the_endpoint_into_the_uri(self):
+        # The form Azure's App Service docs give: the endpoint's variable in
+        # a subexpression, the query after it.
+        for tool in ("PowerShell", "Bash"):
+            self.assertCritical(
+                'Invoke-RestMethod -Uri "$($env:IDENTITY_ENDPOINT)?resource=https:'
+                '//vault.azure.net&api-version=2019-08-01" -Headers '
+                '@{"X-IDENTITY-HEADER"=$env:IDENTITY_HEADER}',
+                '$tok = Invoke-RestMethod -Uri "$($env:IDENTITY_ENDPOINT)?resource='
+                'https://vault.azure.net&api-version=2019-08-01"',
+                'irm "${env:IDENTITY_ENDPOINT}?resource=https://vault.azure.net"',
+                'Invoke-WebRequest -Uri "${env:MSI_ENDPOINT}?resource=https://'
+                'vault.azure.net"', tool=tool)
+
     def test_alibaba_and_oracle(self):
         self.assertCritical(
             "curl http://100.100.100.200/latest/meta-data/ram/security-credentials/"
@@ -235,7 +267,11 @@ class MentionsAreData(unittest.TestCase):
                 "http POST https://api.example.com/notes text='blocked SSRF to %s'" % url,
                 "wget --post-data='msg=%s' -qO- https://hooks.example.com/x" % url,
                 # another app's parameter reaches that app's machine, not this one
-                "curl 'https://target.test/fetch?url=%s'" % url):
+                "curl 'https://target.test/fetch?url=%s'" % url,
+                # and what the shell expands is read only where a word starts
+                'curl "https://target.test/fetch?url=${IMDS:-%s}"' % url,
+                "curl -s 'https://api.github.com/search/code?q=${env:IDENTITY_ENDPOINT}'",
+                'curl -s "https://x.test/?u=$(printf \'%s\')"' % url):
             self.assertIsNone(severity(command), command)
 
     def test_file_tools_are_not_requests(self):
@@ -291,7 +327,14 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             # each word read from where it starts, once
             lambda n: "curl " + "http://169.254.169.254/x " * n(4000),
             lambda n: "curl -d '" + "http://169.254.169.254/ " * n(4000) + "' x",
-            lambda n: "curl " + "'" * n(30000) + "http://169.254.169.254/")
+            lambda n: "curl " + "'" * n(30000) + "http://169.254.169.254/",
+            # what the shell expands at the start of a word, read once
+            lambda n: 'curl "' + "${a:-" * n(8000) + 'http://169.254.169.254/"',
+            lambda n: 'curl "' + "${a}" * n(8000) + '169.254.169.254/"',
+            lambda n: "curl " + "{" * n(30000) + "http://169.254.169.254/",
+            lambda n: 'curl "' + "$(printf " * n(4000) + 'http://169.254.169.254/"',
+            lambda n: 'curl "${' + "a" * n(30000) + '169.254.169.254/"',
+            lambda n: "curl " + "$'http://169.254.169.254/' " * n(4000))
 
 
 if __name__ == "__main__":

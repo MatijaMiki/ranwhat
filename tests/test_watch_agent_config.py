@@ -437,6 +437,43 @@ class OneAgentOrOneRule(Cases):
         self.assertRated(CRITICAL, "stdbuf -oL ranwhat hook uninstall",
                          "caffeinate -i ranwhat hook uninstall")
 
+    def test_a_substitution_in_a_stage_that_launches_something(self):
+        # A substitution runs before the stage it is in, whatever that
+        # stage launches, and behind whatever wrapper.
+        self.assertRated(
+            HIGH,
+            "caffeinate -i git commit -m \"$(claude -p 'write a commit message' "
+            "--dangerously-skip-permissions)\"",
+            'caffeinate -i git commit -m "$(claude -p x --dangerously-skip-permissions)"',
+            "caffeinate -i ./build.sh \"$(claude -p 'write the changelog' "
+            "--dangerously-skip-permissions)\"",
+            'caffeinate -i make LOG="$(claude --dangerously-skip-permissions -p '
+            'summarize)"')
+        self.assertRated(
+            CRITICAL,
+            'stdbuf -oL echo "$(ranwhat hook uninstall)"',
+            'caffeinate -i echo "$(ranwhat hook uninstall)"',
+            'timeout -k 5 60 echo "$(ranwhat hook uninstall)"',
+            'timeout -k 10 600 xargs -I{} sh -c "$(ranwhat hook uninstall)"',
+            'nice --adjustment=5 echo "$(ranwhat hook uninstall)"',
+            'python3 x.py "$(ranwhat hook uninstall)"',
+            # the worse of the launch and what it is given
+            'claude -p "$(ranwhat hook uninstall)" --dangerously-skip-permissions')
+        self.assertQuiet(
+            'caffeinate -i echo "$(ranwhat hook uninstall --help)"',
+            'claude -p "$(cat prompt.md)"',
+            'python3 -m pytest -k "$(cat tests.txt)"')
+
+    def test_a_launch_does_not_hide_the_variable_set_in_its_stage(self):
+        # powershell runs what follows it as a command: the launch says
+        # nothing of its own, and the variable it sets is still set.
+        self.assertRated(
+            CRITICAL,
+            "powershell [Environment]::SetEnvironmentVariable('RANWHAT_HOOK', '0', "
+            "'User')",
+            "powershell.exe [Environment]::SetEnvironmentVariable('RANWHAT_HOOK', "
+            "'0', 'Machine')")
+
     def test_a_launch_hidden_in_an_encoding(self):
         hit = found("Bash", "echo Y2xhdWRlIC0tZGFuZ2Vyb3VzbHktc2tpcC1wZXJtaXNzaW9ucy"
                             "AtcCB4 | base64 -d | sh")
@@ -771,7 +808,13 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             + "' > ~/.claude/settings.json",
             lambda n: "setx " + "/s x " * n(10000) + "RANWHAT_HOOK 0",
             lambda n: "echo \"" + "[Environment]::SetEnvironmentVariable('RANWHAT_HOOK', "
-            * n(1200) + "\" > x")
+            * n(1200) + "\" > x",
+            # a launched stage's substitutions, read beside what it launches
+            lambda n: "caffeinate -i echo " + '"$(echo claude)" ' * n(3000),
+            lambda n: "python3 x.py " + '"$(sh -c \'echo claude\')" ' * n(1500),
+            lambda n: 'timeout -k 5 60 sh -c "' + "$(claude " * n(4000) + '"',
+            lambda n: "claude -p " + '"$(echo x)" ' * n(3000)
+            + "--dangerously-skip-permissions")
 
 
 if __name__ == "__main__":

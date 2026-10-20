@@ -2666,17 +2666,30 @@ _CONTAINER_CREDENTIALS = _Gap(
     r"credential", _URL_STOPS)
 # The variables that name a credential endpoint and nothing else: the
 # container credential URI of ECS and EKS, and an Azure App Service's or
-# Function's managed identity endpoint.
+# Function's managed identity endpoint. PowerShell's ${env:NAME} as well.
 _CREDENTIALS_ENDPOINT = re.compile(
-    r"\$(?:\{|env:)?(?:AWS_CONTAINER_CREDENTIALS_(?:RELATIVE|FULL)_URI"
+    r"\$(?:\{(?:env:)?|env:)?(?:AWS_CONTAINER_CREDENTIALS_(?:RELATIVE|FULL)_URI"
     r"|IDENTITY_ENDPOINT|MSI_ENDPOINT)\b", re.I)
 _METADATA_SIGNALS = (_METADATA_CREDENTIALS, _CONTAINER_CREDENTIALS,
                      _CREDENTIALS_ENDPOINT)
 # Where a fetched URL starts in its word: past curl's --url= or
-# PowerShell's -Uri:, a scheme, and the user a URL may name, since
-# http://user@169.254.169.254/ asks the same service.
+# PowerShell's -Uri:, what the shell expands at its start, a scheme, the
+# user a URL may name (http://user@169.254.169.254/ asks the same service),
+# and a variable that only leads to the one naming the endpoint. What the
+# shell expands: a brace list, {http://.../,http://x}; a substitution, with
+# the echo or printf in it that prints the URL, "$(printf 'http://.../%s'
+# "$ROLE")", or PowerShell's "$($env:IDENTITY_ENDPOINT)?resource=..."; a
+# default, ${IMDS:-http://...}; a variable before another,
+# "$ECS_AGENT$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI". Read only from where
+# the word starts, never searched for in it: ?q=$IDENTITY_ENDPOINT is in a
+# URL to another host. Every part may be empty and each alternative starts
+# with a literal of its own, so a word is read once.
 _URL_LEAD = re.compile(
-    r"(?:--url=|-uri:)?(?:[a-z][a-z0-9+.-]*://(?:[^/@\s]*@)?)?", re.I)
+    r"(?:--url=|-uri:)?"
+    r"(?:\{|\$\((?:[ \t]*(?:echo|printf)[ \t]+(?:(?:-[neE]+|--)[ \t]+)*['\"]?)?"
+    r"|\$\{\w+:?[-=]|\$\{?[A-Za-z_]\w*\}?(?=\$))*"
+    r"(?:[a-z][a-z0-9+.-]*://(?:[^/@\s]*@)?)?"
+    r"(?:\$\{?[A-Za-z_]\w*\}?(?=\$))*", re.I)
 
 
 # What each of _METADATA_SIGNALS holds, in lower case: a call that holds
@@ -2691,9 +2704,11 @@ def _fetched_credentials(stage):
     a credential endpoint's variable, ends; or None. A word counts only
     when one starts it, past _URL_LEAD, as read by the shell: one met inside
     another word is data the request carries. Each word is read once, by
-    regexes anchored where it starts."""
+    regexes anchored where it starts. bash's $'...' quotes as '...' does,
+    but for its escapes, and _dequoted would leave its $ before the URL."""
     for word in _WORD_ANYWHERE.finditer(stage):
-        read = _dequoted(word.group())
+        text = word.group()
+        read = _dequoted(text[1:] if text[:2] == "$'" else text)
         lead = _URL_LEAD.match(read).end()
         if any(signal.match(read, lead) for signal in _METADATA_SIGNALS):
             return word.end()
@@ -3579,6 +3594,32 @@ def _deletes_only(name, wrote):
             and all(map(_only_deletes, wrote.detail)))
 
 
+# The tables in crontab's format, where each line is a job or a setting and
+# a line taken out runs nothing new. In any other job's file a line taken
+# out can be what kept it from running: Hidden=true in an autostart entry,
+# <key>Disabled</key> in a launchd plist, a unit's ConditionPathExists= or
+# ExecCondition=, the exit 0 near the top of rc.local, an init script or a
+# cron.daily script. Debian keeps at's jobs, which are scripts, in
+# /var/spool/cron/atjobs/.
+_CRONTAB_FILES = frozenset(("/etc/crontab", "/etc/anacrontab"))
+_CRONTAB_DIRS = ("/etc/cron.d/", "/var/spool/cron/", "/usr/lib/cron/tabs/",
+                 "/var/cron/tabs/")
+_AT_DIRS = ("/var/spool/cron/atjobs/", "/var/spool/cron/atspool/")
+
+
+def _crontab_table(target):
+    """Whether target, as persist reads a path (_persist_place), is a table
+    in crontab's format: /etc/crontab, a file in /etc/cron.d, a user's
+    table in cron's spool."""
+    path = _as_absolute(_undriven(_slashed(target.strip())), _posix_home())
+    if path is None:
+        return False
+    if path in _CRONTAB_FILES:
+        return True
+    folder = path + "/"
+    return folder.startswith(_CRONTAB_DIRS) and not folder.startswith(_AT_DIRS)
+
+
 def _persist_verb(name, args):
     """(severity, kind) of a stage that schedules or enables something by a
     verb of its own, or None. kind is "job" for an entry the call itself
@@ -3787,12 +3828,17 @@ def _persisted_stage(stage, at, end, before, fetched, depth, refilled=False):
     if _shortcut_to_startup(stage):
         return _Persisted(at, end, HIGH, "job", None)
     place, written, shown, downloaded = None, [], set(), False
+    deleting = None                    # (scripts, whether they only delete)
     for wrote in _stage_writes(name, args if name in _WRITERS else None, stage):
         if wrote.how != "remove":
             here = _persist_place(wrote.target)
-            if here == "job" and _deletes_only(name, wrote):
-                continue
             if here == "job":
+                # A sed gives every file it edits the same scripts: they
+                # are read once, however many tables it edits.
+                if deleting is None or deleting[0] is not wrote.detail:
+                    deleting = wrote.detail, _deletes_only(name, wrote)
+                if deleting[1] and _crontab_table(wrote.target):
+                    continue
                 return _Persisted(at, end, HIGH, "job", None)
             if here == "startup":
                 # Each target of one way of writing is given the same text:
@@ -5084,13 +5130,18 @@ def _loosened_stage(stage, name, here, piped, files, hook_off, depth):
         if operand and depth < 3:
             view = _write_view(operand)
             top = _worst(_loosened(view, view.bodies, depth + 1))
-            verdict = top and (top.severity, top.why)
+            verdict = _worse(verdict, top and (top.severity, top.why))
         elif program:
-            verdict = _launch_verdict(program, args, assigns, hook_off)
-    elif depth < 3 and ("$(" in stage or "`" in stage):
+            verdict = _worse(verdict, _launch_verdict(program, args, assigns,
+                                                      hook_off))
+    # A substitution runs before the stage it is in, whatever that stage
+    # launches: in caffeinate -i git commit -m "$(claude -p x
+    # --dangerously-skip-permissions)" the agent starts as it would bare,
+    # and python3 x.py "$(ranwhat hook uninstall)" takes the hook out.
+    if depth < 3 and ("$(" in stage or "`" in stage):
         top = _worst([f for lo, hi in _substitution_spans(stage)
                       for f in _loosened(stage[lo:hi], (), depth + 1)])
-        verdict = top and (top.severity, top.why)
+        verdict = _worse(verdict, top and (top.severity, top.why))
     stage = _as_written(name, stage)
     words = (_stage_words(stage) if name in _WRITERS or name in ("jq", "yq")
              or name in _GREPS else None)

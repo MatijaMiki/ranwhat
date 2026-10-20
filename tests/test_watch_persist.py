@@ -531,7 +531,10 @@ class ReadsAndRemovals(Cases):
             "bash -c \"crontab -l | grep -v x | crontab -\"",
             "sudo sed -i '/old-job/d' /etc/crontab",
             "sed -i -e '/backup/d' -e '1~2d' /etc/cron.d/backup",
-            "sed -i '' '/old-job/d' /etc/crontab")
+            "sed -i '' '/old-job/d' /etc/crontab",
+            "sed -i '/old-job/d' /etc/anacrontab",
+            "sudo sed -i '/old-job/d' /var/spool/cron/crontabs/root",
+            "sudo sed -i '/old-job/d' /var/spool/cron/root /etc/cron.d/backup")
 
     def test_what_looks_like_taking_one_out_and_is_not(self):
         self.assertRated(
@@ -554,6 +557,27 @@ class ReadsAndRemovals(Cases):
             "sed -i '/x/w /etc/cron.d/evil' /etc/crontab",
             # commented out is a change: s/^#// puts it back
             "sudo sed -i 's/^\\(.*backup.sh\\)/#\\1/' /etc/cron.d/backup")
+
+    def test_a_line_taken_out_of_a_job_that_is_no_crontab(self):
+        # Only a table in crontab's format holds nothing but jobs and
+        # settings. In a job's own file, the line taken out can be what
+        # kept it from running.
+        self.assertRated(
+            HIGH,
+            "sed -i '/^Hidden=true/d' ~/.config/autostart/updater.desktop",
+            "sed -i '/X-GNOME-Autostart-enabled=false/d' "
+            "~/.config/autostart/updater.desktop",
+            "sed -i '/<key>Disabled<\\/key>/,+1d' "
+            "~/Library/LaunchAgents/com.example.updater.plist",
+            "sed -i '/^ConditionPathExists=/d' ~/.config/systemd/user/updater.service",
+            "sed -i '/^ExecCondition=/d' /etc/systemd/system/x.service",
+            "sed -i '/^exit 0/d' /etc/rc.local",
+            "sudo sed -i '/^exit 0$/d' /etc/cron.daily/sync",
+            "sed -i '/^exit 0/d' /etc/init.d/foo",
+            # at's jobs, beside cron's tables, are scripts
+            "sudo sed -i '/^exit 0/d' /var/spool/cron/atjobs/a0000101a2b3c4",
+            # one table and one job's file, in one call
+            "sudo sed -i '/old-job/d' /etc/crontab /etc/rc.local")
 
 
 class AHomeOnWindows(Cases):
@@ -663,6 +687,8 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             lambda n: "crontab -l | " + "grep -v x | " * n(4000) + "crontab -",
             lambda n: "crontab -l | sed '" + "/a/d;" * n(8000) + "x' | crontab -",
             lambda n: "sed -i '" + "1d;" * n(8000) + "x' /etc/crontab",
+            # a sed's scripts are read once, however many tables it edits
+            lambda n: "sed -i '" + "1d;" * n(3000) + "' " + "/etc/cron.d/a " * n(3000),
             lambda n: "sed -i '/" + "\\/" * n(8000) + "' /etc/crontab")
 
 
