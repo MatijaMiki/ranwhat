@@ -34,7 +34,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"A Claude Code audit log from what is already on disk","description":"By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit trail, add a hook or OpenTelemetry, and know the gaps.","datePublished":"2026-10-02","dateModified":"2026-10-14","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Audit trail"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code audit log","item":"https://ranwhat.com/guides/claude-code-audit-log"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"A Claude Code audit log from what is already on disk","description":"By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit trail, add a hook or OpenTelemetry, and know the gaps.","datePublished":"2026-10-02","dateModified":"2026-10-20","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Audit trail"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code audit log","item":"https://ranwhat.com/guides/claude-code-audit-log"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -117,7 +117,7 @@
     </div>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
       Checked against Claude Code's documentation, the advisories and
-      research under Sources, and ranwhat's source. Published 2 October 2026, updated <time datetime="2026-10-14">14 October 2026</time>.
+      research under Sources, and ranwhat's source. Published 2 October 2026, updated <time datetime="2026-10-20">20 October 2026</time>.
     </p>
   </div>
 </section>
@@ -214,7 +214,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         seventeen more coding agents, and <span class="icode">--source ID</span>
         limits it to one.
       </p>
-      <h3 style="margin-top:34px">Thirteen rules</h3>
+      <h3 style="margin-top:34px">Sixteen rules</h3>
       <div class="scroll">
       <table class="stack">
         <thead><tr><th>Rule</th><th>Severity</th><th>For example</th></tr></thead>
@@ -225,6 +225,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
           <tr><td><strong>Cloud resource destroyed or modified</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>terraform destroy</code> <code>kubectl delete</code> <code>aws iam attach-…</code></td></tr>
           <tr><td><strong>Financial API called</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example">Stripe charges, refunds, transfers or payouts</td></tr>
           <tr><td><strong>Log or history tampering</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>history -c</code> <code>aws cloudtrail stop-logging</code></td></tr>
+          <tr><td><strong>Cloud instance credentials requested</strong></td><td data-label="Severity"><span class="chip crit">Critical</span></td><td data-label="For example"><code>curl 169.254.169.254/…/iam/security-credentials/role</code> <code>…/service-accounts/default/token</code></td></tr>
           <tr><td><strong>Destructive git</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>git push --force</code> <code>git reset --hard</code></td></tr>
           <tr><td><strong>Recursive deletion</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>rm -rf ~/Documents/old-notes</code> <code>find . -delete</code></td></tr>
           <tr><td><strong>Local file sent to the network</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>curl -d @dump.sql</code> <code>curl -F file=@notes.txt</code></td></tr>
@@ -232,6 +233,8 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
           <tr><td><strong>Files made writable by every user</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>chmod -R 777 /var/www</code> <code>chmod o+w config.ini</code></td></tr>
           <tr><td><strong>Container data wiped</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>docker system prune -a --volumes</code> <code>docker volume rm</code> <code>docker compose down -v</code></td></tr>
           <tr><td><strong>Decoded command run</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>echo … | base64 -d | sh</code> <code>eval "$(… | base64 -d)"</code> <code>powershell -enc …</code></td></tr>
+          <tr><td><strong>Startup or scheduled job installed</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>crontab -</code> <code>launchctl load …</code> <code>schtasks /create</code></td></tr>
+          <tr><td><strong>Agent guardrails loosened</strong></td><td data-label="Severity"><span class="chip high">High</span></td><td data-label="For example"><code>claude --dangerously-skip-permissions</code> <code>ranwhat hook uninstall</code> <code>"defaultMode": "bypassPermissions"</code></td></tr>
         </tbody>
       </table>
       </div>
@@ -242,8 +245,13 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         <span class="icode">rm -rf "$HOME"</span> is critical. In the same way
         <span class="icode">chmod 777 deploy/</span> is medium, a recursive
         change is high, and <span class="icode">chmod -R 777 /</span> is
-        critical. A command hidden in base64 is judged twice: as a decoded
-        command run, and by the other rules on what it decodes.
+        critical. An <span class="icode">export PATH</span> line appended to
+        <span class="icode">~/.zshrc</span> is medium; one that runs
+        <span class="icode">curl … | sh</span> in every new shell is high. An
+        MCP server added to an agent's settings is medium, and an edit that
+        takes the ranwhat hook out of them is critical. A command hidden in
+        base64 is judged twice: as a decoded command run, and by the other
+        rules on what it decodes.
       </p>
       <h3 style="margin-top:34px">As a log you can keep</h3>
       <p>
@@ -507,7 +515,7 @@ uvx ranwhat watch --days 30    <span class="c-mut"># what ran while they may not
         <li><a href="https://github.com/anthropics/claude-code/security/advisories/GHSA-gfvf-j8jh-jxxw">GHSA-gfvf-j8jh-jxxw<span>CVE-2026-103012, fixed in 2.1.260</span></a></li>
         <li><a href="https://0din.ai/blog/clone-this-repo-and-i-own-your-machine">0DIN: Clone this repo and I own your machine<span>the error Claude followed</span></a></li>
         <li><a href="https://www.mitiga.io/blog/claude-code-mcp-token-theft-mitm">Mitiga: stealing MCP tokens in Claude Code<span>the chain, the disclosure, what to watch</span></a></li>
-        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/watch.py">ranwhat/watch.py<span>the thirteen rules and the JSON record</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/watch.py">ranwhat/watch.py<span>the sixteen rules and the JSON record</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/README.md">ranwhat README<span>what is not treated as an action, what is not read</span></a></li>
       </ul>
     </div>

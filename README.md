@@ -155,14 +155,20 @@ Grok Bot keeps its history in xAI's cloud, even for commands it runs on your
 machine; Grok Build, xAI's coding CLI, is supported. The current Amp keeps
 its threads on ampcode.com.
 
-Thirteen rules: credential access, secret-shaped strings in tool calls, package
+Sixteen rules: credential access, secret-shaped strings in tool calls, package
 publishing, cloud resource changes, financial API calls, log tampering,
 destructive git, recursive deletion, local files uploaded with curl, scripts
 downloaded and run unread, files made writable by every user, container
-volumes wiped, and encoded commands decoded and run.
+volumes wiped, encoded commands decoded and run, an instance's credentials
+asked of a cloud metadata service, jobs set to run at login, boot or on a
+schedule, and an agent's guardrails loosened.
 A command hidden in base64, hex or printf escapes and handed to a shell,
 `eval` or an interpreter is decoded without being run, and what it decodes to
-is judged by the same rules.
+is judged by the same rules. A change to a shell startup file is medium; one
+that runs `curl … | sh` in every new shell is high. An edit to an agent's
+settings is judged by what it lets through: an MCP server added is medium,
+`bypassPermissions` in your user settings, or an edit that takes the ranwhat
+hook out, is critical.
 Each agent's tool calls are judged by the same rules; every action says
 which agent ran it.
 
@@ -477,6 +483,16 @@ ranwhat hook uninstall
 - `--scope project` writes `.claude/settings.json` for everyone on the
   repository; `--scope local` writes `.claude/settings.local.json` for you.
 - `RANWHAT_HOOK=0` in Claude Code's environment lets every call through.
+- It asks before a call that shows it turning the hook off: `ranwhat hook
+  uninstall`, `RANWHAT_HOOK=0 claude`, or an edit (Edit, `sed`, `jq`, `yq`, a
+  removal) that takes its entry out of the settings or sets
+  `disableAllHooks`. Claude Code applies a settings change as soon as the
+  file changes, so before the call is the only time to ask. In deny mode such
+  a call is refused, and the agent is told to ask you to run it yourself.
+  A settings file rewritten whole with other settings, by a call that does
+  not show what it replaced, is recorded as medium and not asked about, and
+  a script that rewrites it is not seen: the hook judges what a call shows,
+  and is no sandbox.
 - Each check takes about a fifth of a second. The reason it gives Claude
   Code names the rule, never the value that tripped it.
 

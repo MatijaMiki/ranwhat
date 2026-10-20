@@ -274,6 +274,21 @@ def _patch_of(argv):
     return None
 
 
+# apply_patch's grammar names each file it writes on a line of its own
+# (apply-patch parser.rs). Greedy, then stripped, as Cline's reader does.
+_PATCH_FILE = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): "
+                         r"(.+)$", re.M)
+
+
+def _patch_paths(patch):
+    """The files a patch writes, in order: apply_patch is Codex's only way
+    to edit a file, and watch judges a write by the paths it names."""
+    if not isinstance(patch, str):
+        return ()
+    found = (m.group(1).strip() for m in _PATCH_FILE.finditer(patch))
+    return tuple(dict.fromkeys(p for p in found if p))
+
+
 def _tomllib():
     """The standard library's TOML reader (Python 3.11+), or None."""
     try:
@@ -816,7 +831,8 @@ class CodexSource(Source):
                                 kind="other", known=True, **common)
             if name == "apply_patch":
                 return ToolCall(self.id, thread.store.path, name, args,
-                                kind="write", known=True, **common)
+                                kind="write", known=True,
+                                paths=_patch_paths(args.get("input")), **common)
             return ToolCall(self.id, thread.store.path, self._display(item),
                             args, kind="other", known=False, **common)
         if kind_of == "custom_tool_call":
@@ -824,7 +840,7 @@ class CodexSource(Source):
             if _str(item.get("name")) == "apply_patch":
                 return ToolCall(self.id, thread.store.path, "apply_patch",
                                 {"input": raw}, kind="write", known=True,
-                                **common)
+                                paths=_patch_paths(raw), **common)
             return ToolCall(self.id, thread.store.path, self._display(item),
                             raw, kind="other", known=False, **common)
         if kind_of == "local_shell_call":
@@ -851,7 +867,8 @@ class CodexSource(Source):
         tool_input = {k: v for k, v in args.items() if k != key}
         tool_input["input"] = patch
         return ToolCall(self.id, thread.store.path, "apply_patch", tool_input,
-                        kind="write", known=True, **common)
+                        kind="write", known=True, paths=_patch_paths(patch),
+                        **common)
 
     @staticmethod
     def _display(item):

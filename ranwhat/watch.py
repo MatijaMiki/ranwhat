@@ -54,7 +54,8 @@ CRITICAL, HIGH, MEDIUM = "critical", "high", "medium"
 
 class Rule(object):
     def __init__(self, rid, severity, title, why, patterns=(), scan_raw=False,
-                 paths=False, find=None, hide=None, keep_source=False):
+                 paths=False, find=None, hide=None, keep_source=False,
+                 writes=None):
         self.id = rid
         self.severity = severity
         self.title = title
@@ -81,6 +82,14 @@ class Rule(object):
         # kept: python3 -c "exec(base64.b64decode(...))" is a command whose
         # payload the other rules must not read, and this one must.
         self.keep_source = keep_source
+        # Also judged on what a call writes. `echo 'x' >> ~/.zshrc` writes,
+        # whatever it prints, and the text the other rules read drops echo
+        # as text, so a shell command is judged as written instead, with
+        # only its here-documents' bodies set aside (_write_view). Write on
+        # ~/.zshrc is the same act, so the paths a file-writing tool wrote
+        # are judged too, as Read's are for cred.read: by this find, given
+        # them one per line.
+        self.writes = writes
 
     def match(self, text):
         """(start, end) of the first match, or None."""
@@ -1726,7 +1735,9 @@ def _reads_script(words, at=0):
 
 # Known gaps: xargs sh -c and tee >(sh) run what they are piped through a
 # third program, and are not followed. The stage that reads the pipe is the
-# one named.
+# one named. A lone & does not split a command (`curl ... | sh & next` is
+# read as sh given & and next), and a quoted -c string (sh -lc 'curl ... |
+# sh') is not read as a command of its own here.
 def _runs_stdin(stage):
     """Whether a stage runs what it is piped as a program."""
     # A redirection that replaces the standard input, anywhere in the stage
@@ -1770,16 +1781,19 @@ def _runs_stdin(stage):
 
 def _remote_run(text):
     """Span from a fetcher to the shell or interpreter that runs what it
-    fetched, or None."""
+    fetched, or None. Each stage is read as the command it runs, so the &
+    that puts the shell in the background (`curl ... | sh &`), the ( ) of a
+    subshell and a leading time or timeout hide neither."""
     fetched, substitution = None, _runs_substitution()
     for start, end, op in _command_spans(text):
         at = _SPACES.match(text, start, end).end()
         found = substitution.match(text, at, end)
         if found:
             return at, found.end()
-        if fetched is not None and _runs_stdin(text[at:end]):
+        stage = _normalised(text[at:end])
+        if fetched is not None and stage and _runs_stdin(stage):
             return fetched, end
-        if fetched is None and _FETCHER.match(text, at, end):
+        if fetched is None and _FETCHER.match(stage):
             fetched = at
         if op != "|":
             fetched = None
@@ -2578,10 +2592,2341 @@ def _encoded_run(text):
     return found[0].span if found else None
 
 
+# cred.metadata: the instance's own credentials asked of a cloud metadata
+# service.
+#
+# AWS, GCP, Azure, Alibaba and Oracle each hand the role a machine runs as a
+# short-lived token, at a link-local address, to anything on the machine
+# that asks. Asking is the first move of an SSRF, and of an agent turned
+# against the account it works in: the token comes back ready to use and
+# grants whatever the role can. A plain metadata read (instance-id, the
+# region, the IMDSv2 token PUT on its own) is in every bootstrap script and
+# CI job, says nothing worth asking about, and is not reported at all.
+#
+# As exec.remote does, one stage at a time on the quote-aware splitter, keyed
+# on a fetcher as the stage's command word, so the URL in an echo, a grep
+# pattern, a heredoc or a commit message is data. The command word is read
+# past what hands a stage on (sudo, env, nohup, command, exec, timeout), a
+# shell's -c string is a command of its own, as persist reads one, and so is
+# PowerShell's `$r = Invoke-WebRequest ...`, the form Microsoft's managed
+# identity docs give. The host must be a literal in the same word as the
+# credential path: that is what tells the metadata service from an API with
+# iam/security-credentials in a path of its own. Not seen: a host reached
+# only through a variable, a fetch in another language's source, and one run
+# somewhere else (ssh, kubectl exec, docker exec), whose words are not read.
+_METADATA_FETCHER = re.compile(
+    _STAGE_PREFIX + r"(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod"
+    r"|http|https|xh)(?:\.exe)?(?![\w.-])", re.I)
+# A PowerShell assignment, which the stage's command follows.
+_PS_ASSIGNED = re.compile(r"\$[\w:]+[ \t]*=[ \t]*")
+# What ends a URL's word.
+_URL_STOPS = " \t\n'\""
+# The services' addresses, and then the paths that hand out credentials.
+# 169.254.169.254 is AWS's, GCP's, Azure's and Oracle's, and is also spelled
+# as one decimal or hex number; 100.100.100.200 is Alibaba's; GCP's has two
+# names and AWS's an IPv6 address. The paths: the role's (AWS, Alibaba), a
+# service account's token or identity (GCP), a managed identity's token
+# (Azure), the instance principal's certificate and key (Oracle). A _Gap,
+# the host and then the path in the rest of its word, in linear time.
+_METADATA_CREDENTIALS = _Gap(
+    r"(?<![\w.])(?:169\.254\.169\.254|100\.100\.100\.200)(?!\d)"
+    r"|(?<![\w.-])metadata\.google\.internal|(?<=//)metadata(?=[:/])"
+    r"|\[fd00:ec2::254\]|(?<![\w.])(?:2852039166|0xa9fea9fe)(?![\w.])",
+    r"/(?:iam/security-credentials|ram/security-credentials"
+    r"|metadata/identity/oauth2/token|opc/v[12]/identity"
+    r"|service-accounts/[^\s'\"/?#]+/(?:token|identity))(?![\w-])",
+    _URL_STOPS)
+# The container credential agents of ECS (169.254.170.2) and EKS Pod
+# Identity (169.254.170.23), which also serve task metadata: only a URL
+# that names credentials asks for them.
+_CONTAINER_CREDENTIALS = _Gap(
+    r"(?<![\w.])169\.254\.170\.(?:23|2)(?!\d)|\[fd00:ec2::23\]",
+    r"credential", _URL_STOPS)
+# The variables that name a credential endpoint and nothing else: the
+# container credential URI of ECS and EKS, and an Azure App Service's or
+# Function's managed identity endpoint.
+_CREDENTIALS_ENDPOINT = re.compile(
+    r"\$(?:\{|env:)?(?:AWS_CONTAINER_CREDENTIALS_(?:RELATIVE|FULL)_URI"
+    r"|IDENTITY_ENDPOINT|MSI_ENDPOINT)\b", re.I)
+_METADATA_SIGNALS = (_METADATA_CREDENTIALS, _CONTAINER_CREDENTIALS,
+                     _CREDENTIALS_ENDPOINT)
+
+
+# What each of _METADATA_SIGNALS holds, in lower case: a call that holds
+# none of them asks no metadata service for anything, and is not read.
+_METADATA_HINTS = ("169.254.", "100.100.100.200", "metadata", "fd00:ec2",
+                   "2852039166", "0xa9fea9fe", "credentials_", "identity_endpoint",
+                   "msi_endpoint")
+
+
+def _metadata_fetch(text, depth=0):
+    """Span from a fetcher to the end of the first credential URL it asks a
+    metadata service for, or None. A substitution's body, and a shell's -c
+    string, are read as commands of their own: CREDS=$(curl ...) asks as
+    much as curl does, and so does bash -lc 'curl ...', which is then the
+    span."""
+    if depth == 0:
+        low = text.lower()
+        if not any(hint in low for hint in _METADATA_HINTS):
+            return None
+    for start, end, _op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        stage = text[at:end]
+        assigned = _PS_ASSIGNED.match(stage)
+        command = _normalised(stage[assigned.end():] if assigned else stage)
+        # bash -c "curl ..." is reduced to `bash -c curl ...`.
+        run = _after_prefix(_unwrap_c(_after_prefix(command)))
+        if _METADATA_FETCHER.match(run):
+            for signal in _METADATA_SIGNALS:
+                found = signal.search(stage)
+                if found:
+                    return at, at + found.span()[1]
+        if depth >= 3:
+            continue
+        name = _command_word(command)
+        if name in _SHELL_STRING_HEADS:
+            operand = _shell_string(name, _stage_words(command))
+            if operand and _metadata_fetch(operand, depth + 1):
+                return at, end
+        if "$(" in stage or "`" in stage:
+            for lo, hi in _substitution_spans(stage):
+                inner = _metadata_fetch(stage[lo:hi], depth + 1)
+                if inner:
+                    return at + lo + inner[0], at + lo + inner[1]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# What a shell command writes, for the rules that judge it.
+#
+# persist and agent.config are about where a command writes and what. The
+# text the other rules read drops echo and printf as text, and with them
+# `echo 'export PATH=…' >> ~/.zshrc`, whose redirect is the whole act. So
+# these two read the command as it was written, with only the bodies of its
+# here-documents set aside, and kept beside it as what was written. They
+# read it a stage at a time on the quote-aware splitter: a > inside quotes or
+# a comment writes nothing, and a stage that only prints (an echo, a commit
+# message) writes only where it is redirected. A sh -c string and a
+# substitution's body are read as commands of their own, three deep.
+# ---------------------------------------------------------------------------
+
+class _WriteView(str):
+    """A command as the rules that judge what it writes read it (see
+    _write_view): a str, with the body of each here-document taken out of
+    it kept as .bodies, (where its operator ends in the text, the body)."""
+    bodies = ()
+
+
+@functools.lru_cache(maxsize=32)
+def _write_view(command):
+    """command as a _WriteView, cut to MAX_SCAN_CHARS after its bodies are
+    taken out, as _shell_text cuts what it reduced."""
+    bodies = []
+    view = _WriteView(_strip_heredocs(command, keep_tail=True,
+                                      bodies=bodies)[:MAX_SCAN_CHARS])
+    view.bodies = tuple(b for b in bodies if b[0] <= MAX_SCAN_CHARS)
+    return view
+
+
+def _joined_view(view):
+    """A write view with each backslash-newline read as blanks, as the shell
+    joins the two lines (_joined_lines), its bodies kept: `RANWHAT_HOOK=0 \\`
+    and then `claude` on the next line is one command, whose words split
+    as written held a newline for a word. The rules that read a write view
+    are given it as what they judge, so their evidence quotes the command
+    as it was written."""
+    joined = _joined_lines(view)
+    if joined is view:
+        return view
+    joined = _WriteView(joined)
+    joined.bodies = getattr(view, "bodies", ())
+    return joined
+
+
+# An output redirection outside quotes, escapes and comments: >, >>, >|, &>,
+# N> and N>>. Not <>, and not from inside a run of digits: the lookbehind
+# lets only the first digit of a run start one, so a long run is read once.
+# Then the word it writes to, read from the text as it was written; >&2,
+# 2>&1 and >( ) have none.
+_FILE_REDIRECT_OP = re.compile(r"(?<![<>&\d])(?:\d+|&)?>>?\|?")
+_SHELL_WORD = r"""(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|\\.|[^\s;&|<>()'"\\])+"""
+_TARGET_WORD = re.compile(r"[ \t]*(" + _SHELL_WORD + ")")
+# The same word, where each is found by a search: with the blanks before it
+# in the pattern, each place in a long run of them read on to its end.
+_WORD_ANYWHERE = re.compile(_SHELL_WORD)
+# The parts of a shell word, each begun by a character of its own.
+_WORD_PART = re.compile(
+    r"""'([^']*)'?|"((?:[^"\\]|\\[\s\S])*)"?|\\([\s\S]?)|([^'"\\]+)""")
+_DOUBLE_QUOTED_ESCAPE = re.compile(r'\\([$`"\\])')
+_ECHO_OPTIONS = re.compile(r"-[neE]+\Z")
+
+
+def _unquoted(text):
+    """text with every quoted string, escape and comment blanked, at the
+    same offsets."""
+    return _HIDDEN.sub(lambda m: " " * len(m.group()), text)
+
+
+def _dequoted(word):
+    """A shell word as the program it is given reads it, quotes taken off
+    and escapes read. Not shlex, which builds a word a character at a
+    time."""
+    if not _QUOTING.search(word):
+        return word
+    out = []
+    for m in _WORD_PART.finditer(word):
+        single, double, escaped, plain = m.groups()
+        if single is not None:
+            out.append(single)
+        elif double is not None:
+            out.append(_DOUBLE_QUOTED_ESCAPE.sub(r"\1", double))
+        elif escaped is not None:
+            out.append(escaped)
+        else:
+            out.append(plain)
+    return "".join(out)
+
+
+def _uncommented(stage):
+    """stage without the comment that ends it, when one does."""
+    if "#" not in stage:
+        return stage
+    for m in _HIDDEN.finditer(stage):
+        if m.group()[:1] == "#":
+            return stage[:m.start()].rstrip()
+    return stage
+
+
+def _redirects(stage):
+    """(start, end, target, appends) for each redirection of stage's output
+    to a file: where the operator starts, where the word it writes to ends,
+    that word as the shell reads it, and whether it appends."""
+    if ">" not in stage:
+        return []
+    found = []
+    for op in _FILE_REDIRECT_OP.finditer(_unquoted(stage)):
+        word = _TARGET_WORD.match(stage, op.end())
+        if word:
+            found.append((op.start(), word.end(), _dequoted(word.group(1)),
+                          op.group().rstrip("|").endswith(">>")))
+    return found
+
+
+def _here_string_word(stage):
+    """The word a here-string gives stage's input, as read, or None."""
+    if "<<<" not in stage:
+        return None
+    at = _unquoted(stage).find("<<<")
+    word = _TARGET_WORD.match(stage, at + 3) if at >= 0 else None
+    return _dequoted(word.group(1)) if word else None
+
+
+# What prints its words: echo, printf, and PowerShell's Write-Output.
+_PRINTERS = frozenset(("echo", "printf", "write-output"))
+
+
+def _without_redirect_text(stage):
+    """stage with each redirection of its output to a file blanked."""
+    parts, pos = [], 0
+    for start, end, _target, _appends in _redirects(stage):
+        parts.append(stage[pos:start])
+        parts.append(" ")
+        pos = end
+    parts.append(stage[pos:])
+    return "".join(parts)
+
+
+def _printed(stage):
+    """What an echo or printf stage prints, read without splitting it into
+    words: what follows the program, as read, with its redirections and
+    echo's options left out. printf's words are a line each: in printf
+    '%s\\n' 'curl ... | sh' the format is not the start of the command."""
+    rest = _without_redirect_text(_after_prefix(stage))
+    words = [_dequoted(m.group()) for m in _WORD_ANYWHERE.finditer(rest)]
+    first = 1
+    program = words[0].rsplit("/", 1)[-1].lower() if words else ""
+    if program == "echo":
+        while first < len(words) and _ECHO_OPTIONS.match(words[first]):
+            first += 1
+    return ("\n" if program == "printf" else " ").join(words[first:])
+
+
+# A PowerShell here-string, @'...'@ or @"..."@, which is a stage of its own.
+_PS_HERE_STRING = re.compile(r"""@(['"])\r?\n?([\s\S]*?)\r?\n?\1@\Z""")
+
+
+def _quoted_literal(stage):
+    """The text of a stage that is only a quoted string, or a PowerShell
+    here-string, as read: PowerShell writes one to its output, so
+    `'Set-Alias ll ls' >> $PROFILE` and `@'...'@ | Set-Content f` write it.
+    None for any other stage."""
+    if stage[:1] not in ("'", '"', "@"):
+        return None
+    rest = _without_redirect_text(stage).strip() if ">" in stage else stage
+    here = _PS_HERE_STRING.match(rest)
+    if here:
+        return here.group(2)
+    word = _TARGET_WORD.match(rest)
+    if not word or word.end() != len(rest) or rest[:1] not in ("'", '"'):
+        return None
+    return _dequoted(word.group(1))
+
+
+def _posix_home():
+    """This user's home as the rules that judge writes read a path: on
+    Windows, where it is USERPROFILE (C:\\Users\\me), with its backslashes
+    read as / and its drive taken off, /Users/me, as a path written there
+    is read. Git Bash reads ~/.bashrc from it, so ~ must resolve there too:
+    left as it was, no ~ or $HOME path was a startup file on Windows."""
+    home = _home()
+    if home.startswith("/"):
+        return home
+    home = _slashed(home).replace("\\", "/")
+    drive = _DRIVE_LETTER.match(home)
+    return home[drive.end():] if drive else home
+
+
+def _home_relative(path):
+    """path below a home directory, as a path relative to it: this user's,
+    or the one /home/<name>/, /Users/<name>/ or /root/ starts; else None."""
+    home = _posix_home().rstrip("/")
+    if home.startswith("/") and path.startswith(home + "/"):
+        return path[len(home) + 1:]
+    found = _OTHER_HOME.match(path)
+    return path[found.end():] if found else None
+
+
+_OTHER_HOME = re.compile(r"/(?:home|Users)/[^/]+/|/(?:var/)?root/")
+_REMOTE_PATH = re.compile(r"[^/\s]{2,}:")
+
+
+_Wrote = collections.namedtuple("_Wrote", "target how detail")
+
+
+# Programs whose own words name a file they write, and the options of each
+# that take the next word as their value. Each is read as GNU and BSD both
+# read it, and a word that is neither is taken for an operand: what is
+# written is the last of those, which a value read as one rarely is.
+_WRITERS = frozenset((
+    "tee", "sponge", "sed", "gsed", "perl", "cp", "mv", "install", "ln", "rsync",
+    "curl", "wget", "dd", "rm", "unlink", "shred", "truncate", "yq",
+    "add-content", "set-content", "out-file", "new-item", "copy-item",
+    "move-item", "remove-item", "invoke-webrequest", "iwr",
+    "invoke-restmethod", "irm"))
+_COPY_VALUES = {
+    "cp": frozenset(("-S", "--suffix")),
+    "mv": frozenset(("-S", "--suffix")),
+    "ln": frozenset(("-S", "--suffix")),
+    "install": frozenset(("-m", "--mode", "-o", "--owner", "-g", "--group",
+                          "-S", "--suffix")),
+    "rsync": frozenset((
+        "-e", "--rsh", "--exclude", "--include", "--exclude-from",
+        "--include-from", "-f", "--filter", "--files-from", "--log-file",
+        "--password-file", "--chmod", "--chown", "--rsync-path", "-T",
+        "--temp-dir", "--partial-dir", "--backup-dir", "--suffix",
+        "--compare-dest", "--copy-dest", "--link-dest", "-B", "--block-size",
+        "--timeout", "--port", "--bwlimit", "-M", "--remote-option")),
+}
+_COPY_HOW = {"cp": "copy", "install": "copy", "rsync": "copy", "mv": "move",
+             "ln": "link"}
+# Letters of a curl cluster that take a value, after which the rest of it is
+# that value: -sSLo FILE is -o's, -H... a header's.
+_CURL_VALUE_LETTERS = frozenset("AbcCdDeEFHKmoQrTuUwxXyYz")
+# PowerShell's writers, and their named parameters that take a value.
+_PS_WRITERS = frozenset(("add-content", "set-content", "out-file", "new-item"))
+_PS_VALUES = frozenset((
+    "-path", "-filepath", "-literalpath", "-destination", "-value",
+    "-encoding", "-itemtype", "-name", "-stream", "-delimiter", "-filter",
+    "-include", "-exclude", "-credential", "-width", "-inputobject",
+    "-type"))
+_PS_PATHS = frozenset(("-path", "-filepath", "-literalpath"))
+_STARTUP_FOLDER = "/start menu/programs/startup"
+# PowerShell's downloaders, which write a file given -OutFile.
+_PS_FETCHERS = frozenset(("invoke-webrequest", "iwr", "invoke-restmethod", "irm"))
+# PowerShell's cmdlets that write, copy, move or remove a file. A backslash
+# is no escape to PowerShell, so their words are read with each one between
+# a path's parts as /: unquoted, $HOME\.claude\settings.json read as POSIX
+# words lost its backslashes, $HOME.claudesettings.json.
+_PS_CMDLETS = _PS_WRITERS | _PS_FETCHERS | frozenset((
+    "copy-item", "move-item", "remove-item"))
+# PowerShell's aliases of its writers. Not sc, which is sc.exe, Windows'
+# service control, to anyone who types it outside Windows PowerShell 5.1.
+_PS_ALIASES = {"copy": "copy-item", "cpi": "copy-item", "move": "move-item",
+               "mi": "move-item", "ni": "new-item"}
+
+
+def _writer_name(name):
+    """A program's name as the rules that judge writes look it up: without
+    .exe (curl.exe is what Windows PowerShell users type, its curl being
+    Invoke-WebRequest), and a PowerShell alias by the cmdlet it stands for."""
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return _PS_ALIASES.get(name, name)
+
+
+def _as_written(name, stage):
+    """stage as its program reads it: slashed for one of _PS_CMDLETS."""
+    return _slashed(stage) if name in _PS_CMDLETS else stage
+
+
+def _operands(args, values=frozenset()):
+    """args without their options and the values they take, up to `--`
+    and everything after it."""
+    out, skip, options = [], False, True
+    for word in args:
+        if skip:
+            skip = False
+        elif options and word == "--":
+            options = False
+        elif options and word[:1] == "-" and len(word) > 1:
+            skip = word in values
+        else:
+            out.append(word)
+    return out
+
+
+# The letters of a sed or perl cluster after which the rest of it, or else
+# the next word, is a script (-e), a file of one (-f), or another value.
+_SCRIPT_LETTERS = {"sed": "e", "gsed": "e", "perl": "eE"}
+_SCRIPT_FILE_LETTERS = {"sed": "f", "gsed": "f", "perl": ""}
+_VALUE_LETTERS = {"sed": "l", "gsed": "l", "perl": "IMmxCdD"}
+
+
+def _in_place(name, args):
+    """(scripts, files) of a sed or perl told to edit files in place, or
+    None: -i, -i.bak, BSD's -i '', --in-place, or a cluster holding i. The
+    scripts are what -e gives, or else the first operand; one read from a
+    file (-f) is shown as nothing."""
+    inplace, scripts, operands, i = False, [], [], 0
+    script, script_file = _SCRIPT_LETTERS[name], _SCRIPT_FILE_LETTERS[name]
+    while i < len(args):
+        word = args[i]
+        i += 1
+        if word in ("--expression", "--file"):
+            scripts.append(args[i] if word == "--expression" and i < len(args)
+                           else "")
+            i += 1
+        elif word.startswith(("--expression=", "--file=")):
+            scripts.append(word.split("=", 1)[1] if word[2] == "e" else "")
+        elif word == "--in-place" or word.startswith("--in-place="):
+            inplace = True
+        elif word == "-i":
+            inplace = True
+            if i < len(args) and args[i] == "":
+                i += 1                         # BSD's -i '': no backup
+        elif word[:1] == "-" and word[1:2] != "-" and len(word) > 1:
+            for k, letter in enumerate(word[1:], 1):
+                if letter == "i":
+                    inplace = True
+                    break                      # the rest is a suffix
+                if letter in script or letter in script_file:
+                    value = word[k + 1:]
+                    if not value and i < len(args):
+                        value, i = args[i], i + 1
+                    scripts.append(value if letter in script else "")
+                    break
+                if letter in _VALUE_LETTERS[name]:
+                    break                      # the rest is a value
+        elif word != "--":
+            operands.append(word)
+    if not inplace:
+        return None
+    if scripts:
+        return scripts, operands
+    return operands[:1], operands[1:]
+
+
+def _copied(name, args):
+    """(destinations, sources) of cp, mv, install, ln or rsync: the
+    destination named, and inside it the name of each source, since which
+    of the two it writes depends on what is there. install -d makes
+    directories and writes none; a remote destination is no file here."""
+    values = _COPY_VALUES[name]
+    target_dir, operands, skip, options = None, [], False, True
+    for k, word in enumerate(args):
+        if skip:
+            skip = False
+        elif options and word == "--":
+            options = False
+        elif options and word in ("-t", "--target-directory"):
+            target_dir = args[k + 1] if k + 1 < len(args) else None
+            skip = True
+        elif options and word.startswith("--target-directory="):
+            target_dir = word.split("=", 1)[1]
+        elif options and word[:1] == "-" and len(word) > 1:
+            if name == "install" and (word == "--directory" or (
+                    word[1:2] != "-" and "d" in word[1:])):
+                return [], []
+            skip = word in values
+        else:
+            operands.append(word)
+    if target_dir is None:
+        if len(operands) < 2:
+            return [], []
+        target_dir, operands = operands[-1], operands[:-1]
+    if name == "rsync" and _REMOTE_PATH.match(target_dir):
+        return [], operands
+    inside = [target_dir.rstrip("/") + "/" + s.rstrip("/").rsplit("/", 1)[-1]
+              for s in operands if s.rstrip("/")]
+    return [target_dir] + inside, operands
+
+
+def _fetched_to(name, args):
+    """The file curl -o, wget -O, dd of= or Invoke-WebRequest -OutFile
+    writes, or None. PowerShell takes a parameter by any prefix of its name
+    that no other shares: -OutF is -OutFile's, -O is not."""
+    for k, word in enumerate(args):
+        value = args[k + 1] if k + 1 < len(args) else None
+        if name in _PS_FETCHERS:
+            key, colon, inline = word.partition(":")
+            if len(key) >= 5 and "-outfile".startswith(key.lower()):
+                return inline if colon else value
+        elif name == "dd":
+            if word.startswith("of="):
+                return word[3:]
+        elif name == "curl":
+            if word in ("-o", "--output"):
+                return value
+            if word.startswith("--output="):
+                return word[9:]
+            if word[:1] == "-" and word[1:2] != "-":
+                for j, letter in enumerate(word[1:], 1):
+                    if letter == "o":
+                        return word[j + 1:] or value
+                    if letter in _CURL_VALUE_LETTERS:
+                        break
+        elif name == "wget":
+            if word in ("-O", "--output-document"):
+                return value
+            if word.startswith("--output-document="):
+                return word[18:]
+            if word[:1] == "-" and word[1:2] != "-" and "O" in word:
+                return word[word.index("O") + 1:] or value
+    return None
+
+
+def _powershell_written(name, args, stage):
+    """(target, value) for each file one of PowerShell's writers writes:
+    the path it is given by name, or by place."""
+    named, positional, skip = {}, [], None
+    for word in args:
+        if skip is not None:
+            named[skip] = word
+            skip = None
+        elif word[:1] == "-" and len(word) > 1:
+            key = word.lower()
+            if key in _PS_VALUES:
+                skip = key
+        else:
+            positional.append(word)
+    value = named.get("-value")
+    if name in ("copy-item", "move-item"):
+        target = named.get("-destination") or (positional[1:2] or [None])[0]
+    else:
+        path = next((named[k] for k in _PS_PATHS if k in named), None)
+        target = path or (positional[:1] or [None])[0]
+        if value is None and name in ("add-content", "set-content"):
+            # -Value by place: the word after the path, or the first when
+            # the path is named.
+            given = positional if path else positional[1:]
+            value = given[0] if given else None
+    found = [(target, value)] if target else []
+    # PowerShell does not escape with \, and a path that ends in \" is cut
+    # wrong by a POSIX split: the Startup folder is found in the text too.
+    if name != "remove-item" and _STARTUP_FOLDER in _slashed(stage).lower():
+        found.append(("shell:startup", value))
+    return found
+
+
+def _stage_writes(name, args, stage):
+    """_Wrote(target, how, detail) for each file a stage writes or removes:
+    by its program's own words when args are given (the stage's words
+    after the program, its redirections left out), then by each of its
+    redirections. how is >, >>, tee, tee -a, sed (detail: the scripts),
+    edit (yq -i; detail: the program), copy, move or link (detail: the
+    sources), fetch, write (detail: the text written, when it is shown) or
+    remove."""
+    found = []
+    if args is not None:
+        if name in ("tee", "sponge"):
+            # sponge (moreutils) soaks up its input and then writes it, so
+            # jq ... f | sponge f writes f as tee would.
+            appends = any(a in ("-a", "--append") or (
+                a[:1] == "-" and a[1:2] != "-" and "a" in a) for a in args)
+            how = "tee -a" if appends else "tee"
+            found += [_Wrote(t, how, None) for t in _operands(args) if t != "-"]
+        elif name in ("sed", "gsed", "perl"):
+            edited = _in_place(name, args)
+            if edited:
+                found += [_Wrote(t, "sed", edited[0]) for t in edited[1]]
+        elif name == "yq":
+            if any(a in ("-i", "--inplace") for a in args):
+                words = [w for w in _operands(args) if w not in ("e", "eval")]
+                found += [_Wrote(t, "edit", words[0]) for t in words[1:2]]
+        elif name in _COPY_VALUES:
+            targets, sources = _copied(name, args)
+            found += [_Wrote(t, _COPY_HOW[name], sources) for t in targets]
+        elif name in ("curl", "wget", "dd") or name in _PS_FETCHERS:
+            target = _fetched_to(name, args)
+            if target and target != "-":
+                found.append(_Wrote(target, "fetch", None))
+        elif name in ("rm", "unlink", "shred"):
+            found += [_Wrote(t, "remove", None) for t in _operands(args)]
+        elif name == "truncate":
+            if any(a in ("-s0", "--size=0") or a == "0" for a in args):
+                found += [_Wrote(t, "remove", None) for t in _operands(
+                    args, frozenset(("-s", "--size", "-r", "--reference")))]
+        elif name in _PS_WRITERS or name in ("copy-item", "move-item",
+                                             "remove-item"):
+            how = "remove" if name == "remove-item" else "write"
+            found += [_Wrote(t, how, v)
+                      for t, v in _powershell_written(name, args, stage)]
+    found += [_Wrote(target, ">>" if appends else ">", None)
+              for _s, _e, target, appends in _redirects(stage)]
+    return found
+
+
+# The shells whose string _shell_string reads: the POSIX ones, and
+# PowerShell and cmd, through which Claude Code's Bash tool on Windows, Git
+# Bash, runs every cmdlet and every cmd built-in.
+_SHELL_STRING_HEADS = _STDIN_SHELLS | frozenset((
+    "powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe"))
+
+
+def _shell_string(name, words):
+    """The string a shell stage is given to run, or None: a POSIX shell's
+    -c string; what follows PowerShell's -Command (or a prefix of it: -c,
+    -com), which takes every word after it, and not -File's script or
+    -EncodedCommand's blob, which exec.encoded reads; what follows cmd's
+    /c or /k, or //c as Git Bash has it typed."""
+    if not words:
+        return None
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name in _STDIN_SHELLS:
+        return _exec_operand(name, words)
+    if name in ("powershell", "pwsh"):
+        for i, word in enumerate(words[1:], 1):
+            flag = word[1:].lower()
+            if word[:1] not in "-/" or not flag:
+                continue
+            if "file".startswith(flag) or "encodedcommand".startswith(flag) \
+                    or flag == "ec":
+                return None
+            if flag == "c" or (len(flag) >= 3 and "command".startswith(flag)):
+                return " ".join(words[i + 1:]) or None
+        return None
+    if name == "cmd":
+        for i, word in enumerate(words[1:], 1):
+            if word[:1] == "/" and word.lstrip("/").lower() in ("c", "k", "r"):
+                return " ".join(words[i + 1:]) or None
+    return None
+
+
+# persist: something left to run again by itself, after the session.
+#
+# A crontab installed, a launch agent or systemd unit written or loaded, a
+# Windows service created or pointed at another program, a scheduled task
+# created, a Run key set, a login item put in an autostart or Startup
+# folder: each runs again on its own, with your permissions, after the agent
+# has gone, and nothing in the project shows it. It is what a
+# prompt-injected agent reaches for (ATT&CK T1053, T1543, T1547, T1037,
+# T1546), and what an agent asked to write code rarely does. Each is high,
+# so the hook asks first.
+#
+# Two kinds are medium, recorded and never interrupting, because they are
+# among the commonest legitimate things an agent does: a packaged service
+# enabled by name (systemctl enable docker, brew services start, sc config
+# x start= auto), which runs the package's own code, and a change to a
+# shell startup file (an export PATH line, eval "$(pyenv init -)", the brew
+# shellenv line). A startup file is high by what goes into it, not by its
+# name: a line that fetches and runs a script, decodes and runs one, or
+# opens /dev/tcp, or a startup file that comes straight from the network.
+#
+# Left out by design: git hooks and core.hooksPath (pre-commit and husky run
+# only in the repository), docker run --restart, pm2, at, the SysV and
+# OpenRC enable commands, and authorized_keys (access, not code).
+_PERSIST_HINTS = ("cron", "launch", "systemctl", "systemd", "schtasks",
+                  "currentversion", "startup", "scheduledtask", "brew",
+                  "autostart", "init.d", "rc.local", "bashrc", "zshrc",
+                  "kshrc", "profile", "zshenv", "zlog", "bash_log", "fish",
+                  "bash_aliases", "binpath", "start=", "new-service",
+                  "set-service")
+
+_STARTUP_WHY = ("A shell startup file was changed. What it holds runs in every "
+                "shell you open from now on, so the change outlives the "
+                "session. Most such changes add a PATH line or a tool's init.")
+_STARTUP_RUN_WHY = ("A shell startup file now runs a script fetched from the "
+                    "network or hidden in an encoding, or opens a connection "
+                    "out. It does that in every shell you open from now on, "
+                    "with your permissions, and nothing on screen shows it.")
+_SERVICE_WHY = ("A service was set to start at boot or at login. What it runs "
+                "is usually a package's own, and it now starts every time, "
+                "whether or not the session is running.")
+
+# Where a scheduler or service manager finds what it runs: a file of jobs,
+# or a directory each file in which is one. And the shell's startup files,
+# with ~/.bash_aliases among them: Debian's and Ubuntu's default .bashrc
+# sources it, and tells you to put your additions there.
+_JOB_FILES = frozenset(("/etc/crontab", "/etc/anacrontab", "/etc/rc.local"))
+_JOB_DIRS = (
+    "/etc/cron.d/", "/etc/cron.hourly/", "/etc/cron.daily/",
+    "/etc/cron.weekly/", "/etc/cron.monthly/", "/var/spool/cron/",
+    "/usr/lib/cron/tabs/", "/var/cron/tabs/", "/Library/LaunchAgents/",
+    "/Library/LaunchDaemons/", "/etc/systemd/system/", "/etc/systemd/user/",
+    "/usr/lib/systemd/system/", "/usr/lib/systemd/user/",
+    "/lib/systemd/system/", "/lib/systemd/user/", "/etc/xdg/autostart/",
+    "/etc/init.d/")
+_JOB_HOME = ("Library/LaunchAgents/", ".config/systemd/user/",
+             ".local/share/systemd/user/", ".config/autostart/")
+_STARTUP_SYSTEM = frozenset((
+    "/etc/profile", "/etc/bash.bashrc", "/etc/bashrc", "/etc/zshrc",
+    "/etc/zprofile", "/etc/zshenv", "/etc/zlogin", "/etc/zsh/zshrc",
+    "/etc/zsh/zprofile", "/etc/zsh/zshenv", "/etc/zsh/zlogin"))
+_STARTUP_HOME = frozenset((
+    ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile",
+    ".bash_aliases", ".zshrc", ".zprofile", ".zshenv", ".zlogin", ".zlogout",
+    ".kshrc", ".config/fish/config.fish"))
+_DRIVE_LETTER = re.compile(r"[A-Za-z]:(?=/)")
+# PowerShell's profile, by its variable or by its file.
+_PROFILE_VARIABLE = re.compile(
+    r"\$profile(?:\.(?:currentuser|allusers)(?:currenthost|allhosts))?\Z", re.I)
+_PS_PROFILE_FOLDERS = frozenset(("powershell", "windowspowershell"))
+
+
+def _persist_place(target):
+    """"job" when target is where a scheduler or service manager finds what
+    it runs, "startup" when it is a shell's startup file, else None. A
+    relative path is none: ./docker/.bashrc is a project's file."""
+    t = _slashed(target.strip())
+    low = t.lower()
+    if _STARTUP_FOLDER in low or low.startswith(("shell:startup",
+                                                 "shell:common startup")):
+        return "job"
+    folder, _sep, name = low.rstrip("/").rpartition("/")
+    if _PROFILE_VARIABLE.match(t) or (
+            folder.rpartition("/")[2] in _PS_PROFILE_FOLDERS
+            and (name == "profile.ps1" or (name.startswith("microsoft.")
+                                           and name.endswith("_profile.ps1")))):
+        return "startup"
+    drive = _DRIVE_LETTER.match(t)
+    if drive:
+        t = t[drive.end():]
+    path = _as_absolute(t, _posix_home())
+    if path is None:
+        return None
+    if path in _JOB_FILES or (path + "/").startswith(_JOB_DIRS):
+        return "job"
+    if path in _STARTUP_SYSTEM or path.startswith("/etc/profile.d/"):
+        return "startup"
+    rel = _home_relative(path)
+    if rel is None:
+        return None
+    if (rel + "/").startswith(_JOB_HOME):
+        return "job"
+    if rel in _STARTUP_HOME or rel.startswith(".config/fish/conf.d/"):
+        return "startup"
+    return None
+
+
+# The Run keys, whose every value Windows runs at login. A key as Git Bash
+# leaves it, unquoted, has lost its backslashes, so it is matched without
+# them too. String tests, from the end.
+_RUN_KEYS = ("currentversion/run", "currentversion/runonce",
+             "currentversion/runonceex", "currentversion/runservices",
+             "currentversion/runservicesonce",
+             "currentversion/policies/explorer/run")
+_RUN_KEYS_JOINED = tuple(k.replace("/", "") for k in _RUN_KEYS)
+_SLASHES = re.compile(r"[\\/]+")
+_SYSTEMCTL_VALUES = frozenset((
+    "-M", "-H", "--host", "--machine", "-t", "--type", "-p", "--property",
+    "--root", "-o", "--output", "-n", "--lines", "-s", "--signal", "--state"))
+# Programs that schedule or enable by a verb of their own.
+_PERSIST_VERBS = frozenset((
+    "crontab", "launchctl", "systemctl", "brew", "schtasks", "schtasks.exe",
+    "reg", "reg.exe", "register-scheduledtask", "new-itemproperty",
+    "set-itemproperty", "sc", "sc.exe", "new-service", "set-service"))
+# PowerShell's start types that start a service at boot.
+_AUTOMATIC = frozenset(("automatic", "automaticdelayedstart"))
+
+
+def _is_run_key(word):
+    key = _SLASHES.sub("/", word).strip("/").lower()
+    return key.endswith(_RUN_KEYS) or key.replace("/", "").endswith(_RUN_KEYS_JOINED)
+
+
+def _crontab_installs(args):
+    """Whether crontab, given args, installs a table: from a file, or from
+    its input given - or nothing. -l lists, -r removes, -e opens an editor,
+    which an agent with no terminal does not get to."""
+    skip = False
+    for word in args:
+        if skip:
+            skip = False
+        elif word == "-u":
+            skip = True
+        elif word in ("--help", "--version"):
+            return False
+        elif word[:1] == "-" and word != "-" and not word.startswith("-u"):
+            if set(word[1:]) & set("lreTVh"):
+                return False
+    return True
+
+
+def _persist_verb(name, args):
+    """(severity, kind) of a stage that schedules or enables something by a
+    verb of its own, or None. kind is "job" for an entry the call itself
+    makes, and "service" for one a package already holds, enabled by name."""
+    first = args[0].lower() if args else ""
+    if name == "crontab":
+        return (HIGH, "job") if _crontab_installs(args) else None
+    if name == "launchctl":
+        if first in ("load", "bootstrap", "submit"):
+            return HIGH, "job"
+        return (MEDIUM, "service") if first == "enable" else None
+    if name == "systemctl":
+        words, skip = [], False
+        for word in args:
+            if skip:
+                skip = False
+            elif word[:1] == "-":
+                skip = word in _SYSTEMCTL_VALUES
+            else:
+                words.append(word)
+        if words[:1] == ["link"]:
+            return HIGH, "job"
+        if words[:1] in (["enable"], ["reenable"]):
+            # A unit named by its path is a file of the agent's own.
+            if any("/" in unit for unit in words[1:]):
+                return HIGH, "job"
+            return MEDIUM, "service"
+        return None
+    if name == "brew":
+        plain = [w for w in args if w[:1] != "-"]
+        return (MEDIUM, "service") if plain[:2] == ["services", "start"] else None
+    if name in ("schtasks", "schtasks.exe"):
+        # /create, or //create from Git Bash, which reads /c as a path.
+        return (HIGH, "job") if any(
+            w[:1] in "/-" and w.lstrip("/-").lower() == "create"
+            for w in args) else None
+    if name in ("reg", "reg.exe"):
+        return (HIGH, "job") if first == "add" and any(
+            _is_run_key(w) for w in args[1:2]) else None
+    if name == "register-scheduledtask":
+        return HIGH, "job"
+    if name in ("new-itemproperty", "set-itemproperty"):
+        return (HIGH, "job") if any(_is_run_key(w) for w in args) else None
+    if name in ("sc", "sc.exe"):
+        return _sc_verb(first, [w.lower() for w in args])
+    if name == "new-service":
+        return HIGH, "job"             # it starts automatically by default
+    if name == "set-service":
+        low = [w.lower() for w in args]
+        if any("-binarypathname".startswith(w) and len(w) > 2 for w in low):
+            return HIGH, "job"
+        automatic = any(_option_value(low, k, "-startuptype") in _AUTOMATIC
+                        or (w.startswith("-startuptype:") and w[13:] in _AUTOMATIC)
+                        for k, w in enumerate(low))
+        return (MEDIUM, "service") if automatic else None
+    return None
+
+
+def _sc_verb(first, low):
+    """(severity, kind) of sc, Windows' service control, or None: a service
+    created, or an existing one pointed at another program (binPath=), is a
+    job; one set to start at boot (start= auto) is a service enabled by
+    name. sc's options are written `name= value`, or `name=value`."""
+    if first == "create":
+        return HIGH, "job"
+    if first != "config":
+        return None
+    if any(w.startswith("binpath=") for w in low):
+        return HIGH, "job"
+    for k, word in enumerate(low):
+        if word.startswith("start="):
+            value = word[6:] or (low[k + 1] if k + 1 < len(low) else "")
+            if value in ("auto", "delayed-auto"):
+                return MEDIUM, "service"
+    return None
+
+
+def _escalates(content, depth=0):
+    """Whether text written to a startup file runs what the session cannot
+    show: a script fetched from the network (exec.remote's own finder),
+    one decoded from an encoding (exec.encoded's), or a connection opened
+    through /dev/tcp or /dev/udp. Judged as the command it is, never run.
+    A shell's quoted -c string is read as a command of its own, two deep:
+    a line meant to run from .bashrc without holding it up is often
+    `nohup sh -c "curl ... | sh" >/dev/null 2>&1 &`."""
+    if not content:
+        return False
+    content = content[:MAX_SCAN_CHARS]
+    if "/dev/tcp/" in content or "/dev/udp/" in content:
+        return True
+    shell = _shell_text("Bash", {"command": content})
+    if _remote_run(shell):
+        return True
+    if depth < 2:
+        for start, end, _op in _command_spans(shell):
+            stage = _normalised(shell[start:end].strip())
+            name = _command_word(stage)
+            if name in _SHELL_STRING_HEADS and _escalates(
+                    _shell_string(name, _stage_words(stage)), depth + 1):
+                return True
+    source = _shell_text("Bash", {"command": content}, keep_source=True)
+    return bool(source) and _encoded_run(source) is not None
+
+
+def _startup_content(name, stage, before):
+    """What a stage that writes a startup file shows of what it writes: its
+    own echo or printf, its here-string, and what the echo or printf piped
+    into it printed; a stage that is only a quoted string, which PowerShell
+    writes out, itself or piped in."""
+    parts = []
+    if name in _PRINTERS:
+        parts.append(_printed(stage))
+    here = _here_string_word(stage)
+    if here:
+        parts.append(here)
+    literal = _quoted_literal(stage)
+    if literal:
+        parts.append(literal)
+    if before is not None:
+        if _command_word(before) in _PRINTERS:
+            parts.append(_printed(before))
+        literal = _quoted_literal(before)
+        if literal:
+            parts.append(literal)
+    return "\n".join(parts)
+
+
+def _shown_written(wrote):
+    """What a write shows of the text it puts in a file: what a sed or perl
+    script adds (a, i, c, and the right of s), and the value a PowerShell
+    writer is given."""
+    if wrote.how == "sed":
+        return [text for script in wrote.detail for text in _sed_changes(script)[1]]
+    if wrote.how == "write" and wrote.detail:
+        return [wrote.detail]
+    return []
+
+
+_Persisted = collections.namedtuple("_Persisted",
+                                    "start end severity kind fed_from")
+# What may run a stage's words as a command of their own, or write.
+_PERSIST_HEADS = _PERSIST_VERBS | _WRITERS
+
+
+def _strongest(found):
+    """The first high finding of found, else its first, else None."""
+    return next((f for f in found if f.severity == HIGH),
+                found[0] if found else None)
+
+
+@functools.lru_cache(maxsize=32)
+def _persistence(text, depth=0):
+    """_Persisted(start, end, severity, kind, fed_from) for each stage of a
+    write view that leaves something to run again by itself, in order.
+    kind is "job", "service" or "startup"; fed_from is where what is piped
+    into the stage starts, the fetch a startup file is written from among
+    it, so the evidence shows the job line echo hands to crontab - and the
+    curl that tee -a ~/.bashrc writes out.
+
+    Linear: a word of the command is read only by a regex anchored where it
+    starts, a stage is split into words only when its program is one of
+    _PERSIST_HEADS or a shell, and what a startup file is given is judged
+    once, on that stage's own text."""
+    if not text or depth > 3 or not _may_persist(text):
+        return ()
+    found, before, fetched, piped = [], None, None, None
+    for start, end, op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        stage = _normalised(_unwrap_c(_uncommented(text[at:end])))
+        if stage:
+            finding = _persisted_stage(stage, at, end, before, fetched, depth)
+            if finding and finding.fed_from is None and before is not None:
+                finding = finding._replace(fed_from=piped)
+            if finding:
+                found.append(finding)
+            if fetched is None and _FETCHER.match(stage):
+                fetched = at
+        if op == "|":
+            before, piped = stage, at if piped is None else piped
+        else:
+            before = fetched = piped = None
+    return tuple(found)
+
+
+def _persisted_stage(stage, at, end, before, fetched, depth):
+    """The _Persisted of one stage, or None: see _persistence."""
+    name = _writer_name(_command_word(stage))
+    stage = _as_written(name, stage)
+    words = (_stage_words(stage)
+             if name in _PERSIST_HEADS or name in _SHELL_STRING_HEADS else None)
+    if depth < 3:
+        inner = ()
+        operand = _shell_string(name, words)
+        if operand:
+            inner = _persistence(_write_view(operand), depth + 1)
+        elif "$(" in stage or "`" in stage:
+            inner = tuple(f for lo, hi in _substitution_spans(stage)
+                          for f in _persistence(stage[lo:hi], depth + 1))
+        top = _strongest(inner)
+        if top:
+            return _Persisted(at, end, top.severity, top.kind, None)
+    args = _without_redirects(words[1:])[0] if words else None
+    if name in _PERSIST_VERBS:
+        verb = _persist_verb(name, args)
+        if verb:
+            return _Persisted(at, end, verb[0], verb[1], None)
+    if _shortcut_to_startup(stage):
+        return _Persisted(at, end, HIGH, "job", None)
+    place, written, shown, downloaded = None, [], set(), False
+    for wrote in _stage_writes(name, args if name in _WRITERS else None, stage):
+        if wrote.how != "remove":
+            here = _persist_place(wrote.target)
+            if here == "job":
+                return _Persisted(at, end, HIGH, "job", None)
+            if here == "startup":
+                # Each target of one way of writing is given the same text:
+                # a sed's scripts are read once, however many files it edits.
+                if (wrote.how, id(wrote.detail)) not in shown:
+                    shown.add((wrote.how, id(wrote.detail)))
+                    written += _shown_written(wrote)
+                downloaded = downloaded or wrote.how == "fetch"
+            place = place or here
+    if place != "startup":
+        return None
+    # A startup file from the network, or one given what fetches, decodes
+    # and runs, or connects out.
+    if downloaded or _FETCHER.match(stage):
+        return _Persisted(at, end, HIGH, "startup", None)
+    if fetched is not None:
+        return _Persisted(at, end, HIGH, "startup", fetched)
+    content = "\n".join([_startup_content(name, stage, before)] + written)
+    severity = HIGH if _escalates(content) else MEDIUM
+    return _Persisted(at, end, severity, "startup", None)
+
+
+def _shortcut_to_startup(stage):
+    """Whether a stage makes a shortcut in the Startup folder, the way
+    PowerShell adds a login item: (New-Object -ComObject WScript.Shell)
+    .CreateShortcut("...\\Startup\\x.lnk"), its .Save() a statement after."""
+    low = stage.lower()
+    if ".createshortcut(" not in low:
+        return False
+    low = _slashed(low)
+    return (_STARTUP_FOLDER in low or "shell:startup" in low
+            or 'getfolderpath("startup")' in low
+            or "getfolderpath('startup')" in low)
+
+
+def _may_persist(text):
+    """Whether text could name anything persist reports. Only a way not to
+    read the rest of a call that names none, which is nearly every call."""
+    low = text.lower()
+    return any(hint in low for hint in _PERSIST_HINTS)
+
+
+def _persist_run(text):
+    """Span of the first stage that persists something high, from the fetch
+    that feeds it when one does; else of the first that persists anything."""
+    top = _strongest(_persistence(text))
+    if top is None:
+        return None
+    return (top.start if top.fed_from is None else top.fed_from), top.end
+
+
+def _refine_persistence(text, severity, tool_input=None):
+    """High for a job the call itself makes, and for a startup file given
+    what runs unseen, whether it shows in the command or in the body of a
+    here-document that writes the file: cat >> ~/.zshrc <<'EOF', and cat
+    <<'EOF' | tee -a ~/.bashrc, where the body is cat's and tee writes it.
+    Medium for any other startup file change, and for a service enabled
+    by name."""
+    found = _persistence(text)
+    if any(f.kind == "job" for f in found):
+        return HIGH
+    startup = [f for f in found if f.kind == "startup"]
+    if any(f.severity == HIGH for f in startup):
+        return HIGH, _STARTUP_RUN_WHY
+    if startup:
+        starts = [f.start if f.fed_from is None else f.fed_from for f in startup]
+        spans = _command_spans(text)
+        span_starts = [start for start, _end, _op in spans]
+        for pos, body in getattr(text, "bodies", ()):
+            i = bisect.bisect_right(starts, pos) - 1
+            if i < 0 or pos > startup[i].end:
+                continue
+            if pos < startup[i].start:
+                # In a stage piped into the writer: only cat passes its
+                # body on as it is; a python or sed given one is a program.
+                lo, hi, _op = spans[bisect.bisect_right(span_starts, pos) - 1]
+                if _command_word(_normalised(text[lo:hi].strip())) != "cat":
+                    continue
+            if _escalates(body):
+                return HIGH, _STARTUP_RUN_WHY
+        return MEDIUM, _STARTUP_WHY
+    return MEDIUM, _SERVICE_WHY
+
+
+def _persist_written(text):
+    """Span of the first path a file tool wrote that is a job's place, else
+    of the first that is a startup file's, else None."""
+    first, pos = None, 0
+    for line in text.split("\n"):
+        place = _persist_place(line) if line else None
+        if place == "job":
+            return pos, pos + len(line)
+        if place == "startup" and first is None:
+            first = pos, pos + len(line)
+        pos += len(line) + 1
+    return first
+
+
+def _refine_persist_written(text, severity, tool_input=None):
+    """A job's file is high; a startup file is high when what was written
+    into it runs what the session cannot show, and medium otherwise."""
+    if any(_persist_place(line) == "job" for line in text.split("\n") if line):
+        return HIGH
+    written = "\n".join(t for t, _pattern in _written_change(tool_input).new)
+    if _escalates(written):
+        return HIGH, _STARTUP_RUN_WHY
+    return MEDIUM, _STARTUP_WHY
+
+
+# agent.config: what an agent may do without asking, loosened.
+#
+# The one kind of call that can switch off ranwhat's own guard, and no rule
+# saw it: a Write to ~/.claude/settings.json reached none, `echo '{...}' >
+# ~/.claude/settings.json` was an echo, dropped as text, and `ranwhat hook
+# uninstall` matched nothing. Claude Code reloads its settings when the file
+# changes, so the write is the last act; no later call runs it to be judged.
+# The hook's ask is the one place the guard can stop its own removal.
+#
+# Judged on what is launched (claude, codex or gemini with approvals or the
+# sandbox off, the hook uninstalled or told to stand aside, ranwhat itself
+# uninstalled, an MCP server added) and on what is written to an agent's
+# configuration, by a file tool or the shell, or removed from it.
+#
+# Severity follows what is switched off. Critical: ranwhat's guard itself,
+# every hook, or every prompt of every new session on the machine
+# (bypassPermissions in user or managed settings; approvals never and no
+# sandbox in Codex's user config). High: one agent launched with no
+# approvals, a broad allow rule, a deny or ask rule taken out, a settings
+# file removed or emptied, what revoke lists as grants worth taking back.
+# Medium, never interrupting, for set-up that is often what the user asked
+# for: an MCP server or a hook added, one of Codex's two switches, another
+# event's hooks taken out, a whole user settings file rewritten with nothing
+# in it to judge.
+#
+# Content is read here, and only here: for a path that is an agent's own
+# configuration, as configuration (key and value markers, and the list each
+# permission rule sits in), never split into commands, never handed to
+# another rule. Claude Code reads the file itself, so no later call runs it,
+# and _CONTENT_KEYS's rule does not apply: an Edit of settings.json is the
+# same act as /permissions. Write on scripts/ci.sh holding `claude
+# --dangerously-skip-permissions` stays a file's content, judged when run.
+_AGENT_HINTS = ("claude", "codex", "gemini", "ranwhat", "mcp", "settings",
+                "config.toml")
+
+_AGENT_WHY = ("An agent changed what it, or another agent, may do without "
+              "asking you: a permission, a hook, an approval or sandbox "
+              "setting, or the ranwhat hook itself. Claude Code applies its "
+              "settings as they change, so a change like this holds for the "
+              "session that made it and for every one after.")
+_GUARD_OFF_WHY = ("The ranwhat hook, or every hook, was taken out or told to "
+                  "stand aside. The calls it would have asked you about now "
+                  "run without a word, in this session and the ones after it.")
+_LAUNCH_WHY = ("An agent was started with its approvals or its sandbox "
+               "switched off. Whatever it does runs with your permissions, "
+               "and nothing asks you first.")
+_UNINSTALL_WHY = ("ranwhat itself was uninstalled. Claude Code lets a call "
+                  "through when its hook fails to start, so the guard is off "
+                  "until ranwhat is installed again.")
+
+
+def _may_loosen(text):
+    """Whether text could name anything agent.config reports. Only a way not
+    to read the rest of a call that names none, which is nearly every call."""
+    low = text.lower()
+    return any(hint in low for hint in _AGENT_HINTS)
+
+
+def _worse(a, b):
+    """The worse of two (severity, why) verdicts, the first of two equal
+    ones; None is no verdict."""
+    if a is None or (b is not None and _RANK[b[0]] > _RANK[a[0]]):
+        return b
+    return a
+
+
+def _program(word):
+    """A program's name as a word runs it: its base name, in lower case,
+    without .exe."""
+    name = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+# What may stand before the program a stage runs, and which of its options
+# take the next word as their value. timeout is given a duration too.
+_LEAD_VALUES = {
+    "sudo": frozenset(("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U",
+                       "-T", "--user", "--group", "--chdir", "--host",
+                       "--prompt", "--role", "--type", "--other-user",
+                       "--close-from", "--command-timeout")),
+    "doas": frozenset(("-u", "-C")),
+    "env": frozenset(("-u", "-C", "-S", "-P", "--unset", "--chdir",
+                      "--split-string")),
+    "nice": frozenset(("-n", "--adjustment")),
+    "timeout": frozenset(("-s", "-k", "--signal", "--kill-after")),
+    "exec": frozenset(("-a",)),
+    "time": frozenset(("-f", "-o", "--format", "--output")),
+    "caffeinate": frozenset(("-t", "-w")),
+    "command": frozenset(), "nohup": frozenset(), "stdbuf": frozenset()}
+# Runners that fetch a package and run its program, and their options that
+# take a value. The first word after them is the package, or the program
+# when an option named the package: either way it is read as a program.
+_RUNNER_VALUES = frozenset((
+    "-p", "--package", "-c", "--call", "--prefix", "--registry", "--cache",
+    "-w", "--workspace", "--node-options", "--from", "--with",
+    "--with-requirements", "--python", "--index", "--index-url",
+    "--extra-index-url", "--default-index", "--constraints", "--cache-dir",
+    "--directory", "--project", "--config-file", "--spec", "--pip-args"))
+_AGENT_PACKAGES = {"@anthropic-ai/claude-code": "claude",
+                   "@openai/codex": "codex", "@google/gemini-cli": "gemini"}
+_VERSION_SPEC = re.compile(r"[@=<>!~\[;]")
+_AGENTS = frozenset(("claude", "codex", "gemini"))
+_AGENT_INFO = frozenset(("--help", "-h", "--version", "-v", "-V"))
+_MCP_ADD = frozenset(("add", "add-json", "add-from-claude-desktop"))
+# The programs whose launch is judged: the agents, ranwhat, what installs
+# and uninstalls a Python package, the runners, and what sets a variable
+# for every program started after it (_switch_kept).
+_AGENT_HEADS = frozenset((
+    "claude", "codex", "gemini", "ranwhat", "pip", "pip3", "pipx", "uv",
+    "uvx", "npx", "bunx", "pnpx", "pnpm", "yarn", "bun", "py", "setx",
+    "launchctl", "systemctl"))
+# setx's options that take the next word as their value.
+_SETX_VALUES = frozenset(("/s", "/u", "/p", "/k", "/f", "/a", "/r", "/d"))
+# PowerShell's way to set a variable for the user, or the machine, for good.
+_SET_ENVIRONMENT = re.compile(
+    r"""setenvironmentvariable\s*\(\s*(['"])ranwhat_hook\1\s*,\s*(['"]?)"""
+    r"""([^'",)\s]*)\2\s*,\s*['"]?(?:\[(?:system\.)?environmentvariabletarget\]::)?"""
+    r"""(?:user|machine)\b""", re.I)
+
+
+def _switch_kept(program, args):
+    """The name and value of each variable a program sets for every program
+    started after it, not only for its own children: setx (Windows' user or
+    machine environment, which every new terminal reads), launchctl setenv
+    (every app launchd starts) and systemctl set-environment (every unit
+    the manager starts). RANWHAT_HOOK=0 set so turns the hook off for each
+    session that starts after it."""
+    if program == "setx":
+        names, skip = [], False
+        for word in args:
+            if skip:
+                skip = False
+            elif word[:1] in "/-" and len(word) > 1:
+                skip = word.lower().replace("-", "/") in _SETX_VALUES
+            else:
+                names.append(word)
+        return [(names[0].upper(), names[1])] if len(names) > 1 else []
+    plain = [w for w in args if w[:1] != "-"]
+    if program == "launchctl" and plain[:1] == ["setenv"]:
+        pairs = plain[1:]
+        return list(zip(pairs[0::2], pairs[1::2]))
+    if program == "systemctl" and plain[:1] == ["set-environment"]:
+        return [m.groups() for m in map(_ASSIGNMENT.match, plain[1:]) if m]
+    return []
+
+
+def _package_program(spec):
+    """The program a runner's package runs: its name without a version,
+    and an agent's package by the agent's name."""
+    name = spec.lower()
+    if name.startswith("@"):
+        at = name.find("@", 1)
+        name = name[:at] if at > 0 else name
+    else:
+        name = _VERSION_SPEC.split(name, 1)[0]
+    return _AGENT_PACKAGES.get(name) or _program(name)
+
+
+def _runner_end(name, words, i):
+    """Where the words of a runner (npx, bunx, uvx, pnpm dlx, yarn dlx, bun
+    x, pipx run, uv run, uv tool run) that starts at words[i] end, or None
+    when words[i] starts none."""
+    if name in ("npx", "bunx", "uvx", "pnpx"):
+        return i + 1
+    j = i + 1
+    while j < len(words) and words[j][:1] == "-":
+        j += 1
+    sub = words[j] if j < len(words) else ""
+    if (name in ("pnpm", "yarn") and sub == "dlx") or (name == "bun" and sub == "x") \
+            or (name in ("pipx", "uv") and sub == "run"):
+        return j + 1
+    if name == "uv" and sub == "tool" and words[j + 1:j + 2] == ["run"]:
+        return j + 2
+    return None
+
+
+def _python_module(words, i):
+    """(module, where its arguments start) of python -m at words[i], or
+    None: a script, -c's one-liner or the standard input runs no module."""
+    j = i + 1
+    while j < len(words):
+        word = words[j]
+        if word[:1] != "-" or word == "-" or word[:2] == "--":
+            return None
+        for k, letter in enumerate(word[1:], 1):
+            if letter == "m":
+                if k + 1 < len(word):
+                    return word[k + 1:].lower(), j + 1
+                return (words[j + 1].lower(), j + 2) if j + 1 < len(words) else None
+            if letter == "c":
+                return None
+            if letter in "WX":
+                if k + 1 == len(word):
+                    j += 1                     # the value is the next word
+                break
+        j += 1
+    return None
+
+
+def _launched(words):
+    """(program, args, assignments) of what a stage's words run: past its
+    assignments, sudo, env, nohup, nice, time, timeout, command and exec
+    with their options, a runner that fetches a package, and python -m.
+    Read a word at a time, as _AfterHandsOn reads what stands before a
+    shell, so no reading of the words is ever tried twice. program is None
+    when the words run nothing."""
+    assigns, i, n = {}, 0, len(words)
+    while i < n:
+        word = words[i]
+        found = _ASSIGNMENT.match(word)
+        if found:
+            assigns[found.group(1)] = found.group(2)
+            i += 1
+            continue
+        name = _program(word)
+        if name in _LEAD_VALUES:
+            values, i = _LEAD_VALUES[name], i + 1
+            while i < n and words[i][:1] == "-" and words[i] != "-":
+                if words[i] == "--":
+                    i += 1
+                    break
+                i += 2 if words[i] in values else 1
+            if name == "timeout" and i < n:
+                i += 1                         # the duration
+            continue
+        end = _runner_end(name, words, i)
+        if end is not None:
+            i = end
+            while i < n and words[i][:1] == "-":
+                if words[i] == "--":
+                    i += 1
+                    break
+                i += 2 if words[i] in _RUNNER_VALUES else 1
+            if i >= n:
+                return None, [], assigns
+            return _package_program(words[i]), words[i + 1:], assigns
+        if name.startswith("python") or name == "py":
+            module = _python_module(words, i)
+            if module:
+                return module[0], words[module[1]:], assigns
+        return name, words[i + 1:], assigns
+    return None, [], assigns
+
+
+def _is_ranwhat(word):
+    return _program(_VERSION_SPEC.split(word.lower(), 1)[0]) == "ranwhat"
+
+
+def _option_value(args, k, option):
+    """The value of option at args[k], given as --option=value or as the
+    next word; None when args[k] is not that option."""
+    word = args[k]
+    if word == option:
+        return args[k + 1] if k + 1 < len(args) else ""
+    if word.startswith(option + "="):
+        return word[len(option) + 1:]
+    return None
+
+
+def _settings_launch(value):
+    """What claude --settings switches off, when given settings inline."""
+    if "{" not in value:
+        return None                            # a file's name: not shown
+    parts = [(value, False)]
+    if _count(_DISABLE_ALL_HOOKS, parts) or _switched_off(parts):
+        return CRITICAL, _GUARD_OFF_WHY
+    return (HIGH, _LAUNCH_WHY) if _count(_BYPASS, parts) else None
+
+
+def _claude_launch(args, hook_off):
+    verdict = (CRITICAL, _GUARD_OFF_WHY) if hook_off else None
+    for k, word in enumerate(args):
+        mode = _option_value(args, k, "--permission-mode")
+        settings = _option_value(args, k, "--settings")
+        if word == "--dangerously-skip-permissions" or mode == "bypassPermissions":
+            verdict = _worse(verdict, (HIGH, _LAUNCH_WHY))
+        elif settings is not None:
+            verdict = _worse(verdict, _settings_launch(settings))
+        elif word == "--allow-dangerously-skip-permissions":
+            verdict = _worse(verdict, (MEDIUM, _LAUNCH_WHY))
+    return verdict
+
+
+def _codex_launch(args):
+    never = full = False
+    for k, word in enumerate(args):
+        if word in ("--dangerously-bypass-approvals-and-sandbox", "--yolo"):
+            return HIGH, _LAUNCH_WHY
+        approval = (_option_value(args, k, "-a")
+                    or _option_value(args, k, "--ask-for-approval"))
+        sandbox = (_option_value(args, k, "-s")
+                   or _option_value(args, k, "--sandbox"))
+        setting = (_option_value(args, k, "-c")
+                   or _option_value(args, k, "--config") or "")
+        key, _sep, value = setting.partition("=")
+        value = value.strip().strip("\"'")
+        never = never or approval == "never" or (
+            key.strip() == "approval_policy" and value == "never")
+        full = full or sandbox == "danger-full-access" or (
+            key.strip() == "sandbox_mode" and value == "danger-full-access")
+    if never and full:
+        return HIGH, _LAUNCH_WHY
+    return (MEDIUM, _LAUNCH_WHY) if never or full else None
+
+
+def _gemini_launch(args):
+    for k, word in enumerate(args):
+        if word in ("--yolo", "-y") or _option_value(
+                args, k, "--approval-mode") == "yolo":
+            return HIGH, _LAUNCH_WHY
+    return None
+
+
+def _launch_verdict(program, args, assigns, hook_off):
+    """(severity, why) of what launching program with args switches off,
+    or None. hook_off: RANWHAT_HOOK was set off by an earlier statement."""
+    from . import hook
+    if program == "ranwhat":
+        # The verb is looked for after "hook", not at a place: ranwhat reads
+        # its options anywhere, `ranwhat --scope project hook uninstall` and
+        # `ranwhat hook --sc user uninstall` uninstall too, and uninstall
+        # takes no option but --scope, whose value is user, project or local.
+        rest = args[args.index("hook") + 1:] if "hook" in args else []
+        return (CRITICAL, _GUARD_OFF_WHY) if "uninstall" in rest else None
+    if program in ("setx", "launchctl", "systemctl"):
+        return (CRITICAL, _GUARD_OFF_WHY) if any(
+            name == hook.OFF_ENV and hook.is_off(value)
+            for name, value in _switch_kept(program, args)) else None
+    if program in ("pip", "pip3", "pipx") or (
+            program == "uv" and args[:1] in (["pip"], ["tool"])):
+        if "uninstall" in args and any(_is_ranwhat(a) for a in args):
+            return HIGH, _UNINSTALL_WHY
+        return None
+    if program not in _AGENTS:
+        return None
+    if "--" in args:
+        args = args[:args.index("--")]
+    if any(a in _AGENT_INFO for a in args):
+        return None                            # asks for its usage: runs nothing
+    if args[:1] == ["mcp"]:
+        return (MEDIUM, _AGENT_WHY) if args[1:2] and args[1] in _MCP_ADD else None
+    if program == "claude":
+        # The hook runs in Claude Code's own environment: RANWHAT_HOOK
+        # reaches it only through the claude it is set for.
+        own = assigns.get(hook.OFF_ENV)
+        return _claude_launch(args, hook.is_off(own) if own is not None else hook_off)
+    return _codex_launch(args) if program == "codex" else _gemini_launch(args)
+
+
+def _hook_state(words, off):
+    """Whether RANWHAT_HOOK is off after a statement that only sets or
+    unsets variables (export and its kin, or bare assignments), given
+    whether it was off before."""
+    from . import hook
+    head = words[0] if words else ""
+    if head == "unset":
+        return False if hook.OFF_ENV in words[1:] else off
+    if head.lower() == "$env:" + hook.OFF_ENV.lower() and words[1:2] == ["="]:
+        return hook.is_off(words[2] if len(words) > 2 else "")
+    items = ([w for w in words[1:] if w[:1] != "-"]
+             if head in ("export", "declare", "typeset", "local", "readonly")
+             else words)
+    if not items or not all(_ASSIGNMENT.match(w) for w in items):
+        return off
+    for word in items:
+        name, value = _ASSIGNMENT.match(word).groups()
+        if name == hook.OFF_ENV:
+            off = hook.is_off(value)
+    return off
+
+
+class _Change(object):
+    """What one call did to one file, as far as the call shows it: text put
+    in (new) and taken out (old), each as (text, pattern), pattern when it
+    is a sed address or a jq path rather than the file's own text; whether
+    the whole file was replaced, or the file removed; and a verdict (blind)
+    for a change judged the worst it could be without being shown. Built
+    once and never changed after, so its verdicts, one for each kind of
+    file it reaches, are kept on it (_judged)."""
+    __slots__ = ("new", "old", "whole", "removed", "blind", "verdicts")
+
+    def __init__(self, whole=False, removed=False):
+        self.new, self.old, self.blind = [], [], None
+        self.whole, self.removed = whole, removed
+        self.verdicts = {}
+
+    def add(self, produced):
+        new, old, blind = produced
+        self.new.extend(new)
+        self.old.extend(old)
+        self.blind = _worse(self.blind, blind)
+
+
+# The markers a change is judged by. Each starts with a literal, so each is
+# one pass.
+_DISABLE_ALL_HOOKS = re.compile(r"""disableAllHooks["']?\s*[:=]\s*true\b""")
+_HOOK_SWITCH = re.compile(r"""RANWHAT_HOOK["']?\s*[:=]\s*["']?([^\s"',;}]*)""")
+# fish sets a variable with no = in it: set -gx RANWHAT_HOOK 0.
+_FISH_HOOK_SWITCH = re.compile(
+    r"""\bset[ \t]+(?:-[A-Za-z-]+[ \t]+)*RANWHAT_HOOK[ \t]+["']?([^\s"';]*)""")
+# Case-sensitive: disableBypassPermissionsMode is a guardrail, not a hole.
+_BYPASS = re.compile(r"(?<![\w$])bypassPermissions(?!\w)")
+_ALL_PROJECT_SERVERS = re.compile(
+    r"""enableAllProjectMcpServers["']?\s*[:=]\s*true\b""")
+_SKIP_BYPASS_PROMPT = re.compile(
+    r"""skipDangerousModePermissionPrompt["']?\s*[:=]\s*true\b""")
+_PRE_TOOL_USE = re.compile(r'"PreToolUse"\s*:')
+_HOOK_ENTRY = re.compile(r'"type"\s*:\s*"(?:command|http|mcp_tool|prompt|agent)"')
+_HOOKS_KEY = re.compile(r'"hooks"\s*:')
+_MCP_ENTRY = re.compile(r'"(?:command|url|httpUrl)"\s*:|mcpServers')
+_CODEX_NEVER = re.compile(r"""approval_policy["']?\s*=\s*["']?never\b""")
+_CODEX_FULL = re.compile(
+    r"""sandbox_mode["']?\s*=\s*["']?danger-full-access\b""")
+_CODEX_SERVER = re.compile(r"(?m)^[ \t]*\[mcp_servers\.")
+_AGENT_WORD = re.compile(r"\b(?:claude|codex|gemini)\b")
+_BYPASS_FLAG = re.compile(
+    r"--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox"
+    r"|--yolo\b|--permission-mode[=\s]+bypassPermissions"
+    r"|--approval-mode[=\s]+yolo")
+# A JSON string, read one at a time from where it opens: one never closed
+# is the rest of the text, read once.
+_JSON_MARK = re.compile(r'["\[\]]')
+_JSON_STRING_REST = re.compile(r'(?:[^"\\]|\\[\s\S])*"')
+_JSON_AFTER = re.compile(r"\s*(:\s*\[|:)?")
+
+
+def _json_unquoted(raw):
+    """A JSON string's text as read. One with no escape in it reads as it
+    is, without the parser: json.loads gives it back, or refuses a control
+    character in it, and then it is given back as it is all the same."""
+    if "\\" not in raw:
+        return raw
+    try:
+        return json.loads('"%s"' % raw)
+    except ValueError:
+        return raw
+
+
+@functools.lru_cache(maxsize=16)
+def _json_strings(text):
+    """(value, key) of each JSON string in text that is not itself a key.
+    key is that of the list it sits in ("allow", "deny"), which a string
+    followed by `: [` opens and `]` closes; a list opened with no key is
+    its parent's. One outside every list the fragment opens has "?": an
+    Edit's fragment may begin inside a list, and not say which. A tuple,
+    kept for the next rule that asks of the same text: _ours and
+    _permission_rules each read every part of a change."""
+    found, stack, pos = [], [], 0
+    while True:
+        mark = _JSON_MARK.search(text, pos)
+        if mark is None:
+            return tuple(found)
+        if mark.group() == '"':
+            rest = _JSON_STRING_REST.match(text, mark.end())
+            if rest is None:
+                return tuple(found)
+            value = _json_unquoted(text[mark.end():rest.end() - 1])
+            after = _JSON_AFTER.match(text, rest.end())
+            pos = after.end()
+            if after.group(1) is None:
+                found.append((value, stack[-1] if stack else "?"))
+            elif after.group(1).endswith("["):
+                stack.append(value)
+        elif mark.group() == "[":
+            stack.append(stack[-1] if stack else "?")
+            pos = mark.end()
+        else:
+            if stack:
+                stack.pop()
+            pos = mark.end()
+
+
+def _count(regex, parts):
+    return sum(len(regex.findall(text)) for text, _pattern in parts)
+
+
+def _guard_entries(text):
+    """How many hook entries the PreToolUse lists in text hold, the event
+    ranwhat's hook is one of: each list read from the [ its key opens to
+    the ] that closes it, or to the end of a fragment that stops inside it.
+    A string at a time, as _json_strings reads, so a bracket in a command
+    is none, and once: the lists of a settings file do not nest in each
+    other."""
+    count, pos, depth, opened = 0, 0, 0, None
+    while True:
+        mark = _JSON_MARK.search(text, pos)
+        if mark is None:
+            break
+        if mark.group() == '"':
+            rest = _JSON_STRING_REST.match(text, mark.end())
+            if rest is None:
+                break
+            pos = rest.end()
+            if opened is None and text[mark.end():pos - 1] == "PreToolUse":
+                after = _JSON_AFTER.match(text, pos)
+                if after.group(1) and after.group(1).endswith("["):
+                    opened, pos = (after.end(), depth), after.end()
+                    depth += 1
+        elif mark.group() == "[":
+            depth, pos = depth + 1, mark.end()
+        else:
+            depth, pos = depth - 1, mark.end()
+            if opened is not None and depth == opened[1]:
+                count += len(_HOOK_ENTRY.findall(text, opened[0], mark.start()))
+                opened = None
+    if opened is not None:
+        count += len(_HOOK_ENTRY.findall(text, opened[0]))
+    return count
+
+
+def _switched_off(parts):
+    """How many times parts set RANWHAT_HOOK to a value that turns the
+    hook off, as the hook itself reads one."""
+    from . import hook
+    return sum(1 for text, _pattern in parts
+               for switch in (_HOOK_SWITCH, _FISH_HOOK_SWITCH)
+               for m in switch.finditer(text) if hook.is_off(m.group(1)))
+
+
+# ranwhat named as a word, in a pattern.
+_RANWHAT_WORD = re.compile(r"(?<![\w-])ranwhat(?![\w-])", re.I)
+
+
+def _ours(parts):
+    """How many times parts hold the ranwhat hook's command, as install and
+    uninstall recognise it. In JSON it is read inside each string, since
+    the quote that closes one ends the command too, and in an Edit's
+    fragment that holds no whole string (-m ranwhat hook run, cut from
+    inside one) as it is.
+
+    A pattern (a sed address, either side of an s command, what grep -v
+    leaves out) is a regex the agent wrote, and is never compiled: one that
+    names ranwhat as a word takes out the line that holds the hook, wherever
+    it is (/ranwhat/d, /-m ranwhat/d, /ranwhat.*run/d), and counts as well
+    as the command it may also hold. So the two sides of
+    s/ranwhat hook run/ranwhat hook run --mode deny/ balance, and
+    s/ranwhat hook run/ranwhat --version/ does not."""
+    from . import hook
+    found = 0
+    for text, pattern in parts:
+        if pattern:
+            found += len(hook._OURS.findall(text)) + len(_RANWHAT_WORD.findall(text))
+            continue
+        strings = _json_strings(text)
+        if strings:
+            found += sum(1 for value, _key in strings if hook._OURS.search(value))
+        else:
+            found += len(hook._OURS.findall(text))
+    return found
+
+
+def _permission_rules(parts):
+    counted = collections.Counter()
+    for text, _pattern in parts:
+        for value, key in _json_strings(text):
+            counted[key, value] += 1
+    return counted
+
+
+def _set(regex, change):
+    """Whether change puts in more of what regex finds than it takes out."""
+    return _count(regex, change.new) > _count(regex, change.old)
+
+
+def _blanked(scope, change):
+    """Whether a whole settings file was written with nothing in it, as `:
+    > f` leaves it: empty, or, in user or managed settings, an empty object.
+    The hook's entry and the deny rules go with everything else. A
+    project's `{}` is how one starts."""
+    if not (change.whole and change.new) or change.old or change.blind:
+        return False
+    empty = ("", "{}") if scope in ("user", "managed") else ("",)
+    return all("".join(text.split()) in empty for text, _pattern in change.new)
+
+
+def _judge_claude(scope, change):
+    """(severity, why) of a change to Claude Code settings, or None."""
+    from . import revoke
+    new, old = change.new, change.old
+    verdict = change.blind
+    if (_ours(old) > _ours(new) or _set(_DISABLE_ALL_HOOKS, change)
+            or _switched_off(new) > _switched_off(old)):
+        verdict = _worse(verdict, (CRITICAL, _GUARD_OFF_WHY))
+    if _set(_BYPASS, change):
+        verdict = _worse(verdict, (CRITICAL if scope in ("user", "managed")
+                                   else HIGH, _AGENT_WHY))
+    before, after = _permission_rules(old), _permission_rules(new)
+    for (key, rule), _n in (after - before).items():
+        # As revoke judges an allow rule, so watch never flags one revoke
+        # would not take back. One whose list the call does not show may
+        # be an allow rule as much as a deny one.
+        if key == "allow" and revoke._risky_rule(rule):
+            verdict = _worse(verdict, (HIGH, _AGENT_WHY))
+        elif key == "?" and "(" in rule and revoke._risky_rule(rule):
+            verdict = _worse(verdict, (MEDIUM, _AGENT_WHY))
+    if any(key in ("deny", "ask") for key, _rule in before - after):
+        verdict = _worse(verdict, (HIGH, _AGENT_WHY))
+    if _set(_ALL_PROJECT_SERVERS, change):
+        verdict = _worse(verdict, (HIGH, _AGENT_WHY))
+    # High when a PreToolUse hook, ranwhat's kind, is taken out, or the
+    # event itself. Any other change to the hooks, or to the statusLine,
+    # a command Claude Code runs on its own as it runs a hook, is medium:
+    # an Edit often shows the whole hooks object to be unique, and a
+    # formatter or a Stop hook taken out of it is no guard gone.
+    pre_new, pre_old = _count(_PRE_TOOL_USE, new), _count(_PRE_TOOL_USE, old)
+    guards_new = sum(_guard_entries(text) for text, _pattern in new)
+    guards_old = sum(_guard_entries(text) for text, _pattern in old)
+    entries_new, entries_old = _count(_HOOK_ENTRY, new), _count(_HOOK_ENTRY, old)
+    if pre_old > pre_new or (pre_old and guards_old > guards_new):
+        verdict = _worse(verdict, (HIGH, _AGENT_WHY))
+    elif (pre_new, entries_new, _count(_HOOKS_KEY, new)) != (
+            pre_old, entries_old, _count(_HOOKS_KEY, old)):
+        verdict = _worse(verdict, (MEDIUM, _AGENT_WHY))
+    if _set(_SKIP_BYPASS_PROMPT, change):
+        verdict = _worse(verdict, (MEDIUM, _AGENT_WHY))
+    if change.removed or _blanked(scope, change):
+        verdict = _worse(verdict, (HIGH, _AGENT_WHY))
+    if verdict is None and change.whole and scope in ("user", "managed"):
+        # What the file held before is not shown: the ranwhat hook may be
+        # gone from it. Recorded, since nothing in the call says it is.
+        verdict = MEDIUM, _AGENT_WHY
+    return verdict
+
+
+def _judge_config(kind, change):
+    """(severity, why) of change to an agent's configuration of kind
+    (kind, scope), as _config_kind gives it, or None."""
+    kind, scope = kind
+    if kind == "claude":
+        return _judge_claude(scope, change)
+    if kind == "codex":
+        never, full = _set(_CODEX_NEVER, change), _set(_CODEX_FULL, change)
+        if never and full:
+            return (CRITICAL if scope == "user" else HIGH), _AGENT_WHY
+        if never or full or _set(_CODEX_SERVER, change):
+            return MEDIUM, _AGENT_WHY
+        return None
+    if kind in ("mcp", "gemini"):
+        if _set(_MCP_ENTRY, change) or (kind == "gemini" and (
+                _set(_HOOKS_KEY, change) or _set(_HOOK_ENTRY, change))):
+            return MEDIUM, _AGENT_WHY
+        return None
+    # A shell's startup file: only what turns the hook off, or makes an
+    # agent start with its approvals off every time it is typed.
+    if _switched_off(change.new) > _switched_off(change.old):
+        return CRITICAL, _GUARD_OFF_WHY
+    flagged = [sum(1 for text, _p in parts for line in text.split("\n")
+                   if _BYPASS_FLAG.search(line) and _AGENT_WORD.search(line))
+               for parts in (change.new, change.old)]
+    return (HIGH, _AGENT_WHY) if flagged[0] > flagged[1] else None
+
+
+def _judged(kind, change):
+    """_judge_config(kind, change), once for each kind of file a change
+    reaches. One text written to many files (tee f f f, a redirect for each,
+    a cp of one source again and again) was judged again for each, at the
+    cost of the text each time: a 60KB command took 17 seconds, past the
+    ten Claude Code gives the hook before it goes on without it."""
+    if kind not in change.verdicts:
+        change.verdicts[kind] = _judge_config(kind, change)
+    return change.verdicts[kind]
+
+
+_CLAUDE_DIRS = frozenset(("$claude_config_dir", "${claude_config_dir}"))
+_CODEX_DIRS = frozenset(("$codex_home", "${codex_home}"))
+_GEMINI_SYSTEM_DIRS = frozenset(("gemini-cli", "geminicli"))
+# A shell's startup files by name, for a path that begins with what the
+# shell expands and ranwhat cannot: $ZDOTDIR/.zshrc, ${ZDOTDIR:-$HOME}/.zshrc,
+# the way install scripts spell zsh's.
+_RC_FILES = frozenset((".bashrc", ".bash_profile", ".bash_login", ".profile",
+                       ".bash_aliases", ".zshrc", ".zprofile", ".zshenv",
+                       ".zlogin"))
+_HOME_WORDS = frozenset(("~", "$home", "${home}", "%userprofile%",
+                         "$env:userprofile", "$env:home"))
+_A_HOME = re.compile(r"(?:[a-z]:)?/(?:home|users)/[^/]+\Z|/(?:var/)?root\Z")
+
+
+def _is_home(folder):
+    """Whether folder is a home directory, however it is spelled."""
+    low = folder.lower()
+    if low in _HOME_WORDS or _A_HOME.match(low):
+        return True
+    path = _as_absolute(folder, _home())
+    return path is not None and path == posixpath.normpath("/" + _home().lstrip("/"))
+
+
+def _user_settings_folder(folder):
+    """Whether folder is where this machine's Claude Code keeps its user
+    settings, CLAUDE_CONFIG_DIR's when that is set."""
+    from . import hook
+    path = _as_absolute(folder, _home())
+    return path is not None and path == posixpath.dirname(
+        hook.settings_path("user").replace("\\", "/"))
+
+
+def _starts_shells(path, t, name):
+    """Whether a file sets up every shell, or every session, that starts:
+    a startup file where a shell reads it (persist's _persist_place: in a
+    home directory or /etc, /etc/profile.d, fish's conf.d, PowerShell's
+    profile), one named under an expansion ranwhat cannot resolve, the
+    environment a login is given (/etc/environment, environment.d), or an
+    .envrc, which direnv loads wherever it is. A project's .devcontainer/.zshrc
+    or docker/.bashrc is none: a container's shell reads it, and an agent
+    run there with its approvals off is the set-up such images are for."""
+    if name == ".envrc" or (name in _RC_FILES and t[:1] == "$"):
+        return True
+    if _persist_place(path) == "startup":
+        return True
+    absolute = _as_absolute(t, _posix_home())
+    if absolute is None:
+        return False
+    rel = _home_relative(absolute) or ""
+    return absolute == "/etc/environment" or (
+        rel.startswith(".config/environment.d/") and rel.endswith(".conf"))
+
+
+def _config_kind(path):
+    """(kind, scope) of an agent's configuration file, or None. kind is
+    claude, codex, gemini, mcp (a file of MCP servers) or rc (a shell's
+    startup file, read only for the agents it starts: see _starts_shells).
+    Named by its file and the folder it sits in, so .claude/worktrees/,
+    .claude/agents/ and a settings.json under tests/fixtures/ are none. A
+    path relative to an unknown directory is a project's."""
+    t = _slashed(path.strip()).replace('"', "").replace("'", "")
+    folder, _sep, name = t.rstrip("/").rpartition("/")
+    holder, _sep, parent = folder.rpartition("/")
+    low_parent = parent.lower()
+    if name in ("settings.json", "settings.local.json"):
+        if parent == ".claude":
+            if _is_home(holder):
+                return "claude", "user"
+            return "claude", "local" if name == "settings.local.json" else "project"
+        if name == "settings.json" and (low_parent in _CLAUDE_DIRS
+                                        or _user_settings_folder(folder)):
+            return "claude", "user"
+        if parent == ".gemini":
+            return "gemini", "user" if _is_home(holder) else "project"
+        if low_parent in _GEMINI_SYSTEM_DIRS:
+            return "gemini", "system"
+    if name == "managed-settings.json" or (
+            parent == "managed-settings.d" and name.endswith(".json")):
+        return "claude", "managed"
+    if name == ".mcp.json":
+        return "mcp", "project"
+    if name == ".claude.json":
+        return "mcp", "user"
+    if name == "managed-mcp.json":
+        return "mcp", "managed"
+    if parent == ".codex" or low_parent in _CODEX_DIRS:
+        if name == "config.toml":
+            home = low_parent in _CODEX_DIRS or _is_home(holder)
+            return "codex", "user" if home else "project"
+        if name.endswith(".config.toml"):
+            return "codex", "profile"
+    if _starts_shells(path, t, name):
+        return "rc", "user"
+    return None
+
+
+def _config_folder_kind(path):
+    """(kind, scope) of a folder that holds an agent's configuration
+    (.claude, .codex, .gemini, CLAUDE_CONFIG_DIR, CODEX_HOME), named with
+    or without a trailing / or /*, or None."""
+    t = _slashed(path.strip()).replace('"', "").replace("'", "")
+    if t.endswith("/*"):
+        t = t[:-2]
+    holder, _sep, name = t.rstrip("/").rpartition("/")
+    low = name.lower()
+    if name == ".claude" or low in _CLAUDE_DIRS:
+        return "claude", "user" if low in _CLAUDE_DIRS or _is_home(holder) else "project"
+    if name == ".codex" or low in _CODEX_DIRS:
+        return "codex", "user"
+    if name == ".gemini":
+        return "gemini", "user"
+    return None
+
+
+# jq and yq: what a program sets, what it takes out, and what it removes
+# without saying what was there. A token at a time, each begun by a
+# character of its own, so the program is read once.
+_JQ_TOKEN = re.compile(
+    r'"(?:[^"\\]|\\[\s\S])*"?|//=|[|+\-*/%]=|[=!<>]=|[()\[\]{}|=,]')
+_JQ_KEY = re.compile(r'\.([A-Za-z_][\w-]*)|\[\s*"([^"]*)"\s*\]')
+# del, then the blanks before the ( it opens, in what a ( is preceded by.
+_JQ_DEL = re.compile(r"(?<![\w$.])del[ \t]*\Z")
+_JQ_LISTS = frozenset(("allow", "deny", "ask"))
+_JQ_EMPTY = frozenset(("{}", "[]", "null", ""))
+_JQ_FILTERS = re.compile(r"\b(?:select|del|map_values|map|to_entries)\s*\(")
+_JQ_TWO_VALUES = frozenset(("--arg", "--argjson", "--slurpfile", "--rawfile"))
+_JQ_ONE_VALUE = frozenset(("--indent", "-L", "-o", "--output-format", "-p",
+                           "--input-format", "-I"))
+
+
+def _jq_keys(path):
+    return [m.group(1) or m.group(2) for m in _JQ_KEY.finditer(path)]
+
+
+def _jq_program(args):
+    """The program a jq or yq stage is given, or None when it reads one
+    from a file."""
+    i = 0
+    while i < len(args):
+        word = args[i]
+        if word in ("-f", "--from-file"):
+            return None
+        if word in _JQ_TWO_VALUES:
+            i += 3
+        elif word in _JQ_ONE_VALUE:
+            i += 2
+        elif word[:1] == "-" and len(word) > 1:
+            i += 1
+        elif word in ("e", "eval", "ea", "eval-all"):
+            i += 1                             # yq's subcommand
+        else:
+            return word
+    return None
+
+
+def _jq_hooks_gone(keys):
+    """What taking out, or emptying, the hooks at keys (a path through
+    "hooks" or "PreToolUse") does. ranwhat's hook is a PreToolUse one: the
+    guard may go with the hooks themselves, with PreToolUse, or with an
+    event the path does not name (.hooks[$e], .hooks."PreToolUse"); the
+    hooks of any other event are a hook changed. The first "hooks" is the
+    object's own, so .hooks.Stop[0].hooks names Stop."""
+    if "PreToolUse" in keys or not keys[keys.index("hooks") + 1:]:
+        return CRITICAL, _GUARD_OFF_WHY
+    return MEDIUM, _AGENT_WHY
+
+
+def _jq_changes(program):
+    """(new, old, blind) of a jq or yq program. Each assignment is read as
+    the key it sets and the value it is given ("defaultMode":
+    "bypassPermissions"; "allow": [...], a list's own key kept), -= as a
+    value taken out; a clause that assigns nothing is shown as it is, so an
+    object merged in (. + {...}) is judged by what it holds. del() of the
+    hooks, or the hooks set empty or filtered, is judged the worst it could
+    be for the event it names (_jq_hooks_gone). The deny or ask rules taken
+    out by del(), set empty or filtered, or every permission taken out by
+    del() or set empty, are a deny or ask rule taken out: what was there is
+    not shown, and may have been the rule that stopped the agent."""
+    new, old, blind = [], [], None
+    clauses, deletes, opened = [], [], []
+    depth, start, assign, deleting = 0, 0, None, 0
+    for m in _JQ_TOKEN.finditer(program):
+        token = m.group()
+        if token[0] == '"':
+            continue
+        if token in "([{":
+            depth += 1
+            is_del = token == "(" and _JQ_DEL.search(
+                program, max(0, m.start() - 16), m.start()) is not None
+            # Only the outermost del() is read: one inside it is in its text.
+            opened.append((m.end(), is_del, is_del and not deleting))
+            deleting += is_del
+        elif token in ")]}":
+            depth = max(0, depth - 1)
+            if opened:
+                body, is_del, outermost = opened.pop()
+                deleting -= is_del
+                if outermost:
+                    deletes.extend(program[body:m.start()].split(","))
+        elif depth == 0 and token == "|":
+            clauses.append((start, m.start(), assign))
+            start, assign = m.end(), None
+        elif depth == 0 and assign is None and token.endswith("=") \
+                and token not in ("==", "!=", "<=", ">="):
+            assign = (m.start(), m.end(), token)
+    clauses.append((start, len(program), assign))
+    for lo, hi, assign in clauses:
+        if assign is None:
+            new.append((program[lo:hi], False))
+            continue
+        keys = _jq_keys(program[lo:assign[0]])
+        key = keys[-1] if keys else ""
+        value = program[assign[1]:hi].strip()
+        emptied = assign[2] in ("=", "|=") and value in _JQ_EMPTY
+        if "hooks" in keys or "PreToolUse" in keys:
+            if emptied or _JQ_FILTERS.search(value):
+                blind = _worse(blind, _jq_hooks_gone(keys))
+        elif (key in ("deny", "ask") and (emptied or _JQ_FILTERS.search(value))) \
+                or (key == "permissions" and emptied):
+            blind = _worse(blind, (HIGH, _AGENT_WHY))
+        shown = ('"%s": [%s]' if key in _JQ_LISTS else '"%s": %s') % (key, value)
+        (old if assign[2] == "-=" else new).append((shown, False))
+    for path in deletes:
+        keys = _jq_keys(path)
+        if "hooks" in keys or "PreToolUse" in keys:
+            blind = _worse(blind, _jq_hooks_gone(keys))
+        elif keys[-1:] in (["deny"], ["ask"], ["permissions"]):
+            blind = _worse(blind, (HIGH, _AGENT_WHY))
+    return new, old, blind
+
+
+@functools.lru_cache(maxsize=64)
+def _sed_part(delimiter):
+    """What runs up to the next delimiter of a sed command that is not
+    escaped."""
+    return re.compile(r"(?:[^\\%s]|\\[\s\S])*" % re.escape(delimiter))
+
+
+def _sed_changes(script):
+    """(old, new) of a sed or perl script, each a list of patterns: what an
+    s command matches and what it puts in its place, what an address
+    deletes (d) or changes (c), and what a, i and c add. One pass over the
+    script, a command at a time."""
+    old, new, addresses, i, n = [], [], [], 0, len(script)
+    while i < n:
+        c = script[i]
+        if c in ";\n}":
+            addresses, i = [], i + 1
+        elif c in " \t{!,$+~0123456789":
+            i += 1
+        elif c == "/" or (c == "\\" and i + 1 < n):
+            delimiter = "/" if c == "/" else script[i + 1]
+            body = i + 1 if c == "/" else i + 2
+            stop = _sed_part(delimiter).match(script, body).end()
+            addresses.append(script[body:stop])
+            i = stop + 1
+        elif c in "sy" and i + 1 < n:
+            delimiter = script[i + 1]
+            first = _sed_part(delimiter).match(script, i + 2).end()
+            second = _sed_part(delimiter).match(script, min(first + 1, n)).end()
+            if c == "s":
+                old.append(script[i + 2:first])
+                new.append(script[first + 1:second])
+            i, addresses = second + 1, []
+            while i < n and script[i] not in ";\n}":
+                i += 1                         # the flags
+        elif c == "d":
+            old.extend(addresses)
+            addresses, i = [], i + 1
+        elif c in "aic":
+            stop = script.find("\n", i + 1)
+            stop = n if stop < 0 else stop
+            text = script[i + 1:stop].lstrip()
+            if text.startswith("\\"):
+                text = text[1:].lstrip(" \t")
+                if not text and stop < n:     # a\ and the text on the next line
+                    after = script.find("\n", stop + 1)
+                    text = script[stop + 1:n if after < 0 else after]
+                    stop = n if after < 0 else after
+            new.append(text)
+            if c == "c":
+                old.extend(addresses)
+            addresses, i = [], stop + 1
+        else:
+            i += 1
+    return old, new
+
+
+_GREPS = frozenset(("grep", "egrep", "fgrep"))
+# grep's options that take the next word as their value.
+_GREP_VALUES = frozenset(("-e", "-f", "-m", "-A", "-B", "-C", "-d", "-D",
+                          "--regexp", "--file", "--max-count", "--context",
+                          "--after-context", "--before-context"))
+
+
+def _inverted_pattern(args):
+    """The pattern grep -v leaves the lines of out, or None when it is not
+    told to: given by -e, or as its first operand."""
+    inverted, pattern, operands, skip = False, None, [], None
+    for word in args:
+        if skip is not None:
+            if skip in ("-e", "--regexp") and pattern is None:
+                pattern = word
+            skip = None
+        elif word in ("-v", "--invert-match"):
+            inverted = True
+        elif word.startswith("--regexp="):
+            pattern = pattern if pattern is not None else word[9:]
+        elif word in _GREP_VALUES:
+            skip = word
+        elif word[:1] == "-" and word[1:2] != "-" and len(word) > 1:
+            for k, letter in enumerate(word[1:], 1):
+                if letter == "v":
+                    inverted = True
+                elif "-" + letter in _GREP_VALUES:
+                    if letter == "e" and pattern is None:
+                        pattern = word[k + 1:] or None
+                    if k + 1 == len(word):
+                        skip = "-" + letter
+                    break                      # the rest is its value
+        elif word[:2] != "--":
+            operands.append(word)
+    if not inverted:
+        return None
+    return pattern if pattern is not None else (operands[:1] or [None])[0]
+
+
+def _produced(name, words, stage):
+    """(new, old, blind) of what a stage puts out: what an echo or printf
+    prints, a here-string's word, and what a jq or yq program sets and
+    takes out. Anything else shows nothing of what it writes."""
+    new, old, blind = [], [], None
+    if name in _PRINTERS:
+        new.append((_printed(stage), False))
+    elif name in ("jq", "yq") and words:
+        program = _jq_program(words[1:])
+        if program:
+            new, old, blind = _jq_changes(program)
+    elif name in _GREPS and words:
+        # grep -v PAT f > tmp && mv tmp f is sed -i '/PAT/d' f.
+        left_out = _inverted_pattern(words[1:])
+        if left_out is not None:
+            old.append((left_out, True))
+    here = _here_string_word(stage)
+    if here:
+        new.append((here, False))
+    literal = _quoted_literal(stage)
+    if literal:
+        new.append((literal, False))
+    return new, old, blind
+
+
+def _file_key(target):
+    return _as_absolute(target, _posix_home()) or target
+
+
+# How many of the stages piped into a stage are read for what it writes.
+# A pipeline of writers is read once this way, however long it is.
+_PIPED_READ = 4
+
+
+def _change_of(wrote, name, produced, piped, here, files):
+    """The _Change one write of a stage makes: what the stage and those
+    piped into it put out, its here-documents, a sed's scripts, a yq's
+    program; for a copy, what this call wrote to the source."""
+    how = wrote.how
+    if how in (">", ">>", "tee", "tee -a"):
+        change = _Change(whole=how in (">", "tee"))
+        for earlier in piped[-_PIPED_READ:]:
+            change.add(earlier)
+        change.add(produced)
+        change.new.extend((body, False) for body in here)
+        if how == ">" and name in ("", ":", "true") and not here \
+                and not piped and not produced[0]:
+            change.removed = True              # `: > f` empties it
+    elif how == "sed":
+        change = _Change()
+        for script in wrote.detail:
+            removed, added = _sed_changes(script)
+            change.old.extend((p, True) for p in removed)
+            change.new.extend((p, True) for p in added)
+    elif how == "edit":
+        change = _Change()
+        change.add(_jq_changes(wrote.detail))
+    elif how in ("copy", "move", "link"):
+        sources = wrote.detail or ()
+        if list(sources) == ["/dev/null"]:
+            return _Change(removed=True)       # cp /dev/null f empties it
+        change = (files.get(_file_key(sources[0])) if len(sources) == 1
+                  else None) or _Change(whole=True)
+    elif how == "remove":
+        change = _Change(removed=True)
+    else:
+        change = _Change(whole=True)
+        if wrote.detail:
+            change.new.append((wrote.detail, False))
+        elif how == "write":
+            # A PowerShell writer given no value writes what it is piped.
+            for earlier in piped[-_PIPED_READ:]:
+                change.add(earlier)
+    return change
+
+
+_Loosened = collections.namedtuple("_Loosened", "start end severity why")
+
+
+def _worst(found):
+    """The first of the worst of found, or None."""
+    top = None
+    for f in found:
+        if top is None or _RANK[f.severity] > _RANK[top.severity]:
+            top = f
+    return top
+
+
+@functools.lru_cache(maxsize=32)
+def _loosened(text, bodies=(), depth=0):
+    """_Loosened(start, end, severity, why) for each stage of a write view
+    that loosens what an agent may do, in order. bodies are the view's
+    here-documents (_WriteView.bodies): what the stage at their place
+    writes.
+
+    Linear: a stage is split into words only when its program is one this
+    rule reads, the files it writes are found as persist finds them, and
+    each distinct change is built once and judged once for each kind of
+    file it reaches, however many files it is written to."""
+    if not text or depth > 3 or not _may_loosen(text):
+        return ()
+    found, files, piped, hook_off = [], {}, [], False
+    positions = [pos for pos, _body in bodies]
+    for start, end, op in _command_spans(text):
+        at = _SPACES.match(text, start, end).end()
+        stage = _normalised(_unwrap_c(_uncommented(text[at:end])))
+        produced = ([], [], None)
+        if stage:
+            here = [body for _pos, body in bodies[
+                bisect.bisect_left(positions, at):bisect.bisect_right(positions, end)]]
+            name = _writer_name(_program(_command_word(stage)))
+            verdict, produced = _loosened_stage(stage, name, here, piped, files,
+                                                hook_off, depth)
+            if name == "cat" and here and op == "|":
+                # cat <<'EOF' | sudo tee f, the way a root-owned file is
+                # written: what cat is given is what tee writes. A python
+                # or sed given a here-document puts out something else.
+                produced = (produced[0] + [(body, False) for body in here],
+                            produced[1], produced[2])
+            if "RANWHAT_HOOK" in stage:
+                hook_off = _hook_state(_argv(stage) or stage.split(), hook_off)
+            if verdict:
+                found.append(_Loosened(at, end, verdict[0], verdict[1]))
+        if op == "|":
+            piped.append(produced)
+        else:
+            piped = []
+    return tuple(found)
+
+
+def _loosened_stage(stage, name, here, piped, files, hook_off, depth):
+    """(verdict, what the stage puts out) of one stage: see _loosened."""
+    from . import hook
+    verdict = None
+    if "SETENVIRONMENTVARIABLE" in stage.upper():
+        found = _SET_ENVIRONMENT.search(stage)
+        if found and hook.is_off(found.group(3)):
+            verdict = CRITICAL, _GUARD_OFF_WHY
+    if name in _AGENT_HEADS or name.startswith("python") or name in _SHELL_STRING_HEADS:
+        program, args, assigns = _launched(_argv(stage) or stage.split())
+        operand = _shell_string(program, [program] + args) if program else None
+        if operand and depth < 3:
+            view = _write_view(operand)
+            top = _worst(_loosened(view, view.bodies, depth + 1))
+            verdict = top and (top.severity, top.why)
+        elif program:
+            verdict = _launch_verdict(program, args, assigns, hook_off)
+    elif depth < 3 and ("$(" in stage or "`" in stage):
+        top = _worst([f for lo, hi in _substitution_spans(stage)
+                      for f in _loosened(stage[lo:hi], (), depth + 1)])
+        verdict = top and (top.severity, top.why)
+    stage = _as_written(name, stage)
+    words = (_stage_words(stage) if name in _WRITERS or name in ("jq", "yq")
+             or name in _GREPS else None)
+    args = _without_redirects(words[1:])[0] if words else None
+    produced = _produced(name, words, stage)
+    moved, built = None, {}
+    for wrote in _stage_writes(name, args if name in _WRITERS else None, stage):
+        # What a stage writes does not depend on where: every target of one
+        # way of writing (a redirect, tee, a sed's scripts, a copy's
+        # sources) is given the one change, built once.
+        key = (wrote.how, id(wrote.detail))
+        change = built.get(key)
+        if change is None:
+            change = built[key] = _change_of(wrote, name, produced, piped, here,
+                                              files)
+        files[_file_key(wrote.target)] = change
+        kind = _config_kind(wrote.target)
+        if kind is None and wrote.how == "remove":
+            kind = _config_folder_kind(wrote.target)
+        if kind:
+            verdict = _worse(verdict, _judged(kind, change))
+        if wrote.how == "move" and moved is None:
+            # A file moved away is gone from where it was.
+            moved = wrote.detail
+            for source in moved:
+                gone = _config_kind(source)
+                if gone:
+                    verdict = _worse(verdict, _judge_config(gone, _Change(removed=True)))
+    return verdict, produced
+
+
+def _agent_unguarded(text):
+    """Span of the stage whose loosening is the worst, the first of equals."""
+    top = _worst(_loosened(text, getattr(text, "bodies", ())))
+    return (top.start, top.end) if top else None
+
+
+def _refine_agent_shell(text, severity, tool_input=None):
+    """What that stage switches off, and why it matters."""
+    top = _worst(_loosened(text, getattr(text, "bodies", ())))
+    return (top.severity, top.why) if top else None
+
+
+def _agent_config_path(text):
+    """Span of the first path a file tool wrote that is an agent's
+    configuration, or None."""
+    pos = 0
+    for line in text.split("\n"):
+        if line and _config_kind(line):
+            return pos, pos + len(line)
+        pos += len(line) + 1
+    return None
+
+
+def _refine_agent_config(text, severity, tool_input=None):
+    """The worst of what the call puts in and takes out of each agent
+    configuration file it writes, read from its input; None when it
+    loosens nothing. The input is read once, whatever the paths: what its
+    content and edits put in, the same for each, is judged once for each
+    kind of file, and a patch's sections once for each file they name.
+    Read again for each path, 256 paths written with one 64KB content took
+    17 seconds."""
+    kinds = {}
+    for line in text.split("\n"):
+        kind = _config_kind(line) if line else None
+        if kind:
+            kinds.setdefault(line, kind)
+    if not kinds:
+        return None
+    common, sections = _written_parts(tool_input)
+    for section in sections:
+        if section.header is None:
+            _add_section(common, section)
+    headers = _Headers([s for s in sections if s.header is not None])
+    verdict = None
+    for path, kind in kinds.items():
+        verdict = _worse(verdict, _judged(kind, common))
+        for change in headers.changes_of(path):
+            verdict = _worse(verdict, _judged(kind, change))
+    return verdict
+
+
 REFINERS = {"fs.destructive": _refine_deletion,
             "cred.read": _refine_credential,
-            "perm.open": _refine_permissions}
+            "perm.open": _refine_permissions,
+            "persist": _refine_persistence,
+            "agent.config": _refine_agent_shell}
 PATH_REFINERS = {"cred.read": _refine_read_path}
+# For the paths a file tool wrote (Rule.writes).
+WRITE_REFINERS = {"persist": _refine_persist_written,
+                  "agent.config": _refine_agent_config}
 
 
 RULES = [
@@ -2694,6 +5039,29 @@ RULES = [
          "readable in the transcript, which is the point of encoding it, and "
          "it ran with your permissions.",
          find=_encoded_run, keep_source=True),
+
+    # The rules after exec.encoded were added after it, at the end, so the
+    # index each rule has in a SARIF document stays the one it had.
+    Rule("cred.metadata", CRITICAL,
+         "Cloud instance credentials requested",
+         "A request to a cloud metadata service for the instance's own "
+         "credentials: the IAM role, service account or managed identity the "
+         "machine runs as. The short-lived token it hands back is now in a "
+         "model context you do not control, and it grants whatever that role "
+         "can do in the account.",
+         find=_metadata_fetch),
+
+    Rule("persist", HIGH,
+         "Startup or scheduled job installed",
+         "Something was set to run again on its own: on a schedule, at boot "
+         "or at login. It runs with your permissions after the session has "
+         "ended, when nothing is watching, and goes on running until someone "
+         "finds it.",
+         find=_persist_run, writes=_persist_written, hide=_joined_view),
+
+    Rule("agent.config", HIGH,
+         "Agent guardrails loosened", _AGENT_WHY,
+         find=_agent_unguarded, writes=_agent_config_path, hide=_joined_view),
 ]
 
 
@@ -2713,7 +5081,7 @@ _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 _TERMINATOR = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)[^\S\n]*$", re.M)
 
 
-def _strip_heredocs(command, keep_tail=False):
+def _strip_heredocs(command, keep_tail=False, bodies=None):
     """Remove heredoc bodies. The body is data being written to disk, not a
     sequence of commands being executed. A << with no line of its word
     after it is not one (1 << x in a python -c string), and is kept.
@@ -2724,6 +5092,11 @@ def _strip_heredocs(command, keep_tail=False):
     The operator stays as it was written, `<<'EOF'`. A placeholder here
     was quoted as evidence, and read as `<redacted` by _REDACTING, which
     made any read beside a heredoc look deliberately masked.
+
+    Given a list, bodies is given (where the operator ends in what is
+    returned, the body) for each one taken out: the rules that judge what
+    a command writes read the body as what was written, and this is the
+    one place that decides where a body begins and ends.
 
     Every line that could end one is found first, in one pass. As one regex
     each << read on to the end of the command looking for its terminator:
@@ -2736,7 +5109,7 @@ def _strip_heredocs(command, keep_tail=False):
         starts, stops = ends.setdefault(m.group(1), ([], []))
         starts.append(m.start())
         stops.append(m.end())
-    out, copied, pos = [], 0, 0
+    out, copied, pos, size = [], 0, 0, 0
     while True:
         op = _HEREDOC.search(command, pos)
         if not op:
@@ -2747,9 +5120,15 @@ def _strip_heredocs(command, keep_tail=False):
             pos = op.start() + 1          # no terminator: not a heredoc
             continue
         out.append(command[copied:op.end()])
+        size += op.end() - copied
+        newline = command.find("\n", op.end(), lines[0][i])
+        if bodies is not None:
+            bodies.append((size, command[newline + 1:lines[0][i]]
+                           if newline >= 0 else ""))
         if keep_tail:
-            newline = command.find("\n", op.end(), lines[0][i])
-            out.append(command[op.end():newline if newline >= 0 else op.end()])
+            tail = command[op.end():newline if newline >= 0 else op.end()]
+            out.append(tail)
+            size += len(tail)
         copied = pos = lines[1][i]
     out.append(command[copied:])
     return "".join(out)
@@ -3198,6 +5577,17 @@ def _shell_text(tool_name, tool_input, keep_source=False):
     rule that reads it has nothing to find there."""
     if _base_name(tool_name) not in _SHELL_TOOLS:
         return ""
+    commands = _commands_of(tool_input)
+    if keep_source and not any(_may_decode(c) for c in commands):
+        return ""
+    parts = [_executable_text(c, limit=MAX_SCAN_CHARS, keep_source=keep_source)
+             for c in commands]
+    return " ; ".join(p for p in parts if p)[:MAX_SCAN_CHARS]
+
+
+def _commands_of(tool_input):
+    """The commands a shell tool was given, as written: each of its command
+    keys, with an argv that continues the last."""
     if not isinstance(tool_input, dict):
         tool_input = {"_value": tool_input}
     commands = [c for c in (_words(tool_input.get(k)) for k in _COMMAND_KEYS)
@@ -3206,11 +5596,23 @@ def _shell_text(tool_name, tool_input, keep_source=False):
                     if a)
     if argv:
         commands = commands[:-1] + [" ".join(commands[-1:] + [argv])]
-    if keep_source and not any(_may_decode(c) for c in commands):
+    return commands
+
+
+def _writes_text(tool_name, tool_input):
+    """A shell tool's command as the rules that judge what it writes read
+    it (_write_view), or "" for any other tool, and for a command that
+    names nothing either of them reports: then neither has anything to
+    find, and nearly every call is one."""
+    if _base_name(tool_name) not in _SHELL_TOOLS:
         return ""
-    parts = [_executable_text(c, limit=MAX_SCAN_CHARS, keep_source=keep_source)
-             for c in commands]
-    return " ; ".join(p for p in parts if p)[:MAX_SCAN_CHARS]
+    return _writes_of(" ; ".join(_commands_of(tool_input)))
+
+
+def _writes_of(command):
+    if not command or not (_may_persist(command) or _may_loosen(command)):
+        return ""
+    return _write_view(command)
 
 
 def _read_paths(tool_name, tool_input):
@@ -3225,6 +5627,187 @@ def _read_paths(tool_name, tool_input):
             if isinstance(path, str) and path:
                 found.append(path)
     return "\n".join(found)[:MAX_SCAN_CHARS]
+
+
+# Tools that write or edit a file, and those of them that are given a
+# patch, whose file headers name what it writes. str_replace_editor's view
+# reads.
+_WRITE_TOOLS = {"write", "edit", "multiedit", "notebookedit", "write_file",
+                "replace", "edit_file", "create_file", "write_to_file",
+                "replace_in_file", "str_replace_editor",
+                "str_replace_based_edit_tool", "apply_patch", "applypatch"}
+_PATCH_KEYS = ("patch", "diff", "input")
+_PATCH_FILE = re.compile(
+    r"^(?:\*\*\* (?:Add|Update|Delete) File: |\*\*\* Move to: |\+\+\+ (?:b/)?)"
+    r"([^\t\n]+)", re.M)
+_MOST_WRITTEN = 256
+
+
+def _written_paths(tool_name, tool_input):
+    """The paths a file-writing tool wrote, one per line, or ""."""
+    if (_base_name(tool_name) not in _WRITE_TOOLS
+            or not isinstance(tool_input, dict)
+            or tool_input.get("command") == "view"):
+        return ""
+    found = []
+    for key in _PATH_KEYS:
+        value = tool_input.get(key)
+        for path in (value if isinstance(value, (list, tuple)) else [value]):
+            if isinstance(path, str) and path:
+                found.append(path)
+    for key in _PATCH_KEYS:
+        value = tool_input.get(key)
+        if isinstance(value, str):
+            found.extend(m.group(1).strip() for m in
+                         _PATCH_FILE.finditer(value[:MAX_SCAN_CHARS]))
+    found = [p for p in dict.fromkeys(found) if p and p != "/dev/null"]
+    return "\n".join(found[:_MOST_WRITTEN])[:MAX_SCAN_CHARS]
+
+
+_PatchSection = collections.namedtuple("_PatchSection",
+                                       "header added removed whole gone")
+
+
+def _patch_sections(patch):
+    """A patch read once, into the section each file header starts: the
+    lines it adds and takes out (+ and -, a SEARCH and REPLACE block's
+    halves), and whether it adds or deletes the file whole. Lines before
+    any header are a section whose header is None: a diff that names no
+    file is about the one the tool was given."""
+    sections, current, side = [], [None, [], [], False, False], None
+    for line in patch.split("\n"):
+        header = _PATCH_FILE.match(line)
+        if header or line.startswith("--- "):
+            if header:
+                sections.append(current)
+                current = [header.group(1).strip(), [], [],
+                           line.startswith("*** Add File: "),
+                           line.startswith("*** Delete File: ")]
+                side = None
+            continue
+        if line.startswith("<<<<<<< SEARCH"):
+            side = current[2]
+        elif line.startswith("=======") and side is current[2]:
+            side = current[1]
+        elif line.startswith(">>>>>>> REPLACE"):
+            side = None
+        elif side is not None:
+            side.append(line)
+        elif line[:1] == "+":
+            current[1].append(line[1:])
+        elif line[:1] == "-":
+            current[2].append(line[1:])
+    sections.append(current)
+    return [_PatchSection(*section) for section in sections
+            if section[0] is not None or section[1] or section[2]]
+
+
+def _add_section(change, section):
+    if section.added:
+        change.new.append(("\n".join(section.added), False))
+    if section.removed:
+        change.old.append(("\n".join(section.removed), False))
+    change.whole = change.whole or section.whole
+    change.removed = change.removed or section.gone
+
+
+# What an edit puts in and takes out, by the names agents give the two
+# halves: Claude Code's, Gemini's and Cline's; OpenCode's and Grok's
+# oldString and newString; Pi's oldText and newText. Kimi nests each edit
+# under `edit`, one or a list, as old and new, which are read only there:
+# at the top of an input they could be anything.
+_NEW_KEYS = ("new_string", "new_str", "new_text", "new_source", "newString",
+             "newText")
+_OLD_KEYS = ("old_string", "old_str", "old_text", "oldString", "oldText")
+
+
+def _edits_of(value):
+    """The dicts an edits or edit value holds: a list of them, or one."""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [e for e in value[:_MOST_WRITTEN] if isinstance(e, dict)]
+    return []
+
+
+def _written_parts(tool_input):
+    """(change, sections) of what a file tool's input writes: the change
+    its content and edits make, whatever file it wrote, and the sections of
+    its patches (_patch_sections). Each value is read as far as
+    MAX_SCAN_CHARS, and all of them as far as MAX_WRITTEN_CHARS."""
+    change, sections = _Change(), []
+    if not isinstance(tool_input, dict):
+        return change, sections
+    budget = [MAX_WRITTEN_CHARS]
+
+    def strings(source, keys):
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and budget[0] > 0:
+                value = value[:min(MAX_SCAN_CHARS, budget[0])]
+                budget[0] -= len(value)
+                yield value
+
+    for value in strings(tool_input, ("content", "file_text", "contents", "text")):
+        change.new.append((value, False))
+        change.whole = True
+    sources = [(s, _NEW_KEYS, _OLD_KEYS) for s in
+               [tool_input] + _edits_of(tool_input.get("edits"))]
+    sources += [(s, _NEW_KEYS + ("new",), _OLD_KEYS + ("old",))
+                for s in _edits_of(tool_input.get("edit"))]
+    for source, new_keys, old_keys in sources:
+        change.new.extend((v, False) for v in strings(source, new_keys))
+        change.old.extend((v, False) for v in strings(source, old_keys))
+    for value in strings(tool_input, _PATCH_KEYS):
+        sections += _patch_sections(value)
+    return change, sections
+
+
+def _written_change(tool_input):
+    """The _Change a file tool made to every file it wrote, read from its
+    input (_written_parts)."""
+    change, sections = _written_parts(tool_input)
+    for section in sections:
+        _add_section(change, section)
+    return change
+
+
+def _tails(path):
+    """path, and each part of it that follows a /."""
+    yield path
+    at = path.find("/")
+    while at >= 0:
+        yield path[at + 1:]
+        at = path.find("/", at + 1)
+
+
+class _Headers(object):
+    """The files a patch's headers name, each with the _Change its sections
+    make, found for a path as a header names it whether either is the
+    longer: .claude/settings.json is /repo/.claude/settings.json. Each
+    header is kept under every part of it that follows a /, and a path is
+    looked up whole and by each such part of it, so a path is never
+    compared with every header: 256 paths written by a patch of as many
+    headers were each read against all of them."""
+
+    def __init__(self, sections):
+        self.changes, self.under = collections.OrderedDict(), {}
+        for section in sections:
+            header = _slashed(section.header)
+            if header not in self.changes:
+                self.changes[header] = _Change()
+                for tail in _tails(header):
+                    self.under.setdefault(tail, []).append(header)
+            _add_section(self.changes[header], section)
+
+    def changes_of(self, path):
+        """The _Change of each header that names path."""
+        path = _slashed(path.strip())
+        found = list(self.under.get(path, ()))
+        tails = _tails(path)
+        next(tails)
+        found += [tail for tail in tails if tail in self.changes]
+        return [self.changes[header] for header in dict.fromkeys(found)]
 
 
 def _input_strings(obj, depth=0):
@@ -3307,30 +5890,48 @@ def _hash(text):
 MAX_SCAN_CHARS = 64000
 # Every string in one call together, for the rules that read them all.
 MAX_RAW_CHARS = 4 * MAX_SCAN_CHARS
+# How much of a file tool's input is read for what it writes, every value
+# together (_written_parts): each is cut at MAX_SCAN_CHARS, and a MultiEdit
+# of 256 edits of that size, 32MB, took half a minute to read. Far more
+# than one answer of a model's holds, so no edit can be hidden behind
+# others that fill it.
+MAX_WRITTEN_CHARS = 16 * MAX_SCAN_CHARS
 
 
-def _rule_hits(rules, shell, source, paths, raw, tool_input, known):
+def _rule_hits(rules, shell, source, paths, raw, tool_input, known,
+               writes=None, written=""):
     """The hits of `rules` on a call: its judged shell text, the same text
     with the source of one-liners kept (source(), asked only by a rule that
-    wants it), the paths a file-reading tool opened and every string the
-    call carried. One hit per rule."""
+    wants it), the paths a file-reading tool opened, every string the call
+    carried, the command as the rules that judge writes read it (writes(),
+    asked only by them) and the paths a file-writing tool wrote. One hit
+    per rule."""
     hits = []
     for rule in rules:
-        # (subject, what the rule judges in it, refiners). The two differ
-        # only by what rule.hide blanks and by a Windows path's backslashes
-        # read as /, so a span in one is a span in both.
+        # (subject, what the rule judges in it, refiners, how it is
+        # matched). The two texts differ only by what rule.hide blanks and
+        # by a Windows path's backslashes read as /, so a span in one is a
+        # span in both.
         if rule.scan_raw:
-            subjects = [(s, s, REFINERS) for s in raw]
+            subjects = [(s, s, REFINERS, rule.match) for s in raw]
         else:
-            text = source() if rule.keep_source else shell
+            if rule.keep_source:
+                text = source()
+            elif rule.writes:
+                text = writes() if writes else ""
+            else:
+                text = shell
             seen = rule.hide(text) if rule.hide and text else text
-            subjects = [(text, seen, REFINERS)]
+            subjects = [(text, seen, REFINERS, rule.match)]
             if rule.paths:
-                subjects.append((paths, _slashed(paths), PATH_REFINERS))
-        for subject, seen, refiners in subjects:
+                subjects.append((paths, _slashed(paths), PATH_REFINERS, rule.match))
+            if rule.writes:
+                subjects.append((written, _slashed(written), WRITE_REFINERS,
+                                 rule.writes))
+        for subject, seen, refiners, match in subjects:
             if not subject:
                 continue
-            span = rule.match(seen)
+            span = match(seen)
             if not span:
                 continue
             severity, why = rule.severity, rule.why
@@ -3414,7 +6015,8 @@ def _decoded_hits(source, seen, known):
             label = " then ".join(decode.LABELS[kind] for kind in how)
             shell = _executable_text(decoded, limit=MAX_SCAN_CHARS)[:MAX_SCAN_CHARS]
             for hit in _rule_hits(rules, shell, _no_source, "",
-                                  [decoded[:MAX_SCAN_CHARS]], None, known):
+                                  [decoded[:MAX_SCAN_CHARS]], None, known,
+                                  writes=functools.partial(_writes_of, decoded)):
                 if hit["rule"] in seen:
                     continue
                 seen.add(hit["rule"])
@@ -3431,16 +6033,22 @@ def _decoded_hits(source, seen, known):
     return hits
 
 
-def evaluate(tool_name, tool_input, known=None):
+def evaluate(tool_name, tool_input, known=None, written=None):
     """Return (hits, payload) for one tool call: the rules it trips, and the
     whole input as masked text for telling flagged calls apart ("" when
     nothing tripped, since then there is nothing to tell apart). `known`,
     a known.Matcher, is every value clean finds in the history, masked in
-    both wherever a copy starts."""
+    both wherever a copy starts. `written`, the paths an adapter found the
+    call wrote, stands for the ones its tool name would give."""
     shell = _shell_text(tool_name, tool_input)
     paths = _read_paths(tool_name, tool_input)
     raw = _raw_strings(tool_input)
-    kept = []
+    if written is None:
+        written = _written_paths(tool_name, tool_input)
+    else:
+        written = "\n".join(p for p in written if isinstance(p, str) and p)
+        written = written[:MAX_SCAN_CHARS]
+    kept, views = [], []
 
     def source():
         # Asked only by a rule that judges source, and read once.
@@ -3448,7 +6056,14 @@ def evaluate(tool_name, tool_input, known=None):
             kept.append(_shell_text(tool_name, tool_input, keep_source=True))
         return kept[0]
 
-    hits = _rule_hits(RULES, shell, source, paths, raw, tool_input, known)
+    def writes():
+        # Asked only by the rules that judge writes, and read once.
+        if not views:
+            views.append(_writes_text(tool_name, tool_input))
+        return views[0]
+
+    hits = _rule_hits(RULES, shell, source, paths, raw, tool_input, known,
+                      writes, written)
     if any(h["rule"] == _ENCODED for h in hits) and source():
         hits.extend(_decoded_hits(source(), {h["rule"] for h in hits}, known))
     return hits, (_payload(tool_input, known) if hits else "")
@@ -3467,10 +6082,11 @@ def judge(call, known=None):
     adapter does not know are judged by name, exactly as evaluate judges
     them. A known shell call is judged as the command it ran, with the
     input keys the adapter turned into that command left out and any
-    working directory kept; a known read, by the paths it opened. Anything
-    else, and a shell or read call whose command or paths were not found,
-    answers only to the rules that read every string: file content is not
-    an action."""
+    working directory kept; a known read, by the paths it opened; a known
+    write, by the paths it wrote, with its input as it was, so a payload's
+    hash stays what it was. Anything else, and a call whose command or
+    paths were not found, answers only to the rules that read every
+    string: file content is not an action."""
     if call.kind is None or not call.known:
         return evaluate(call.tool_name, call.tool_input, known)
     rest = {k: v for k, v in call.tool_input.items() if k not in call.consumed}
@@ -3481,6 +6097,9 @@ def judge(call, known=None):
         return evaluate("Bash", judged, known)
     if call.kind == "read" and call.paths:
         return evaluate("Read", dict(rest, paths=list(call.paths)), known)
+    if call.kind == "write" and call.paths:
+        return evaluate(NEUTRAL % call.kind, call.tool_input, known,
+                        written=call.paths)
     return evaluate(NEUTRAL % call.kind, call.tool_input, known)
 
 

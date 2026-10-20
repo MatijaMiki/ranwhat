@@ -486,6 +486,86 @@ class OneMegabyteOfAdversarialInput(unittest.TestCase):
             ("a variable read back", "'F=.env; ' + 'cat \"$F\" ' * n(110000)"),
         ], call="watch.evaluate('Bash', {'command': text})")
 
+    def test_what_a_command_writes_and_where_it_does(self):
+        """persist and agent.config read the command as it was written, a
+        stage and a word at a time: where a regex over the words would read
+        on to the end of the stage for each of them, and shlex would split a
+        long echo it only has to print, each is read once. 64,000 characters
+        is all watch judges."""
+        self.assertLinear([
+            ("startup-file appends", "'echo x >> ~/.bashrc ; ' * n(2900)"),
+            ("one long quoted echo", repr("echo '") + " + 'a' * n(63000) + "
+             + repr("' >> ~/.zshrc")),
+            ("crontab -u values", "'crontab ' + '-u x ' * n(12700)"),
+            ("systemctl options", "'systemctl ' + '--user ' * n(9000) + 'enable x'"),
+            ("sudo -u before crontab", "'sudo -u ' * n(7900) + 'crontab x'"),
+            ("redirections", "'echo bashrc ' + '>a ' * n(21000)"),
+            ("tee targets", "'echo x | tee -a ' + '~/.bashrc ' * n(6300)"),
+            ("cp sources", "'cp ' + 'a ' * n(31000) + '~/Library/LaunchAgents/'"),
+            ("nested sh -c", repr("sh -c 'sh -c \"crontab x\"' ; ") + " * n(2200)"),
+            ("a digit run", "'1' * n(63000) + '> ~/.bashrc'"),
+            ("redirections after a launch", "'echo claude ' + '> a ' * n(15900)"),
+            ("quoted >", "'echo claude ' + " + repr("'>' ") + " * n(15900)"),
+            ("commented >", repr("echo claude # > \n") + " * n(3700)"),
+            ("tee words", "'echo claude | ' + 'tee f ' * n(10600)"),
+            ("sed -i words", "'sed -i ' * n(8000) + "
+             + repr("'s/a/b/' ~/.claude/settings.json")),
+            ("codex --yolo", "'codex ' + '--yolo ' * n(9000)"),
+            ("assignments before a launch", "'RANWHAT_HOOK=0 ' * n(4200) + 'claude'"),
+            ("npx -y", "'npx ' + '-y ' * n(21000) + '@anthropic-ai/claude-code'"),
+            ("bypassPermissions repeated", repr("echo '") + " + 'bypassPermissions ' "
+             "* n(3500) + " + repr("' > ~/.claude/settings.json")),
+            ("lists opened", repr("echo '\"allow\": [") + " + "
+             + repr('"Bash(x)", [') + " * n(5000) + "
+             + repr("' > ~/.claude/settings.json")),
+            ("metadata hosts", "'curl ' + 'http://169.254.169.254/' * n(2700)"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+
+    # A settings file's JSON, as an agent would write it, and where.
+    JSON = repr('"Bash(x)",')
+    SETTINGS = repr("~/.claude/settings.json ")
+
+    def test_one_text_written_to_many_settings_files(self):
+        """agent.config judged what a stage writes again for each file it
+        wrote it to, at the cost of the text each time: a 60KB command took
+        17 seconds, past the ten Claude Code gives the hook before it goes
+        on without it, and every rule with it. The text and the files grow
+        together here, so a cost of their product shows."""
+        json_text, settings = self.JSON, self.SETTINGS
+        self.assertLinear([
+            ("tee targets", repr("echo '") + " + %s * n(1500) + " % json_text
+             + repr("' | tee ") + " + %s * n(1000)" % settings),
+            ("redirections", repr("echo '") + " + %s * n(1500) + " % json_text
+             + repr("'") + " + ' > ~/.claude/settings.json' * n(1000)"),
+            ("a here-document's redirections", "'cat' + ' > ~/.claude/settings.json'"
+             " * n(1000) + " + repr(" <<'EOF'\n") + " + %s * n(1500) + " % json_text
+             + repr("\nEOF")),
+            ("a source copied again and again", repr("echo '") + " + %s * n(1500)"
+             " + " % json_text + repr("' > /tmp/a ; ")
+             + " + 'cp /tmp/a ~/.claude/settings.json ; ' * n(700)"),
+            ("a sed script on many files", repr("sed -i '") + " + 's/a/b/;' * n(3000)"
+             " + " + repr("' ") + " + %s * n(1000)" % settings),
+            ("a publish before it", repr("npm publish; echo '") + " + '\"x\",' * n(3000)"
+             " + " + repr("' | tee ") + " + '.claude/settings.json ' * n(1000)"),
+        ], call="watch.evaluate('Bash', {'command': text})")
+
+    def test_a_file_tool_that_writes_many_settings_files(self):
+        """The same, through a file tool: its input was read again, and
+        judged again, for each path it wrote, 256 of them at most."""
+        self.assertLinear([
+            ("paths and content", "%s * n(6000)" % self.JSON),
+        ], call="watch.evaluate('Write', {'paths': ['/p%d/.claude/settings.json' % i"
+                " for i in range(len(text) // 250)], 'content': text})")
+        self.assertLinear([
+            ("patch headers", "''.join('*** Update File: /p%d/.claude/settings.json\\n'"
+             " % i + '+\"Bash(x)\",\\n' * 20 for i in range(n(220)))"),
+        ], call="watch.evaluate('apply_patch', {'input': text})")
+        self.assertLinear([
+            ("edits", "'x' * n(256)"),
+        ], call="watch.evaluate('MultiEdit', {'file_path': '/home/u/.claude/"
+                "settings.json', 'edits': [{'old_string': '\"Bash(y)\",' * 25, "
+                "'new_string': '\"Bash(x)\",' * 25}] * len(text)})")
+
     def test_a_megabyte_of_distinct_keys(self):
         """Each distinct value was looked for again in the whole text, once
         to decide whether it was only part of a longer one and once to mask

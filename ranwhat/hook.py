@@ -55,6 +55,14 @@ ISOLATED = ("-I",)
 OFF_ENV = "RANWHAT_HOOK"
 
 
+def is_off(value):
+    """Whether a value of OFF_ENV turns the hook off. watch's agent.config
+    rule asks the same of a RANWHAT_HOOK an agent sets, so the two cannot
+    drift apart."""
+    return isinstance(value, str) and value.strip().lower() in (
+        "0", "off", "false", "no")
+
+
 class SettingsError(Exception):
     """A settings file the hook will not write to, and why."""
 
@@ -274,7 +282,7 @@ def run(stdin=None, stdout=None, mode=DEFAULT_MODE, env=None):
     stdout = sys.stdout if stdout is None else stdout
     env = os.environ if env is None else env
     try:
-        if env.get(OFF_ENV, "").strip().lower() in ("0", "off", "false", "no"):
+        if is_off(env.get(OFF_ENV, "")):
             return 0
         # Bytes where there are any: Claude Code sends UTF-8, and read as
         # text in Windows' ANSI code page, a call with an emoji in it failed

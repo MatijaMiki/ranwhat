@@ -384,6 +384,17 @@ def build(seed=DEFAULT_SEED):
             ("docker-prune-volumes", "docker system prune -af --volumes",
              "container.destructive", "high",
              "docker system prune -af --volumes"),
+            ("imds-credentials", "the instance role's credentials fetched",
+             "cred.metadata", "critical",
+             "curl -s http://169.254.169.254/latest/meta-data/iam/"
+             "security-credentials/app-role"),
+            ("crontab-install", "a crontab installed", "persist", "high",
+             'echo "*/10 * * * * /usr/local/bin/sync.sh" | crontab -'),
+            ("hook-uninstall", "the ranwhat hook uninstalled", "agent.config",
+             "critical", "ranwhat hook uninstall"),
+            ("agent-no-prompts", "claude --dangerously-skip-permissions",
+             "agent.config", "high",
+             'claude -p "fix the tests" --dangerously-skip-permissions'),
             ("read-env", "cat of a .env file", "cred.read", "critical", None),
             ("read-aws-credentials", "cat of ~/.aws/credentials", "cred.read",
              "critical", None),
@@ -533,6 +544,13 @@ def build(seed=DEFAULT_SEED):
         "A deletion inside a Python one-liner is source text to watch, not a "
         "shell command.",
         ["python3 -c \"import shutil; shutil.rmtree('/home/dev/work')\""],
+        "watch")
+    gap("python-imds", "Instance credentials fetched inside a Python one-liner",
+        "miss",
+        "A fetch made from Python source is not one the metadata rule reads: "
+        "it keys on curl, wget and their kind as the command word.",
+        ["python3 -c \"import urllib.request as u; u.urlopen('http://"
+         "169.254.169.254/latest/meta-data/iam/security-credentials/')\""],
         "watch")
     gap("base64-secret", "A secret passed base64-encoded", "miss",
         "A secret passed base64-encoded has no recognisable shape and nothing "

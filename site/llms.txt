@@ -11,7 +11,7 @@ Where it fits: ranwhat is the after-the-fact side of AI agent security and devel
 Commands:
 
 - `ranwhat check`: watch and clean in one read-only pass. It never changes anything.
-- `ranwhat watch`: thirteen rules over what the agent ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, local files uploaded with curl, scripts downloaded and run unread, files made writable by every user, container volumes wiped, and encoded commands decoded and run. `--json` prints one record per flagged call.
+- `ranwhat watch`: sixteen rules over what the agent ran: credential access, secret-shaped strings in tool calls, package publishing, cloud resource changes, financial API calls, log or history tampering, destructive git, recursive deletion, local files uploaded with curl, scripts downloaded and run unread, files made writable by every user, container volumes wiped, encoded commands decoded and run, an instance's credentials asked of a cloud metadata service, jobs set to run at login, boot or on a schedule, and an agent's guardrails loosened (a permission, a hook, an approval or sandbox setting, or the ranwhat hook itself). `--json` prints one record per flagged call.
 - `ranwhat clean`: finds credentials in every agent's transcripts, passwords typed into commands (`mysql -pPASSWORD`, `curl -u user:password`) among them, says what to rotate, and masks them only when asked (`--apply`, or `mask` in the review session). Backups go to `~/.ranwhat/backups`.
 - `ranwhat sources`: every coding agent ranwhat reads, where it looked for each one's history, and whether it found any. `check`, `watch` and `clean` read them all by default; `--source ID` reads one, and `--path ID=PATH` reads one from elsewhere.
 - `ranwhat reach`: the MCP servers agents are configured with (Claude Code's `~/.claude.json` and `.mcp.json`, and the configs of Claude Desktop, Cursor, VS Code, Gemini CLI, Qwen Code, GitHub Copilot CLI, Windsurf and Codex), what each launches or connects to, and risky shapes: a secret inline in `env`, args, headers or the URL (masked the way `clean` masks it), a package fetched by `npx` or `uvx` with no exact version, a remote URL. Then the credential files (`.env`, `~/.aws/credentials`, `~/.ssh/id_*` and others) an agent could read from its working directories that no Claude Code `Read(...)` deny rule covers, paths only, and a `permissions.deny` block to paste into `~/.claude/settings.json`. It writes nothing. `ranwhat reach DIR` looks at one project.
@@ -38,7 +38,7 @@ Not read yet: large tool outputs Claude Code stores in `<session>/tool-results/`
 ## Docs
 
 - [Commands](https://ranwhat.com/commands): every command and every flag, what each reads and what it sends
-- [watch](https://ranwhat.com/watch): the thirteen rules, their severities, the false positives it suppresses, and where it reads from
+- [watch](https://ranwhat.com/watch): the sixteen rules, their severities, the false positives it suppresses, and where it reads from
 - [clean](https://ranwhat.com/clean): how secrets are found, why masking is not remediation, and the review session
 - [scan](https://ranwhat.com/scan): the three scores, evidence states, and the providers the catalogue covers
 - [Install](https://ranwhat.com/install): uvx, pipx or pip, and what it reads and writes

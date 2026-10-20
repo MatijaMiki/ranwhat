@@ -84,13 +84,16 @@ class Quiet(object):
 
 class RuleIsRegistered(unittest.TestCase):
 
-    def test_it_is_the_last_rule_and_nothing_moved(self):
+    def test_it_came_after_the_twelve_before_it_and_nothing_moved(self):
+        # The rules added after it come after it, so its SARIF index and
+        # every one before it stay where they were.
         ids = [r.id for r in watch.RULES]
-        self.assertEqual(ids[-1], RULE)
-        self.assertEqual(ids[-2], "container.destructive")
-        self.assertEqual(len(ids), 13)
+        self.assertEqual(ids[-4:], [RULE, "cred.metadata", "persist",
+                                    "agent.config"])
+        self.assertEqual(ids[-5], "container.destructive")
+        self.assertEqual(len(ids), 16)
         self.assertEqual(len(ids), len(set(ids)))
-        rule = watch.RULES[-1]
+        rule = watch.RULES[-4]
         self.assertEqual(rule.severity, watch.HIGH)
         self.assertEqual(rule.title, "Decoded command run")
         self.assertEqual(
@@ -127,7 +130,8 @@ class RuleIsRegistered(unittest.TestCase):
 
     def test_sarif_lists_the_rule(self):
         ids = [r["id"] for r in sarif._rules()]
-        self.assertEqual(ids[-2:], [RULE, sarif.SECRET_RULE])
+        self.assertEqual(ids[-5:], [RULE, "cred.metadata", "persist",
+                                    "agent.config", sarif.SECRET_RULE])
         self.assertEqual(ids, [r.id for r in watch.RULES] + [sarif.SECRET_RULE])
 
 
