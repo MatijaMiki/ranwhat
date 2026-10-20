@@ -564,17 +564,39 @@ class ToolCalls(ZedCase):
         self.assertEqual(calls["c"].status, "declined")
         self.assertIsNone(calls["d"].status)        # a command that ran
 
+    def test_refusals_never_ran(self):
+        texts = ["Permission to run tool denied by user",
+                 "Permission denied: user sent a follow-up message instead "
+                 "of approving the tool call.",
+                 "Command cancelled: user denied permission to run outside "
+                 "the sandbox (e).",
+                 "Command cancelled: the user declined to run a command "
+                 "whose sandbox writes to a Windows drive (x)."]
+        db = self.one([call_message("r%d" % i, "terminal",
+                                    {"command": "rm -rf ~"}, t)
+                       for i, t in enumerate(texts)]
+                      + [call_message("ok", "terminal", {"command": "ls"},
+                                      "Permission to run tool denied by "
+                                      "user in the log")])
+        calls = self.by_id(db)
+        for i in range(len(texts)):
+            self.assertEqual(calls["r%d" % i].status, "declined")
+        self.assertIsNone(calls["ok"].status)
+
+    def test_repeated_ids_across_messages_are_all_yielded(self):
+        db = self.one([
+            call_message("terminal-0", "terminal", {"command": "ls"}, "a"),
+            call_message("terminal-0", "terminal", {"command": "rm -rf ~"},
+                         "b")])
+        calls = self.calls(db)
+        self.assertEqual([c.command for c in calls], ["ls", "rm -rf ~"])
+        self.assertEqual([c.output for c in calls], ["a", "b"])
+
     def test_a_call_with_no_result_is_still_a_call(self):
         db = self.one([call_message("c", "terminal", {"command": "sleep 99"})])
         [call] = self.calls(db)
         self.assertEqual((call.command, call.output, call.status),
                          ("sleep 99", None, None))
-
-    def test_a_call_is_yielded_once_per_thread(self):
-        db = self.one([call_message("c", "terminal", {"command": "ls"}, "a"),
-                       call_message("c", "terminal", {"command": "ls"}, "b")])
-        [call] = self.calls(db)
-        self.assertEqual(call.output, "a")
 
     def test_the_same_call_id_in_two_threads_is_two_calls(self):
         msgs = [call_message("c", "terminal", {"command": "ls"}, "x")]

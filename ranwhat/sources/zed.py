@@ -95,9 +95,15 @@ no structured exit code: "Command executed successfully.", the raw output,
 or "Command "<cmd>" failed with exit code N." and the output. is_error is
 true for a failure and for a call that was cancelled before it finished
 (Zed writes "Tool canceled by user" for it). A call answered with that text
-never ran: it is "declined". Whether Zed writes a particular result when
-the user refuses a tool permission was not verified, so a refusal is read
-as whatever result the thread holds.
+never ran: it is "declined". So is one answered with what Zed writes for a
+refusal (read from its source: thread.rs "Permission to run tool denied by
+user" and "Permission denied: user sent a follow-up message instead of
+approving the tool call."; terminal_tool.rs "Command cancelled: user denied
+..." and "Command cancelled: the user declined ..."),
+matched on the text's start; policy denials "Blocked by ..." are not
+matched, their wording being unverified). Tool ids
+are not unique in a thread (Gemini's restart at 0 on each Zed launch), so
+a call is tied to the result of the message it is in, never skipped.
 
 Not read: anything outside threads.db: Zed's settings.json (language-model
 and context-server configuration, keys included), its credentials in the
@@ -129,6 +135,16 @@ DAMAGED = "part of it is damaged"
 
 DECLINED = "declined"
 CANCELED = "Tool canceled by user"
+# Results Zed writes for a call that did not run (thread.rs, terminal_tool.rs
+# of Zed's source). Policy denials ("Blocked by ...", tool_permissions.rs)
+# are not matched: their exact wording was not verified and a prefix could
+# take a command's own output for a refusal.
+REFUSED = (CANCELED, "Permission to run tool denied by user")
+REFUSED_PREFIXES = (
+    "Permission denied: user sent a follow-up message",
+    "Command cancelled: user denied",
+    "Command cancelled: the user declined",
+)
 
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 
@@ -226,11 +242,15 @@ def output_text(result):
 
 
 def never_ran(result):
-    """True when the result is the text Zed gives a call it cancelled."""
+    """True when the result is text Zed gives a call that did not run:
+    cancelled, refused by the user, or blocked by a permission policy."""
     if not isinstance(result, dict):
         return False
     texts = _content_texts(result.get("content"))
-    return len(texts) == 1 and texts[0].strip() == CANCELED
+    if len(texts) != 1:
+        return False
+    text = texts[0].strip()
+    return text in REFUSED or text.startswith(REFUSED_PREFIXES)
 
 
 def _bytes(value):
@@ -565,7 +585,7 @@ class ZedSource(Source):
             if thread.doc is _BAD:
                 continue
             not_after = self._not_after(thread, store, thread.doc)
-            pending, done = {}, set()
+            pending = {}
             for message in self._messages(thread):
                 parts = self._agent_parts(message)
                 if parts is None:
@@ -575,15 +595,18 @@ class ZedSource(Source):
                 uses, results = parts
                 for use in uses:
                     cid = use.get("id") if isinstance(use, dict) else None
-                    if isinstance(cid, str) and (cid in pending
-                                                 or cid in done):
-                        continue
                     call = self._call(store, thread, use, not_after)
                     if call is None:
                         continue
                     if call.tool_call_id is None:
                         yield call
                     else:
+                        # Ids are not unique in a thread (Gemini's restart
+                        # at 0 on each Zed launch): a call still waiting
+                        # under the same id is let go as it is.
+                        older = pending.pop(cid, None)
+                        if older is not None:
+                            yield older
                         pending[cid] = call
                 for cid, result in results.items():
                     call = pending.pop(cid, None) \
@@ -593,7 +616,6 @@ class ZedSource(Source):
                     call.output = output_text(result)
                     if never_ran(result):
                         call.status = DECLINED
-                    done.add(cid)
                     yield call
             for call in pending.values():
                 yield call
@@ -633,14 +655,14 @@ class ZedSource(Source):
                         for use in parts[0]:
                             call = self._call(store, thread, use, not_after)
                             if call is not None and call.tool_call_id:
-                                calls.setdefault(call.tool_call_id, call)
+                                calls[call.tool_call_id] = call
                     yield SecretText(message, where=where)
                     continue
                 uses, results = parts
                 for use in uses:
                     call = self._call(store, thread, use, not_after)
                     if call is not None and call.tool_call_id:
-                        calls.setdefault(call.tool_call_id, call)
+                        calls[call.tool_call_id] = call
                 for cid, result in results.items():
                     call = calls.get(cid) if isinstance(cid, str) else None
                     yield SecretText(result, call=call, where=where)
