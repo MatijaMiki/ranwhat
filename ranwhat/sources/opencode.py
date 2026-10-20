@@ -446,6 +446,7 @@ class OpenCodeSource(Source):
     name = "OpenCode"
     unit = "file"           # one database holds many sessions; see agents.amount
     env = (DB_ENV,)
+    SEARCHED_TABLES = SEARCHED_TABLES    # what clean reads; a subclass adds
     path_means = ("an OpenCode data folder (~/.local/share/opencode), or "
                   "its database file")
     checked = "2.0.24 and 1.18.35"
@@ -773,7 +774,7 @@ class OpenCodeSource(Source):
                                                     tally)):
                 yield item
             if texts:
-                for table, cols in SEARCHED_TABLES:
+                for table, cols in self.SEARCHED_TABLES:
                     if table in tables and table not in SPLIT_TABLES:
                         for item in self._guarded(store, table, self._cells(
                                 conn, table, cols)):

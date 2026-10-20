@@ -114,8 +114,7 @@ forward slashes (as upstream).
 
 Not read: the credential, account, account_state and control_account tables
 (tokens), session_share (share secrets), event, project, permission, the
-Kilo-only kilo_board (kilo_board_message, the agents' board messages, is
-searched), data_migration and the others not listed in SEARCHED_TABLES;
+Kilo-only data_migration and the others not listed in SEARCHED_TABLES;
 <data>/log/ and background-process/ (logs and manifests of processes, in the
 data folder and in $XDG_STATE_HOME/kilo), worktree-pool/ (git checkouts), the
 -wal and -shm files themselves (SQLite reads them) and the kilo.db.json-
@@ -196,8 +195,13 @@ def classify(name, arguments, cwd=None):
         path = _string(arguments.get("path"))
         paths = (path,) if path else ()
         kind = "read" if name in READ else "write"
-        return (kind, True, None, paths,
-                ("path",) if path and kind == "read" else (), None)
+        consumed = ("path",) if path and kind == "read" else ()
+        image = _string(arguments.get("image")) \
+            if name == "generate_image" else None
+        if image:       # an existing file, sent to the image model
+            paths += (image,)
+            consumed += ("image",)
+        return kind, True, None, paths, consumed, None
     if name in oc.SHELL or name in oc.READ or name in oc.WRITE \
             or name in oc.FETCH or name in oc.OTHER:
         return _opencode(name, arguments)
@@ -249,6 +253,10 @@ class KiloSource(oc.OpenCodeSource):
     path_means = ("a Kilo data folder (~/.local/share/kilo), or its database "
                   "file")
     checked = "7.8.15 and 1.0.25"
+    # OpenCode's tables plus the Kilo-only free text: the agents' board posts
+    # (kilo_board_message.body) and a board's objective.
+    SEARCHED_TABLES = oc.SEARCHED_TABLES + (
+        ("kilo_board_message", ("body",)), ("kilo_board", ("objective",)))
 
     # -- where to look ------------------------------------------------------
 

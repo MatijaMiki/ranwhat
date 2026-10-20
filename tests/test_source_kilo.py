@@ -106,7 +106,10 @@ CREATE TABLE account (id text PRIMARY KEY, email text NOT NULL, access_token tex
   refresh_token text NOT NULL);
 CREATE TABLE control_account (email text NOT NULL, access_token text NOT NULL, refresh_token text NOT NULL);
 CREATE TABLE session_share (session_id text PRIMARY KEY, id text NOT NULL, secret text NOT NULL);
-CREATE TABLE kilo_board_message (id text PRIMARY KEY, board_id text, data text NOT NULL);
+CREATE TABLE kilo_board (id text PRIMARY KEY, objective text);
+CREATE TABLE kilo_board_message (id text PRIMARY KEY, board_root_session_id text, seq integer,
+  time_created integer, sender_session_id text, recipient text, type text, body text NOT NULL,
+  reply_to text, source_message_id text, source_call_id text);
 CREATE INDEX recall_part_search_idx ON part (session_id)
   WHERE json_valid(data) AND json_extract(data, '$.type') = 'text';
 CREATE INDEX recall_message_role_idx ON message (session_id)
@@ -436,7 +439,7 @@ class Calls(_Case):
              "write", True, ("n.py", "m.py")),
             ("generate_image", {"prompt": "a cat", "path": "out/cat.png",
                                 "image": "in.png"}, "write", True,
-             ("out/cat.png",)),
+             ("out/cat.png", "in.png")),
             ("notebook_read", {"path": "a.ipynb"}, "read", True,
              ("a.ipynb",)),
             ("notebook_edit", {"path": "a.ipynb", "action": "insert"},
@@ -745,13 +748,23 @@ class Secrets(_Case):
         db.close()
         self.assertEqual(self.found(db.path), {SECRET: {".env"}})
 
-    def test_board_messages_and_titles_are_searched(self):
+    def test_board_messages_and_objectives_are_searched(self):
+        other = "sk_" "live_" "Qw3Er5Ty7Ui9Op1As3Df5Gh7"
         db = self.db()
-        db.session(title="deploy with STRIPE_KEY=" + SECRET)
-        db.conn.execute("INSERT INTO kilo_board_message VALUES (?,?,?)",
-                        ("kbm_1", "b1", "STRIPE_KEY=" + SECRET))
+        db.session()
+        db.conn.execute("INSERT INTO kilo_board_message (id, board_root_session_id,"
+                        " seq, type, body) VALUES ('kbm_1','b1',1,'post',?)",
+                        ("STRIPE_KEY=" + SECRET,))
+        db.conn.execute("INSERT INTO kilo_board VALUES ('b1', ?)",
+                        ("use STRIPE_KEY=" + other,))
         db.close()
-        self.assertIn(SECRET, self.found(db.path))
+        self.assertEqual(set(self.found(db.path)), {SECRET, other})
+
+    def test_generate_image_input_file_is_a_path(self):
+        c = kilo.classify("generate_image", {"prompt": "x", "path": "out/a.png",
+                                        "image": "/home/a/.ssh/id_rsa"})
+        self.assertEqual(c[0], "write")
+        self.assertEqual(c[3], ("out/a.png", "/home/a/.ssh/id_rsa"))
 
     def test_logins_and_share_secrets_are_not_searched(self):
         other = "sk_" "live_" "Qw3Er5Ty7Ui9Op1As3Df5Gh7"
