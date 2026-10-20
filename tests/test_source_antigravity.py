@@ -301,6 +301,26 @@ class ToolCalls(Case):
         self.assertIn("exited with code 4", c.output)
         self.assertIsNone(c.status)
 
+    def test_a_non_result_step_between_is_not_taken_as_the_result(self):
+        eph = {"step_index": 2, "source": "SYSTEM",
+               "type": "EPHEMERAL_MESSAGE", "status": "DONE",
+               "created_at": T0 % 2, "content": "eph"}
+        lines = [user(0), planner(1, [("run_command", {"CommandLine": "ls"})]),
+                 eph, cortex_result(3, "real")]
+        [c] = self.calls(self.write(lines))
+        self.assertIn("real", c.output)
+        self.assertNotIn("eph", c.output)
+        self.assertIsNone(c.status)
+
+    def test_a_denial_behind_a_non_result_step_is_still_seen(self):
+        eph = {"step_index": 2, "source": "SYSTEM", "type": "CHECKPOINT",
+               "status": "DONE", "created_at": T0 % 2, "content": "cp"}
+        bad = generic_result(3, "no", status="INVALID")
+        lines = [user(0), planner(1, [("run_command", {"CommandLine": "ls"})]),
+                 eph, bad]
+        [c] = self.calls(self.write(lines))
+        self.assertEqual(c.status, "declined")
+
     def test_parallel_calls_pair_by_position_and_lines_are_sorted(self):
         lines = [planner(7, [("run_command", {"CommandLine": "echo ok"}),
                              ("run_command", {"CommandLine": "exit 4"})]),

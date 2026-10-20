@@ -48,7 +48,11 @@ Facts of the format that shape this reader:
 - A call has no id. A PLANNER_RESPONSE at step k with n tool_calls is
   followed by its n result steps, k+1 to k+n, in call order. So lines are
   sorted by step_index (they are not always written in order) and call i
-  is paired with step k+1+i. The id given to a call here is
+  is paired with step k+1+i, skipping steps that are never a result
+  (EPHEMERAL_MESSAGE, CHECKPOINT and the like, see NON_RESULT) and
+  stopping at the next PLANNER_RESPONSE or USER_INPUT. The adjacency was
+  observed only for the listed step types; skipping the others is a
+  defensive choice, not documented behaviour. The id given to a call here is
   "<session>:<step>:<i>".
 - Two tool-name families, by model path. Default cortex tools: run_command
   {CommandLine, Cwd, WaitMsBeforeAsync}, view_file {AbsolutePath},
@@ -132,6 +136,36 @@ USER = "USER_INPUT"
 # "such as", so a rise in the count is a hint, not an error).
 TYPES = (USER, PLANNER, "RUN_COMMAND", "VIEW_FILE", "CODE_ACTION",
          "READ_URL_CONTENT", "ERROR_MESSAGE", "GENERIC")
+
+# Steps that are never a tool's result. The type list is "such as", so
+# these are skipped when pairing instead of being taken as the answer; any
+# other type (a tool's own result type, or one not yet known) can be one.
+NON_RESULT = (USER, PLANNER, "EPHEMERAL_MESSAGE", "CHECKPOINT",
+              "CONVERSATION_HISTORY", "KNOWLEDGE_ARTIFACTS", "SYSTEM_MESSAGE")
+
+
+def _results(steps, k, n, last):
+    """[(step index, step)] for the first n result steps after step k, in
+    order, skipping NON_RESULT steps; the run ends at the next PLANNER or
+    USER step, which starts another turn. Linear: each step is visited by
+    the one planner that precedes it."""
+    out = []
+    at = k
+    while len(out) < n and at < last:
+        at += 1
+        step = steps.get(at)
+        if step is None:
+            # a gap keeps its place: the missing step's call is unanswered
+            out.append((at, None))
+            continue
+        kind = step.get("type")
+        if kind in (PLANNER, USER):
+            break
+        if kind in NON_RESULT:
+            continue
+        out.append((at, step))
+    return out
+
 
 # A line longer than this is not read as a record (a transcript line is a
 # step; this is far beyond any tool result agy keeps). It is skipped,
@@ -486,14 +520,15 @@ class AntigravitySource(Source):
             planned = step.get("tool_calls")
             if step.get("type") != PLANNER or not isinstance(planned, list):
                 continue
+            results = _results(steps, k, len(planned), last)
             for i, item in enumerate(planned):
                 if not isinstance(item, dict):
                     self.count("unknown")
                     continue
                 result_at = k + 1 + i
-                result = steps.get(result_at)
-                if result is not None and result.get("type") in (PLANNER, USER):
-                    result = None
+                result = None
+                if i < len(results):
+                    result_at, result = results[i]
                 calls.append((self._call(store, k, i, step, item, result,
                                          result_at, last, marks["bad"],
                                          compact),
