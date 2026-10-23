@@ -183,7 +183,11 @@
         anything that high or higher, and <span class="icode">--sarif PATH</span> writes the findings for
         code scanning, every secret masked. In CI, the
         <a href="https://github.com/MatijaMiki/ranwhat#in-ci-the-github-action">GitHub Action</a>
-        runs it with both.
+        runs it with both. For Claude Code, a flagged action also says when part of
+        it, such as a URL, appeared earlier in the same session: in the output of a
+        web fetch, an MCP tool or a file it read, or in your own message. That is
+        where the text was seen, not proof it caused the call, and the output itself
+        is never quoted.
       </p>
       <p class="flaglist">Flags: <a href="#flag-days"><span class="icode">--days N</span></a>, <a href="#flag-source"><span class="icode">--source ID</span></a>, <a href="#flag-path"><span class="icode">--path ID=PATH</span></a>, <a href="#flag-root"><span class="icode">--root PATH</span></a>, <a href="#flag-state-dir"><span class="icode">--state-dir PATH</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>, <a href="#flag-fail-on"><span class="icode">--fail-on SEVERITY</span></a>, <a href="#flag-sarif"><span class="icode">--sarif PATH</span></a>, <a href="#flag-ignore"><span class="icode">--ignore PATH</span></a>, <a href="#flag-no-ignore"><span class="icode">--no-ignore</span></a>.</p>
     </div>

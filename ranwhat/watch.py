@@ -33,6 +33,7 @@ import time
 
 from . import agents as _agents
 from . import decode
+from . import provenance
 from . import sources as _registry
 from . import term
 from .sources import _sqlite
@@ -7214,6 +7215,12 @@ def scan_transcript(path, source="claude-code", known=None):
                 records.append(_record(call, hits, payload, source))
     except Exception as error:          # one transcript must not stop the rest
         src.stopped(store, error)
+    if records:
+        from . import clean
+        try:
+            provenance.attach(path, records, clean.mask_for_display)
+        except Exception:               # a link is extra; the record stands
+            pass
     return records
 
 
@@ -7636,12 +7643,37 @@ def render(records, scanned, days, footer=True, locations=None, notes=None,
                 evidence = clean.mask_for_display(evidence)
             L.append(DIM("      " + _fit(_printable(evidence), width - 6)))
             L += [DIM(line) for line in _why_lines(h.get("why") or "", width)]
+        L += [DIM(line) for line in _seen_before_lines(r.get("provenance"), width)]
         L.append("")
     if notes:
         L += notes + [""]
     if footer:
         L += [DIM(term.rule("-")), DIM(term.FOOTER), ""]
     return "\n".join(L)
+
+
+def _seen_before_lines(link, width):
+    """The line a record shows when part of its call was seen earlier in the
+    session (provenance.py). It says where the text also appeared, not that
+    it caused the call."""
+    if not isinstance(link, dict) or not isinstance(link.get("piece"), str):
+        return []
+    piece = _fit(_printable(link["piece"]), 48)
+    n = link.get("steps_back")
+    gap = ("" if not isinstance(n, int) or n < 0 else
+           ", right before it" if n == 0 else
+           ", %d call%s earlier" % (n, "" if n == 1 else "s"))
+    if link.get("origin") == "prompt":
+        text = "Also in your own message%s: %s" % (gap, piece)
+    else:
+        what = _printable(str(link.get("tool") or "a tool"))
+        about = _printable(str(link.get("about") or ""))
+        if about:
+            what = "%s (%s)" % (what, about)
+        text = "Also in the output of %s%s: %s" % (what, gap, piece)
+        if link.get("external"):
+            text += " [from outside this machine]"
+    return ["      " + line.strip() for line in term.wrap(text, limit=width - 6)]
 
 
 # What the meta line of a record adds for a command the user typed into
