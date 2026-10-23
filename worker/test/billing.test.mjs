@@ -366,7 +366,7 @@ test("the locked panels lead to the upgrade, which signs in first and comes back
   assert.match(home, /<section class="card locked[^"]*" id="ci-tokens"[\s\S]*?<a class="btn primary" href="\/upgrade">Upgrade to Plus<\/a>/);
   assert.doesNotMatch(home, /ranwhat\.com\/pricing">Upgrade/);
   const billing = billingOf(home);
-  assert.match(billing, /Personal is on Free\. Plus is €12 a month or €120 a year, one price for the organisation\./);
+  assert.match(billing, /Personal is on Free\. Plus is €12 a month or €120 a year, one price for the organisation\. Price on 4\.10\.2026: €12 a month or €120 a year\./);
   /* Billing offers both ways to pay, each a form that opens the same Checkout as the upgrade page's. */
   assert.deepEqual(formsOf(billing, "/upgrade").map((f) => [f.plan, f.org]), [["monthly", orgOf(e, "ana@example.com")],
     ["yearly", orgOf(e, "ana@example.com")]]);
@@ -432,8 +432,8 @@ test("an owner's upgrade is a Checkout bound to the organisation, at the pricing
 
   const page = await ana.get("/upgrade");
   assert.match(page.text, /Catalogue feed, CI tokens, Push and Cross-machine view now/);
-  assert.match(page.text, /<input type="hidden" name="plan" value="monthly">[^]*?<span class="choice-price">€12 a month<\/span>[^]*?<button type="submit">Choose monthly<\/button><\/form>/);
-  assert.match(page.text, /<input type="hidden" name="plan" value="yearly">[^]*?<span class="choice-price">€120 a year<\/span>[^]*?<button type="submit" class="primary">Choose yearly<\/button><\/form>/);
+  assert.match(page.text, /<input type="hidden" name="plan" value="monthly">[^]*?<span class="choice-price">€12 a month<\/span>\s*<span class="hint">Price on 4\.10\.2026: €12 a month<\/span>[^]*?<button type="submit">Choose monthly<\/button><\/form>/);
+  assert.match(page.text, /<input type="hidden" name="plan" value="yearly">[^]*?<span class="choice-price">€120 a year<\/span>\s*<span class="hint">Price on 4\.10\.2026: €120 a year<\/span>[^]*?<button type="submit" class="primary">Choose yearly<\/button><\/form>/);
   assert.match(page.headers.get("content-security-policy"), /form-action 'self' https:\/\/checkout\.stripe\.com; /);
   assert.doesNotMatch(page.text, /<script/);
 

@@ -83,6 +83,13 @@ const SHOWN = 5;                         // subscriptions the panel lists at mos
    found by its lookup key (stripe.js's INTERVALS), is what is charged. */
 export const PRICES = Object.freeze({ monthly: "€12 a month", yearly: "€120 a year" });
 
+/* The price each choice had on the day Plus went on sale, shown next to it: Croatia's
+   Odluka o isticanju dodatne cijene (NN 101/26, from 17.11.2026) wants every price
+   paired with the price on a reference date, or, for something first sold after
+   10.9.2026, its first price and that day. It stays fixed when PRICES changes;
+   site/cjenik/ holds the same in the published price list. */
+export const ANCHOR = Object.freeze({ date: "4.10.2026", monthly: "€12 a month", yearly: "€120 a year" });
+
 /* A subscription bought without an account is moved to an organisation by
    hand (scripts/org_admin.py link), on request from whoever paid. */
 const MOVE = "mailto:hello@ranwhat.com?subject=Move%20a%20ranwhat%20Plus%20subscription";
@@ -231,7 +238,7 @@ export async function billingPanel(env, who, onPlan, { error = "", stepup = fals
     }
   } else if (onPlan === "free") {
     standing = manager
-      ? `<p>${name} is on Free. Plus is ${PRICES.monthly} or ${PRICES.yearly}, one price for the organisation.</p>`
+      ? `<p>${name} is on Free. Plus is ${PRICES.monthly} or ${PRICES.yearly}, one price for the organisation. Price on ${ANCHOR.date}: ${ANCHOR.monthly} or ${ANCHOR.yearly}.</p>`
       : `<p>${name} is on Free. An owner or an admin of it can upgrade it to Plus.</p>`;
   }
 
@@ -341,6 +348,7 @@ function choices(who, token) {
       <input type="hidden" name="plan" value="${interval}">
       <span class="label">${name}</span>
       <span class="choice-price">${escape(PRICES[interval])}</span>
+      <span class="hint">Price on ${ANCHOR.date}: ${escape(ANCHOR[interval])}</span>
       ${best ? pill(note, "brand") : `<span class="hint">${note}</span>`}
       <button type="submit"${best ? ' class="primary"' : ""}>Choose ${name.toLowerCase()}</button>`, `choice${best ? " best" : ""}`);
   return `<div class="choices">

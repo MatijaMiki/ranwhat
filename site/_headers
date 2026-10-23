@@ -18,6 +18,15 @@
   # pricing page's Plus form ends on Stripe Checkout or, with accounts on,
   # on the account's upgrade (worker/src/stripe.js's checkout()).
 
+# The price list (cjenik) Croatia's Odluka o objavi cjenika (NN 101/26) asks for:
+# machine-readable, so scrapers may fetch it from anywhere, and never cached stale.
+/cjenik/*
+  Content-Type: text/csv; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+  Access-Control-Allow-Origin: *
+  ! Cross-Origin-Resource-Policy
+  Cross-Origin-Resource-Policy: cross-origin
+
 # build.sh stamps every reference to these with ?v=<content hash>, so a
 # changed file is a new URL and the old one can be cached for good. HTML
 # keeps Pages' default, max-age=0 and must-revalidate, so a page always names
