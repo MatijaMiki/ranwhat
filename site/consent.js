@@ -72,6 +72,29 @@
     document.head.appendChild(s);
   }
 
+  /* Events that say whether a visit turned into an install. They are sent
+     only once visit statistics are allowed and gtag is running, so a visitor
+     who said no is never measured. Mark them as key events in GA4. */
+  function track(name, params) {
+    if (!statsLoaded || window["ga-disable-" + GA_ID]) return;
+    window.gtag("event", name, params);
+  }
+  document.addEventListener("click", function (ev) {
+    var t = ev.target;
+    if (!t || !t.closest) return;
+    var copy = t.closest(".copy");
+    if (copy) {
+      track("copy_command", { command_id: (copy.getAttribute("data-copy") || "").replace("#", "") });
+      return;
+    }
+    var a = t.closest("a[href]");
+    if (!a) return;
+    var href = a.getAttribute("href");
+    if (/^https:\/\/pypi\.org\/project\/ranwhat/.test(href)) track("click_pypi", { link_url: href });
+    else if (/^https:\/\/github\.com\/MatijaMiki\/ranwhat/.test(href)) track("click_github", { link_url: href });
+    else if (href === "/install") track("click_install", { page_path: location.pathname });
+  });
+
   var adsLoaded = false;
   function loadAds() {
     if (adsLoaded) return;
