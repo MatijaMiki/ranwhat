@@ -1,7 +1,7 @@
 # Search engines, AI answer engines and model training are all allowed.
 # The code is MIT licensed and this site exists to be found.
-# GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, Claude-User,
-# PerplexityBot, Google-Extended, Applebot-Extended and Bingbot fall under * on purpose.
+# GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot and Bingbot fall
+# under * on purpose. Keep in sync with /llms.txt and /ai.txt.
 User-agent: *
 Allow: /
 Disallow: /api/
@@ -10,4 +10,23 @@ Disallow: /cdn-cgi/
 # The same page again, with a topic preselected (canonical is /contact).
 Disallow: /contact?
 
+# AI search and user-fetch crawlers, named so their access is explicit. A bot
+# with a group of its own ignores the * group, so the same rules repeat here.
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+Allow: /
+Disallow: /api/
+Disallow: /cdn-cgi/
+Disallow: /contact?
+
+# Crawls heavily and sends nothing back.
+User-agent: Bytespider
+Disallow: /
+
+# For AI tools: https://ranwhat.com/llms.txt (and llms-full.txt), usage policy
+# at https://ranwhat.com/ai.txt, every page as markdown at its URL plus .md.
 Sitemap: https://ranwhat.com/sitemap.xml

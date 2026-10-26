@@ -19,3 +19,10 @@ dist/
 
 # Wrangler local state. The account cache names the Cloudflare account.
 .wrangler/
+
+# Markdown twins and their index, written into site/ by scripts/build_md.py
+# during the build (build.sh). Never committed.
+site/*.md
+site/guides/*.md
+site/llms-full.txt
+site/md-catalog.json
