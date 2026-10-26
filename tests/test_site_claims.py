@@ -480,12 +480,31 @@ class SiteStructure(unittest.TestCase):
         robots = read(SITE / "robots.txt")
         self.assertIn("Sitemap: %s/sitemap.xml" % ORIGIN, robots.splitlines())
         self.assertIn("User-agent: *", robots.splitlines())
-        blocked = [l.split(":", 1)[1].strip() for l in robots.splitlines()
-                   if l.lower().startswith("disallow:") and l.split(":", 1)[1].strip()]
-        for loc in sitemap_locs():
-            path = loc[len(ORIGIN):]
-            for prefix in blocked:
-                self.assertFalse(path.startswith(prefix), (loc, prefix))
+        # Each group of User-agent lines with the rules under it. Every group
+        # must leave the sitemap's pages crawlable, except the bots shut out
+        # on purpose.
+        shut_out = {"bytespider"}
+        groups, agents, rules = [], [], []
+        for line in robots.splitlines():
+            key, _, value = line.partition(":")
+            key, value = key.strip().lower(), value.strip()
+            if key == "user-agent":
+                if rules:
+                    groups.append((agents, rules))
+                    agents, rules = [], []
+                agents.append(value.lower())
+            elif key == "disallow" and value:
+                rules.append(value)
+        groups.append((agents, rules))
+        self.assertTrue(any("*" in a for a, _ in groups))
+        for agents, blocked in groups:
+            if set(agents) <= shut_out:
+                self.assertEqual(blocked, ["/"], agents)
+                continue
+            for loc in sitemap_locs():
+                path = loc[len(ORIGIN):]
+                for prefix in blocked:
+                    self.assertFalse(path.startswith(prefix), (agents, loc, prefix))
 
     def test_header_and_footer_are_the_same_on_every_page(self):
         def part(text, tag):

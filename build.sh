@@ -28,3 +28,8 @@ done
 
 echo "--- stamped references:"
 grep -rho '/[a-z.]*\.\(css\|js\)?v=[a-f0-9]*' site --include='*.html' | sort | uniq -c
+
+# A markdown twin of every page for AI agents, plus /llms-full.txt and
+# /md-catalog.json, all derived from the pages just stamped (scripts/build_md.py).
+# Generated here, never committed, so they cannot drift from the HTML.
+python3 scripts/build_md.py
