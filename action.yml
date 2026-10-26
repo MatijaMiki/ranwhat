@@ -1,8 +1,9 @@
-name: ranwhat
+# The Marketplace name must not match a GitHub account, and the account
+# "ranwhat" is taken, so the listing carries a longer name.
+name: ranwhat agent audit
 description: >-
-  Check what AI coding agents ran in this job, and the secrets they left in
-  their history, with ranwhat. Fails the step on findings at or above a
-  severity, and uploads them to code scanning as SARIF.
+  Audit what AI coding agents ran in a CI job and the secrets left in their
+  history. Fails on findings, uploads SARIF.
 author: Matija Mikulinec
 branding:
   icon: shield
