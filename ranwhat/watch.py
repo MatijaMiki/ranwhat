@@ -1385,6 +1385,16 @@ def _rm_recursive_force(text):
 # that reads local files and is given something to read, and one that
 # sends to the network.
 _STAGE_PREFIX = r"(?:sudo\s+(?:-\S+\s+)*)?(?:\w+=\S*\s+)*(?:\S*/)?"
+# The same, read just inside an opener ($(, <( or a backquote), where the
+# tail is tried again at every opener in the text: there no part of it reads
+# across another ( or backquote. With \S, each try read on to the end of the
+# word, so `eval $($($(...` cost the square of its length. A path or value
+# that holds a substitution, $(pwd)/curl, starts at that substitution's own
+# opener, which is tried as well. A value may hold flat ones, X=$(id) curl:
+# what they read stops at the next parenthesis, so it is still read once.
+_OPENED_PREFIX = (r"(?:sudo\s+(?:-[^\s(`]+\s+)*)?"
+                  r"(?:\w+=(?:[^\s(`]|\$\([^()`]*\))*\s+)*"
+                  r"(?:[^\s(`]*/)?")
 _FILE_READER = re.compile(
     _STAGE_PREFIX + r"(?P<reader>cat|tar|zip|base64|tac|head|tail|less|more|gzip"
     r"|bzip2|xz|zstd|lz4|xxd|od|strings|jq|yq|sed|awk|gawk)\s+[^\s|;]")
@@ -1663,7 +1673,7 @@ def _runs_substitution():
     shell = (r"(?:(?:sh|bash|zsh|dash|ksh|fish|ash|eval|source)(?![\w.-])"
              r"|\.(?=\s))")
     powershell = r"(?:iex|invoke-expression)\s*\(?"
-    fetched = r"\s*" + _STAGE_PREFIX + _FETCH_WORD
+    fetched = r"\s*" + _OPENED_PREFIX + _FETCH_WORD
     return _AfterHandsOn(
         r"(?:[^\s|;&]*/)?(?:" + shell + r"[^|;&]*?(?P<opener><\(|\$\(|`)|"
         + powershell + r")" + fetched,

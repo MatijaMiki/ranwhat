@@ -1441,7 +1441,12 @@ class AdversarialInputIsLinear(growth.Assertions, unittest.TestCase):
             lambda n: 'echo "' + "$(a | " * n(12000),
             lambda n: "bash " + "-a " * n(20000) + "$(x)",
             lambda n: "bash " + "-a " * n(20000) + "<(x)",
-            lambda n: "eval " + "$(x) " * n(15000))
+            lambda n: "eval " + "$(x) " * n(15000),
+            # read inside an opener: a path, a value, a sudo option
+            lambda n: "eval " + "$(a=$(" * n(4000),
+            lambda n: "eval $(" + "a=$(x)" * n(6000),
+            lambda n: "eval " + "$(sudo -" * n(4000),
+            lambda n: "eval " + "$(/" * n(8000))
 
     def test_source_one_liners(self):
         self.linear(
