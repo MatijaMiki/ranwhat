@@ -54,9 +54,10 @@ each one was found (`--days 365` looks further back):
 ```
 
 Then `ranwhat clean` walks you through the secrets it found. You can mask
-most of them in place (Cursor and a few other agents keep a database it only
-reads), see what to rotate, and open each provider's page to do it. Masking
-stops a key leaking a second time but doesn't un-leak it, so rotate it.
+the ones in plain transcript files, see what to rotate, and open each
+provider's page to do it. Agents that keep a database, like Cursor, are only
+read, and it tells you how to remove the secret there. Masking stops a key
+leaking a second time but doesn't un-leak it, so rotate it.
 
 If you want Claude Code to ask you before a high-risk command runs, there's
 an opt-in hook: `ranwhat hook install`.
