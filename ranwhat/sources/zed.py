@@ -284,6 +284,7 @@ class ZedSource(Source):
     env = (ENV,)
     path_means = "Zed's data folder (the one holding threads/threads.db)"
     checked = "main (2026-10)"
+    read_only = True        # SQLite, every store of it
     mask_note = ("Zed keeps its threads in a database it holds open, and "
                  "ranwhat only reads it: delete the thread in Zed to remove "
                  "it.")

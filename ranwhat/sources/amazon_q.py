@@ -272,6 +272,8 @@ class AmazonQSource(Source):
     path_means = ("an Amazon Q history folder (chat-history-*.json) or the "
                   "CLI's data folder (data.sqlite3)")
     checked = "language-servers 0.0.131, Q Developer CLI 1.19.7"
+    read_only = True        # the CLI's SQLite, and the IDE's JSON that the
+                            # language server rewrites every second
 
     def reset(self):
         Source.reset(self)
