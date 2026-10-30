@@ -1493,9 +1493,10 @@ class Performance(VibeCase):
 
     def test_many_entries_and_a_long_journal_read_in_linear_time(self):
         # A file per chunk: 4000 files cost a Windows runner 40 s or more
-        # in opens alone, so there it reads a quarter as many. The reader
-        # opens each file once on every platform.
-        n = 1000 if sys.platform.startswith("win") else 4000
+        # in opens alone, and 1000 once took 21 s there against this 20 s
+        # bound, so there it reads an eighth as many. The reader opens each
+        # file once on every platform, and Linux and macOS keep all 4000.
+        n = 500 if sys.platform.startswith("win") else 4000
         s = self.session()
         entries = [bash("a%d" % i, "echo %d" % i, output="o" * 50, n=i)
                    for i in range(n)]
