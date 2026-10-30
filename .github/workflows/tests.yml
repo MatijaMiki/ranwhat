@@ -21,8 +21,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
         include:
+          # ubuntu-latest became 26.04, and setup-python has no 3.9 build
+          # for it, so the job failed in seconds without running a test.
+          - os: ubuntu-24.04
+            python: "3.9"
           - os: macos-latest
             python: "3.13"
           - os: windows-latest
