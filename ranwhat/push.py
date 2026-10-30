@@ -79,7 +79,7 @@ _LOOPBACK = ("localhost", "127.0.0.1", "::1")
 
 DAY = 86400
 
-# Said in the summary, and in the README, privacy and commands pages: the id
+# Said in the summary, docs/reference.md and the privacy and commands pages: the id
 # is not salted, because `ranwhat ignore ID` takes the id the Findings page
 # shows. Tests keep these four in step.
 ID_NOTE = ("The action id is a hash, not the action, but it is not secret: where "

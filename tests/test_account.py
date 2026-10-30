@@ -1100,13 +1100,13 @@ class Flags(AccountCase):
     def test_every_place_offers_them_now_accounts_are_live(self):
         # ACCOUNTS_ON is set in worker/wrangler.toml, so the server answers
         # them, and the overview, NETWORK, install.html (which quotes
-        # NETWORK), commands.html, llms.txt and the README list them
+        # NETWORK), commands.html, llms.txt and docs/reference.md list them
         # together: none may leave out a command that works.
         names = [name for name, _what in cli.COMMANDS]
         for name in cli._ACCOUNT_COMMANDS:
             self.assertIn(name, names)
             self.assertIn(name, cli.NETWORK)
-        for path in (os.path.join(ROOT, "README.md"),
+        for path in (os.path.join(ROOT, "docs", "reference.md"),
                      os.path.join(ROOT, "site", "llms.txt"),
                      os.path.join(ROOT, "site", "install.html"),
                      os.path.join(ROOT, "site", "commands.html")):
@@ -1114,7 +1114,7 @@ class Flags(AccountCase):
                 text = fh.read()
             for name in cli._ACCOUNT_COMMANDS:
                 self.assertRegex(text, r"ranwhat %s\b|>%s<" % (name, name), path)
-        for path in (os.path.join(ROOT, "README.md"),
+        for path in (os.path.join(ROOT, "docs", "reference.md"),
                      os.path.join(ROOT, "site", "commands.html")):
             with open(path, encoding="utf-8") as fh:
                 self.assertIn("ranwhat.com/device", fh.read(), path)

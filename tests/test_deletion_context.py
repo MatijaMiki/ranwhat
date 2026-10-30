@@ -93,7 +93,7 @@ class TempDeletionsResolvedFromContextAreSilent(Harness):
     def test_other_keys_no_longer_bleed_into_the_targets(self):
         """The flattened text ends in `timeout 120000`, which read as two more
         deletion targets, so `rm -rf /tmp/x` from a real Bash call was HIGH
-        although the README promises it is silent."""
+        although docs/reference.md promises it is silent."""
         self.assertSilent([
             "rm -rf /tmp/x",
             {"command": "rm -rf /tmp/x", "timeout": 60000},
