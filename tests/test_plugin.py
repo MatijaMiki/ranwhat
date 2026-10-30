@@ -8,6 +8,7 @@ import pathlib
 import re
 import unittest
 
+import ranwhat
 from ranwhat import cli
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -32,8 +33,20 @@ class ThePlugin(unittest.TestCase):
         files = sorted(PLUGIN.rglob("*.md"))
         self.assertTrue(files)
         for f in files:
-            for sub in re.findall(r"uvx ranwhat ([a-z]+)", f.read_text(encoding="utf-8")):
+            for sub in re.findall(r"uvx ranwhat@[\d.]+ ([a-z]+)", f.read_text(encoding="utf-8")):
                 self.assertIn(sub, known, f)
+
+    def test_every_run_is_pinned_to_the_release(self):
+        # An unpinned uvx runs whatever is newest on PyPI, which is the
+        # unreviewed-code risk `ranwhat reach` flags in other tools. The pin
+        # is the version this repository is at, so the release PR moves it,
+        # and bumps plugin.json's version, or installs keep the old pin.
+        pins = set()
+        for f in sorted(PLUGIN.rglob("*.md")):
+            text = f.read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"uvx ranwhat(?!@)", f)
+            pins.update(re.findall(r"uvx ranwhat@([\d.]+)", text))
+        self.assertEqual(pins, {ranwhat.__version__})
 
     def test_nothing_that_changes_things_runs_unasked(self):
         for f in (PLUGIN / "commands").glob("*.md"):
