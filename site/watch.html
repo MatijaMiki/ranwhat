@@ -303,7 +303,7 @@
           <tr><td><strong>Zed</strong></td>
               <td data-label="Location"><code>~/.local/share/zed/threads/threads.db</code> (<code>$XDG_DATA_HOME/zed</code>)</td>
               <td data-label="Format">SQLite, read only</td>
-              <td data-label="Status">Shipped</td></tr>
+              <td data-label="Status">Shipped, secrets read-only</td></tr>
           <tr><td><strong>Warp</strong></td>
               <td data-label="Location"><code>~/.local/state/warp-terminal/warp.sqlite</code> (<code>$XDG_STATE_HOME</code>)</td>
               <td data-label="Format">SQLite</td>
@@ -311,7 +311,7 @@
           <tr><td><strong>Amazon Q</strong></td>
               <td data-label="Location"><code>~/.aws/amazonq/history/chat-history-*.json</code> for the IDE plugins, and the CLI's <code>data.sqlite3</code> under <code>~/.local/share/amazon-q</code> (<code>$XDG_DATA_HOME</code>)</td>
               <td data-label="Format">JSON, read only; SQLite, read only</td>
-              <td data-label="Status">Shipped</td></tr>
+              <td data-label="Status">Shipped, secrets read-only</td></tr>
           <tr><td><strong>Qwen Code</strong></td>
               <td data-label="Location"><code>~/.qwen/projects/&lt;project&gt;/chats/</code>, and older <code>tmp/&lt;hash&gt;/chats/</code> (<code>$QWEN_RUNTIME_DIR</code>, <code>$QWEN_HOME</code>)</td>
               <td data-label="Format">JSONL, JSON</td>
@@ -384,11 +384,11 @@
         and what it found.
       </p>
       <p style="font-size:14.5px;color:var(--muted)">
-        Databases and compressed files are only ever read. Cursor,
+        Databases and compressed files are only ever read. Cursor, Zed,
         Warp and OpenClaw keep their history in SQLite, so <a href="/clean">clean</a>
-        finds their secrets but cannot mask them there; the same goes for the
-        databases Kilo Code, OpenCode, Goose, Zed and Amazon Q's CLI keep, and
-        for Mistral Vibe's unified sessions and DeepSeek Harness's compressed
+        finds their secrets but cannot mask them there; the same goes for both
+        of Amazon Q's stores, the databases Kilo Code, OpenCode and Goose keep,
+        and Mistral Vibe's unified sessions and DeepSeek Harness's compressed
         ones. Windsurf keeps
         Cascade's own history encrypted, so ranwhat counts those files and
         reads the plaintext transcripts Windsurf's hook writes instead. Not read yet: the large tool outputs

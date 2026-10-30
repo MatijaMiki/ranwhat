@@ -316,7 +316,8 @@ class DefaultPaths(unittest.TestCase):
             src.path_means,
             "Zed's data folder (the one holding threads/threads.db)")
         self.assertTrue(src.checked)
-        self.assertFalse(src.read_only)
+        # One SQLite database Zed holds open: clean finds, never masks.
+        self.assertTrue(src.read_only)
 
 
 class Discovery(ZedCase):
