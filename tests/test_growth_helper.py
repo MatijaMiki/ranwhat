@@ -58,8 +58,10 @@ class ReadingGrowth(unittest.TestCase):
         growth.assert_linear(self, m)
 
     def test_a_quadratic_cost_with_a_short_quarter_size_still_fails(self):
-        # 6ms at a quarter of the size, 16 times that at full size.
-        m = self.measure([0.006, 0.096] * growth.TRIES)
+        # Under the floor at a quarter of the size (6ms where it is 10ms),
+        # 16 times that at full size.
+        quarter = 0.6 * growth.FLOOR
+        m = self.measure([quarter, 16 * quarter] * growth.TRIES)
         with self.assertRaises(AssertionError):
             growth.assert_linear(self, m)
 
