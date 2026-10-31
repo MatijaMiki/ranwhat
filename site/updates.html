@@ -126,6 +126,68 @@
         <span class="icode nowrap">pipx upgrade ranwhat</span>.
       </p>
       <div class="releases">
+        <article class="release" id="v0-8-0">
+          <p class="rel-meta"><span class="rel-v">0.8.0</span> <time datetime="2026-10-31T00:12:24Z">31 October 2026</time></p>
+          <h3>Thirty coding agents, ignore, push and sixteen watch rules</h3>
+          <ul>
+            <li><span class="icode">check</span>, <span class="icode">watch</span> and
+              <span class="icode">clean</span> read Antigravity, GitHub Copilot in VS Code, Kilo
+              Code, Zed, Warp, Amazon Q, CodeBuddy, Oh My Pi, Mistral Vibe and DeepSeek Harness
+              too, thirty coding agents in all. The ten were written from each agent&rsquo;s own
+              code and documentation, not from a long-lived install, and none of them publishes
+              its history format, so a new version of one can change what ranwhat reads.
+              <span class="icode">clean</span> finds secrets in all ten, but masks them only in
+              files it can safely rewrite: not in Warp&rsquo;s, Zed&rsquo;s or Amazon Q&rsquo;s
+              histories, Kilo Code&rsquo;s database, Mistral Vibe&rsquo;s unified sessions or
+              DeepSeek Harness&rsquo;s compressed ones. Zed&rsquo;s compressed threads and
+              DeepSeek Harness&rsquo;s compressed sessions need Python 3.14 or the
+              <span class="icode">zstd</span> command to be read. A task Kilo Code imported
+              from Roo Code is listed under both.</li>
+            <li><a href="/watch">watch</a> has three new rules, for sixteen in all, up from
+              thirteen. They are a request to a cloud metadata service for the machine&rsquo;s own
+              credentials, something set to run again on its own after the session, such as a
+              crontab, a launch agent, a systemd unit or a scheduled task, and an agent loosening
+              its own or another agent&rsquo;s guardrails: one started with its approvals off, a
+              broad allow rule added, a deny rule taken out, or the ranwhat hook removed. The
+              <a href="/commands#hook">hook</a> asks before the high and critical ones, a call that
+              would switch the hook off among them, once the ranwhat it runs is
+              upgraded.</li>
+            <li>New: <a href="/commands#ignore">ranwhat ignore</a> stops listing an action you
+              expected. Each action now has an id, the 16 characters at the end of its line.
+              <span class="icode">ignore ID</span> leaves that action out of later reports, and
+              <span class="icode">ignore all</span> leaves out every action listed now, so later
+              runs list just what is new. Entries go in <span class="icode">~/.ranwhat/ignore</span>,
+              a plain-text file, and <span class="icode">--no-ignore</span> lists everything again.
+              A secret is never left out, and a change an agent makes to ranwhat itself, such as
+              to that file or the hook, stays listed until you acknowledge it with
+              <span class="icode">ignore ID</span> on a terminal.</li>
+            <li>New: <a href="/commands#push">ranwhat push</a> sends this machine&rsquo;s findings
+              to your Plus account, so every linked machine&rsquo;s findings can be read side by
+              side at account.ranwhat.com. It sends rule ids, severities, action ids, agents,
+              times, counts, the days read and ranwhat&rsquo;s version, never a command, a path
+              or a secret, and it asks before it sends. <span class="icode">--dry-run</span> prints
+              the exact JSON and sends nothing.</li>
+            <li>For Claude Code, a flagged action says when part of it, such as a URL, appeared
+              earlier in the same session: in the output of a web fetch, an MCP tool or a file it
+              read, or in your own message. That is where the text was seen, not proof that it
+              caused the call, and the output itself is never quoted.</li>
+            <li>A command run through <span class="icode">env</span>, <span class="icode">nohup</span>,
+              <span class="icode">timeout</span>, <span class="icode">sudo -E</span> or a similar
+              wrapper is judged as the bare command would be, and the files Codex edits are judged
+              like any other agent&rsquo;s writes.</li>
+            <li>The new rules and agents can report calls and secrets that 0.7.0 did not, so a
+              pipeline that runs <span class="icode">check --fail-on</span> may start failing after
+              the upgrade. An <span class="icode">export PATH</span> line an agent appends to a
+              shell startup file is now reported as medium, so
+              <span class="icode">--fail-on medium</span> fails on it. The GitHub Action&rsquo;s new
+              <span class="icode">ignore-file</span> input reads a committed
+              <span class="icode">.ranwhatignore</span> as it was at the pull request&rsquo;s base,
+              or before the push, and what that file leaves out is not counted. Each action line
+              in the text report now ends with its id, so a script that reads the text rather
+              than <span class="icode">--json</span> sees changed lines.</li>
+          </ul>
+        </article>
+
         <article class="release" id="v0-7-0">
           <p class="rel-meta"><span class="rel-v">0.7.0</span> <time datetime="2026-10-14T23:32:16Z">14 October 2026</time></p>
           <h3>Callers, revoke, bench and thirteen watch rules</h3>
