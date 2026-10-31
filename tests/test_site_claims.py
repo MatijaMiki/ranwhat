@@ -23,6 +23,7 @@ import ranwhat
 from ranwhat import catalog, cli, feed, hints
 
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
+REFERENCE = SITE.parent / "docs" / "reference.md"
 ORIGIN = "https://ranwhat.com"
 
 
@@ -548,7 +549,7 @@ class SiteStructure(unittest.TestCase):
     def test_no_page_repeats_a_claim_the_tool_does_not_keep(self):
         # live, --pull-usage and update all go online; the suite outgrew 102.
         stale = ("transmits nothing", "never sends a byte", "102 tests")
-        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md"]
+        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md", REFERENCE]
         for page in files:
             text = read(page).lower()
             for claim in stale:
@@ -578,13 +579,13 @@ class SiteStructure(unittest.TestCase):
     def test_every_count_of_watch_rules_is_the_rule_count(self):
         # llms.txt kept saying nine for a release after the count had
         # changed, and no test read it. Every page that counts the rules,
-        # the README and llms.txt, the JSON-LD copy of a page's text
+        # the README, the reference and llms.txt, the JSON-LD copy of a page's text
         # included, says the number there are.
         from ranwhat import watch
         counted = re.compile(
             r"\b(%s) (?:rules\b|kinds of action|things worth interrupting)"
             % "|".join(WORDS.values()), re.I)
-        files = ([SITE.parent / "README.md", SITE / "llms.txt"] + all_pages())
+        files = ([SITE.parent / "README.md", REFERENCE, SITE / "llms.txt"] + all_pages())
         seen = 0
         for path in files:
             for found in counted.finditer(read(path)):
@@ -1149,7 +1150,7 @@ class CommandsPageMatchesTheCommands(unittest.TestCase):
 
 
 class SiteAgentsComeFromTheRegistry(unittest.TestCase):
-    """Every agent the site, llms.txt and the README name, and every count
+    """Every agent the site, llms.txt, the README and the reference name, and every count
     of them, is what `ranwhat sources --json` says."""
 
     def test_the_registry_is_what_sources_lists(self):
@@ -1188,7 +1189,7 @@ class SiteAgentsComeFromTheRegistry(unittest.TestCase):
         counted = re.compile(r"\b(%s) (?:more|other) (?:coding )?agents\b"
                              % "|".join(WORDS.values()))
         every = re.compile(r"\b[Aa]ll (%s)\b" % "|".join(WORDS.values()))
-        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md"]
+        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md", REFERENCE]
         seen = 0
         for page in files:
             text = read(page)
@@ -1234,7 +1235,7 @@ class SiteAgentsComeFromTheRegistry(unittest.TestCase):
     def test_nothing_says_an_agent_is_next_when_none_is(self):
         if names("Next"):
             return
-        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md"]
+        files = all_pages() + [SITE / "llms.txt", SITE.parent / "README.md", REFERENCE]
         for page in files:
             if page.name in ("updates.html",):
                 continue
@@ -1249,12 +1250,12 @@ class SiteAgentsComeFromTheRegistry(unittest.TestCase):
         if names("Next"):
             self.assertIn("%s is next." % listed(names("Next")), text)
 
-    def test_the_readme_table_names_every_agent(self):
-        readme = read(SITE.parent / "README.md")
-        table = readme.split("| Source | Location | Format |", 1)[1].split("\n\n", 1)[0]
+    def test_the_reference_table_names_every_agent(self):
+        reference = read(REFERENCE)
+        table = reference.split("| Source | Location | Format |", 1)[1].split("\n\n", 1)[0]
         rows = [line.split("|")[1].strip() for line in table.strip().splitlines()[1:]]
         self.assertEqual([re.sub(r" \(.*\)$", "", r) for r in rows], names(*SHIPPED))
-        text = " ".join(readme.split())
+        text = " ".join(reference.split())
         for name in names("Cloud only") + names("Next"):
             self.assertIn(name, text)
 
@@ -1503,7 +1504,7 @@ class PushCopyTests(unittest.TestCase):
     def test_the_action_id_is_not_called_unrecoverable(self):
         from ranwhat import push
         flat = lambda t: re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", t)))
-        for name, text in (("README.md", read(SITE.parent / "README.md")),
+        for name, text in (("docs/reference.md", read(REFERENCE)),
                            ("privacy.html", read(SITE / "privacy.html")),
                            ("commands.html", read(SITE / "commands.html"))):
             with self.subTest(page=name):

@@ -913,8 +913,8 @@ class Strictness(_Bench):
 
 
 class PublicCopy(unittest.TestCase):
-    def test_the_readme_documents_bench(self):
-        with open(os.path.join(REPO, "README.md"), encoding="utf-8") as fh:
+    def test_the_reference_documents_bench(self):
+        with open(os.path.join(REPO, "docs", "reference.md"), encoding="utf-8") as fh:
             text = fh.read()
         head = "### `ranwhat bench`"
         self.assertEqual(text.count(head), 1)

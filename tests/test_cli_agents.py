@@ -1285,17 +1285,17 @@ class Review(_Cli):
 
 
 
-class ReadmeNamesEveryAgent(unittest.TestCase):
-    """design 6: the README's Source / Location / Format table has a row
+class ReferenceNamesEveryAgent(unittest.TestCase):
+    """design 6: docs/reference.md's Source / Location / Format table has a row
     for every adapter, in registry order, and the examples point at the
     flags that read them. (The site's table waits for its own change.)"""
 
-    def readme(self):
-        with open(os.path.join(REPO, "README.md"), encoding="utf-8") as fh:
+    def reference(self):
+        with open(os.path.join(REPO, "docs", "reference.md"), encoding="utf-8") as fh:
             return fh.read()
 
     def test_the_table_is_the_registry_in_order(self):
-        text = self.readme()
+        text = self.reference()
         table = text.split("| Source | Location | Format |", 1)[1].split("\n\n", 1)[0]
         rows = [line.split("|")[1].strip() for line in table.strip().split("\n")[1:]]
         names = [sources.get(i).name for i in sources.ids()]
@@ -1303,7 +1303,7 @@ class ReadmeNamesEveryAgent(unittest.TestCase):
         self.assertEqual(rows[-1], "OpenClaw")
 
     def test_the_examples(self):
-        text = self.readme()
+        text = self.reference()
         for example in ("ranwhat watch --source codex", "ranwhat watch --path codex=",
                         "ranwhat sources"):
             self.assertIn(example, text)

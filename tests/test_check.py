@@ -425,7 +425,7 @@ class WatchShowsNoSecretCleanFound(_Base):
 
     def test_watch_on_its_own_never_shows_it(self):
         """watch and watch --json printed it whole: only check asked what
-        clean found. The README sends people to watch first."""
+        clean found. docs/reference.md and the site document watch on its own."""
         for command in self.COMMANDS:
             for extra in ([], ["--json"]):
                 with self.subTest(command=command, extra=extra):

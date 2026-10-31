@@ -749,7 +749,7 @@ class TextPipedIntoAWrappedShell(growth.Assertions, unittest.TestCase):
 class SearchingHistoryIsNotRunning(unittest.TestCase):
     """git log -S and -G search history for a string, and git grep searches
     the tree. Each was read as running the string it searched for, against
-    the README's promise that searching for a string is not running it."""
+    the promise in docs/reference.md that searching for a string is not running it."""
 
     def test_the_string_searched_for_is_not_run(self):
         for command in ('git log -S"rm -rf build" --oneline -- README.md',

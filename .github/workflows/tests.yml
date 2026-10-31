@@ -1,6 +1,6 @@
 name: tests
 
-# The README says the local tools "ship and are tested". Until this ran on
+# docs/reference.md says the local tools "ship and are tested". Until this ran on
 # every push, that meant tested on whichever laptop last ran them.
 
 on:

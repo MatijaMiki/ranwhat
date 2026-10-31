@@ -230,8 +230,8 @@ TAGLINE = "Flight recorder and authority scanner for AI agents."
 # transmitted" was false for live and --pull-usage, which send each token to
 # the provider that issued it, and for update, login, whoami, logout and
 # push, which talk to ranwhat's own server (feed.ranwhat.com). site/install.html
-# quotes it word for word, and commands.html, llms.txt and the README say
-# the same.
+# quotes it word for word, and commands.html, llms.txt and docs/reference.md
+# say the same.
 NETWORK = ("No account needed. live, callers, --pull-usage and clean's "
            "revoke ask only the provider that issued each token, and update, login, whoami, logout and push "
            "talk only to ranwhat.com. push sends derived metadata only, and only when you run it. "
