@@ -61,7 +61,11 @@ CEILING = 10.0     # seconds at the larger size, whatever the growth
 # 0.004s against 0.038s in all five tries. Under the same load, 6ms of work
 # never ran in under 9.8: from 10ms up, both sizes share the core alike.
 # A quadratic still fails where its quarter size takes 5ms or more.
-FLOOR = 0.01
+# Windows hands out longer slices (about 15.6ms), and its runners read
+# 0.009s against 0.083s, 8.3 times, run after run for cases that grow
+# about four times: there the floor is above its slice, and a quadratic
+# still fails where its quarter size takes 10ms or more.
+FLOOR = 0.02 if sys.platform.startswith("win") else 0.01
 
 QUARTER = ((1.0, 1.0 / SCALE),)
 
