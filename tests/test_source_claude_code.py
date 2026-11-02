@@ -229,9 +229,10 @@ class Discovery(_Case):
                 rc, out, err = _run_cli(*(argv + ["--source", "claude-code",
                                                   "--root", self.root]))
                 self.assertEqual(rc, 0, err)
+        # the fixture's call is dated 2026-10-01: look back past the 30-day default
         self.assertEqual([h["rule"] for r in json.loads(_run_cli(
-            "watch", "--json", "--root", self.root)[1]) for h in r["hits"]],
-            ["fs.destructive"])
+            "watch", "--json", "--days", "36500", "--root", self.root)[1])
+            for h in r["hits"]], ["fs.destructive"])
 
     def test_a_tilde_in_the_root(self):
         # zsh and Windows pass "--root=~/x" on as typed; --path expands it
@@ -239,7 +240,7 @@ class Discovery(_Case):
         given = os.path.join("~", ".claude", "projects")
         self.assertEqual(watch.discover(given), [path])
         rc, out, err = _run_cli("watch", "--json", "--source", "claude-code",
-                                "--root=" + given)
+                                "--days", "36500", "--root=" + given)
         self.assertEqual(rc, 0, err)
         self.assertEqual(len(json.loads(out)), 1)
 
