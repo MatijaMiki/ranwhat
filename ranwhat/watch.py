@@ -4338,7 +4338,7 @@ def _is_ranwhat(word):
 _RANWHAT_VALUES = frozenset((
     "--days", "--source", "--path", "--root", "--state-dir", "--ignore",
     "--html", "--sarif", "--fail-on", "--scope", "--mode", "--controls",
-    "--window-days", "--seed", "--mine", "--aws-profile", "--aws-key-id",
+    "--window-days", "--seed", "--head", "--mine", "--aws-profile", "--aws-key-id",
     "--aws-region", "--github-org", "--token", "--google", "--github",
     "--slack", "--stripe"))
 _RANWHAT_FLAGS = frozenset((

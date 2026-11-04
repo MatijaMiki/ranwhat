@@ -663,6 +663,39 @@ ranwhat hook uninstall
 - Each check takes about a fifth of a second. The reason it gives Claude
   Code names the rule, never the value that tripped it.
 
+### `ranwhat ledger`: a record of what watch flagged, that shows if it was changed
+
+`ranwhat ledger record` reads what `watch` reads, applies the ignore file as
+`watch` does, and appends one line to `~/.ranwhat/ledger.jsonl`
+(`$RANWHAT_HOME/ledger.jsonl`) for each flagged action it has not recorded
+before. Each line holds the five facts `push` sends (the action's 16-character
+id, the agent, the UTC time, and the rule and severity of each hit), its place
+in the file, when it was written, the SHA-256 of the line before it and its own
+SHA-256. Change a line and its hash no longer fits it; take one out or move one
+and the next line no longer fits the one before. No command, path, evidence or
+secret is written.
+
+```bash
+ranwhat ledger record                # add what is new; prints the head
+ranwhat ledger verify                # exit 3 at the first line that does not fit
+ranwhat ledger verify --head HASH    # and require the file to end at HASH
+ranwhat ledger show                  # the last 50 lines; --json for all
+```
+
+- It runs on your machine and sends nothing. Only `record` writes the file,
+  with mode 0600, and it refuses to add to a ledger that does not verify.
+- `verify` names the line and the kind of fault: changed after it was written,
+  not following the line before, taken out, put in or moved, cut short, or not
+  a ledger line.
+- What a chain cannot show: lines cut off its end, or a file written again
+  whole by someone who can write to it, still fit. `record` prints the head,
+  the hash of the last line. Keep it somewhere else (a note, a commit, another
+  machine), and `verify --head HASH` finds both.
+- Two ranwhat processes recording at once leave one chain: the file is
+  locked while a line is added.
+- The ignore file applies to `record`, as it does to `watch`; `--ignore PATH`,
+  `--days`, `--source`, `--path` and `--root` work as they do there.
+
 ### `ranwhat bench`: see what ranwhat catches, on made-up data
 
 Builds a made-up agent home in a temporary directory: a Claude Code session
