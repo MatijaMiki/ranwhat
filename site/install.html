@@ -153,6 +153,26 @@ brew install MatijaMiki/ranwhat/ranwhat</pre></div>
         what their credentials allow. A bare <span class="icode">ranwhat</span>
         lists every command.
       </p>
+      <h3 style="margin-top:34px">Inside your agent</h3>
+      <p style="font-size:14.5px;color:var(--muted)">
+        In Claude Code, the plugin adds <span class="icode">/ranwhat:check</span>,
+        <span class="icode">/ranwhat:watch</span>, <span class="icode">/ranwhat:reach</span>
+        and <span class="icode">/ranwhat:guard</span>, and installs no hook:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>/plugin marketplace add MatijaMiki/ranwhat
+/plugin install ranwhat --marketplace MatijaMiki/ranwhat</pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        For Codex, Cursor, Gemini CLI and other agents, the same skill is on
+        <a href="https://skills.sh/matijamiki/ranwhat/ranwhat">skills.sh</a>.
+        It tells the agent when to run ranwhat and never to print a secret:
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="skill-add">npx skills add MatijaMiki/ranwhat</span>
+        <button class="copy" data-copy="#skill-add">Copy</button>
+      </div>
     </div>
   </div>
 </section>
