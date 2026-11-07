@@ -1,7 +1,5 @@
 # ranwhat
 
-[![skills.sh](https://skills.sh/b/MatijaMiki/ranwhat)](https://skills.sh/MatijaMiki/ranwhat)
-
 ranwhat checks whether any of your secrets have leaked into your coding
 agents' history, and where. It also checks whether your agent ran anything
 sketchy: read your SSH key, force-pushed, piped a script from the internet
