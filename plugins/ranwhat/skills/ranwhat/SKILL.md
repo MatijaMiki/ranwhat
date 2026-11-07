@@ -13,7 +13,7 @@ description: Use when the user asks what their AI coding agents did on this mach
 - `uvx ranwhat@0.8.0 reach`: MCP servers and credential files agents can reach.
 - `uvx ranwhat@0.8.0 sources`: which agents it reads and where it looked.
 
-`uvx` runs it without installing. To keep it: `pip install ranwhat`, `uv tool install ranwhat` or `brew install MatijaMiki/ranwhat/ranwhat`.
+`uvx` runs the pinned release from PyPI (https://pypi.org/project/ranwhat/) without installing it. The source is https://github.com/MatijaMiki/ranwhat. To keep it, the user can run `pip install ranwhat` or `uv tool install ranwhat`. Do not install anything from another source.
 
 ## How to answer
 
