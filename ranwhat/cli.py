@@ -43,7 +43,7 @@ from . import term
 # cli.usage_mod, cli.feed_mod and cli.account_mod still name them.
 _LAZY = {"introspect": "introspect", "usage_mod": "usage", "feed_mod": "feed",
          "account_mod": "account", "bench_mod": "bench",
-         "push_mod": "push"}
+         "push_mod": "push", "ledger_mod": "ledger"}
 # introspect.PROVIDERS, named here for the flags each takes, and usage's
 # default window (tests/test_work_done.py checks that they agree). bench is
 # lazy too: nothing but the bench command needs it. Its default seed is
@@ -258,6 +258,7 @@ COMMANDS = (
     ("logout", "unlink this machine and delete its token"),
     ("push", "send this machine's findings to your account, as metadata only"),
     ("hook", "opt in: ask before a high-risk Claude Code call runs"),
+    ("ledger", "keep a tamper-evident record of what watch flagged, on this machine"),
 )
 
 # The opt-in commands that link this machine to an account (account.py),
@@ -609,6 +610,107 @@ def _account(p, args):
     except KeyboardInterrupt:
         sys.stderr.write("\n  Cancelled.\n")
         return 130
+
+
+def _ledger(p, args):
+    """ranwhat ledger (ledger.py): record what watch flagged in a hash chain
+    on this machine, and check that chain. Local only: it reads agent
+    history as watch does and writes one file in ranwhat's state directory,
+    and only `record` writes it."""
+    ledger_mod = _module("ledger_mod")
+    err, out = sys.stderr, sys.stdout
+    action = args.profile or "verify"
+    if action not in ("record", "verify", "show"):
+        p.error("ledger takes record, verify or show, not %s" % action)
+    if args.head is not None and action != "verify":
+        p.error("--head is only for ledger verify")
+    for flag, value in (("--apply", args.apply), ("--token", args.token),
+                        ("--no-interactive", args.no_interactive)):
+        if value:
+            p.error("%s is not for ledger" % flag)
+    if action != "record" and args.ignore is not None:
+        p.error("--ignore is only for ledger record")
+
+    def say(stream, text):
+        stream.write("\n".join(term.wrap(text, stream=stream)) + "\n")
+
+    try:
+        if action == "verify":
+            report = ledger_mod.verify(head=args.head)
+            if args.json:
+                out.write(json.dumps(report.as_dict()) + "\n")
+            elif not report.exists and report.ok:
+                say(out, "There is no ledger yet. ranwhat ledger record starts "
+                    "one at %s." % ledger_mod.default_path())
+            elif report.ok:
+                say(out, "The ledger verifies: %d line%s, each fitting the one "
+                    "before it." % (report.entries,
+                                    "" if report.entries == 1 else "s"))
+                out.write("  head %s\n" % report.head)
+            else:
+                say(out, "The ledger does not verify: line %d %s." % (
+                    report.line or 0, report.why))
+                if report.entries:
+                    out.write("  The %d line%s before it fit. head %s\n" % (
+                        report.entries, "" if report.entries == 1 else "s",
+                        report.head))
+            return 0 if report.ok else FAIL_STATUS
+
+        if action == "show":
+            report = ledger_mod.verify()
+            items = report.items
+            if args.json:
+                out.write(json.dumps({"entries": items, **report.as_dict()}) + "\n")
+            else:
+                for entry in items[-50:]:
+                    out.write("  %5d  %s  %-12s %s\n" % (
+                        entry["n"], entry["at"] or "-", entry["agent"],
+                        ", ".join("%s:%s" % (h["rule"], h["severity"])
+                                  for h in entry["hits"])))
+                if not items:
+                    say(out, "The ledger is empty.")
+                if not report.ok:
+                    say(err, "Not everything is shown: line %d %s." % (
+                        report.line or 0, report.why))
+            return 0 if report.ok else FAIL_STATUS
+
+        if args.days < 1 or args.days > 365:
+            p.error("--days for ledger record is 1 to 365")
+        ignoring = _ignoring(args)
+        if ignoring is None:
+            return 1
+        records, counts, unread, _everywhere = _watch_scan(
+            args, unmasked=_module("push_mod").is_fixed)
+        if not sum(counts.values()):
+            if sum(unread.values()):
+                say(err, "ranwhat could read none of the %d transcripts it "
+                    "found. Nothing was recorded." % sum(unread.values()))
+                return 1
+            places = watch_mod.locations(
+                args.sources, root=args.root, state_dir=args.state_dir,
+                paths=args.paths, asked=args.source)
+            status = _said_nothing_read(places, args.days)
+            say(err, "Nothing was recorded.")
+            return status or 2
+        records = ignoring.split(records)
+        items = ledger_mod.actions(records)
+        added, held, report = ledger_mod.record(items)
+        if args.json:
+            out.write(json.dumps({"added": added, "already_recorded": held,
+                                  **report.as_dict()}) + "\n")
+            return 0
+        say(out, "Recorded %d new action%s%s; the ledger holds %d line%s."
+            % (added, "" if added == 1 else "s",
+               " (%d already there)" % held if held else "",
+               report.entries, "" if report.entries == 1 else "s"))
+        if report.entries:
+            out.write("  head %s\n" % report.head)
+            say(out, "Keep the head somewhere else: ranwhat ledger verify "
+                "--head HASH then also finds lines cut off the end.")
+        return 0
+    except ledger_mod.LedgerError as exc:
+        say(err, "ranwhat: %s" % exc)
+        return 1
 
 
 def _push(p, args):
@@ -2618,12 +2720,12 @@ def _main(argv=None):
                    choices=["check", "demo", "bench", "scan", "live",
                             "callers", "revoke", "watch", "clean", "sources",
                             "reach", "update", "login", "whoami", "logout",
-                            "push", "hook", "ignore"])
+                            "push", "hook", "ignore", "ledger"])
     p.add_argument("profile", nargs="?",
                    help="scan: path to a profile JSON. reach: a project "
                         "directory to look at. hook: install, uninstall or "
                         "status. ignore: an action's id, all, or - (ids from "
-                        "--json on stdin)")
+                        "--json on stdin). ledger: record, verify or show")
     p.add_argument("--json", action="store_true", help="emit raw JSON")
     p.add_argument("--html", metavar="PATH",
                    help="demo, scan, live: also write the report as HTML")
@@ -2658,6 +2760,11 @@ def _main(argv=None):
                    help="check, watch, clean, ignore, push: how far back to "
                         "read local agent history (default 30; push: 1 to "
                         "365)")
+    p.add_argument("--head", metavar="HASH",
+                   help="ledger verify: also require the ledger to end at this "
+                        "hash, the head ledger record printed, so lines cut off "
+                        "its end are found. Exit status %d when the ledger "
+                        "does not verify" % FAIL_STATUS)
     p.add_argument("--seed", type=int, default=None, metavar="N",
                    help="bench: draw the made-up secrets from this seed "
                         "(default %d), so a run can be repeated. Another seed "
@@ -2755,6 +2862,8 @@ def _main(argv=None):
     for flag, value in (("--dry-run", args.dry_run), ("--yes", args.yes)):
         if value and args.command != "push":
             p.error("%s is only for push" % flag)
+    if args.head is not None and args.command != "ledger":
+        p.error("--head is only for ledger")
     if args.command == "hook":
         return _hook(p, args)
     if args.command == "revoke":
@@ -2769,7 +2878,7 @@ def _main(argv=None):
         p.error("--seed is only for bench")
 
     if args.profile is not None and args.command not in ("scan", "reach",
-                                                         "ignore"):
+                                                         "ignore", "ledger"):
         # Taken and ignored, `check DIR` reported on the default history as
         # if it were DIR, and `clean DIR --apply` would have masked it.
         p.error(_takes_no_path(args.command, args.profile))
@@ -2785,8 +2894,9 @@ def _main(argv=None):
             # Accepted and ignored, a CI step would pass on any history.
             p.error("%s is only for check, watch and clean" % flag)
     if args.ignore is not None and args.command not in ("check", "watch",
-                                                        "ignore", "push"):
-        p.error("--ignore is only for check, watch, ignore and push"
+                                                        "ignore", "push",
+                                                        "ledger"):
+        p.error("--ignore is only for check, watch, ignore, push and ledger"
                 + ("; clean leaves a secret alone with keep, in its review"
                    if args.command == "clean" else ""))
     if args.no_ignore and args.command not in ("check", "watch"):
@@ -2840,6 +2950,9 @@ def _main(argv=None):
 
     if args.command == "push":
         return _push(p, args)
+
+    if args.command == "ledger":
+        return _ledger(p, args)
 
     # After the --days check: check dispatched first scanned the future for
     # --days -1 and printed an all-clear.

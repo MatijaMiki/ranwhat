@@ -90,6 +90,7 @@
     <li><a class="cmdname" href="/commands#login">login</a></li>
     <li><a class="cmdname" href="/commands#push">push</a></li>
     <li><a class="cmdname" href="/commands#hook">hook</a></li>
+    <li><a class="cmdname" href="/commands#ledger">ledger</a></li>
   </ul>
   <p class="docnav-h">Reference</p>
   <ul>
@@ -103,10 +104,10 @@
     <p class="eyebrow">Commands</p>
     <h1>Every ranwhat command</h1>
     <p class="lede">
-      Eighteen commands in one tool. Only <span class="icode">login</span>,
+      Nineteen commands in one tool. Only <span class="icode">login</span>,
       <span class="icode">whoami</span> and <span class="icode">logout</span> work with
       an account, <span class="icode">update</span> and <span class="icode">push</span>
-      need a Plus token, and the other thirteen need neither.
+      need a Plus token, and the other fourteen need neither.
       Start with <span class="icode">check</span>: it reads what your agents ran and what they
       left on disk, and changes nothing.
     </p>
@@ -120,7 +121,7 @@
       <h2>A bare ranwhat lists them all.</h2>
       <p class="lede">
         <a href="/watch">watch</a>, <a href="/clean">clean</a> and <a href="/scan">scan</a> each have a
-        page of their own. The other fifteen are below, and every flag is at the end.
+        page of their own. The other sixteen are below, and every flag is at the end.
       </p>
       <div class="term" aria-label="What a bare ranwhat prints">
         <div class="term-bar"><span>uvx ranwhat</span></div>
@@ -144,6 +145,7 @@
   <span class="c-b">logout</span>   unlink this machine and delete its token
   <span class="c-b">push</span>     send this machine's findings to your account, as metadata only
   <span class="c-b">hook</span>     opt in: ask before a high-risk Claude Code call runs
+  <span class="c-b">ledger</span>   keep a tamper-evident record of what watch flagged, on this machine
 
   Start here:
     uvx ranwhat check
@@ -701,9 +703,50 @@
   </div>
 </section>
 
+<section class="mark-5" id="ledger">
+  <div class="shell band split">
+    <div class="marginal">15 / ledger</div>
+    <div>
+      <h2>ledger: a record that shows if it was changed.</h2>
+      <p class="lede">
+        <span class="icode">ledger record</span> reads what
+        <a href="/watch">watch</a> reads and appends one line to
+        <span class="icode">~/.ranwhat/ledger.jsonl</span> for each flagged action it
+        has not recorded yet. Each line carries the SHA-256 of the line before it,
+        so a line that is edited, taken out or moved no longer fits, and
+        <span class="icode">ledger verify</span> names the first one that does not.
+      </p>
+      <div class="term" aria-label="Recording and checking the ledger">
+        <div class="term-bar"><span>ranwhat ledger</span></div>
+        <div class="term-body"><pre><span class="c-mut">$</span> ranwhat ledger record
+<span class="c-mut">$</span> ranwhat ledger verify
+<span class="c-mut">$</span> ranwhat ledger verify --head HASH
+<span class="c-mut">$</span> ranwhat ledger show</pre></div>
+      </div>
+      <p class="cmdnote">
+        A line holds the same five facts <a href="/commands#push">push</a> sends and
+        nothing else: the action&rsquo;s id (a hash), the agent, the time, and the rule
+        and severity of each hit, with its place in the file, when it was written and
+        the hashes. No command, path, evidence or secret. It runs on your machine,
+        sends nothing, and only <span class="icode">record</span> writes the file,
+        which ranwhat makes with mode 0600. The ignore file applies, as in watch.
+      </p>
+      <p class="cmdnote">
+        What a chain cannot show: lines cut off its end, or a file written again
+        whole by someone who can write to it, leave a chain that still fits.
+        <span class="icode">record</span> prints the head, the hash of the last line;
+        keep it somewhere else, and <span class="icode">verify --head HASH</span> then
+        finds both. A ledger that does not verify is not added to. Exit status 0 when
+        it verifies, 3 when it does not, 1 on an error.
+      </p>
+      <p class="flaglist">Flags: <a href="#flag-head"><span class="icode">--head</span></a>, <a href="#flag-json"><span class="icode">--json</span></a>, and for record <a href="#flag-days"><span class="icode">--days</span></a>, <a href="#flag-source"><span class="icode">--source</span></a>, <a href="#flag-ignore"><span class="icode">--ignore</span></a>.</p>
+    </div>
+  </div>
+</section>
+
 <section class="mark-5" id="flags">
   <div class="shell band split">
-    <div class="marginal">15 / Flags</div>
+    <div class="marginal">16 / Flags</div>
     <div>
       <h2>Every flag, and the commands that take it.</h2>
       <p class="lede">
@@ -714,22 +757,22 @@
         <thead><tr><th>Flag</th><th>Commands</th><th>What it does</th></tr></thead>
         <tbody>
           <tr><td><code id="flag-days">--days N</code></td>
-              <td data-label="Commands">check, watch, clean, ignore, push</td>
+              <td data-label="Commands">check, watch, clean, ignore, push, ledger record</td>
               <td data-label="What it does">How far back to read each agent's history, in days. 30 by default.</td></tr>
           <tr><td><code id="flag-seed">--seed N</code></td>
               <td data-label="Commands">bench</td>
               <td data-label="What it does">Draw the made-up secrets from this seed, a whole number from 0, so a run can be repeated. 2026 by default. Another seed gives other values and the same expectations.</td></tr>
           <tr><td><code id="flag-source">--source ID</code></td>
-              <td data-label="Commands">check, watch, clean, ignore, push,&nbsp;sources</td>
+              <td data-label="Commands">check, watch, clean, ignore, push, ledger&nbsp;record,&nbsp;sources</td>
               <td data-label="What it does">Read only this agent, and repeat it for more; every agent by default. IDs: <span class="icode">claude-code</span>, <span class="icode">codex</span>, <span class="icode">gemini</span>, <span class="icode">antigravity</span>, <span class="icode">copilot-cli</span>, <span class="icode">vscode-copilot</span>, <span class="icode">cursor</span>, <span class="icode">windsurf</span>, <span class="icode">cline</span>, <span class="icode">roo</span>, <span class="icode">kilo</span>, <span class="icode">opencode</span>, <span class="icode">continue</span>, <span class="icode">aider</span>, <span class="icode">goose</span>, <span class="icode">zed</span>, <span class="icode">warp</span>, <span class="icode">amazon-q</span>, <span class="icode">qwen</span>, <span class="icode">codebuddy</span>, <span class="icode">grok</span>, <span class="icode">droid</span>, <span class="icode">kimi-code</span>, <span class="icode">kimi</span>, <span class="icode">pi</span>, <span class="icode">omp</span>, <span class="icode">muse-code</span>, <span class="icode">mistral-vibe</span>, <span class="icode">dsh</span>, <span class="icode">openclaw</span>.</td></tr>
           <tr><td><code id="flag-path">--path ID=PATH</code></td>
-              <td data-label="Commands">check, watch, clean, ignore, push,&nbsp;sources</td>
+              <td data-label="Commands">check, watch, clean, ignore, push, ledger&nbsp;record,&nbsp;sources</td>
               <td data-label="What it does">Read this agent's history from PATH instead of its default place, one per agent. <span class="icode">sources</span> says what each PATH is.</td></tr>
           <tr><td><code id="flag-root">--root PATH</code></td>
-              <td data-label="Commands">check, watch, clean, ignore, push</td>
+              <td data-label="Commands">check, watch, clean, ignore, push, ledger record</td>
               <td data-label="What it does">Claude Code's transcript directory, <span class="icode">~/.claude/projects</span> by default. The same as <span class="icode">--path claude-code=PATH</span>.</td></tr>
           <tr><td><code id="flag-state-dir">--state-dir PATH</code></td>
-              <td data-label="Commands">check, watch, clean, ignore, push</td>
+              <td data-label="Commands">check, watch, clean, ignore, push, ledger record</td>
               <td data-label="What it does">OpenClaw's state directory, <span class="icode">~/.openclaw</span> by default. The same as <span class="icode">--path openclaw=PATH</span>.</td></tr>
           <tr><td><code id="flag-json">--json</code></td>
               <td data-label="Commands">every command but update, login, whoami and logout; push only with --dry-run or --yes; hook only with status</td>
@@ -741,7 +784,7 @@
               <td data-label="Commands">clean, ignore</td>
               <td data-label="What it does">clean: report and exit, instead of opening the review session. ignore: add the action's id without asking.</td></tr>
           <tr><td><code id="flag-ignore">--ignore PATH</code></td>
-              <td data-label="Commands">check, watch, ignore, push</td>
+              <td data-label="Commands">check, watch, ignore, push, ledger record</td>
               <td data-label="What it does">Use the ignore file at PATH, such as a repository's <span class="icode">.ranwhatignore</span>, instead of <span class="icode">~/.ranwhat/ignore</span>. check and watch exit 1 when it cannot be read; ignore makes it.</td></tr>
           <tr><td><code id="flag-no-ignore">--no-ignore</code></td>
               <td data-label="Commands">check, watch</td>
@@ -806,6 +849,9 @@
           <tr><td><code id="flag-yes">--yes</code></td>
               <td data-label="Commands">push</td>
               <td data-label="What it does">Send without asking first. Without it push asks on a terminal and refuses on a pipe.</td></tr>
+          <tr><td><code id="flag-head">--head HASH</code></td>
+              <td data-label="Commands">ledger verify</td>
+              <td data-label="What it does">Also require the ledger to end at this hash, the head <span class="icode">ledger record</span> printed, so lines cut off its end are found.</td></tr>
           <tr><td><code id="flag-scope">--scope SCOPE</code></td>
               <td data-label="Commands">hook, revoke</td>
               <td data-label="What it does">Which Claude Code settings file: <span class="icode">user</span> (<span class="icode">~/.claude/settings.json</span>, or <span class="icode">$CLAUDE_CONFIG_DIR/settings.json</span> when that is set; the default), <span class="icode">project</span> (<span class="icode">.claude/settings.json</span> here) or <span class="icode">local</span> (<span class="icode">.claude/settings.local.json</span> here). <span class="icode">hook status</span> shows all three without it.</td></tr>

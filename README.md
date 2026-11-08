@@ -62,6 +62,10 @@ leaking a second time but doesn't un-leak it, so rotate it.
 If you want Claude Code to ask you before a high-risk command runs, there's
 an opt-in hook: `ranwhat hook install`.
 
+To keep a record of what `watch` flagged that shows if it was changed later,
+`ranwhat ledger record` appends it to a hash chain on your machine, and
+`ranwhat ledger verify` names the first line that no longer fits.
+
 ## Free and paid
 
 Everything that runs on your machine is free and stays free. Plus is €12 a
