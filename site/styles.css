@@ -796,3 +796,14 @@ main p a:not([class]):hover,main td a:not([class]):hover,main .v a:not([class]):
 .cell p a{position:relative;z-index:1}
 @media(prefers-reduced-motion:reduce){.cell h3 a::after{transition:none}}
 .hero .lede+.cmdrow{margin-top:24px}
+
+/* ---------- terminal screenshots (/install, /commands), click to enlarge (zoom.js) ---------- */
+.shot{margin:26px 0 6px;max-width:720px}
+.shot__zoom{display:block;width:100%;padding:0;border:0;background:none;cursor:zoom-in}
+.shot__zoom:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+.shot img{display:block;width:100%;height:auto;border-radius:10px}
+.shot figcaption{margin-top:10px;font-size:14px;color:var(--muted)}
+.zoom-veil{position:fixed;inset:0;z-index:70;background:rgba(8,10,12,.6);opacity:0;cursor:zoom-out}
+.zoom-big{position:fixed;z-index:71;border-radius:10px;object-fit:fill;cursor:zoom-out}
+.zoom-close{position:fixed;left:16px;bottom:16px;z-index:72;min-height:40px;padding:0 16px;border:1px solid var(--ink);
+  background:var(--surface);color:var(--ink);font:inherit;font-size:14px;cursor:pointer;opacity:0}
