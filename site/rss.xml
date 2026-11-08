@@ -6,7 +6,14 @@
   <atom:link href="https://ranwhat.com/rss.xml" rel="self" type="application/rss+xml"/>
   <description>What each release of ranwhat added and fixed: the coding agents it reads, the rules it gained, and what it got wrong before.</description>
   <language>en</language>
-  <lastBuildDate>Sat, 31 Oct 2026 00:12:24 +0000</lastBuildDate>
+  <lastBuildDate>Sun, 08 Nov 2026 21:17:07 +0000</lastBuildDate>
+  <item>
+    <title>ranwhat 0.9.0: A ledger of what watch flagged, with verify</title>
+    <link>https://ranwhat.com/updates#v0-9-0</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-9-0</guid>
+    <pubDate>Sun, 08 Nov 2026 21:17:07 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;New: &lt;a href="https://ranwhat.com/commands#ledger"&gt;ranwhat ledger&lt;/a&gt; keeps a local, append-only record of what &lt;a href="https://ranwhat.com/watch"&gt;watch&lt;/a&gt; flagged, in &lt;span class="icode"&gt;~/.ranwhat/ledger.jsonl&lt;/span&gt;. It is opt in and free. &lt;span class="icode"&gt;ledger record&lt;/span&gt; adds one line per flagged action, holding only the facts &lt;span class="icode"&gt;push&lt;/span&gt; sends (the action id, the agent, the time, and each rule and its severity), never a command, a path or a secret. Each line carries the SHA-256 of the line before it, so the lines form a chain.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;ledger verify&lt;/span&gt; names the first line that no longer fits and why: changed, taken out, put in, moved, cut short or not a ledger line, and exits with 3. A chain alone cannot show that lines were cut off the end or that the whole file was rewritten, so save the head that &lt;span class="icode"&gt;ledger record&lt;/span&gt; prints somewhere else and pass it with &lt;span class="icode"&gt;--head&lt;/span&gt;.&lt;/li&gt;&lt;li&gt;&lt;span class="icode"&gt;ledger record&lt;/span&gt; refuses to add to a ledger that does not verify, one writer at a time holds the chain, and a ledger that is a symbolic link is refused. Actions in your &lt;a href="https://ranwhat.com/commands#ignore"&gt;ignore&lt;/a&gt; file are left out. It sends nothing over the network.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
   <item>
     <title>ranwhat 0.8.0: Thirty coding agents, ignore, push and sixteen watch rules</title>
     <link>https://ranwhat.com/updates#v0-8-0</link>

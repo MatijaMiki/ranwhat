@@ -126,6 +126,29 @@
         <span class="icode nowrap">pipx upgrade ranwhat</span>.
       </p>
       <div class="releases">
+        <article class="release" id="v0-9-0">
+          <p class="rel-meta"><span class="rel-v">0.9.0</span> <time datetime="2026-11-08T21:17:07Z">8 November 2026</time></p>
+          <h3>A ledger of what watch flagged, with verify</h3>
+          <ul>
+            <li>New: <a href="/commands#ledger">ranwhat ledger</a> keeps a local, append-only record
+              of what <a href="/watch">watch</a> flagged, in
+              <span class="icode">~/.ranwhat/ledger.jsonl</span>. It is opt in and free.
+              <span class="icode">ledger record</span> adds one line per flagged action, holding only
+              the facts <span class="icode">push</span> sends (the action id, the agent, the time,
+              and each rule and its severity), never a command, a path or a secret. Each line
+              carries the SHA-256 of the line before it, so the lines form a chain.</li>
+            <li><span class="icode">ledger verify</span> names the first line that no longer fits
+              and why: changed, taken out, put in, moved, cut short or not a ledger line, and exits
+              with 3. A chain alone cannot show that lines were cut off the end or that the whole
+              file was rewritten, so save the head that <span class="icode">ledger record</span>
+              prints somewhere else and pass it with <span class="icode">--head</span>.</li>
+            <li><span class="icode">ledger record</span> refuses to add to a ledger that does not
+              verify, one writer at a time holds the chain, and a ledger that is a symbolic link is
+              refused. Actions in your <a href="/commands#ignore">ignore</a> file are left out. It
+              sends nothing over the network.</li>
+          </ul>
+        </article>
+
         <article class="release" id="v0-8-0">
           <p class="rel-meta"><span class="rel-v">0.8.0</span> <time datetime="2026-10-31T00:12:24Z">31 October 2026</time></p>
           <h3>Thirty coding agents, ignore, push and sixteen watch rules</h3>
