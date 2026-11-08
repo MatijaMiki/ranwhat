@@ -80,6 +80,7 @@
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
     <li><a href="/guides/claude-code-hooks-security" aria-current="page">Hooks that block calls</a></li>
+    <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
@@ -306,7 +307,11 @@ exit 0</pre></div>
       <p style="margin-top:22px">
         Exit 2 is a blocking error. For PreToolUse it cancels the call, and the
         text on stderr is the reason Claude sees. It wins even over a JSON
-        <span class="icode">"allow"</span>.
+        <span class="icode">"allow"</span>. A complete exit-2 hook for
+        <span class="icode">rm -rf</span> and <span class="icode">curl | sh</span>,
+        with a test you can run, is in
+        <a href="/guides/block-command-claude-code-pretooluse-hook">how to block
+        a command with a PreToolUse hook</a>.
       </p>
       <h3 style="margin-top:34px">Exit 0 with JSON</h3>
       <p>
@@ -564,6 +569,7 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"/Users/you/app/.env"}}' \
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
           <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
           <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
           <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>

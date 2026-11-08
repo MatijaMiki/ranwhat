@@ -130,6 +130,7 @@
         asks for the newest release. <span class="icode">pipx run ranwhat check</span>
         works the same way.
       </p>
+      <figure class="shot"><picture><source type="image/webp" srcset="/shots/ranwhat-check-actions-960.webp 960w, /shots/ranwhat-check-actions-1440.webp 1440w" sizes="(max-width: 720px) 100vw, 720px"><img src="/shots/ranwhat-check-actions-1440.png" width="1440" height="1506" alt="ranwhat check in a terminal: 5 critical and 4 high findings, such as a file piped to the network, a token in a tool call and docker system prune, each with time, agent and command" loading="lazy" decoding="async"></picture><figcaption>What <span class="icode">ranwhat check</span> prints: the risky actions, newest first. Made-up history; no real data.</figcaption></figure>
     </div>
   </div>
 </section>
@@ -153,6 +154,26 @@ brew install MatijaMiki/ranwhat/ranwhat</pre></div>
         what their credentials allow. A bare <span class="icode">ranwhat</span>
         lists every command.
       </p>
+      <h3 style="margin-top:34px">Inside your agent</h3>
+      <p style="font-size:14.5px;color:var(--muted)">
+        In Claude Code, the plugin adds <span class="icode">/ranwhat:check</span>,
+        <span class="icode">/ranwhat:watch</span>, <span class="icode">/ranwhat:reach</span>
+        and <span class="icode">/ranwhat:guard</span>, and installs no hook:
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>/plugin marketplace add MatijaMiki/ranwhat
+/plugin install ranwhat --marketplace MatijaMiki/ranwhat</pre></div>
+      </div>
+      <p style="margin-top:18px;font-size:14.5px;color:var(--muted)">
+        For Codex, Cursor, Gemini CLI and other agents, the same skill is on
+        <a href="https://skills.sh/matijamiki/ranwhat/ranwhat">skills.sh</a>.
+        It tells the agent when to run ranwhat and never to print a secret:
+      </p>
+      <div class="cmd" style="max-width:640px">
+        <span class="dollar">$</span>
+        <span id="skill-add">npx skills add MatijaMiki/ranwhat</span>
+        <button class="copy" data-copy="#skill-add">Copy</button>
+      </div>
     </div>
   </div>
 </section>
@@ -234,6 +255,7 @@ brew install MatijaMiki/ranwhat/ranwhat</pre></div>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
           <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
           <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
           <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
@@ -269,5 +291,6 @@ brew install MatijaMiki/ranwhat/ranwhat</pre></div>
 </footer>
 <script src="/copy.js" defer></script>
 <script src="/consent.js" defer></script>
+<script src="/zoom.js" defer></script>
 </body>
 </html>

@@ -37,6 +37,15 @@ the guard stays off until you ask for it with `/ranwhat:guard`. It runs the
 same commands through `uvx`, pinned to the ranwhat release it ships with, so
 it needs `uv` on your path.
 
+### As an agent skill
+
+For Codex, Cursor, Gemini CLI and other agents, the same skill is on
+[skills.sh](https://skills.sh/matijamiki/ranwhat/ranwhat):
+
+```
+npx skills add MatijaMiki/ranwhat
+```
+
 Python 3.9+. No dependencies, and nothing is built on your machine.
 
 ## Commands
