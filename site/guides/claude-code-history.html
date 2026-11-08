@@ -36,7 +36,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Claude Code stores your conversation history","description":"Claude Code history is stored as plaintext JSONL in ~/.claude/projects and deleted after 30 days. How to find, view and delete it, and what it holds.","datePublished":"2026-10-02","dateModified":"2026-10-15","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Claude Code stores your conversation history","description":"Claude Code history is stored as plaintext JSONL in ~/.claude/projects and deleted after 30 days. How to find, view and delete it, and what it holds.","datePublished":"2026-10-02","dateModified":"2026-11-08","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -80,6 +80,7 @@
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
     <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+    <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
@@ -127,7 +128,7 @@
       </div>
     </div>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code documentation and the reports under Sources. Published 2 October 2026, updated <time datetime="2026-10-15">15 October 2026</time>.
+      Checked against the Claude Code documentation and the reports under Sources. Published 2 October 2026, updated <time datetime="2026-11-08">8 November 2026</time>.
     </p>
   </div>
 </section>
@@ -526,9 +527,25 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
   </div>
 </section>
 
+<section class="mark-3" id="questions">
+  <div class="shell band split">
+    <div class="marginal">06 / Questions</div>
+    <div>
+      <h2>Common questions about Claude Code history</h2>
+      <div class="faqs">
+        <div class="faq"><h3>Can I see Claude Code history?</h3><p>Yes. Claude Code saves every session on your machine as a plaintext JSONL file under <span class="icode">~/.claude/projects</span>, and keeps it for 30 days by default. Run <span class="icode">claude --resume</span> to pick a past session and open it again, or read the files directly.</p></div>
+        <div class="faq"><h3>Does Claude Code have history?</h3><p>It keeps two kinds. Each session's transcript, with every message, tool call and tool result, is deleted after <span class="icode">cleanupPeriodDays</span>, 30 by default. <span class="icode">~/.claude/history.jsonl</span> holds every prompt you typed, for up-arrow recall and <span class="icode">Ctrl+R</span> search, and the sweep never deletes it.</p></div>
+        <div class="faq"><h3>Where is Claude Code session history stored?</h3><p>In <span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</span>, where <span class="icode">&lt;project&gt;</span> is the working directory with every character that is not a letter or digit replaced by a hyphen. On Windows, <span class="icode">~/.claude</span> is <span class="icode">%USERPROFILE%\.claude</span>. With <span class="icode">CLAUDE_CONFIG_DIR</span> set, the files are under that directory instead.</p></div>
+        <div class="faq"><h3>How do I view Claude Code session history from the CLI?</h3><p><span class="icode">claude --resume</span> (or <span class="icode">-r</span>) opens a picker of past sessions and takes an optional search term. <span class="icode">claude --resume &lt;session-id&gt;</span> opens one session, and <span class="icode">claude --continue</span> (or <span class="icode">-c</span>) continues the most recent conversation in the current directory. Inside a session, <span class="icode">/export</span> saves it as plain text. <span class="icode">ls -lt ~/.claude/projects/</span> lists the project folders, most recent first.</p></div>
+        <div class="faq"><h3>What is claude-history on GitHub?</h3><p>Not part of Claude Code, which has no <span class="icode">claude-history</span> command. The name is used by community projects that read the same JSONL files and display or search them. The format is internal and changes between releases, so check that a tool supports your Claude Code version, and remember the files hold whatever the sessions saw, secrets included, before you point any tool at them.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="mark-5">
   <div class="shell band split">
-    <div class="marginal">06 / Sources</div>
+    <div class="marginal">07 / Sources</div>
     <div>
       <h2>Sources</h2>
       <p class="lede">
@@ -605,6 +622,7 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
           <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
           <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
           <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>

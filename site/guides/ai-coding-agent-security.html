@@ -80,6 +80,7 @@
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
     <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+    <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
@@ -237,7 +238,7 @@ claude --permission-mode default   <span class="c-mut">Manual mode: ask before e
         <div class="row"><span class="k">Misses</span>
           <span class="v"><span class="icode">grep -r pattern .</span> run from the folder that holds the file, and a Python or Node script that opens files itself.</span></div>
         <div class="row"><span class="k">Bash rules</span>
-          <span class="v">They match the command as written. As a deny rule, <span class="icode">Bash(rm *)</span> stops <span class="icode">rm -rf build/</span>, not <span class="icode">/bin/rm -rf build/</span> or <span class="icode">bash -c 'rm -rf build/'</span>. They are not a security boundary around the program.</span></div>
+          <span class="v">They match the command as written. As a deny rule, <span class="icode">Bash(rm *)</span> stops <span class="icode">rm -rf build/</span>, not <span class="icode">/bin/rm -rf build/</span> or <span class="icode">bash -c 'rm -rf build/'</span>. They are not a security boundary around the program. A <a href="/guides/block-command-claude-code-pretooluse-hook">PreToolUse hook that blocks a command</a> can match those forms too.</span></div>
       </div>
 
       <h3 style="margin-top:40px">The sandbox</h3>
@@ -748,6 +749,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
           <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
           <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
           <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>

@@ -36,7 +36,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-audit-log#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"A Claude Code audit log from what is already on disk","description":"By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit trail, add a hook or OpenTelemetry, and know the gaps.","datePublished":"2026-10-02","dateModified":"2026-10-20","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Audit trail"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code audit log","item":"https://ranwhat.com/guides/claude-code-audit-log"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-audit-log#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"A Claude Code audit log from what is already on disk","description":"By default Claude Code keeps 30 days of every tool call on disk. Read it back as an audit trail, add a hook or OpenTelemetry, and know the gaps.","datePublished":"2026-10-02","dateModified":"2026-11-08","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Audit trail"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code audit log","item":"https://ranwhat.com/guides/claude-code-audit-log"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -80,6 +80,7 @@
     <li><a href="/guides/claude-code-audit-log" aria-current="page">Audit log</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
     <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+    <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
@@ -119,7 +120,7 @@
     </div>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
       Checked against Claude Code's documentation, the advisories and
-      research under Sources, and ranwhat's source. Published 2 October 2026, updated <time datetime="2026-10-20">20 October 2026</time>.
+      research under Sources, and ranwhat's source. Published 2 October 2026, updated <time datetime="2026-11-08">8 November 2026</time>.
     </p>
   </div>
 </section>
@@ -177,6 +178,17 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
         reads better than raw JSON. Claude Code's documentation says the line
         format is internal and changes between versions, so any script that
         parses it can break on a release, ranwhat included.
+      </p>
+      <h3 style="margin-top:34px">Is there a Claude Code activity log?</h3>
+      <p>
+        Not as a separate file. The closest thing to a Claude Code activity
+        log is the transcript above: every tool call of every session, for as
+        long as <span class="icode">cleanupPeriodDays</span> keeps it.
+        <span class="icode">history.jsonl</span> adds the prompts, not what
+        ran. To add audit logs to Claude Code going forward, use the
+        <a href="#hook">hook</a> below for a log file on this machine, or
+        <a href="#otel">OpenTelemetry</a> to send each tool call to a
+        collector you run.
       </p>
     </div>
   </div>
@@ -305,7 +317,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
   </div>
 </section>
 
-<section class="mark-3">
+<section class="mark-3" id="hook">
   <div class="shell band split">
     <div class="marginal">03 / Hook</div>
     <div>
@@ -367,7 +379,7 @@ claude --resume &lt;session-id&gt;                   <span class="c-mut"># then 
   </div>
 </section>
 
-<section class="mark-4">
+<section class="mark-4" id="otel">
   <div class="shell band split">
     <div class="marginal">04 / OpenTelemetry</div>
     <div>
@@ -571,6 +583,7 @@ uvx ranwhat watch --days 30    <span class="c-mut"># what ran while they may not
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
           <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
           <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
           <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
