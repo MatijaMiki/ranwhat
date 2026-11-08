@@ -64,6 +64,7 @@ MAX_BYTES = 64 * 1024 * 1024
 
 _O_BINARY = getattr(os, "O_BINARY", 0)
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_WINDOWS = os.name == "nt"
 
 
 class LedgerError(Exception):
@@ -312,6 +313,12 @@ def _locked(path):
                 raise LedgerError(
                     "another ranwhat is writing %s (or died holding %s). "
                     "Nothing was recorded." % (path, lock))
+            time.sleep(0.02)
+        except PermissionError as exc:
+            # Windows answers "access denied", not "exists", while another
+            # process is deleting the lock file. That is a busy lock.
+            if not _WINDOWS or time.monotonic() > deadline:
+                raise LedgerError("cannot lock %s: %s" % (path, exc.strerror or exc))
             time.sleep(0.02)
         except OSError as exc:
             raise LedgerError("cannot lock %s: %s" % (path, exc.strerror or exc))

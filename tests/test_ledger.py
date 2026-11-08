@@ -410,6 +410,40 @@ class WritingAtOnce(_Dir):
         self.assertIn("Nothing was recorded", str(caught.exception))
         self.assertEqual(ledger.verify(self.path).entries, 1)
 
+    def _denied(self, times):
+        """os.open that refuses the lock file `times` times, as Windows does
+        while another process is deleting it."""
+        real, left = os.open, [times]
+
+        def fake(name, *args, **kwargs):
+            if str(name).endswith(".lock") and left[0]:
+                left[0] -= 1
+                raise PermissionError(13, "Permission denied", name)
+            return real(name, *args, **kwargs)
+        return mock.patch("ranwhat.ledger.os.open", fake)
+
+    def test_on_windows_a_lock_being_deleted_is_waited_for(self):
+        self.make(1)
+        with mock.patch.object(ledger, "_WINDOWS", True), self._denied(3):
+            ledger.record([item(2)], self.path)
+        self.assertEqual(ledger.verify(self.path).entries, 2)
+
+    def test_on_windows_a_lock_denied_for_good_says_so_in_the_end(self):
+        self.make(1)
+        with mock.patch.object(ledger, "_WINDOWS", True), \
+                mock.patch.object(ledger, "LOCK_WAIT", 0.1), self._denied(10**6):
+            with self.assertRaises(ledger.LedgerError) as caught:
+                ledger.record([item(2)], self.path)
+        self.assertIn("cannot lock", str(caught.exception))
+        self.assertEqual(ledger.verify(self.path).entries, 1)
+
+    def test_elsewhere_a_denied_lock_is_an_error_at_once(self):
+        self.make(1)
+        with mock.patch.object(ledger, "_WINDOWS", False), self._denied(1):
+            with self.assertRaises(ledger.LedgerError):
+                ledger.record([item(2)], self.path)
+        self.assertEqual(ledger.verify(self.path).entries, 1)
+
     def test_the_lock_is_let_go_when_the_ledger_is_refused(self):
         self.make(2)
         self.edit(1, hits=[{"rule": "cred.read", "severity": "medium"}])
