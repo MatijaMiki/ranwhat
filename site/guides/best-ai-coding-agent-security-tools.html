@@ -129,7 +129,7 @@
       Sources, on 20 October 2026, and
       re-checked every 30 to 90 days. HOL Guard was added on
       <time datetime="2026-11-09">9 November 2026</time>, partly from test
-      evidence its maker supplied.
+      evidence its maker supplied and partly from our own live test on Cursor.
     </p>
   </div>
 </section>
@@ -289,6 +289,8 @@
         that led to them, which ranwhat does not do.
       </p>
       <div class="rows">
+        <div class="row"><span class="k">Links</span>
+          <span class="v"><a href="https://stroq.dev">stroq.dev</a>, <a href="https://github.com/AGGIB/Stroq">GitHub</a></span></div>
         <div class="row"><span class="k">Checks met</span>
           <span class="v">4 of 5. It reads the history of three agents, below the five the first check asks for.</span></div>
         <div class="row"><span class="k">Agents</span>
@@ -313,19 +315,26 @@
         actions as they happen and does not read past sessions.
       </p>
       <p>
-        We have not installed or run it. HOL asked to be listed and sent us
-        hook-level tests of version 3.58.0, run by HOL on 3 November 2026 on
-        one Debian Linux machine with its default policy. Each test fed a
-        sample payload to the hook that Guard had installed. We read the raw
-        results and the test scripts, and the results match what HOL reports.
-        Treat the test results below as vendor-supplied: no live Claude Code,
-        Codex or Cursor session took part.
+        We ran it ourselves on Cursor only. On 9 November 2026 we installed
+        Guard 3.59.0 with Cursor 3.29.9 in a throwaway macOS 14 virtual
+        machine, and sent requests to a signed-in Cursor agent. HOL asked to
+        be listed and also sent us hook-level tests of version 3.58.0, run by
+        HOL on 3 November 2026 on one Debian Linux machine with its default
+        policy. Each of those tests fed a sample payload to the hook that
+        Guard had installed. We read the raw results and the test scripts,
+        and the results match what HOL reports. Treat HOL's results as
+        vendor-supplied: no live Claude Code, Codex or Cursor session took
+        part in them, and for Claude Code and Codex they are all we have.
       </p>
       <div class="rows">
+        <div class="row"><span class="k">Links</span>
+          <span class="v"><a href="https://hol.org/guard">hol.org/guard</a>, <a href="https://github.com/hashgraph-online/hol-guard">GitHub</a></span></div>
         <div class="row"><span class="k">Checks met</span>
           <span class="v">3 of 5 (can block, stays local, open source). It does not read saved history or look for credentials in it.</span></div>
         <div class="row"><span class="k">Agents</span>
-          <span class="v">Its README lists adapters for sixteen, among them Claude Code, Codex, Cursor, GitHub Copilot CLI, Gemini CLI and Cline. HOL's tests cover only Claude Code, Codex and Cursor, and Cursor itself was not installed for them.</span></div>
+          <span class="v">Its README lists adapters for sixteen, among them Claude Code, Codex, Cursor, GitHub Copilot CLI, Gemini CLI and Cline. HOL's tests cover only Claude Code, Codex and Cursor, and Cursor itself was not installed for them. We tested Cursor only.</span></div>
+        <div class="row"><span class="k">Tested by us</span>
+          <span class="v">In one live Cursor session, Guard denied <span class="icode">rm -rf</span>, reading <span class="icode">.env</span> with the file tool and <span class="icode">npm install</span>, and queued each for approval. It blocked <span class="icode">curl | sh</span> outright. The agent stopped and none of them ran. After we chose Allow just this once on Guard's local page, the agent's retry of <span class="icode">rm -rf</span> ran and the folder was deleted. The same command sent again later was denied, so that approval was good for one use. It also denied <span class="icode">cat .env</span>, a delete wrapped in <span class="icode">bash -c</span> and the agent running Guard's own approve command, and it allowed <span class="icode">ls</span> and an ordinary file edit. With Guard's background service stopped, the next hook restarted it and still denied <span class="icode">rm -rf</span>, which took about four seconds.</span></div>
         <div class="row"><span class="k">Tested by HOL</span>
           <span class="v">On all three agents, Guard's hook returned a deny and queued an approval for <span class="icode">rm -rf</span>, for reading <span class="icode">.env</span> with the file tool and with <span class="icode">cat</span>, for an unreviewed MCP call and for <span class="icode">npm install</span>. It blocked <span class="icode">curl | sh</span> outright and allowed <span class="icode">ls</span>. On Codex the hook waits for your answer, about 123 seconds in these tests, then denies if nobody replies.</span></div>
         <div class="row"><span class="k">Data</span>
@@ -333,9 +342,9 @@
         <div class="row"><span class="k">Licence and price</span>
           <span class="v">Apache-2.0. Local protection is free and unmetered. Guard Cloud is a paid add-on for history, sync and team policy, and we did not check its plans.</span></div>
         <div class="row"><span class="k">Limits</span>
-          <span class="v">HOL's tests show what Guard returns to an agent, not that a live agent obeyed it. The step where you approve and the agent's retry goes through was not reproduced: replaying the same call was queued again, and HOL has not confirmed why. It was one run on Linux, so macOS and Windows are untested, and file writes are hooked but were not tested. In 3.58.0 there is no prompt hook for Claude Code or Cursor, and after-action events are logged only. Guard sees only what passes through an agent's hooks, so commands you type yourself and Cursor edits that bypass its hooks are outside it. HOL does not claim it stops every attack, prompt injection included. Version 3.59.0 was released after these tests and we have seen no results for it.</span></div>
+          <span class="v">HOL's tests show what Guard returns to an agent, not that a live agent obeyed it, and we confirmed that only on Cursor. In HOL's tests the step where you approve and the agent's retry goes through was not reproduced: replaying the same call was queued again, and HOL has not confirmed why. In our test the retry worked after approval on the local page. Approving with <span class="icode">hol-guard approvals approve</span> closed the request but the retry was still denied. The link the agent showed in chat opened to a sign-in error, and <span class="icode">hol-guard approvals open</span> reached the request. Cursor passes a file's content to the hook, and its own local hook log kept our fake <span class="icode">.env</span> value even though the read was denied. A delete written as a Python one-liner was not queued for review. Guard sent it to a contained run, which failed with an authorization error, so it did not run, and we cannot say what a working contained run would have done. Each test was one run, on Linux for HOL and macOS for us, so Windows is untested. File writes are hooked, but neither test tried a risky one. We did not test MCP calls in the live session, or a hook that fails outright. In 3.58.0 there is no prompt hook for Claude Code or Cursor, and after-action events are logged only. Guard sees only what passes through an agent's hooks, so commands you type yourself and Cursor edits that bypass its hooks are outside it. HOL does not claim it stops every attack, prompt injection included. HOL's results are for 3.58.0 and ours are for 3.59.0.</span></div>
         <div class="row"><span class="k">Best suited for</span>
-          <span class="v">A developer who wants to approve risky commands, package installs and MCP calls across several agents, and is comfortable that its behaviour in live sessions has not been independently shown yet.</span></div>
+          <span class="v">A developer who wants to approve risky commands, package installs and MCP calls across several agents, and accepts that we have confirmed its behaviour in a live session only on Cursor.</span></div>
       </div>
 
       <h3 id="ggshield" style="margin-top:44px">4. GitGuardian ggshield, best for teams that want enforcement and one account</h3>
@@ -348,6 +357,8 @@
         it the strongest enforcement on this list.
       </p>
       <div class="rows">
+        <div class="row"><span class="k">Links</span>
+          <span class="v"><a href="https://www.gitguardian.com/">gitguardian.com</a>, <a href="https://github.com/GitGuardian/ggshield">GitHub</a></span></div>
         <div class="row"><span class="k">Checks met</span>
           <span class="v">2 of 5 (can block, open source).</span></div>
         <div class="row"><span class="k">Agents</span>
@@ -372,6 +383,8 @@
         a successor project.
       </p>
       <div class="rows">
+        <div class="row"><span class="k">Links</span>
+          <span class="v"><a href="https://gitleaks.io/">gitleaks.io</a>, <a href="https://github.com/gitleaks/gitleaks">GitHub</a></span></div>
         <div class="row"><span class="k">Checks met</span>
           <span class="v">2 of 5 (stays local, open source).</span></div>
         <div class="row"><span class="k">Agents</span>
@@ -397,6 +410,8 @@
         Agent Scan examines the tools themselves.
       </p>
       <div class="rows">
+        <div class="row"><span class="k">Links</span>
+          <span class="v"><a href="https://snyk.io/">snyk.io</a>, <a href="https://github.com/snyk/agent-scan">GitHub</a></span></div>
         <div class="row"><span class="k">Checks met</span>
           <span class="v">1 of 5 (open source). It scans configuration, not transcripts, and it reports instead of blocking.</span></div>
         <div class="row"><span class="k">Agents</span>
@@ -420,6 +435,8 @@
         against the provider.
       </p>
       <div class="rows">
+        <div class="row"><span class="k">Links</span>
+          <span class="v"><a href="https://trufflesecurity.com/">trufflesecurity.com</a>, <a href="https://github.com/trufflesecurity/trufflehog">GitHub</a></span></div>
         <div class="row"><span class="k">Checks met</span>
           <span class="v">1 of 5 (open source).</span></div>
         <div class="row"><span class="k">Agents</span>
@@ -642,7 +659,7 @@ Read locally. Nothing was transmitted.</pre></div>
         <div class="faq"><h3>What does it cost to secure a coding agent?</h3><p>ranwhat, Stroq, Gitleaks and TruffleHog are free and open source. HOL Guard is free and open source locally, with a paid optional Guard Cloud whose plans we did not check. ggshield and Snyk Agent Scan are open-source clients that need an account with their vendor, and we did not check those plans. ranwhat's paid Plus is &euro;12 a month per organisation and covers only what needs a server.</p></div>
         <div class="faq"><h3>What data does each tool send off my machine?</h3><p>ranwhat and Stroq work locally, and ranwhat goes online only for commands that check a token or talk to ranwhat.com. HOL Guard needs no account, can look up package metadata on public registries, and sends more only if you connect its optional Cloud or turn on plugin counts. ggshield and Snyk Agent Scan need an account: Snyk says it sends configuration and skill content with secrets redacted, and ggshield's page does not say what it sends. Gitleaks scans locally, and TruffleHog sends a found secret to its provider to verify it unless you switch that off.</p></div>
         <div class="faq"><h3>How do I check MCP servers and skills for malicious instructions?</h3><p>Run a scanner built for it, such as Snyk Agent Scan, and read each server's configuration yourself. <span class="icode">ranwhat reach</span> lists the servers and credential files your agents can reach and flags risky shapes, but it does not inspect a server's tool descriptions. The <a href="/guides/mcp-server-security-coding-agents">MCP server guide</a> covers what to approve.</p></div>
-        <div class="faq"><h3>How current is this comparison?</h3><p>Every fact comes from a project's own documentation as of 14 October 2026, except HOL Guard, added on 9 November 2026 from its documentation and from tests its maker supplied. We re-check this page every 30 to 90 days. If something here is wrong, <a href="/contact">tell us</a> and we will correct it and date the change.</p></div>
+        <div class="faq"><h3>How current is this comparison?</h3><p>Every fact comes from a project's own documentation as of 14 October 2026, except HOL Guard, added on 9 November 2026 from its documentation, from tests its maker supplied and from our own live test on Cursor. We re-check this page every 30 to 90 days. If something here is wrong, <a href="/contact">tell us</a> and we will correct it and date the change.</p></div>
       </div>
     </div>
   </div>
