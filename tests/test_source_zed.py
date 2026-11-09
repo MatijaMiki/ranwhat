@@ -793,7 +793,10 @@ class Compressed(ZedCase):
             calls = self.calls(db)
         self.assertEqual([c.session for c in calls], ["p"])
         self.assertEqual(self.src.counts["unparsed"], 1)
-        self.assertNotIn("ls", err.getvalue().replace("rows", ""))
+        # The warning names the store's path, and the random temp folder in
+        # it can contain "ls" by chance.
+        warning = err.getvalue().replace(self.home, "")
+        self.assertNotIn("ls", warning.replace("rows", ""))
 
     def test_truncated_and_garbage_zstd_with_a_real_decoder(self):
         if not _zstd.available():
