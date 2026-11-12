@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code audit log tools: ranwhat, suvadu, cc-audit-log</title>
+<meta name="description" content="Three free tools that show which commands Claude Code ran. ranwhat and cc-audit-log read what is already on disk; suvadu records from the day you add its hooks.">
+<link rel="canonical" href="https://ranwhat.com/guides/claude-code-audit-log-tools">
+<meta name="ai-summary" content="Three free tools that show which commands Claude Code ran. ranwhat and cc-audit-log read what is already on disk; suvadu records from the day you add its hooks.">
+<link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/claude-code-audit-log-tools.md">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/claude-code-audit-log-tools">
+<meta property="og:title" content="Claude Code audit log tools: ranwhat, suvadu, cc-audit-log">
+<meta property="og:description" content="Three free tools that show which commands Claude Code ran. ranwhat and cc-audit-log read what is already on disk; suvadu records from the day you add its hooks.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Claude Code audit log tools: ranwhat, suvadu, cc-audit-log">
+<meta name="twitter:description" content="Three free tools that show which commands Claude Code ran. ranwhat and cc-audit-log read what is already on disk; suvadu records from the day you add its hooks.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-audit-log-tools#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Claude Code audit log tools compared: ranwhat, suvadu and cc-audit-log","description":"Three free tools that show which commands Claude Code ran. ranwhat and cc-audit-log read what is already on disk; suvadu records from the day you add its hooks.","datePublished":"2026-11-12","dateModified":"2026-11-12","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-audit-log-tools","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Audit trail"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Audit log tools compared","item":"https://ranwhat.com/guides/claude-code-audit-log-tools"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+  <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools" aria-current="page">Audit log tools</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+    <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Audit log tools compared</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Claude Code audit log tools compared: ranwhat, suvadu and cc-audit-log</h1>
+    <p class="lede">
+      Three free tools answer "which commands did Claude Code run?". They
+      differ in one way that decides the choice: ranwhat and cc-audit-log
+      read the transcripts already on your disk, so they work on sessions
+      from before you installed anything. suvadu records through hooks, so
+      it starts from the day you set it up and keeps more about each command
+      from then on. This page is written by ranwhat's maker; every claim
+      about the other two comes from their own pages, listed under Sources.
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-hero">uvx ranwhat watch</span>
+        <button class="copy" data-copy="#cmd-hero">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against each tool's site, README and changelog under Sources,
+      and ranwhat's source. We did not run suvadu or cc-audit-log.
+      Published <time datetime="2026-11-12">12 November 2026</time>.
+    </p>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Answer</div>
+    <div>
+      <h2>The short answer</h2>
+      <div class="rows">
+        <div class="row"><span class="k">Something already went wrong</span>
+          <span class="v"><strong>ranwhat.</strong> It reads the history your agents already wrote, so it can show a session from last week with nothing installed beforehand. <span class="icode">uvx ranwhat watch</span> runs it once without installing.</span></div>
+        <div class="row"><span class="k">A record from now on</span>
+          <span class="v"><strong>suvadu.</strong> Once its hooks are in, it keeps every command in its own database with the exit code, how long it took, the folder and the git branch, next to the commands you typed yourself.</span></div>
+        <div class="row"><span class="k">A quick timeline</span>
+          <span class="v"><strong>cc-audit-log.</strong> One small script, run with <span class="icode">npx</span>, that prints what Claude Code did today. It reads Claude Code only, and its repository was archived in July 2026.</span></div>
+        <div class="row"><span class="k">Both</span>
+          <span class="v">ranwhat and suvadu do not get in each other's way. One reads transcripts, the other writes its own database, and neither changes what the other sees.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Compare</div>
+    <div>
+      <h2>Side by side</h2>
+      <p class="lede">
+        What each tool's own pages say, as of 12 November 2026. "Not
+        described" means we found no mention of it there.
+      </p>
+      <table class="stack">
+        <thead><tr><th>Tool</th><th>Gets its record from</th><th>Sessions before install</th><th>Agents</th><th>Leaked keys</th><th>Can block</th></tr></thead>
+        <tbody>
+          <tr><td><strong>ranwhat</strong></td>
+              <td data-label="Gets its record from">The history agents write to disk</td>
+              <td data-label="Sessions before install">Yes</td>
+              <td data-label="Agents">30</td>
+              <td data-label="Leaked keys">Finds them in transcripts and says what to rotate</td>
+              <td data-label="Can block">Opt-in hook, Claude Code only</td></tr>
+          <tr><td><strong>suvadu</strong></td>
+              <td data-label="Gets its record from">Hooks it adds to each agent, into its own database</td>
+              <td data-label="Sessions before install">No; a past session's conversation can be imported</td>
+              <td data-label="Agents">6 with setup, 10 more tagged</td>
+              <td data-label="Leaked keys">Masks secrets in the commands it stores</td>
+              <td data-label="Can block">Only if you wire its guard into a hook</td></tr>
+          <tr><td><strong>cc-audit-log</strong></td>
+              <td data-label="Gets its record from">Claude Code's transcripts on disk</td>
+              <td data-label="Sessions before install">Yes</td>
+              <td data-label="Agents">1</td>
+              <td data-label="Leaked keys">Not described</td>
+              <td data-label="Can block">No</td></tr>
+        </tbody>
+      </table>
+      <table class="stack" style="margin-top:34px">
+        <thead><tr><th>Tool</th><th>Licence</th><th>Price</th><th>Runs with</th><th>Latest release</th></tr></thead>
+        <tbody>
+          <tr><td><strong>ranwhat</strong></td>
+              <td data-label="Licence">MIT</td>
+              <td data-label="Price">Free; Plus &euro;12 a month per organisation</td>
+              <td data-label="Runs with">Python 3.9+, <span class="icode">uvx</span> or <span class="icode">pipx</span></td>
+              <td data-label="Latest release">0.9.0, November 2026</td></tr>
+          <tr><td><strong>suvadu</strong></td>
+              <td data-label="Licence">MIT</td>
+              <td data-label="Price">Free</td>
+              <td data-label="Runs with">A Rust binary from Homebrew or cargo; macOS and Linux, zsh or bash</td>
+              <td data-label="Latest release">0.5.3, November 2026</td></tr>
+          <tr><td><strong>cc-audit-log</strong></td>
+              <td data-label="Licence">MIT</td>
+              <td data-label="Price">Free</td>
+              <td data-label="Runs with">Node, <span class="icode">npx</span></td>
+              <td data-label="Latest release">1.0.7, March 2026; archived</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / suvadu</div>
+    <div>
+      <h2>suvadu: a shell history that also records your agents</h2>
+      <p class="lede">
+        suvadu replaces your shell history with a local SQLite database and
+        adds the commands AI agents run to it. For Claude Code,
+        <span class="icode">suv init claude-code</span> writes hooks into
+        <span class="icode">~/.claude/settings.json</span>, and recording
+        starts with the next session.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Does well</span>
+          <span class="v">Each command is stored with its exit code, duration, working directory and git branch, which a transcript does not always give you. Your own commands and the agent's sit in one searchable history, and an agent can query that history over suvadu's MCP server.</span></div>
+        <div class="row"><span class="k">Keeps longer</span>
+          <span class="v">Claude Code deletes transcripts after 30 days by default. suvadu's database is its own, so what it recorded stays after the transcript is gone.</span></div>
+        <div class="row"><span class="k">Agents</span>
+          <span class="v">Dedicated setup for Claude Code, Cursor, Codex, OpenCode, pi.dev and Antigravity. Ten more environments, among them Aider, Copilot and Windsurf, are recognised and tagged without their prompts.</span></div>
+        <div class="row"><span class="k">Limits</span>
+          <span class="v">Installing it does not record anything until the hooks are added, and commands from before that are not there. For Claude Code its integration page describes capturing Bash calls, so a file the Read tool opened or an MCP call is outside it. It is for macOS and Linux.</span></div>
+        <div class="row"><span class="k">Secrets</span>
+          <span class="v">It masks secret-shaped strings in command text before storing them. Its pages do not describe a report of which credentials an agent saw.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / cc-audit-log</div>
+    <div>
+      <h2>cc-audit-log: a timeline from one script</h2>
+      <p class="lede">
+        cc-audit-log scans <span class="icode">~/.claude/projects/</span> and
+        prints a readable timeline of files, commands, commits and subagents,
+        for today, a date or the last few sessions.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">Does well</span>
+          <span class="v">No install and no dependencies: <span class="icode">npx cc-audit-log --today</span>. It is one small file, so you can read all of it before you run it. It sends nothing anywhere.</span></div>
+        <div class="row"><span class="k">Flags</span>
+          <span class="v">Seven kinds of command, among them <span class="icode">rm -rf</span>, a force push, a hard reset, <span class="icode">npm publish</span> and <span class="icode">sudo</span>.</span></div>
+        <div class="row"><span class="k">Limits</span>
+          <span class="v">Claude Code only. Its README describes no secret detection. The last release was in March 2026 and the repository was archived by its owner on 2 July 2026, so a change in Claude Code's transcript format will not be followed.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / ranwhat</div>
+    <div>
+      <h2>ranwhat: what it adds, and what it does not do</h2>
+      <p class="lede">
+        ranwhat reads the history Claude Code and twenty-nine other coding
+        agents already write to disk. Nothing has to be installed before
+        the session you want to look at.
+      </p>
+      <div class="rows">
+        <div class="row"><span class="k">What ran</span>
+          <span class="v"><span class="icode">ranwhat watch</span> runs sixteen rules over every tool call, not only shell commands: credential reads, recursive deletes, force pushes, package publishing, scripts downloaded and run unread, and more. The list is on the <a href="/watch">watch page</a>.</span></div>
+        <div class="row"><span class="k">What leaked</span>
+          <span class="v"><span class="icode">ranwhat clean</span> finds credentials sitting in plaintext in transcripts, says which to rotate first, and masks them only when you ask.</span></div>
+        <div class="row"><span class="k">What a key allows</span>
+          <span class="v"><span class="icode">ranwhat scan</span> scores what a token can do from a catalogue of 204 scopes across twelve providers. Neither of the other two describes this.</span></div>
+        <div class="row"><span class="k">Checkable</span>
+          <span class="v"><span class="icode">ranwhat bench</span> runs the detection over a made-up agent home and scores it against an answer key, and lists what ranwhat is known not to catch. Anyone can rerun it.</span></div>
+        <div class="row"><span class="k">Limits</span>
+          <span class="v">It reports after the fact, and only what is still on disk: a Claude Code session older than <span class="icode">cleanupPeriodDays</span> is gone for ranwhat too, where a recorder with its own database would still have it. It does not add your own shell commands to the picture. The one thing it can block is a call you opt in to with its Claude Code hook.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">06 / Choose</div>
+    <div>
+      <h2>Which one to use</h2>
+      <table class="stack">
+        <thead><tr><th>If you</th><th>Start with</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Need to know what an agent did in a session that already happened</td>
+              <td data-label="Start with">ranwhat</td>
+              <td data-label="Why">It reads what is on disk. A hook installed today recorded nothing last week.</td></tr>
+          <tr><td>Use Cursor, Codex or Gemini CLI as well as Claude Code</td>
+              <td data-label="Start with">ranwhat</td>
+              <td data-label="Why">One pass over thirty agents' history, with no setup for each.</td></tr>
+          <tr><td>Want to know whether a key leaked into a transcript</td>
+              <td data-label="Start with">ranwhat</td>
+              <td data-label="Why">It finds the credential, says what to rotate and what the token allows.</td></tr>
+          <tr><td>Want a lasting record with exit codes and timings, next to your own shell history</td>
+              <td data-label="Start with">suvadu</td>
+              <td data-label="Why">Its database outlives the transcripts and holds detail they do not.</td></tr>
+          <tr><td>Want your agent to look up what ran earlier</td>
+              <td data-label="Start with">suvadu</td>
+              <td data-label="Why">Its MCP server lets an agent query the history.</td></tr>
+          <tr><td>Want a one-line look at today in Claude Code</td>
+              <td data-label="Start with">cc-audit-log</td>
+              <td data-label="Why">Nothing to install, and small enough to read first. Check that it still parses your version's transcripts.</td></tr>
+        </tbody>
+      </table>
+      <h2 style="margin-top:52px">Next</h2>
+      <p>
+        To read the record by hand, with no tool at all, see
+        <a href="/guides/claude-code-audit-log">a Claude Code audit log from
+        what is already on disk</a>. For tools that stop a call before it
+        runs, Stroq and HOL Guard among them, read the
+        <a href="/guides/best-ai-coding-agent-security-tools">best AI coding
+        agent security tools</a>. Every other control is in the
+        <a href="/guides/ai-coding-agent-security">AI coding agent security
+        checklist</a>, and the rest of the <a href="/guides">guides</a> are
+        listed here.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://suvadu.sh/">suvadu<span>what it is, platforms, install, MCP server</span></a></li>
+        <li><a href="https://suvadu.sh/cli/ai-integration/">suvadu: AI integration<span>which agents get hooks, what is captured for Claude Code</span></a></li>
+        <li><a href="https://suvadu.sh/blog/claude-code-ran-commands-see-which-ones/">suvadu: which commands Claude Code ran<span>recording starts once the hook is installed; importing a past session</span></a></li>
+        <li><a href="https://suvadu.sh/faq/">suvadu: FAQ<span>licence, storage, redaction, guard</span></a></li>
+        <li><a href="https://suvadu.sh/changelog/">suvadu: changelog<span>version 0.5.3</span></a></li>
+        <li><a href="https://github.com/yurukusa/cc-audit-log">cc-audit-log on GitHub<span>what it reads, its flags, archived status</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/settings">Claude Code settings<span>cleanupPeriodDays, 30 days by default</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/docs/reference.md">ranwhat reference<span>every command, and what goes online</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>
