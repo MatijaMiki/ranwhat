@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex CLI session history: no documented expiry date | ranwhat</title>
+<meta name="description" content="Codex keeps every thread as JSONL in ~/.codex/sessions, by day, with no retention documented. What each file holds, the shell snapshots, and how to cap it.">
+<link rel="canonical" href="https://ranwhat.com/guides/codex-cli-session-history">
+<meta name="ai-summary" content="Codex keeps every thread as JSONL in ~/.codex/sessions, by day, with no retention documented. What each file holds, the shell snapshots, and how to cap it.">
+<link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/codex-cli-session-history.md">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/codex-cli-session-history">
+<meta property="og:title" content="Codex CLI session history: no documented expiry date | ranwhat">
+<meta property="og:description" content="Codex keeps every thread as JSONL in ~/.codex/sessions, by day, with no retention documented. What each file holds, the shell snapshots, and how to cap it.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Codex CLI session history: no documented expiry date | ranwhat">
+<meta name="twitter:description" content="Codex keeps every thread as JSONL in ~/.codex/sessions, by day, with no retention documented. What each file holds, the shell snapshots, and how to cap it.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/codex-cli-session-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Codex CLI keeps your session history","description":"Codex keeps every thread as JSONL in ~/.codex/sessions, by day, with no retention documented. What each file holds, the shell snapshots, and how to cap it.","datePublished":"2026-11-16","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/codex-cli-session-history","about":[{"@type":"Thing","name":"Codex"},{"@type":"Thing","name":"Session history"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Codex session history","item":"https://ranwhat.com/guides/codex-cli-session-history"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+    <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/codex-cli-session-history" aria-current="page">Codex session history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+  <p class="docnav-h">More guides</p>
+  <ul>
+    <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Codex session history</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Where Codex CLI keeps your session history</h1>
+    <p class="lede">
+      Claude Code deletes its transcripts after 30 days by default. Codex documents no such limit for its sessions, so every thread you have run since you installed it can still be in <span class="icode">~/.codex</span>, with each command's output. Where the files are, what they hold, and how to cap them.
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-hero">uvx ranwhat check --source codex</span>
+        <button class="copy" data-copy="#cmd-hero">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Paths are the ones ranwhat's Codex reader uses, checked against Codex rust-v0.159.3 and its configuration documentation under Sources. Published <time datetime="2026-11-16">16 November 2026</time>.
+    </p>
+  </div>
+</section>
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / Where</div>
+    <div>
+      <h2>Where does Codex store session history?</h2>
+      <p class="lede">
+        In <span class="icode">~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</span>, one file per thread, or under <span class="icode">$CODEX_HOME</span> if you set it.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Threads</span>
+          <span class="v"><span class="icode">sessions/YYYY/MM/DD/rollout-*.jsonl</span>. The CLI, the IDE extension and the desktop app all write here. On Windows, <span class="icode">~</span> is <span class="icode">%USERPROFILE%</span>.</span></div>
+        <div class="row"><span class="k">Compressed</span>
+          <span class="v"><span class="icode">rollout-*.jsonl.zst</span> once a thread has been idle for a week.</span></div>
+        <div class="row"><span class="k">Archived</span>
+          <span class="v"><span class="icode">archived_sessions/rollout-*</span>, a flat folder.</span></div>
+        <div class="row"><span class="k">Prompts</span>
+          <span class="v"><span class="icode">history.jsonl</span>: the prompts you typed.</span></div>
+        <div class="row"><span class="k">Shell</span>
+          <span class="v"><span class="icode">shell_snapshots/*.sh</span> and <span class="icode">*.ps1</span>: your shell's exported variables.</span></div>
+        <div class="row"><span class="k">Index</span>
+          <span class="v"><span class="icode">thread_history_1.sqlite</span> and <span class="icode">state_5.sqlite</span>, in <span class="icode">sqlite_home</span> from <span class="icode">config.toml</span>, else <span class="icode">$CODEX_SQLITE_HOME</span>, else <span class="icode">CODEX_HOME</span>.</span></div>
+        <div class="row"><span class="k">Older</span>
+          <span class="v">Early Rust builds wrote a flat <span class="icode">sessions/rollout-*.jsonl</span>; the TypeScript CLI wrote one JSON document per thread, <span class="icode">rollout-*.json</span>.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Contents</div>
+    <div>
+      <h2>What is in a Codex rollout file?</h2>
+      <p class="lede">
+        The whole thread: each line is one JSON event with a <span class="icode">timestamp</span>, a <span class="icode">type</span> and a <span class="icode">payload</span>.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Calls</span>
+          <span class="v">Every tool call, such as a shell command or a patch, and its output, in <span class="icode">response_item</span> lines.</span></div>
+        <div class="row"><span class="k">Your commands</span>
+          <span class="v">A command you ran yourself with <span class="icode">!</span> is recorded as a user message holding the command, its exit code and its output.</span></div>
+        <div class="row"><span class="k">Forks</span>
+          <span class="v">A forked thread or a subagent can start with a copy of its parent's history, written with the time of the copy, so the same call can appear in two files.</span></div>
+        <div class="row"><span class="k">Secrets</span>
+          <span class="v">Whatever a command printed or a file read showed is in the output, a credential included. <span class="icode">shell_snapshots/</span> can hold any token you exported in that shell.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Retention</div>
+    <div>
+      <h2>Does Codex delete old sessions?</h2>
+      <p class="lede">
+        Not by any documented rule: the docs give no retention period for the rollout files.
+      </p>
+      <p>
+        The configuration documentation names <span class="icode">[history] persistence = "none"</span> in <span class="icode">config.toml</span> to stop saving history, and <span class="icode">history.max_bytes</span> to cap it. It does not say whether the rollouts under <span class="icode">sessions/</span> follow it, so check the folder after a new session.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.codex/config.toml</span></div>
+        <div class="term-body"><pre>[history]
+persistence = "none"</pre></div>
+      </div>
+      <p>
+        For comparison: Claude Code's <a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a> defaults to 30 days, and Gemini CLI's <span class="icode">general.sessionRetention</span> to <span class="icode">"30d"</span>.
+      </p>
+    </div>
+  </div>
+</section>
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Size</div>
+    <div>
+      <h2>How much Codex history do I have?</h2>
+      <p class="lede">
+        <span class="icode">du -sh ~/.codex/sessions</span> gives the total; <span class="icode">ls ~/.codex/sessions</span> shows the years it covers.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>du -sh ~/.codex/sessions ~/.codex/archived_sessions ~/.codex/history.jsonl
+ls ~/.codex/sessions
+ls ~/.codex/shell_snapshots | wc -l</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Check</div>
+    <div>
+      <h2>How do I check what Codex ran and which secrets it kept?</h2>
+      <p class="lede">
+        Run <span class="icode">uvx ranwhat check --source codex</span>: it reads the rollouts, flags risky calls and finds credentials, changing nothing.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">watch</span>
+          <span class="v"><span class="icode">uvx ranwhat watch --source codex</span> lists what Codex ran, rated by its rules. Widen the window with <span class="icode">--days 365</span>, since Codex keeps far more than 30 days.</span></div>
+        <div class="row"><span class="k">clean</span>
+          <span class="v"><span class="icode">uvx ranwhat clean --source codex</span> lists credentials in the rollouts, <span class="icode">history.jsonl</span> and the shell snapshots, and with <span class="icode">--apply</span> masks them after a backup.</span></div>
+        <div class="row"><span class="k">zst</span>
+          <span class="v">Compressed rollouts are read when a zstd decoder is available, and never rewritten.</span></div>
+        <div class="row"><span class="k">Never</span>
+          <span class="v"><span class="icode">auth.json</span> and Codex's logs are never opened.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">06 / Delete</div>
+    <div>
+      <h2>How do I delete Codex session history?</h2>
+      <p class="lede">
+        Remove the files: there is no purge command, and deleting them only removes your local copy.
+      </p>
+      <p>
+        Delete a day's folder under <span class="icode">sessions/</span>, <span class="icode">archived_sessions/</span> or <span class="icode">history.jsonl</span> when Codex is not running. If a thread showed a credential, rotate it first: the copy was readable for as long as it sat there. <a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a> has each provider's steps.
+      </p>
+    </div>
+  </div>
+</section>
+<section class="mark-3" id="questions">
+  <div class="shell band split">
+    <div class="marginal">07 / Questions</div>
+    <div>
+      <h2>Common questions about Codex history</h2>
+      <div class="faqs">
+        <div class="faq"><h3>Where is Codex CLI history stored?</h3><p>In <span class="icode">~/.codex/sessions/YYYY/MM/DD/</span>, one <span class="icode">rollout-*.jsonl</span> file per thread, plus typed prompts in <span class="icode">~/.codex/history.jsonl</span>. Set <span class="icode">CODEX_HOME</span> and it all moves there.</p></div>
+        <div class="faq"><h3>What is ~/.codex/history.jsonl?</h3><p>The prompts you typed into Codex. <span class="icode">history.max_bytes</span> in <span class="icode">config.toml</span> caps its size.</p></div>
+        <div class="faq"><h3>Why are some Codex sessions .jsonl.zst files?</h3><p>Codex compresses a thread with zstd once it has been idle for a week. <span class="icode">zstd -dc</span> prints one.</p></div>
+        <div class="faq"><h3>Does Codex keep secrets in its history?</h3><p>It keeps whatever a session saw: a printed key, a file it read, and the exported variables in its shell snapshots. <span class="icode">uvx ranwhat clean --source codex</span> finds them.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://learn.chatgpt.com/docs/config-file/config-advanced">Codex advanced configuration<span>history.persistence, history.max_bytes, CODEX_HOME</span></a></li>
+        <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/sources/codex.py">ranwhat source: codex.py<span>the store layout, line types and what is never opened</span></a></li>
+      </ul>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides/ai-coding-agent-history-locations">Where AI coding agents keep history<span>every other agent's store</span></a></li>
+        <li><a href="/guides/cursor-chat-history">Cursor chat history<span>the same question for Cursor</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security checklist<span>every other control, in order</span></a></li>
+        <li><a href="/guides">All guides<span>everything in this section</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>

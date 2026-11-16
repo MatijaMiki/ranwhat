@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI coding agent history: where each one stores it | ranwhat</title>
-<meta name="description" content="Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.">
+<title>AI coding agent history: where it lives, what it holds | ranwhat</title>
+<meta name="description" content="Claude Code, Codex, Gemini CLI, Cursor and other agents keep every session on your disk, file contents and secrets included. Where each one is, and how to clear it.">
 <link rel="canonical" href="https://ranwhat.com/guides/ai-coding-agent-history-locations">
-<meta name="ai-summary" content="Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.">
+<meta name="ai-summary" content="Claude Code, Codex, Gemini CLI, Cursor and other agents keep every session on your disk, file contents and secrets included. Where each one is, and how to clear it.">
 <link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/ai-coding-agent-history-locations.md">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -20,8 +20,8 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/ai-coding-agent-history-locations">
-<meta property="og:title" content="AI coding agent history: where each one stores it | ranwhat">
-<meta property="og:description" content="Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.">
+<meta property="og:title" content="AI coding agent history: where it lives, what it holds | ranwhat">
+<meta property="og:description" content="Claude Code, Codex, Gemini CLI, Cursor and other agents keep every session on your disk, file contents and secrets included. Where each one is, and how to clear it.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -29,14 +29,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="AI coding agent history: where each one stores it | ranwhat">
-<meta name="twitter:description" content="Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.">
+<meta name="twitter:title" content="AI coding agent history: where it lives, what it holds | ranwhat">
+<meta name="twitter:description" content="Claude Code, Codex, Gemini CLI, Cursor and other agents keep every session on your disk, file contents and secrets included. Where each one is, and how to clear it.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/ai-coding-agent-history-locations#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where each AI coding agent keeps your conversation history","description":"Where Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue keep chat history on disk, its format, and how to clear it.","datePublished":"2026-10-09","dateModified":"2026-10-20","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-history-locations","about":[{"@type":"Thing","name":"AI coding agents"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent history locations","item":"https://ranwhat.com/guides/ai-coding-agent-history-locations"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/ai-coding-agent-history-locations#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where each AI coding agent keeps your conversation history","description":"Claude Code, Codex, Gemini CLI, Cursor and other agents keep every session on your disk, file contents and secrets included. Where each one is, and how to clear it.","datePublished":"2026-10-09","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/ai-coding-agent-history-locations","about":[{"@type":"Thing","name":"AI coding agents"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Agent history locations","item":"https://ranwhat.com/guides/ai-coding-agent-history-locations"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -67,25 +67,26 @@
 <div class="docs">
 <aside class="docnav" aria-label="Guides">
   <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
-  <p class="docnav-h">Start here</p>
+    <p class="docnav-h">Start here</p>
   <ul>
     <li><a href="/guides">Overview</a></li>
     <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
-    <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
   </ul>
   <p class="docnav-h">Claude Code</p>
   <ul>
     <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
     <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
-    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
     <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
     <li><a href="/guides/ai-coding-agent-history-locations" aria-current="page">Where agents keep history</a></li>
+    <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
     <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
     <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
     <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
@@ -100,6 +101,11 @@
   <ul>
     <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
   </ul>
+  <p class="docnav-h">More guides</p>
+  <ul>
+    <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+  </ul>
 </aside>
 <div class="docmain">
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Agent history locations</span></nav>
@@ -108,10 +114,7 @@
     <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
     <h1>Where each AI coding agent keeps your conversation history</h1>
     <p class="lede">
-      Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf,
-      Cline and Continue all record your sessions on your own disk. Where each
-      one puts them, what format they are in, how long they stay, and how to
-      see how much you have.
+      The agent you tried for a week last spring still has every session it ran on your disk, with the output of each command. Claude Code, Codex, Gemini CLI, Copilot CLI, Cursor, Aider, Windsurf, Cline and Continue all record their sessions locally. Where each one puts them, what format they are in, how long they stay, and how to see how much you have.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -129,7 +132,7 @@
       </div>
     </div>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Paths are the ones ranwhat reads, checked against vendor documentation where it exists (see Sources). Published <time datetime="2026-10-20">20 October 2026</time>.
+      Paths are the ones ranwhat reads, checked against vendor documentation where it exists (see Sources). Published 20 October 2026, updated <time datetime="2026-11-16">16 November 2026</time>.
     </p>
   </div>
 </section>
@@ -138,7 +141,7 @@
   <div class="shell band split">
     <div class="marginal">01 / Where</div>
     <div>
-      <h2>Where each agent keeps its sessions</h2>
+      <h2>Where does each AI coding agent store chat history?</h2>
       <p class="lede">
         Most terminal agents write one file per session under a dot folder in
         your home directory. Editor-based agents tend to use a database inside
@@ -298,7 +301,7 @@ find ~ -maxdepth 4 -name '.aider*history*' 2&gt;/dev/null</pre></div>
   <div class="shell band split">
     <div class="marginal">04 / Limit</div>
     <div>
-      <h2>How to limit or delete them</h2>
+      <h2>How do I limit or delete coding agent history?</h2>
       <p class="lede">
         Only some of these agents give you a setting. For the rest, the
         history is a file or a database you delete yourself.
@@ -389,6 +392,22 @@ ranwhat check --path codex=~/work/.codex   <span class="c-mut">history kept some
   </div>
 </section>
 
+<section class="mark-3" id="questions">
+  <div class="shell band split">
+    <div class="marginal">Questions</div>
+    <div>
+      <h2>Common questions about AI coding agent history</h2>
+      <div class="faqs">
+        <div class="faq"><h3>Where is Claude Code history stored?</h3><p>In <span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</span>, deleted after 30 days by default. <a href="/guides/claude-code-history">Claude Code history</a> and <a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a> go deeper.</p></div>
+        <div class="faq"><h3>Where does Cursor store chat history?</h3><p>In one SQLite database, <span class="icode">Cursor/User/globalStorage/state.vscdb</span>, and the CLI in <span class="icode">~/.cursor/chats</span>. <a href="/guides/cursor-chat-history">Cursor chat history</a> has each path.</p></div>
+        <div class="faq"><h3>Where does Codex store its sessions?</h3><p>In <span class="icode">~/.codex/sessions/YYYY/MM/DD/</span>, one rollout file per thread, with no retention period documented. <a href="/guides/codex-cli-session-history">Codex session history</a> has the rest.</p></div>
+        <div class="faq"><h3>Where does Gemini CLI keep chat history?</h3><p>In <span class="icode">~/.gemini/tmp/&lt;project&gt;/chats/</span>, kept 30 days by default under <span class="icode">general.sessionRetention</span>.</p></div>
+        <div class="faq"><h3>Is coding agent history encrypted?</h3><p>Mostly not. Apart from Windsurf's Cascade files, every store in the table is plain JSON, text or SQLite, protected only by file permissions.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="mark-5">
   <div class="shell band split">
     <div class="marginal">07 / Sources</div>
@@ -420,6 +439,9 @@ ranwhat check --path codex=~/work/.codex   <span class="c-mut">history kept some
       </ul>
       <h2 style="margin-top:52px">Related guides</h2>
       <ul class="follow">
+        <li><a href="/guides/cursor-chat-history">Cursor chat history<span>the editor and CLI stores</span></a></li>
+        <li><a href="/guides/codex-cli-session-history">Codex session history<span>rollouts and shell snapshots</span></a></li>
+        <li><a href="/guides/claude-code-cleanupperioddays">Claude Code cleanupPeriodDays<span>how long Claude Code keeps it</span></a></li>
         <li><a href="/guides/claude-code-history">Claude Code history<span>location, retention, deletion</span></a></li>
         <li><a href="/guides/claude-code-env-secrets">Claude Code and .env secrets<span>keeping credentials out of transcripts</span></a></li>
         <li><a href="/guides/developer-opsec">Developer OPSEC<span>the laptop around the agent</span></a></li>
@@ -469,21 +491,24 @@ ranwhat check --path codex=~/work/.codex   <span class="c-mut">history kept some
           <li><a href="/guides">All guides</a></li>
           <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
           <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
           <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
-          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
-          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
-          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
-          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
           <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
           <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
           <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
-          <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
         </ul>
       </div>
       <div>

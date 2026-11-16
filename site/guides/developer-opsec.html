@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Developer OPSEC: what laptops and AI agents leak | ranwhat</title>
-<meta name="description" content="OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.">
+<title>Developer OPSEC: agent transcripts keep what they read | ranwhat</title>
+<meta name="description" content="OPSEC for developers using AI agents: one cat .env leaves the value in a plaintext transcript. Where credentials sit on a laptop, and how to find and rotate them.">
 <link rel="canonical" href="https://ranwhat.com/guides/developer-opsec">
-<meta name="ai-summary" content="OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.">
+<meta name="ai-summary" content="OPSEC for developers using AI agents: one cat .env leaves the value in a plaintext transcript. Where credentials sit on a laptop, and how to find and rotate them.">
 <link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/developer-opsec.md">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -20,8 +20,8 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/developer-opsec">
-<meta property="og:title" content="Developer OPSEC: what laptops and AI agents leak | ranwhat">
-<meta property="og:description" content="OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.">
+<meta property="og:title" content="Developer OPSEC: agent transcripts keep what they read | ranwhat">
+<meta property="og:description" content="OPSEC for developers using AI agents: one cat .env leaves the value in a plaintext transcript. Where credentials sit on a laptop, and how to find and rotate them.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -29,14 +29,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="Developer OPSEC: what laptops and AI agents leak | ranwhat">
-<meta name="twitter:description" content="OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.">
+<meta name="twitter:title" content="Developer OPSEC: agent transcripts keep what they read | ranwhat">
+<meta name="twitter:description" content="OPSEC for developers using AI agents: one cat .env leaves the value in a plaintext transcript. Where credentials sit on a laptop, and how to find and rotate them.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/developer-opsec#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Developer OPSEC: what your laptop and your AI agents give away","description":"OPSEC for developers who use AI coding agents: where credentials sit on a laptop, what agent transcripts add, how to clean up, and a checklist to work through.","datePublished":"2026-10-06","dateModified":"2026-10-06","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/developer-opsec","about":[{"@type":"Thing","name":"Operations security (OPSEC)"},{"@type":"Thing","name":"AI agent security"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Developer OPSEC","item":"https://ranwhat.com/guides/developer-opsec"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/developer-opsec#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Developer OPSEC: what your laptop and your AI agents give away","description":"OPSEC for developers using AI agents: one cat .env leaves the value in a plaintext transcript. Where credentials sit on a laptop, and how to find and rotate them.","datePublished":"2026-10-06","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/developer-opsec","about":[{"@type":"Thing","name":"Operations security (OPSEC)"},{"@type":"Thing","name":"AI agent security"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Developer OPSEC","item":"https://ranwhat.com/guides/developer-opsec"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -67,25 +67,26 @@
 <div class="docs">
 <aside class="docnav" aria-label="Guides">
   <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
-  <p class="docnav-h">Start here</p>
+    <p class="docnav-h">Start here</p>
   <ul>
     <li><a href="/guides">Overview</a></li>
     <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
-    <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
   </ul>
   <p class="docnav-h">Claude Code</p>
   <ul>
     <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
     <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
-    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
     <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
     <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
     <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
     <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
     <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
@@ -100,6 +101,11 @@
   <ul>
     <li><a href="/guides/developer-opsec" aria-current="page">Developer OPSEC</a></li>
   </ul>
+  <p class="docnav-h">More guides</p>
+  <ul>
+    <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+  </ul>
 </aside>
 <div class="docmain">
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Developer OPSEC</span></nav>
@@ -108,10 +114,7 @@
     <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
     <h1>Developer OPSEC: what your laptop and your AI agents give away</h1>
     <p class="lede">
-      Operations security, OPSEC, is knowing which of your information would
-      help an attacker and keeping it out of their reach. For a developer,
-      that information is mostly credentials. A laptop keeps many of them in
-      plaintext, and AI coding agents add copies of their own.
+      Your agent ran <span class="icode">cat .env</span> once, to debug a config. The values are now in two places they were not before: the model's context and a plaintext transcript in your home folder. Developer OPSEC is knowing which of these copies exist and keeping them out of an attacker's reach.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -122,7 +125,7 @@
       <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
     </div>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against NIST, OWASP, the Claude Code, AWS, npm, Docker, GitHub CLI, OpenSSH and 1Password documentation, and the research under Sources. Published <time datetime="2026-10-06">6 October 2026</time>.
+      Checked against NIST, OWASP, the Claude Code, AWS, npm, Docker, GitHub CLI, OpenSSH and 1Password documentation, and the research under Sources. Published 6 October 2026, updated <time datetime="2026-11-16">16 November 2026</time>.
     </p>
   </div>
 </section>
@@ -431,6 +434,21 @@ AWS_SECRET_ACCESS_KEY="op://development/aws/Access Keys/secret_access_key"</pre>
   </div>
 </section>
 
+<section class="mark-3" id="questions">
+  <div class="shell band split">
+    <div class="marginal">Questions</div>
+    <div>
+      <h2>Common questions about developer OPSEC</h2>
+      <div class="faqs">
+        <div class="faq"><h3>What does OPSEC mean for a developer?</h3><p>Operations security: knowing which of your information would help an attacker and keeping it out of reach. On a developer laptop that is mostly credentials, and the copies of them that tools keep.</p></div>
+        <div class="faq"><h3>Where do AI coding agents leave credentials?</h3><p>In their session history. Claude Code writes every tool result to a transcript under <span class="icode">~/.claude/projects</span>, so a key a command printed is in the file. <a href="/guides/ai-coding-agent-history-locations">Where each agent keeps history</a> lists the others.</p></div>
+        <div class="faq"><h3>Do infostealers target AI coding tools?</h3><p>Yes. Gen Digital reported on 8 September 2026 that infostealers have added AI tools' access tokens, MCP configurations and prompt histories to what they collect.</p></div>
+        <div class="faq"><h3>What should I do first if a secret leaked?</h3><p>Rotate it at the provider, then check its logs for use you do not recognise. Masking or deleting the copy comes after, because it was already readable. <a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a> has each provider's steps.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="mark-5" id="sources">
   <div class="shell band split">
     <div class="marginal">Sources</div>
@@ -505,21 +523,24 @@ AWS_SECRET_ACCESS_KEY="op://development/aws/Access Keys/secret_access_key"</pre>
           <li><a href="/guides">All guides</a></li>
           <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
           <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
           <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
-          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
-          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
-          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
-          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
           <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
           <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
           <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
-          <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
         </ul>
       </div>
       <div>

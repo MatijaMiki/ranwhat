@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI agent security: a checklist for coding agents | ranwhat</title>
+<title>Coding agent security checklist: 14 steps, in order | ranwhat</title>
 <meta name="description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.">
 <link rel="canonical" href="https://ranwhat.com/guides/ai-coding-agent-security">
 <meta name="ai-summary" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.">
@@ -20,7 +20,7 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/ai-coding-agent-security">
-<meta property="og:title" content="AI agent security: a checklist for coding agents | ranwhat">
+<meta property="og:title" content="Coding agent security checklist: 14 steps, in order | ranwhat">
 <meta property="og:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
@@ -29,7 +29,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="AI agent security: a checklist for coding agents | ranwhat">
+<meta name="twitter:title" content="Coding agent security checklist: 14 steps, in order | ranwhat">
 <meta name="twitter:description" content="What a coding agent like Claude Code can reach on your machine, what it writes to disk, how to audit what it ran, and how to cut its tokens to least privilege.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
@@ -67,25 +67,26 @@
 <div class="docs">
 <aside class="docnav" aria-label="Guides">
   <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
-  <p class="docnav-h">Start here</p>
+    <p class="docnav-h">Start here</p>
   <ul>
     <li><a href="/guides">Overview</a></li>
     <li><a href="/guides/ai-coding-agent-security" aria-current="page">Security checklist</a></li>
-    <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
   </ul>
   <p class="docnav-h">Claude Code</p>
   <ul>
     <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
     <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
-    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
     <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
     <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
     <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
     <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
     <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
@@ -99,6 +100,11 @@
   <p class="docnav-h">Laptop</p>
   <ul>
     <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+  <p class="docnav-h">More guides</p>
+  <ul>
+    <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
   </ul>
 </aside>
 <div class="docmain">
@@ -607,7 +613,7 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
         <li class="row"><span class="k">09</span>
           <span class="v">Check who can read <span class="icode">~/.claude</span>.&nbsp;<a href="#disk">Disk</a></span></li>
         <li class="row"><span class="k">10</span>
-          <span class="v">Set <span class="icode">cleanupPeriodDays</span> on purpose: <a href="/guides/claude-code-history">how long Claude Code keeps history</a>.&nbsp;<a href="#disk">Disk</a></span></li>
+          <span class="v">Set <span class="icode">cleanupPeriodDays</span> on purpose: <a href="/guides/claude-code-cleanupperioddays">how long Claude Code keeps history</a>, and check what <a href="/guides/codex-cli-session-history">Codex</a> and <a href="/guides/cursor-chat-history">Cursor</a> keep.&nbsp;<a href="#disk">Disk</a></span></li>
         <li class="row"><span class="k">11</span>
           <span class="v">Run <span class="icode">uvx ranwhat check</span> now, and again after anything odd.&nbsp;<a href="#audit">Audit</a></span></li>
         <li class="row"><span class="k">12</span>
@@ -746,21 +752,24 @@ aws iam delete-access-key --access-key-id &lt;old-key-id&gt;</pre></div>
           <li><a href="/guides">All guides</a></li>
           <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
           <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
           <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
-          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
-          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
-          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
-          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
           <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
           <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
           <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
-          <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
         </ul>
       </div>
       <div>

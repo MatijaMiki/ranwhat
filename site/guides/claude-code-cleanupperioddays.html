@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code cleanupPeriodDays: 0 doesn't mean forever | ranwhat</title>
+<meta name="description" content="cleanupPeriodDays is how many days Claude Code keeps session transcripts: 30 by default, minimum 1. How to raise it, why 0 fails, and what the sweep never deletes.">
+<link rel="canonical" href="https://ranwhat.com/guides/claude-code-cleanupperioddays">
+<meta name="ai-summary" content="cleanupPeriodDays is how many days Claude Code keeps session transcripts: 30 by default, minimum 1. How to raise it, why 0 fails, and what the sweep never deletes.">
+<link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/claude-code-cleanupperioddays.md">
+<meta name="color-scheme" content="light dark">
+<meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
+<link rel="icon" href="/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-16.png?v=2" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="ranwhat releases" href="https://ranwhat.com/rss.xml">
+<meta name="theme-color" content="#edeff1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ranwhat">
+<meta property="og:url" content="https://ranwhat.com/guides/claude-code-cleanupperioddays">
+<meta property="og:title" content="Claude Code cleanupPeriodDays: 0 doesn&#x27;t mean forever | ranwhat">
+<meta property="og:description" content="cleanupPeriodDays is how many days Claude Code keeps session transcripts: 30 by default, minimum 1. How to raise it, why 0 fails, and what the sweep never deletes.">
+<meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ranwhat: find out what your agents actually did">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@ranwhatcom">
+<meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
+<meta name="twitter:title" content="Claude Code cleanupPeriodDays: 0 doesn&#x27;t mean forever | ranwhat">
+<meta name="twitter:description" content="cleanupPeriodDays is how many days Claude Code keeps session transcripts: 30 by default, minimum 1. How to raise it, why 0 fails, and what the sweep never deletes.">
+<link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/theme.js"></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-cleanupperioddays#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Claude Code cleanupPeriodDays: how long your history is kept","description":"cleanupPeriodDays is how many days Claude Code keeps session transcripts: 30 by default, minimum 1. How to raise it, why 0 fails, and what the sweep never deletes.","datePublished":"2026-11-16","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-cleanupperioddays","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Data retention"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"cleanupPeriodDays","item":"https://ranwhat.com/guides/claude-code-cleanupperioddays"}]}]}</script>
+</head>
+<body class="in-guides">
+<header>
+  <div class="shell nav">
+    <a class="wordmark" href="/">ran<i>what</i></a>
+    <nav id="site-nav">
+      <a href="/">Home</a>
+      <a href="/commands">Commands</a>
+      <a href="/guides">Guides</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="https://account.ranwhat.com/">Sign in</a>
+    </nav>
+    <button class="theme" type="button" data-theme-toggle aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <a class="ghost" href="https://github.com/MatijaMiki/ranwhat">GitHub</a>
+    <button class="menu" type="button" data-menu-toggle aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+      <svg class="icon-bars" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+<div class="docs">
+<aside class="docnav" aria-label="Guides">
+  <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
+    <p class="docnav-h">Start here</p>
+  <ul>
+    <li><a href="/guides">Overview</a></li>
+    <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+  </ul>
+  <p class="docnav-h">Claude Code</p>
+  <ul>
+    <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-cleanupperioddays" aria-current="page">cleanupPeriodDays</a></li>
+    <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
+    <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+    <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+    <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+  </ul>
+  <p class="docnav-h">Agents</p>
+  <ul>
+    <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+    <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+    <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+    <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+    <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+  </ul>
+  <p class="docnav-h">Tokens</p>
+  <ul>
+    <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+    <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+  </ul>
+  <p class="docnav-h">Laptop</p>
+  <ul>
+    <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+  </ul>
+  <p class="docnav-h">More guides</p>
+  <ul>
+    <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+  </ul>
+</aside>
+<div class="docmain">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">cleanupPeriodDays</span></nav>
+<section class="hero pagehead">
+  <div class="shell">
+    <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
+    <h1>Claude Code cleanupPeriodDays: how long your history is kept</h1>
+    <p class="lede">
+      You go back for last month's session and <span class="icode">/resume</span> no longer lists it. Claude Code deleted it: after 30 days, by default, a background sweep removes every older transcript without a message. <span class="icode">cleanupPeriodDays</span> is the setting that decides that, and it has a few traps.
+    </p>
+    <div class="cmdrow">
+      <div class="cmd">
+        <span class="dollar">$</span>
+        <span id="cmd-hero">uvx ranwhat check --days 365</span>
+        <button class="copy" data-copy="#cmd-hero">Copy</button>
+      </div>
+      <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
+    </div>
+    <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
+      Checked against Claude Code's settings reference and .claude directory documentation under Sources. Published <time datetime="2026-11-16">16 November 2026</time>.
+    </p>
+  </div>
+</section>
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">01 / What</div>
+    <div>
+      <h2>What does cleanupPeriodDays do in Claude Code?</h2>
+      <p class="lede">
+        It sets how many days Claude Code keeps each session's transcript before deleting it: 30 by default.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Value</span>
+          <span class="v">A whole number of days, minimum 1.</span></div>
+        <div class="row"><span class="k">Files</span>
+          <span class="v">The transcripts in <span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</span>: every message, tool call and tool result of a session.</span></div>
+        <div class="row"><span class="k">When</span>
+          <span class="v">A background sweep after a session starts. It deletes anything older than the period, without a message, so an old session just stops appearing in <span class="icode">/resume</span>.</span></div>
+        <div class="row"><span class="k">Paused</span>
+          <span class="v">If Claude Code cannot work out the period, for example because a settings file cannot be read or parsed, it pauses the sweep rather than guess, and <span class="icode">/status</span> shows a warning. Runs with <span class="icode">claude -p --bare</span> skip the sweep.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-2">
+  <div class="shell band split">
+    <div class="marginal">02 / Longer</div>
+    <div>
+      <h2>How do I keep Claude Code history longer than 30 days?</h2>
+      <p class="lede">
+        Set <span class="icode">cleanupPeriodDays</span> in <span class="icode">~/.claude/settings.json</span> to a larger number.
+      </p>
+      <div class="term">
+        <div class="term-bar"><span>~/.claude/settings.json</span></div>
+        <div class="term-body"><pre>{
+  "cleanupPeriodDays": 365
+}</pre></div>
+      </div>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Long</span>
+          <span class="v">Claude Code's documentation suggests something like <span class="icode">3650</span> for long retention.</span></div>
+        <div class="row"><span class="k">Not back</span>
+          <span class="v">A higher value keeps what the sweep has not reached yet. It does not bring back sessions already deleted, so set it before you need the record.</span></div>
+        <div class="row"><span class="k">Managed</span>
+          <span class="v">Managed settings, where an organisation sets them, take precedence over your own file.</span></div>
+        <div class="row"><span class="k">Shorter</span>
+          <span class="v">A smaller number means less sitting on disk. The documentation lists lowering it as a way to reduce exposure, since the transcripts are plaintext and hold whatever the session saw.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-3">
+  <div class="shell band split">
+    <div class="marginal">03 / Zero</div>
+    <div>
+      <h2>Can I set cleanupPeriodDays to 0?</h2>
+      <p class="lede">
+        No. <span class="icode">0</span> fails validation: it means neither keep nothing nor keep forever.
+      </p>
+      <p>
+        To stop transcripts being written at all, start Claude Code with <span class="icode">CLAUDE_CODE_SKIP_PROMPT_HISTORY=1</span>: those sessions write no transcript and no prompt history, and do not appear in <span class="icode">--resume</span>. For one <span class="icode">claude -p</span> run, <span class="icode">--no-session-persistence</span> skips the transcript.
+      </p>
+      <div class="term">
+        <div class="term-body"><pre>CLAUDE_CODE_SKIP_PROMPT_HISTORY=1 claude
+claude -p --no-session-persistence "run the tests"</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-4">
+  <div class="shell band split">
+    <div class="marginal">04 / Kept</div>
+    <div>
+      <h2>What does the cleanupPeriodDays sweep not delete?</h2>
+      <p class="lede">
+        <span class="icode">~/.claude/history.jsonl</span> and <span class="icode">stats-cache.json</span> are never swept, so every prompt you typed stays.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Prompts</span>
+          <span class="v"><span class="icode">history.jsonl</span> holds each prompt with a timestamp and the project path, for up-arrow recall. It stays until you delete it.</span></div>
+        <div class="row"><span class="k">Desktop</span>
+          <span class="v">From Claude Code v2.1.248, transcripts of sessions you started or last continued in Claude Desktop or Cowork are kept at any age, unless you set <span class="icode">desktopSessionCleanupPeriodDays</span>. Each is then deleted once it is older than both limits. If managed settings set <span class="icode">cleanupPeriodDays</span>, that period applies to them instead.</span></div>
+        <div class="row"><span class="k">Scratch</span>
+          <span class="v">A purged session's scratchpad in the temp directory stays until you or the operating system clear it. The <a href="/guides/claude-code-history">history guide</a> lists the rest.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">05 / Before</div>
+    <div>
+      <h2>How do I see what is in my Claude Code history before it is deleted?</h2>
+      <p class="lede">
+        Run <span class="icode">uvx ranwhat check</span>: it reads the transcripts still on disk and changes nothing.
+      </p>
+      <p>
+        It lists the risky actions the agent took and the credentials left in the transcripts. Its <span class="icode">--days</span> window is 30 by default, the same as Claude Code's default retention. If you raised <span class="icode">cleanupPeriodDays</span>, widen it to match: <span class="icode">uvx ranwhat check --days 365</span>. To keep a record that does not depend on the sweep at all, add a hook or OpenTelemetry, as the <a href="/guides/claude-code-audit-log">Claude Code audit log guide</a> shows.
+      </p>
+    </div>
+  </div>
+</section>
+<section class="mark-1">
+  <div class="shell band split">
+    <div class="marginal">06 / Others</div>
+    <div>
+      <h2>Do Gemini CLI, Codex and Cursor have a cleanupPeriodDays?</h2>
+      <p class="lede">
+        Gemini CLI has one; Codex and Cursor document no retention period for sessions.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Claude Code</span>
+          <span class="v"><span class="icode">cleanupPeriodDays</span>, 30 days by default.</span></div>
+        <div class="row"><span class="k">Gemini CLI</span>
+          <span class="v"><span class="icode">general.sessionRetention</span> in <span class="icode">settings.json</span>: <span class="icode">maxAge</span> defaults to <span class="icode">"30d"</span>, with <span class="icode">maxCount</span> and <span class="icode">minRetention</span>.</span></div>
+        <div class="row"><span class="k">Codex</span>
+          <span class="v">None documented for the rollout files. <span class="icode">history.max_bytes</span> caps <span class="icode">history.jsonl</span>. <a href="/guides/codex-cli-session-history">Codex session history</a>.</span></div>
+        <div class="row"><span class="k">Cursor</span>
+          <span class="v">None documented. Chats stay in its database until you delete them in Cursor. <a href="/guides/cursor-chat-history">Cursor chat history</a>.</span></div>
+      </div>
+      <p>
+        Every agent's path and setting is in <a href="/guides/ai-coding-agent-history-locations">where AI coding agents keep history</a>.
+      </p>
+    </div>
+  </div>
+</section>
+<section class="mark-3" id="questions">
+  <div class="shell band split">
+    <div class="marginal">07 / Questions</div>
+    <div>
+      <h2>Common questions about cleanupPeriodDays</h2>
+      <div class="faqs">
+        <div class="faq"><h3>What is the default cleanupPeriodDays in Claude Code?</h3><p>30 days. Transcripts older than that are deleted by a background sweep after a session starts, without a message.</p></div>
+        <div class="faq"><h3>Where do I set cleanupPeriodDays?</h3><p>In <span class="icode">~/.claude/settings.json</span>, as <span class="icode">"cleanupPeriodDays": 365</span> or any whole number from 1. Managed settings, where an organisation uses them, take precedence.</p></div>
+        <div class="faq"><h3>Does raising cleanupPeriodDays restore deleted sessions?</h3><p>No. It only keeps what the sweep has not deleted yet. A session older than the old period is already gone.</p></div>
+        <div class="faq"><h3>Is keeping Claude Code history longer a risk?</h3><p>It is a trade. The transcripts are plaintext, protected only by file permissions, and hold whatever the sessions read, secrets included. A longer period is a longer audit record and more for anything running as you to read. Check them with <span class="icode">uvx ranwhat check</span> either way.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="mark-5">
+  <div class="shell band split">
+    <div class="marginal">Sources</div>
+    <div>
+      <h2>Sources</h2>
+      <ul class="follow">
+        <li><a href="https://code.claude.com/docs/en/settings-reference#cleanupperioddays">Settings reference<span>cleanupPeriodDays, desktopSessionCleanupPeriodDays</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/claude-directory#application-data">Explore the .claude directory<span>what is swept, what is kept, plaintext storage</span></a></li>
+        <li><a href="https://code.claude.com/docs/en/env-vars">Environment variables<span>CLAUDE_CODE_SKIP_PROMPT_HISTORY</span></a></li>
+        <li><a href="https://geminicli.com/docs/cli/session-management/">Gemini CLI session management<span>general.sessionRetention</span></a></li>
+      </ul>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides/claude-code-history">Claude Code history<span>where the transcripts are and how to view them</span></a></li>
+        <li><a href="/guides/claude-code-audit-log">Claude Code audit log<span>the transcripts as a record of what ran</span></a></li>
+        <li><a href="/guides/ai-coding-agent-security">AI coding agent security checklist<span>every other control, in order</span></a></li>
+        <li><a href="/guides">All guides<span>everything in this section</span></a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+</div>
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="fgrid">
+      <div>
+        <a class="wordmark" href="/" style="font-size:16px">ran<i>what</i></a>
+        <p class="fnote">
+          A flight recorder for AI agents, and a scanner for the authority they
+          hold. Reads locally, and goes online only when you ask.
+        </p>
+        <p class="byline">Built by <a class="cenner" href="https://cenner.hr">cenner.hr</a></p>
+      </div>
+      <div>
+        <p class="fh">Commands</p>
+        <ul>
+          <li><a href="/watch">watch: what it did</a></li>
+          <li><a href="/clean">clean: secrets on disk</a></li>
+          <li><a href="/scan">scan: what it may do</a></li>
+          <li><a href="/commands">All commands</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Docs</p>
+        <ul>
+          <li><a href="/install">Install</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat#readme">README</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Guides</p>
+        <ul>
+          <li><a href="/guides">All guides</a></li>
+          <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
+          <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
+          <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
+          <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+          <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
+          <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
+          <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
+          <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
+          <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
+          <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
+          <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="fh">Project</p>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="https://account.ranwhat.com/">Sign in</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/updates">Updates</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat">Repository</a></li>
+          <li><a href="https://pypi.org/project/ranwhat/">PyPI</a></li>
+          <li><a href="https://x.com/ranwhatcom">X</a></li>
+          <li><a href="https://github.com/MatijaMiki/ranwhat/issues">Issues</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbase">
+      <a class="cenner" href="https://cenner.hr">cenner.hr</a>
+      <span>ranwhat.com</span>
+      <span>Runs locally &middot; no telemetry</span>
+      <span>Python 3.9+ &middot; no dependencies</span>
+      <a class="choices" href="/privacy#ads" data-consent-open>Privacy choices</a>
+    </div>
+  </div>
+</footer>
+<script src="/copy.js" defer></script>
+<script src="/consent.js" defer></script>
+</body>
+</html>
