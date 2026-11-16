@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MCP server security for coding agents: what they reach | ranwhat</title>
-<meta name="description" content="An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.">
+<title>MCP server security: it runs with your privileges | ranwhat</title>
+<meta name="description" content="Claude Code does not sandbox MCP servers: a local one can run any command you can. Read what is configured, scope it, and see what each server can reach.">
 <link rel="canonical" href="https://ranwhat.com/guides/mcp-server-security-coding-agents">
-<meta name="ai-summary" content="An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.">
+<meta name="ai-summary" content="Claude Code does not sandbox MCP servers: a local one can run any command you can. Read what is configured, scope it, and see what each server can reach.">
 <link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/mcp-server-security-coding-agents.md">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -20,8 +20,8 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/mcp-server-security-coding-agents">
-<meta property="og:title" content="MCP server security for coding agents: what they reach | ranwhat">
-<meta property="og:description" content="An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.">
+<meta property="og:title" content="MCP server security: it runs with your privileges | ranwhat">
+<meta property="og:description" content="Claude Code does not sandbox MCP servers: a local one can run any command you can. Read what is configured, scope it, and see what each server can reach.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -29,14 +29,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="MCP server security for coding agents: what they reach | ranwhat">
-<meta name="twitter:description" content="An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.">
+<meta name="twitter:title" content="MCP server security: it runs with your privileges | ranwhat">
+<meta name="twitter:description" content="Claude Code does not sandbox MCP servers: a local one can run any command you can. Read what is configured, scope it, and see what each server can reach.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/mcp-server-security-coding-agents#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Securing MCP servers for coding agents","description":"An MCP server runs with your privileges or holds your OAuth token. See what is configured, what to approve, and how to scope MCP servers in Claude Code.","datePublished":"2026-10-09","dateModified":"2026-10-09","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/mcp-server-security-coding-agents","about":[{"@type":"Thing","name":"Model Context Protocol"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"MCP server security","item":"https://ranwhat.com/guides/mcp-server-security-coding-agents"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/mcp-server-security-coding-agents#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Securing MCP servers for coding agents","description":"Claude Code does not sandbox MCP servers: a local one can run any command you can. Read what is configured, scope it, and see what each server can reach.","datePublished":"2026-10-09","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/mcp-server-security-coding-agents","about":[{"@type":"Thing","name":"Model Context Protocol"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"MCP server security","item":"https://ranwhat.com/guides/mcp-server-security-coding-agents"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -67,25 +67,26 @@
 <div class="docs">
 <aside class="docnav" aria-label="Guides">
   <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
-  <p class="docnav-h">Start here</p>
+    <p class="docnav-h">Start here</p>
   <ul>
     <li><a href="/guides">Overview</a></li>
     <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
-    <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
   </ul>
   <p class="docnav-h">Claude Code</p>
   <ul>
     <li><a href="/guides/claude-code-history">Conversation history</a></li>
+    <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
     <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
-    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
     <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
     <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
     <li><a href="/guides/mcp-server-security-coding-agents" aria-current="page">MCP server security</a></li>
     <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
     <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
@@ -100,6 +101,11 @@
   <ul>
     <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
   </ul>
+  <p class="docnav-h">More guides</p>
+  <ul>
+    <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+  </ul>
 </aside>
 <div class="docmain">
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">MCP server security</span></nav>
@@ -108,9 +114,7 @@
     <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
     <h1>Securing MCP servers for coding agents</h1>
     <p class="lede">
-      An MCP server is code you run, or an account you hand over, and the
-      agent decides when to call it. Know what each one can reach before you
-      approve it.
+      You added an MCP server with one <span class="icode">npx</span> line, and it now runs with every permission your account has, holding whatever token you put in its config. An MCP server is code you run, or an account you hand over, and the agent decides when to call it. Know what each one can reach before you approve it.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -123,7 +127,7 @@
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
       Checked against Claude Code's documentation, the MCP specification's
       security guidance, the research under Sources, and ranwhat's source.
-      Published <time datetime="2026-10-09">9 October 2026</time>.
+      Published 9 October 2026, updated <time datetime="2026-11-16">16 November 2026</time>.
     </p>
   </div>
 </section>
@@ -393,6 +397,21 @@ uvx ranwhat reach               <span class="c-mut"># inline secrets, unpinned p
   </div>
 </section>
 
+<section class="mark-3" id="questions">
+  <div class="shell band split">
+    <div class="marginal">Questions</div>
+    <div>
+      <h2>Common questions about MCP server security</h2>
+      <div class="faqs">
+        <div class="faq"><h3>Does Claude Code sandbox MCP servers?</h3><p>No. Claude Code does not sandbox an MCP server for you. The MCP specification's security guidance says a local server can run any command with the client's privileges.</p></div>
+        <div class="faq"><h3>Where are MCP servers configured in Claude Code?</h3><p>In <span class="icode">~/.claude.json</span> for user and local scope, and in a project's <span class="icode">.mcp.json</span> for project scope. Plugins and claude.ai connectors can add more, and <span class="icode">/mcp</span> shows each one's status.</p></div>
+        <div class="faq"><h3>What is MCP tool poisoning?</h3><p>Instructions hidden in a tool's description, which the model reads and you usually do not. Invariant Labs named it in April 2025, and also described a server changing a description after you approve it.</p></div>
+        <div class="faq"><h3>How do I see which MCP servers my agents can reach?</h3><p><span class="icode">uvx ranwhat reach</span> lists the servers in Claude Code, Cursor, VS Code, Gemini CLI, Codex and other agents' configs, flags inline secrets and unpinned packages, and only reads.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="mark-5">
   <div class="shell band split">
     <div class="marginal">Sources</div>
@@ -409,6 +428,10 @@ uvx ranwhat reach               <span class="c-mut"># inline secrets, unpinned p
         <li><a href="https://www.mitiga.io/blog/claude-code-mcp-token-theft-mitm">Mitiga: stealing MCP tokens in Claude Code<span>the trust and re-pointed server chain, the disclosure</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/ranwhat/reach.py">ranwhat/reach.py<span>what reach reads and reports</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/docs/reference.md#ranwhat-reach-mcp-servers-and-credential-files-your-agents-can-reach">ranwhat reference<span>the reach command, its files and its limits</span></a></li>
+      </ul>
+      <h2 style="margin-top:52px">Related guides</h2>
+      <ul class="follow">
+        <li><a href="/guides">All guides<span>everything in this section</span></a></li>
       </ul>
     </div>
   </div>
@@ -454,21 +477,24 @@ uvx ranwhat reach               <span class="c-mut"># inline secrets, unpinned p
           <li><a href="/guides">All guides</a></li>
           <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
           <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
           <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
-          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
-          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
-          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
-          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
           <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
           <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
           <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
-          <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
         </ul>
       </div>
       <div>

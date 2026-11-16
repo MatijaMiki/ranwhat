@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Where Claude Code history is stored and how to view it | ranwhat</title>
-<meta name="description" content="Claude Code history is stored as plaintext JSONL in ~/.claude/projects and deleted after 30 days. How to find, view and delete it, and what it holds.">
+<title>Claude Code history: it deletes itself after 30 days | ranwhat</title>
+<meta name="description" content="Claude Code saves session history as plaintext JSONL in ~/.claude/projects and deletes it after 30 days. How to view it with --resume, keep it longer or purge it.">
 <link rel="canonical" href="https://ranwhat.com/guides/claude-code-history">
-<meta name="ai-summary" content="Claude Code history is stored as plaintext JSONL in ~/.claude/projects and deleted after 30 days. How to find, view and delete it, and what it holds.">
+<meta name="ai-summary" content="Claude Code saves session history as plaintext JSONL in ~/.claude/projects and deletes it after 30 days. How to view it with --resume, keep it longer or purge it.">
 <link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/claude-code-history.md">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -20,8 +20,8 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/claude-code-history">
-<meta property="og:title" content="Where Claude Code history is stored and how to view it | ranwhat">
-<meta property="og:description" content="Claude Code history is stored as plaintext JSONL in ~/.claude/projects and deleted after 30 days. How to find, view and delete it, and what it holds.">
+<meta property="og:title" content="Claude Code history: it deletes itself after 30 days | ranwhat">
+<meta property="og:description" content="Claude Code saves session history as plaintext JSONL in ~/.claude/projects and deletes it after 30 days. How to view it with --resume, keep it longer or purge it.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -29,14 +29,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="Where Claude Code history is stored and how to view it | ranwhat">
-<meta name="twitter:description" content="Claude Code history is stored as plaintext JSONL in ~/.claude/projects and deleted after 30 days. How to find, view and delete it, and what it holds.">
+<meta name="twitter:title" content="Claude Code history: it deletes itself after 30 days | ranwhat">
+<meta name="twitter:description" content="Claude Code saves session history as plaintext JSONL in ~/.claude/projects and deletes it after 30 days. How to view it with --resume, keep it longer or purge it.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Claude Code stores your conversation history","description":"Claude Code history is stored as plaintext JSONL in ~/.claude/projects and deleted after 30 days. How to find, view and delete it, and what it holds.","datePublished":"2026-10-02","dateModified":"2026-11-08","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Claude Code stores your conversation history","description":"Claude Code saves session history as plaintext JSONL in ~/.claude/projects and deletes it after 30 days. How to view it with --resume, keep it longer or purge it.","datePublished":"2026-10-02","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-history","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"AI agent transcripts"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Claude Code history","item":"https://ranwhat.com/guides/claude-code-history"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -67,25 +67,26 @@
 <div class="docs">
 <aside class="docnav" aria-label="Guides">
   <a class="docnav-title" href="/guides"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Guides</span></a>
-  <p class="docnav-h">Start here</p>
+    <p class="docnav-h">Start here</p>
   <ul>
     <li><a href="/guides">Overview</a></li>
     <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
-    <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
   </ul>
   <p class="docnav-h">Claude Code</p>
   <ul>
     <li><a href="/guides/claude-code-history" aria-current="page">Conversation history</a></li>
+    <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
     <li><a href="/guides/claude-code-env-secrets">Blocking .env reads</a></li>
     <li><a href="/guides/claude-code-audit-log">Audit log</a></li>
+    <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
     <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
-    <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
     <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
   </ul>
   <p class="docnav-h">Agents</p>
   <ul>
     <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
+    <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
     <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
     <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
     <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
@@ -100,6 +101,11 @@
   <ul>
     <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
   </ul>
+  <p class="docnav-h">More guides</p>
+  <ul>
+    <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+    <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
+  </ul>
 </aside>
 <div class="docmain">
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/">ranwhat</a> <span aria-hidden="true">/</span> <a href="/guides">Guides</a> <span aria-hidden="true">/</span> <span aria-current="page">Claude Code history</span></nav>
@@ -108,10 +114,7 @@
     <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
     <h1>Where Claude Code stores your conversation history</h1>
     <p class="lede">
-      Every Claude Code session is saved on your machine as a plaintext JSONL
-      file, and deleted after 30 days unless you change that. Where the files
-      are, how to view them, what is in them, how long they stay, and how to
-      delete them.
+      The session where Claude Code fixed that bug five weeks ago is gone from <span class="icode">/resume</span>: by default Claude Code deletes transcripts after 30 days. Until then, every session is saved on your machine as a plaintext JSONL file. Where the files are, how to view them, what is in them, how long they stay, and how to delete them.
     </p>
     <div class="cmdrow">
       <div class="cmd">
@@ -129,7 +132,7 @@
       </div>
     </div>
     <p class="mono" style="margin:22px 0 0;font-size:12px;color:var(--faint)">
-      Checked against the Claude Code documentation and the reports under Sources. Published 2 October 2026, updated <time datetime="2026-11-08">8 November 2026</time>.
+      Checked against the Claude Code documentation and the reports under Sources. Published 2 October 2026, updated <time datetime="2026-11-16">16 November 2026</time>.
     </p>
   </div>
 </section>
@@ -534,6 +537,7 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
     <div>
       <h2>Common questions about Claude Code history</h2>
       <div class="faqs">
+        <div class="faq"><h3>How do I keep Claude Code history longer?</h3><p>Raise <span class="icode">cleanupPeriodDays</span> in <span class="icode">~/.claude/settings.json</span>, for example to 365. It keeps what the sweep has not reached yet and cannot bring back what it deleted. <a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a> covers the traps.</p></div>
         <div class="faq"><h3>Can I see Claude Code history?</h3><p>Yes. Claude Code saves every session on your machine as a plaintext JSONL file under <span class="icode">~/.claude/projects</span>, and keeps it for 30 days by default. Run <span class="icode">claude --resume</span> to pick a past session and open it again, or read the files directly.</p></div>
         <div class="faq"><h3>Does Claude Code have history?</h3><p>It keeps two kinds. Each session's transcript, with every message, tool call and tool result, is deleted after <span class="icode">cleanupPeriodDays</span>, 30 by default. <span class="icode">~/.claude/history.jsonl</span> holds every prompt you typed, for up-arrow recall and <span class="icode">Ctrl+R</span> search, and the sweep never deletes it.</p></div>
         <div class="faq"><h3>Where is Claude Code session history stored?</h3><p>In <span class="icode">~/.claude/projects/&lt;project&gt;/&lt;session-id&gt;.jsonl</span>, where <span class="icode">&lt;project&gt;</span> is the working directory with every character that is not a letter or digit replaced by a hyphen. On Windows, <span class="icode">~/.claude</span> is <span class="icode">%USERPROFILE%\.claude</span>. With <span class="icode">CLAUDE_CONFIG_DIR</span> set, the files are under that directory instead.</p></div>
@@ -569,6 +573,7 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
       </ul>
       <h2 style="margin-top:52px">Related guides</h2>
       <ul class="follow">
+        <li><a href="/guides/claude-code-cleanupperioddays">Claude Code cleanupPeriodDays<span>the retention setting in full</span></a></li>
         <li><a href="/guides/claude-code-env-secrets">Claude Code and .env secrets<span>keeping credentials out of transcripts</span></a></li>
         <li><a href="/guides/claude-code-audit-log">Claude Code audit log<span>these files as a record of what ran</span></a></li>
         <li><a href="/guides/ai-coding-agent-security">AI coding agent security<span>the wider picture</span></a></li>
@@ -617,21 +622,24 @@ ranwhat clean --apply   <span class="c-mut">mask every value found, backups firs
           <li><a href="/guides">All guides</a></li>
           <li><a href="/guides/ai-coding-agent-security">Security checklist</a></li>
           <li><a href="/guides/claude-code-history">Claude Code history</a></li>
+          <li><a href="/guides/claude-code-cleanupperioddays">cleanupPeriodDays</a></li>
           <li><a href="/guides/claude-code-env-secrets">Claude Code and .env</a></li>
           <li><a href="/guides/claude-code-audit-log">Claude Code audit log</a></li>
+          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
           <li><a href="/guides/claude-code-deleted-files">Deleted files</a></li>
+          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
+          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
+          <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
+          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
           <li><a href="/guides/developer-opsec">Developer OPSEC</a></li>
-          <li><a href="/guides/claude-code-hooks-security">Hooks that block calls</a></li>
-          <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
-          <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
-          <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
           <li><a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a></li>
           <li><a href="/guides/check-ai-agent-code-is-secure">Checking agent code</a></li>
           <li><a href="/guides/secure-by-default-ai-coding-agent-setup">Secure-by-default setup</a></li>
-          <li><a href="/guides/best-ai-coding-agent-security-tools">Best security tools</a></li>
-          <li><a href="/guides/claude-code-audit-log-tools">Audit log tools</a></li>
+          <li><a href="/guides/claude-code-hooks-security">Deny rules vs hooks</a></li>
+          <li><a href="/guides/best-ai-coding-agent-security-tools">Security tools compared</a></li>
         </ul>
       </div>
       <div>
