@@ -103,6 +103,8 @@
         var data = await res.json().catch(function () { return {}; });
         if (res.ok && data.ok) {
           input.value = "";
+          /* Visit statistics, when allowed: that someone signed up, never the address. */
+          if (window.ranwhatStats) window.ranwhatStats.event("newsletter_signup", { page_path: location.pathname });
           say(data.queued
             ? "Thanks. Today\u2019s confirmation emails are used up, so the link to confirm " +
               "comes on a later day, in the order people signed up. If it has not gone 30 days " +
