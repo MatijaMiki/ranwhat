@@ -54,6 +54,14 @@ class ThePlugin(unittest.TestCase):
             if f.name != "guard.md":
                 self.assertNotRegex(front, r"hook|--apply|revoke|clean")
 
+    def test_commands_preapprove_no_tools(self):
+        # Anthropic's plugin directory accepts allowed-tools only for read-only
+        # tools (Read, Grep, Glob, LS). The commands run uvx, so Claude Code
+        # asks before each run instead of pre-approving it.
+        for f in (PLUGIN / "commands").glob("*.md"):
+            front = f.read_text(encoding="utf-8").split("---")[1]
+            self.assertNotIn("allowed-tools", front, f)
+
 
 if __name__ == "__main__":
     unittest.main()
