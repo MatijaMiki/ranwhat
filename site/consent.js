@@ -93,7 +93,11 @@
     if (/^https:\/\/pypi\.org\/project\/ranwhat/.test(href)) track("click_pypi", { link_url: href });
     else if (/^https:\/\/github\.com\/MatijaMiki\/ranwhat/.test(href)) track("click_github", { link_url: href });
     else if (href === "/install") track("click_install", { page_path: location.pathname });
+    else if (/^https:\/\/account\.ranwhat\.com(\/|$)/.test(href)) track("click_account", { page_path: location.pathname });
   });
+  /* The forms report their own success here (contact.js, subscribe.js), so a
+     sent message or a newsletter signup can be counted. Never what was typed. */
+  window.ranwhatStats = { event: track };
 
   var adsLoaded = false;
   function loadAds() {

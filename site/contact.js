@@ -105,6 +105,8 @@
         });
         say("Sent. We read everything, and a day or two is a normal reply time.", "sent");
         if (conversion && ads) ads.lead(conversion);
+        /* Visit statistics, when allowed: that a message was sent and its topic. */
+        if (window.ranwhatStats) window.ranwhatStats.event("generate_lead", { lead_source: "contact_" + payload.about });
         sent = true;
         return;
       }
