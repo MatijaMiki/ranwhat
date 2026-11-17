@@ -12,6 +12,10 @@ Copilot
 It's open source (MIT), runs locally and has no dependencies. No account
 needed, no telemetry.
 
+Use it as an audit log for your agents after the fact: see what commands
+Claude Code ran on your machine, and which API keys and passwords ended up
+in its transcripts.
+
 ## Install
 
 Try it once without installing anything:
