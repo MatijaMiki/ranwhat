@@ -126,6 +126,23 @@
         <span class="icode nowrap">pipx upgrade ranwhat</span>.
       </p>
       <div class="releases">
+        <article class="release" id="v0-10-0">
+          <p class="rel-meta"><span class="rel-v">0.10.0</span> <time datetime="2026-11-18T05:04:09Z">18 November 2026</time></p>
+          <h3>clean now searches the files Claude Code keeps beside its transcripts</h3>
+          <ul>
+            <li>New: <a href="/clean">ranwhat clean</a> now also searches the large tool
+              outputs Claude Code stores in <span class="icode">&lt;session&gt;/tool-results/</span>
+              (a <span class="icode">cat .env</span> too big for the transcript lands there whole)
+              and <span class="icode">~/.claude/history.jsonl</span>, the prompts you typed. Both
+              were left out before, so a key that only appeared there was never reported. They are
+              only read, never rewritten: a finding says to rotate the key and then delete the file
+              or the line.</li>
+            <li>Fixed: on Windows, two <span class="icode">ledger record</span> runs at the same
+              time could end one with "cannot lock". A lock file that is being deleted is now a busy
+              lock, and the run waits. The chain was never harmed.</li>
+          </ul>
+        </article>
+
         <article class="release" id="v0-9-0">
           <p class="rel-meta"><span class="rel-v">0.9.0</span> <time datetime="2026-11-08T21:17:07Z">8 November 2026</time></p>
           <h3>A ledger of what watch flagged, with verify</h3>

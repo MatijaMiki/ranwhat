@@ -6,7 +6,14 @@
   <atom:link href="https://ranwhat.com/rss.xml" rel="self" type="application/rss+xml"/>
   <description>What each release of ranwhat added and fixed: the coding agents it reads, the rules it gained, and what it got wrong before.</description>
   <language>en</language>
-  <lastBuildDate>Sun, 08 Nov 2026 21:17:07 +0000</lastBuildDate>
+  <lastBuildDate>Wed, 18 Nov 2026 05:04:09 +0000</lastBuildDate>
+  <item>
+    <title>ranwhat 0.10.0: clean now searches the files Claude Code keeps beside its transcripts</title>
+    <link>https://ranwhat.com/updates#v0-10-0</link>
+    <guid isPermaLink="true">https://ranwhat.com/updates#v0-10-0</guid>
+    <pubDate>Wed, 18 Nov 2026 05:04:09 +0000</pubDate>
+    <description>&lt;ul&gt;&lt;li&gt;New: &lt;a href="https://ranwhat.com/clean"&gt;ranwhat clean&lt;/a&gt; now also searches the large tool outputs Claude Code stores in &lt;span class="icode"&gt;&amp;lt;session&amp;gt;/tool-results/&lt;/span&gt; (a &lt;span class="icode"&gt;cat .env&lt;/span&gt; too big for the transcript lands there whole) and &lt;span class="icode"&gt;~/.claude/history.jsonl&lt;/span&gt;, the prompts you typed. Both were left out before, so a key that only appeared there was never reported. They are only read, never rewritten: a finding says to rotate the key and then delete the file or the line.&lt;/li&gt;&lt;li&gt;Fixed: on Windows, two &lt;span class="icode"&gt;ledger record&lt;/span&gt; runs at the same time could end one with "cannot lock". A lock file that is being deleted is now a busy lock, and the run waits. The chain was never harmed.&lt;/li&gt;&lt;/ul&gt;</description>
+  </item>
   <item>
     <title>ranwhat 0.9.0: A ledger of what watch flagged, with verify</title>
     <link>https://ranwhat.com/updates#v0-9-0</link>

@@ -1,6 +1,6 @@
 {
   "name": "ranwhat",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Flight recorder and secret finder for AI coding agents: what they ran, which secrets sit in their transcripts, and what they can reach. Commands run the ranwhat CLI (pinned uvx release) after you approve; it reads local files and sends nothing.",
   "author": { "name": "Matija Mikulinec" },
   "homepage": "https://ranwhat.com",
