@@ -28,6 +28,7 @@ ORIGIN = "https://ranwhat.com"
 SKIP = {
     "404.html": "the not-found page, noindex",
     "example-report.html": "a sample of the tool's own report, not prose",
+    "cjenik/arhiva/index.html": "the bare listing of replaced price lists, noindex",
 }
 
 # llms-full.txt reads in this order: the tool, then the guides, then the rest.

@@ -271,9 +271,12 @@ class ScriptAndWorkerAgree(unittest.TestCase):
     def test_the_prices_are_the_ones_on_the_pricing_page(self):
         page = (ROOT / "site" / "pricing.html").read_text(encoding="utf-8")
         cents = {key: c for key, c, *_ in self.tool.PRICES}
-        self.assertIn("&euro;%d" % (cents["ranwhat_plus_monthly"] // 100), page)
-        self.assertIn("&euro;%d" % (cents["ranwhat_plus_annual"] // 1200), page)
-        self.assertIn("&euro;%d" % (cents["ranwhat_plus_annual"] // 100), page)
+        # The page's prices are written between these marks by the cjenik updater
+        # (tests/test_site_claims.py, PriceListMatchesThePrices), from the published
+        # price list: a price changed there fails here until Stripe's is changed too.
+        self.assertIn("<!--c:ranwhat-plus-month:price-->€%d<!--/c-->" % (cents["ranwhat_plus_monthly"] // 100), page)
+        self.assertIn("<!--c:ranwhat-plus-year:monthly_equiv-->€%d<!--/c-->" % (cents["ranwhat_plus_annual"] // 1200), page)
+        self.assertIn("<!--c:ranwhat-plus-year:price-->€%d<!--/c-->" % (cents["ranwhat_plus_annual"] // 100), page)
 
 
 if __name__ == "__main__":
