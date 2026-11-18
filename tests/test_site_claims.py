@@ -1593,7 +1593,7 @@ class PriceListMatchesThePrices(unittest.TestCase):
         self.assertIn("<!--c:ranwhat-plus-year:price-->€%s<!--/c--> a year</small>" % whole(yearly[1]), page)
         self.assertIn('<p class="anchor p-monthly"><!--c:ranwhat-plus-month:base_label-->' + label % whole(monthly[2]) + " / month</p>", page)
         self.assertIn('<p class="anchor p-annual"><!--c:ranwhat-plus-year:base_label-->' + label % whole(yearly[2]) + " a year</p>", page)
-        self.assertIn('<p class="anchor"><!--c:ranwhat-free:base_label-->Base price (bazna cijena, 10. 9. 2026.): €%s<!--/c--></p>'
+        self.assertIn('<p class="anchor"><!--c:ranwhat-free:base_label-->Base price (bazna cijena, 23. 9. 2026.): €%s<!--/c--></p>'
                       % whole(self.rows["ranwhat Free"][2]), page)
         self.assertIn('href="/cjenik/cjenik.csv"', page)
         self.assertIn('href="/cjenik/arhiva/"', page)
