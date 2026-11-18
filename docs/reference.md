@@ -305,6 +305,12 @@ ranwhat clean               # report, then open a review session
 ranwhat clean --apply       # mask everything without asking
 ```
 
+`clean` also searches the files Claude Code keeps beside its transcripts:
+the large tool outputs stored in `<session>/tool-results/` (a `cat .env`
+too big for the transcript lands there whole) and `~/.claude/history.jsonl`,
+the prompts you typed. Those are only read, never rewritten: a finding says
+to rotate the key and then delete the file or the line.
+
 `clean` searches every agent's history, and masks a value only in a file
 the agent lets it rewrite: a plain JSONL, JSON or text file nothing has
 written to in the last two minutes. Databases (Codex's thread index,
@@ -815,8 +821,6 @@ push sends derived metadata only, and only when you run it. Everything else read
 
 ## What it does not read yet
 
-- The large tool outputs Claude Code stores in `<session>/tool-results/`
-- `~/.claude/history.jsonl`
 - Events OpenClaw stores compressed (`event_zstd`), and the cold
   transcript archives in `agents/<agentId>/sessions/cold/` under its
   state directory, which

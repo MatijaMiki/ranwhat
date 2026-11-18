@@ -3119,6 +3119,7 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
     extra = sum(len(stores) for _source, stores in others)
     done = 0
     claude_paths = []
+    claude = None                   # Claude Code, when it has extra stores
     held = {}                       # transcript not masked -> why
     if "claude-code" in selected:
         step = progress
@@ -3135,6 +3136,13 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
         done = scanned + out.unread.get("claude-code", 0)
         out.changed += list(changed or ())
         claude_paths = discover(root, since_days) if scanned else []
+        # The tool outputs and prompt history beside the transcripts.
+        extras = _registry.get("claude-code").extra_stores(root)
+        claude = _registry.get("claude-code") if extras else None
+        for store in extras:
+            out.stores[store.path] = store
+            findings, _masks, _whole = _read_store(claude, store, values)
+            _merge(out.findings, findings)
     total = done + extra
     by_id = {}
     for source, stores in others:
@@ -3159,7 +3167,9 @@ def scan_sources(sources=None, root=None, paths=None, since_days=None,
                                  - out.others[source.id])
 
     if out.findings and out.stores:
-        _copies_in_stores(list(out.stores.values()), out.findings, values, by_id)
+        _copies_in_stores(list(out.stores.values()), out.findings, values,
+                          by_id if claude is None
+                          else dict(by_id, **{"claude-code": claude}))
         # A value found only in another agent's files, typed or quoted in
         # a Claude Code transcript.
         elsewhere = {fp: f for fp, f in out.findings.items()

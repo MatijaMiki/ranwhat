@@ -23,6 +23,16 @@ from .base import MaskResult, SecretText, Source, Store, ToolCall, newest_first
 
 ENV = "CLAUDE_CONFIG_DIR"
 
+# A stored tool output is capped by Claude Code well below this; a file past
+# it is not one, and is not read whole into memory.
+MAX_EXTRA = 32 << 20
+
+WHY_RESULT = ("It is a large tool output Claude Code stored beside the "
+              "session; ranwhat reads it but does not rewrite it. Rotate "
+              "the key, then delete the file.")
+WHY_HISTORY = ("It is the list of prompts you typed; ranwhat reads it but "
+               "does not rewrite it. Rotate the key, then edit the line out.")
+
 
 def projects_dir():
     """Where Claude Code keeps its transcripts. CLAUDE_CONFIG_DIR is Claude
@@ -194,16 +204,58 @@ class ClaudeCodeSource(Source):
         self.warn(("open", store.path), "could not read Claude Code "
                   "transcript %s (%s)" % (store.path, reason))
 
+    def extra_stores(self, projects):
+        """The files beside the transcripts that hold text clean searches:
+        each stored tool output (<project>/<session>/tool-results/*, where
+        an output too big for the transcript is kept whole: a `cat .env`)
+        and history.jsonl (every prompt typed). `projects` is the projects
+        directory searched; only the standard layout is looked at, a
+        --root of any other name has neither. Role "side", only read: a
+        finding says to rotate the key and then remove the file."""
+        projects = os.path.abspath(os.path.expanduser(projects))
+        if os.path.basename(projects) != "projects":
+            return []
+        found = []
+        base = glob.escape(projects)
+        paths = glob.glob(os.path.join(base, "*", "*", "tool-results", "*"))
+        paths += glob.glob(os.path.join(base, "*", "*", "subagents", "**",
+                                        "tool-results", "*"), recursive=True)
+        for path in sorted({p for p in paths if os.path.isfile(p)}):
+            parts = os.path.normpath(path).split(os.sep)
+            at = len(parts) - 1 - parts[::-1].index("tool-results")
+            store = self.store(path, "text", role="side", unit="file",
+                               session=parts[at - 1], project=parts[at - 2],
+                               masking="read-only",
+                               why_read_only=WHY_RESULT)
+            if store is not None:
+                found.append(store)
+        history = os.path.join(os.path.dirname(projects), "history.jsonl")
+        if os.path.isfile(history):
+            store = self.store(history, "jsonl", role="side", unit="file",
+                               masking="read-only", why_read_only=WHY_HISTORY)
+            if store is not None:
+                found.append(store)
+        return found
+
     def secret_texts(self, store):
         """Each line that is JSON, decoded, for a reader that wants every
-        string in the transcript. clean does not search Claude Code through
+        string in the transcript. clean does not search a transcript through
         this: its scan_file credits each secret to the file it was read out
-        of, line by line, which needs the calls before it."""
+        of, line by line, which needs the calls before it. It does search
+        extra_stores() through it: a stored tool output whole, as one string,
+        and history.jsonl a line at a time."""
         try:
+            if store.format == "text" and os.path.getsize(store.path) > MAX_EXTRA:
+                self.unreadable_store("larger than %d MiB" % (MAX_EXTRA >> 20),
+                                      store.path)
+                return
             fh = open(store.path, "r", encoding="utf-8", errors="replace")
         except OSError:
             return
         with fh:
+            if store.format == "text":
+                yield SecretText(fh.read(), where="stored tool output")
+                return
             for number, line in enumerate(fh, 1):
                 try:
                     node = json.loads(line)
