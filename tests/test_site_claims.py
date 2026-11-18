@@ -271,8 +271,14 @@ def read(page):
     return page.read_text(encoding="utf-8")
 
 
+# The bare listing of replaced price lists (PriceListMatchesThePrices): written by
+# the cjenik updater, not a page of the site, so the chrome rules skip it. Its
+# links are still checked by InternalLinksResolve.
+PRICE_LIST_ARCHIVE = SITE / "cjenik" / "arhiva" / "index.html"
+
+
 def all_pages():
-    return sorted(SITE.rglob("*.html"))
+    return sorted(p for p in SITE.rglob("*.html") if p != PRICE_LIST_ARCHIVE)
 
 
 def indexable(page):
@@ -1514,53 +1520,83 @@ class PushCopyTests(unittest.TestCase):
 
 
 class PriceListMatchesThePrices(unittest.TestCase):
-    """Croatia's Odluka o isticanju dodatne cijene and Odluka o objavi cjenika
-    (NN 101/26, from 17.11.2026) want each price shown with its price on a
-    reference date, and the price list published as .csv. The list in force
-    (site/cjenik/cjenik.csv), its dated copy, the pricing page and the
-    worker's PRICES and ANCHOR must say the same, or one of them is a false
-    statement of what Plus costs.
+    """Croatia's Pravilnik o isticanju bazne cijene proizvoda and Pravilnik o
+    načinu objave cjenika proizvoda (NN 132/2026, from 17.11.2026) want each
+    price shown with its base price (bazna cijena), and the price list
+    published as .csv: UTF-8, ";" between columns, three columns for services
+    (name; retail price and whether it is a special-offer price; base price),
+    under a prescribed file name, replaced by 11:00 on the day a price changes,
+    with replaced lists kept public for 15 days.
 
-    A price change is a new dated file next to the old ones (keep those for
-    at least 30 days), a new cjenik.csv, and the same change in PRICES and
-    on the page; the reference price and its date (ANCHOR) stay as they are."""
+    The list in force (site/cjenik/cjenik.csv), its named copy, the pricing
+    page and the worker's PRICES and ANCHOR must say the same, or one of them
+    is a false statement of what Plus costs.
+
+    The files under site/cjenik/ and the prices between <!--c:...--> marks on
+    the pricing page are written by the cjenik updater on the Mac mini
+    (~/sidrene-cijene/cjenik.py, from prices.json): change a price there, not
+    here. PRICES in worker/src/billing.js (and Stripe) change by hand with it;
+    ANCHOR, the base price and its date, stays as it is."""
+
+    NAMED = r"^99210363_ZA_SVA_PRODAJNA_MJESTA_USLUGE_\d{4}_\d{8}_\d{4}\.csv$"
+    HEADER = ["Naziv usluge", "Maloprodajna cijena i poseban oblik prodaje (DA/NE)", "Bazna cijena usluge"]
+    MONTHLY, YEARLY = "ranwhat Plus, mjesečna pretplata", "ranwhat Plus, godišnja pretplata"
 
     def setUp(self):
         self.dir = SITE / "cjenik"
-        self.current = (self.dir / "cjenik.csv").read_text(encoding="utf-8")
-        self.rows = {r[0]: r for r in (l.split(";") for l in self.current.splitlines()[1:])}
+        self.raw = (self.dir / "cjenik.csv").read_bytes()
+        self.lines = [l.split(";") for l in self.raw.decode("utf-8").splitlines()]
+        self.rows = {r[0]: r for r in self.lines[1:]}
         self.billing = (SITE.parent / "worker" / "src" / "billing.js").read_text(encoding="utf-8")
 
     def eur(self, text):
         return int(re.fullmatch(r"€(\d+) a (?:month|year)", text).group(1))
 
-    def test_newest_dated_file_is_the_current_list(self):
-        dated = sorted((f for f in self.dir.glob("webshop_*.csv")),
-                       key=lambda f: int(f.name.split("_")[3]))
-        self.assertTrue(dated)
-        self.assertEqual(dated[-1].read_text(encoding="utf-8"), self.current)
-        for f in dated:
-            self.assertRegex(f.name, r"^webshop_Mikulinci 8 Zagreb_01_\d{3}_\d{2}\.\d{2}\.\d{4}_\d{2}-\d{2}\.csv$")
+    def test_format_is_three_columns_utf8_semicolons(self):
+        self.assertFalse(self.raw.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(self.lines[0], self.HEADER)
+        self.assertGreater(len(self.lines), 1)
+        for line in self.lines:
+            self.assertEqual(len(line), 3, line)
+        for name, price, base in self.lines[1:]:
+            self.assertTrue(name.strip())
+            self.assertRegex(price, r"^\d+,\d{2} EUR (DA|NE)$")
+            self.assertRegex(base, r"^\d+,\d{2} EUR$")
+
+    def test_named_file_is_the_current_list_and_older_ones_are_archived(self):
+        named = [f for f in self.dir.glob("*.csv") if f.name != "cjenik.csv"]
+        self.assertEqual(len(named), 1, "one named file next to cjenik.csv; replaced ones live in arhiva/")
+        self.assertRegex(named[0].name, self.NAMED)
+        self.assertEqual(named[0].read_bytes(), self.raw)
+        self.assertTrue((self.dir / "arhiva" / "index.html").is_file())
+        listing = (self.dir / "arhiva" / "index.html").read_text(encoding="utf-8")
+        for f in (self.dir / "arhiva").glob("*.csv"):
+            self.assertIn(html.escape(f.name), listing)
 
     def test_plus_rows_match_the_worker(self):
         prices = dict(re.findall(r'(monthly|yearly): "(€\d+ a (?:month|year))"',
                                  re.search(r"PRICES = Object.freeze\(\{(.+?)\}\)", self.billing).group(1)))
-        anchor = re.search(r'ANCHOR = Object.freeze\(\{ date: "([\d.]+)", monthly: "(.+?)", yearly: "(.+?)" \}\)', self.billing)
-        for name, key, anchor_text in (("ranwhat Plus, mjesečna pretplata", "monthly", anchor.group(2)),
-                                       ("ranwhat Plus, godišnja pretplata", "yearly", anchor.group(3))):
+        anchor = re.search(r'ANCHOR = Object.freeze\(\{ date: "([\d. ]+)", monthly: "(.+?)", yearly: "(.+?)" \}\)', self.billing)
+        self.assertEqual(anchor.group(1), "4. 10. 2026.")
+        for name, key, anchor_text in ((self.MONTHLY, "monthly", anchor.group(2)),
+                                       (self.YEARLY, "yearly", anchor.group(3))):
             row = self.rows[name]
-            self.assertEqual(row[1], "%d,00" % self.eur(prices[key]))
-            self.assertEqual(row[5], "%d,00" % self.eur(anchor_text))
-            self.assertEqual(row[6], anchor.group(1) + ".")
+            self.assertEqual(row[1], "%d,00 EUR NE" % self.eur(prices[key]))
+            self.assertEqual(row[2], "%d,00 EUR" % self.eur(anchor_text))
 
     def test_pricing_page_shows_the_same(self):
         page = (SITE / "pricing.html").read_text(encoding="utf-8")
-        monthly, yearly = self.rows["ranwhat Plus, mjesečna pretplata"], self.rows["ranwhat Plus, godišnja pretplata"]
-        self.assertIn('<div class="price p-monthly">&euro;%s<small> / month</small>' % monthly[1][:-3], page)
-        self.assertIn("&euro;%s a year</small>" % yearly[1][:-3], page)
-        self.assertIn('<p class="anchor p-monthly">Price on %s: &euro;%s / month</p>' % (monthly[6][:-1], monthly[5][:-3]), page)
-        self.assertIn('<p class="anchor p-annual">Price on %s: &euro;%s a year</p>' % (yearly[6][:-1], yearly[5][:-3]), page)
+        whole = lambda cell: cell.split(",")[0]
+        monthly, yearly = self.rows[self.MONTHLY], self.rows[self.YEARLY]
+        label = "Base price (bazna cijena, 4. 10. 2026.): €%s<!--/c-->"
+        self.assertIn('<div class="price p-monthly"><!--c:ranwhat-plus-month:price-->€%s<!--/c--><small> / month</small>' % whole(monthly[1]), page)
+        self.assertIn("<!--c:ranwhat-plus-year:price-->€%s<!--/c--> a year</small>" % whole(yearly[1]), page)
+        self.assertIn('<p class="anchor p-monthly"><!--c:ranwhat-plus-month:base_label-->' + label % whole(monthly[2]) + " / month</p>", page)
+        self.assertIn('<p class="anchor p-annual"><!--c:ranwhat-plus-year:base_label-->' + label % whole(yearly[2]) + " a year</p>", page)
+        self.assertIn('<p class="anchor"><!--c:ranwhat-free:base_label-->Base price (bazna cijena, 10. 9. 2026.): €%s<!--/c--></p>'
+                      % whole(self.rows["ranwhat Free"][2]), page)
         self.assertIn('href="/cjenik/cjenik.csv"', page)
+        self.assertIn('href="/cjenik/arhiva/"', page)
 
 
 if __name__ == "__main__":

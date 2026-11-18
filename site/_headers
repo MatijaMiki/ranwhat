@@ -18,14 +18,22 @@
   # pricing page's Plus form ends on Stripe Checkout or, with accounts on,
   # on the account's upgrade (worker/src/stripe.js's checkout()).
 
-# The price list (cjenik) Croatia's Odluka o objavi cjenika (NN 101/26) asks for:
-# machine-readable, so scrapers may fetch it from anywhere, and never cached stale.
+# The price list (cjenik) Croatia's Pravilnik o načinu objave cjenika proizvoda
+# (NN 132/2026) asks for: machine-readable, so scrapers may fetch it from anywhere,
+# without a login or a bot check, and never cached stale. The files are written by
+# the cjenik updater (see tests/test_site_claims.py, PriceListMatchesThePrices).
 /cjenik/*
   Content-Type: text/csv; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
   Access-Control-Allow-Origin: *
   ! Cross-Origin-Resource-Policy
   Cross-Origin-Resource-Policy: cross-origin
+
+# The archive of replaced price lists has a plain HTML listing; the rule above
+# would serve it as CSV.
+/cjenik/arhiva/
+  ! Content-Type
+  Content-Type: text/html; charset=utf-8
 
 # build.sh stamps every reference to these with ?v=<content hash>, so a
 # changed file is a new URL and the old one can be cached for good. HTML
