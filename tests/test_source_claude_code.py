@@ -426,5 +426,52 @@ class Masking(_Case):
         self.assertEqual((again.changed, again.skipped), (False, None))
 
 
+class ExtraStores(unittest.TestCase):
+    """The stored tool outputs and the prompt history beside the
+    transcripts: searched for secrets, only ever read."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.projects = os.path.join(self.root, "projects")
+        self.results = os.path.join(self.projects, SLUG, SID, "tool-results")
+        os.makedirs(self.results)
+        self.output = os.path.join(self.results, "toolu_01.txt")
+        with open(self.output, "w", encoding="utf-8") as fh:
+            fh.write("DATABASE_URL=postgres://app\nSTRIPE_SECRET_KEY=%s\n" % KEY)
+        self.history = os.path.join(self.root, "history.jsonl")
+        with open(self.history, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"display": "use %s for the test" % OTHER,
+                                 "timestamp": 1760000000000}) + "\n")
+        self.source = ClaudeCodeSource()
+
+    def test_a_tool_output_and_the_history_are_read_only_side_stores(self):
+        stores = self.source.extra_stores(self.projects)
+        self.assertEqual({s.path for s in stores},
+                         {self.output, self.history})
+        for store in stores:
+            self.assertEqual((store.role, store.masking),
+                             ("side", "read-only"))
+            self.assertTrue(store.why_read_only)
+
+    def test_only_the_standard_layout_has_them(self):
+        self.assertEqual(self.source.extra_stores(self.root), [])
+
+    def test_clean_finds_a_key_only_a_tool_output_holds(self):
+        found = clean.scan_sources(["claude-code"], root=self.projects)
+        paths = {p for f in found.findings.values() for p in f["files"]}
+        self.assertIn(self.output, paths)
+        self.assertIn(self.history, paths)
+        self.assertEqual(found.read_only.keys(), {self.output, self.history})
+
+    def test_the_files_are_left_as_they_were(self):
+        def read(path):
+            with open(path, encoding="utf-8") as fh:
+                return fh.read()
+        before = (read(self.output), read(self.history))
+        clean.scan_sources(["claude-code"], root=self.projects, apply=True)
+        self.assertEqual(before, (read(self.output), read(self.history)))
+
+
 if __name__ == "__main__":
     unittest.main()
