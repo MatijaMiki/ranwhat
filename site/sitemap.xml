@@ -14,11 +14,12 @@
   <url><loc>https://ranwhat.com/guides/claude-code-deleted-files</loc><lastmod>2026-10-02</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/ai-agent-token-scopes</loc><lastmod>2026-11-16</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/developer-opsec</loc><lastmod>2026-11-16</lastmod><priority>0.7</priority></url>
-  <url><loc>https://ranwhat.com/guides/claude-code-hooks-security</loc><lastmod>2026-10-09</lastmod><priority>0.7</priority></url>
+  <url><loc>https://ranwhat.com/guides/claude-code-hooks-security</loc><lastmod>2026-11-26</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/block-command-claude-code-pretooluse-hook</loc><lastmod>2026-11-08</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/mcp-server-security-coding-agents</loc><lastmod>2026-11-16</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/ai-coding-agent-history-locations</loc><lastmod>2026-11-16</lastmod><priority>0.7</priority></url>
-  <url><loc>https://ranwhat.com/guides/cursor-chat-history</loc><lastmod>2026-11-16</lastmod><priority>0.7</priority></url>
+  <url><loc>https://ranwhat.com/guides/cursor-chat-history</loc><lastmod>2026-11-26</lastmod><priority>0.7</priority></url>
+  <url><loc>https://ranwhat.com/guides/cursor-archived-chats</loc><lastmod>2026-11-26</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/codex-cli-session-history</loc><lastmod>2026-11-16</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/claude-code-cleanupperioddays</loc><lastmod>2026-11-16</lastmod><priority>0.7</priority></url>
   <url><loc>https://ranwhat.com/guides/prompt-injection-coding-agents</loc><lastmod>2026-10-09</lastmod><priority>0.7</priority></url>

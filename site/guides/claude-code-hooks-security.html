@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Code deny rules vs hooks: what each one stops | ranwhat</title>
-<meta name="description" content="A deny rule and a PreToolUse hook both read the command text; only the sandbox limits what it touches. What each layer blocks in Claude Code, and how they combine.">
+<title>Claude Code hooks security: risks and what hooks block | ranwhat</title>
+<meta name="description" content="Claude Code hooks run shell commands with your permissions, and a repo can ship its own. The risks of hooks, what one can block, and where the sandbox fits.">
 <link rel="canonical" href="https://ranwhat.com/guides/claude-code-hooks-security">
-<meta name="ai-summary" content="A deny rule and a PreToolUse hook both read the command text; only the sandbox limits what it touches. What each layer blocks in Claude Code, and how they combine.">
+<meta name="ai-summary" content="Claude Code hooks run shell commands with your permissions, and a repo can ship its own. The risks of hooks, what one can block, and where the sandbox fits.">
 <link rel="alternate" type="text/markdown" href="https://ranwhat.com/guides/claude-code-hooks-security.md">
 <meta name="color-scheme" content="light dark">
 <meta name="google-site-verification" content="H1pSrDiEFJ3SkWLLIC7Az4ghrC-IIj-kqINttylIULo">
@@ -20,8 +20,8 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="ranwhat">
 <meta property="og:url" content="https://ranwhat.com/guides/claude-code-hooks-security">
-<meta property="og:title" content="Claude Code deny rules vs hooks: what each one stops | ranwhat">
-<meta property="og:description" content="A deny rule and a PreToolUse hook both read the command text; only the sandbox limits what it touches. What each layer blocks in Claude Code, and how they combine.">
+<meta property="og:title" content="Claude Code hooks security: risks and what hooks block | ranwhat">
+<meta property="og:description" content="Claude Code hooks run shell commands with your permissions, and a repo can ship its own. The risks of hooks, what one can block, and where the sandbox fits.">
 <meta property="og:image" content="https://ranwhat.com/og-c85b8f42.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -29,14 +29,14 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@ranwhatcom">
 <meta name="twitter:image" content="https://ranwhat.com/og-c85b8f42.png">
-<meta name="twitter:title" content="Claude Code deny rules vs hooks: what each one stops | ranwhat">
-<meta name="twitter:description" content="A deny rule and a PreToolUse hook both read the command text; only the sandbox limits what it touches. What each layer blocks in Claude Code, and how they combine.">
+<meta name="twitter:title" content="Claude Code hooks security: risks and what hooks block | ranwhat">
+<meta name="twitter:description" content="Claude Code hooks run shell commands with your permissions, and a repo can ship its own. The risks of hooks, what one can block, and where the sandbox fits.">
 <link rel="preload" href="/fonts/archivo-d5751e0f.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-01c04f4d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-hooks-security#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Claude Code deny rules, hooks and the sandbox: what each one blocks","description":"A deny rule and a PreToolUse hook both read the command text; only the sandbox limits what it touches. What each layer blocks in Claude Code, and how they combine.","datePublished":"2026-10-09","dateModified":"2026-10-09","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-hooks-security","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Hooks"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Deny rules vs hooks","item":"https://ranwhat.com/guides/claude-code-hooks-security"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/claude-code-hooks-security#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Claude Code hooks security: what hooks can do to you, and what they can block","description":"Claude Code hooks run shell commands with your permissions, and a repo can ship its own. The risks of hooks, what one can block, and where the sandbox fits.","datePublished":"2026-10-09","dateModified":"2026-11-26","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/claude-code-hooks-security","about":[{"@type":"Thing","name":"Claude Code"},{"@type":"Thing","name":"Hooks"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Deny rules vs hooks","item":"https://ranwhat.com/guides/claude-code-hooks-security"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -86,6 +86,7 @@
   <ul>
     <li><a href="/guides/ai-coding-agent-history-locations">Where agents keep history</a></li>
     <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+    <li><a href="/guides/cursor-archived-chats">Cursor archived chats</a></li>
     <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
     <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
     <li><a href="/guides/prompt-injection-coding-agents">Prompt injection</a></li>
@@ -112,7 +113,7 @@
 <section class="hero pagehead">
   <div class="shell">
     <p class="eyebrow">Part of the <a href="/guides/ai-coding-agent-security">AI coding agent security checklist</a></p>
-    <h1>Claude Code deny rules, hooks and the sandbox: what each one blocks</h1>
+    <h1>Claude Code hooks security: what hooks can do to you, and what they can block</h1>
     <p class="lede">
       Your deny rule blocks <span class="icode">rm -rf build/</span>, and the same delete written as <span class="icode">bash -c '...'</span> goes through. A deny rule and a hook both judge the command text; only the sandbox limits what a command can touch. What each of the three layers blocks, how they combine, and where each one stops. For one tested script that refuses a command, see <a href="/guides/block-command-claude-code-pretooluse-hook">how to block a command with a PreToolUse hook</a>.
     </p>
@@ -126,8 +127,35 @@
     </div>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
       Checked against Claude Code's hooks and permissions documentation under
-      Sources, and ranwhat's source. Published <time datetime="2026-10-09">9 October 2026</time>.
+      Sources, and ranwhat's source. Published 9 October 2026, updated <time datetime="2026-11-26">26 November 2026</time>.
     </p>
+  </div>
+</section>
+
+<section class="mark-3" id="risks">
+  <div class="shell band split">
+    <div class="marginal">00 / Risks</div>
+    <div>
+      <h2>Are Claude Code hooks a security risk?</h2>
+      <p class="lede">
+        Yes. A hook is a shell command that Claude Code runs for you, with your full user permissions, and it can come from a repository you just cloned.
+      </p>
+      <div class="rows" style="margin-top:26px">
+        <div class="row"><span class="k">Your permissions</span>
+          <span class="v">Claude Code's documentation says command hooks can modify, delete or read any file your account can. A hook that is wrong, or edited by something else, has the same reach.</span></div>
+        <div class="row"><span class="k">Repo hooks</span>
+          <span class="v">A repository's <span class="icode">.claude/settings.json</span> can define hooks. In an interactive session they wait for the workspace trust dialog; with <span class="icode">claude -p</span> or the SDK there is no dialog, so they run. Plugins, skills and subagents can bring hooks too.</span></div>
+        <div class="row"><span class="k">They merge</span>
+          <span class="v">Hooks from user, project, local, plugin and managed settings all run together. A project hook does not replace yours; both fire.</span></div>
+        <div class="row"><span class="k">Fail open</span>
+          <span class="v">A hook meant to block something lets the call through when it crashes, times out or exits with any code other than 2.</span></div>
+        <div class="row"><span class="k">Check now</span>
+          <span class="v">Run <span class="icode">/hooks</span> to list every active hook, read <span class="icode">.claude/</span> in repos you did not write, and pass <span class="icode">--settings '{"disableAllHooks": true}'</span> when you script <span class="icode">claude -p</span> over someone else's code.</span></div>
+      </div>
+      <p style="margin-top:26px">
+        Used the other way round, a hook is also a security control: it can refuse a command before it runs. The rest of this page is what that control blocks, and where deny rules and the sandbox do better.
+      </p>
+    </div>
   </div>
 </section>
 
@@ -511,6 +539,21 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"/Users/you/app/.env"}}' \
   </div>
 </section>
 
+<section class="mark-3" id="questions">
+  <div class="shell band split">
+    <div class="marginal">Questions</div>
+    <div>
+      <h2>Common questions about Claude Code hooks security</h2>
+      <div class="faqs">
+        <div class="faq"><h3>Are Claude Code hooks a security risk?</h3><p>Yes, in two ways. A hook is a shell command that runs with your full user permissions, so a wrong or tampered hook can touch any file you can. And hooks can come from a repository's <span class="icode">.claude/settings.json</span> or a plugin, which makes them code from someone else running on your machine.</p></div>
+        <div class="faq"><h3>Can a cloned repository run hooks on my machine?</h3><p>Yes. Hooks in a repository's <span class="icode">.claude/settings.json</span> run once you accept Claude Code's workspace trust dialog for that folder. With claude -p or the SDK there is no dialog, so they run straight away. Read the repo's .claude/ folder first, or run with <span class="icode">--settings '{"disableAllHooks": true}'</span>.</p></div>
+        <div class="faq"><h3>Can a hook stop Claude Code from running a dangerous command?</h3><p>Partly. A PreToolUse hook that exits with code 2 blocks the call, but it only sees the command text, so a rewritten or encoded command can get past it. A hook that crashes or times out lets the call through. Use the sandbox when the limit has to hold.</p></div>
+        <div class="faq"><h3>How do I see which hooks are active?</h3><p>Run <span class="icode">/hooks</span> in Claude Code. It lists every configured hook by event, from user, project, local, managed and plugin settings, which all merge and run together.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="mark-5">
   <div class="shell band split">
     <div class="marginal">Sources</div>
@@ -575,6 +618,7 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"/Users/you/app/.env"}}' \
           <li><a href="/guides/block-command-claude-code-pretooluse-hook">Block one command</a></li>
           <li><a href="/guides/ai-coding-agent-history-locations">Agent history locations</a></li>
           <li><a href="/guides/cursor-chat-history">Cursor chat history</a></li>
+          <li><a href="/guides/cursor-archived-chats">Cursor archived chats</a></li>
           <li><a href="/guides/codex-cli-session-history">Codex session history</a></li>
           <li><a href="/guides/mcp-server-security-coding-agents">MCP server security</a></li>
           <li><a href="/guides/ai-agent-token-scopes">Token scopes</a></li>
