@@ -36,7 +36,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/codex-cli-session-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Codex CLI keeps your session history","description":"Codex keeps every thread as JSONL in ~/.codex/sessions, by day, with no retention documented. What each file holds, the shell snapshots, and how to cap it.","datePublished":"2026-11-16","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/codex-cli-session-history","about":[{"@type":"Thing","name":"Codex"},{"@type":"Thing","name":"Session history"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Codex session history","item":"https://ranwhat.com/guides/codex-cli-session-history"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/codex-cli-session-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Codex CLI keeps your session history","description":"Codex keeps every thread as JSONL in ~/.codex/sessions, by day, with no retention documented. What each file holds, the shell snapshots, and how to cap it.","datePublished":"2026-11-16","dateModified":"2026-11-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/codex-cli-session-history","about":[{"@type":"Thing","name":"Codex"},{"@type":"Thing","name":"Session history"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Codex session history","item":"https://ranwhat.com/guides/codex-cli-session-history"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -126,7 +126,7 @@
       <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
     </div>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
-      Paths are the ones ranwhat's Codex reader uses, checked against Codex rust-v0.159.3 and its configuration documentation under Sources. Published <time datetime="2026-11-16">16 November 2026</time>.
+      Paths are the ones ranwhat's Codex reader uses, checked against Codex rust-v0.159.3 and its configuration documentation under Sources. Published 16 November 2026, updated <time datetime="2026-11-27">27 November 2026</time>.
     </p>
   </div>
 </section>
@@ -241,12 +241,17 @@ ls ~/.codex/shell_snapshots | wc -l</pre></div>
   <div class="shell band split">
     <div class="marginal">06 / Delete</div>
     <div>
-      <h2>How do I delete Codex session history?</h2>
+      <h2>How do I clear or delete Codex session history?</h2>
       <p class="lede">
-        Remove the files: there is no purge command, and deleting them only removes your local copy.
+        One session at a time with <span class="icode">codex delete</span>; all of it by removing the files while Codex is closed. Either way only your local copy goes.
       </p>
-      <p>
-        Delete a day's folder under <span class="icode">sessions/</span>, <span class="icode">archived_sessions/</span> or <span class="icode">history.jsonl</span> when Codex is not running. If a thread showed a credential, rotate it first: the copy was readable for as long as it sat there. <a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a> has each provider's steps.
+      <div class="term" style="margin-top:22px">
+        <div class="term-body"><pre>codex delete SESSION            <span class="c-mut"># session id or name; asks before deleting</span>
+codex delete --force UUID       <span class="c-mut"># no prompt; needs the full session id</span>
+codex archive SESSION           <span class="c-mut"># hide it instead; codex unarchive brings it back</span></pre></div>
+      </div>
+      <p style="margin-top:22px">
+        <span class="icode">codex delete</span> and <span class="icode">codex archive</span> exist since Codex 0.140. Prefer them for single sessions, because they also update Codex's own index. To clear everything, quit Codex and remove <span class="icode">sessions/</span>, <span class="icode">archived_sessions/</span> and <span class="icode">history.jsonl</span>. If a thread showed a credential, rotate it first: the copy was readable for as long as it sat there. <a href="/guides/rotate-leaked-api-key-ai-agent">Rotate a leaked key</a> has each provider's steps.
       </p>
     </div>
   </div>

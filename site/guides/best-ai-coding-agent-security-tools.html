@@ -36,7 +36,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/best-ai-coding-agent-security-tools#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Seven coding agent security tools compared on five checks","description":"ranwhat, Stroq, HOL Guard, ggshield, Gitleaks, Snyk Agent Scan and TruffleHog compared on five checks you can verify. ranwhat is ours, so the method is shown.","datePublished":"2026-10-14","dateModified":"2026-11-12","author":{"@id":"https://ranwhat.com/about#matija"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/best-ai-coding-agent-security-tools","about":[{"@type":"Thing","name":"AI coding agent security"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Best security tools","item":"https://ranwhat.com/guides/best-ai-coding-agent-security-tools"}]},{"@type":"ItemList","name":"Best AI coding agent security tools in 2026","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","url":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Stroq","url":"https://github.com/AGGIB/Stroq"},{"@type":"ListItem","position":3,"name":"HOL Guard","url":"https://github.com/hashgraph-online/hol-guard"},{"@type":"ListItem","position":4,"name":"GitGuardian ggshield","url":"https://github.com/GitGuardian/ggshield"},{"@type":"ListItem","position":5,"name":"Gitleaks","url":"https://github.com/gitleaks/gitleaks"},{"@type":"ListItem","position":6,"name":"Snyk Agent Scan","url":"https://github.com/snyk/agent-scan"},{"@type":"ListItem","position":7,"name":"TruffleHog","url":"https://github.com/trufflesecurity/trufflehog"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/best-ai-coding-agent-security-tools#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Seven coding agent security tools compared on five checks","description":"ranwhat, Stroq, HOL Guard, ggshield, Gitleaks, Snyk Agent Scan and TruffleHog compared on five checks you can verify. ranwhat is ours, so the method is shown.","datePublished":"2026-10-14","dateModified":"2026-11-27","author":{"@id":"https://ranwhat.com/about#matija"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/best-ai-coding-agent-security-tools","about":[{"@type":"Thing","name":"AI coding agent security"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Best security tools","item":"https://ranwhat.com/guides/best-ai-coding-agent-security-tools"}]},{"@type":"ItemList","name":"Best AI coding agent security tools in 2026","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","url":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Stroq","url":"https://github.com/AGGIB/Stroq"},{"@type":"ListItem","position":3,"name":"HOL Guard","url":"https://github.com/hashgraph-online/hol-guard"},{"@type":"ListItem","position":4,"name":"GitGuardian ggshield","url":"https://github.com/GitGuardian/ggshield"},{"@type":"ListItem","position":5,"name":"Gitleaks","url":"https://github.com/gitleaks/gitleaks"},{"@type":"ListItem","position":6,"name":"Snyk Agent Scan","url":"https://github.com/snyk/agent-scan"},{"@type":"ListItem","position":7,"name":"TruffleHog","url":"https://github.com/trufflesecurity/trufflehog"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -136,7 +136,7 @@
       Every fact checked against each project's own documentation under
       Sources, on 20 October 2026, and
       re-checked every 30 to 90 days. HOL Guard was added on
-      <time datetime="2026-11-12">12 November 2026</time>, partly from test
+      <time datetime="2026-11-27">27 November 2026</time>, partly from test
       evidence its maker supplied and partly from our own live test on Cursor.
     </p>
   </div>
@@ -620,9 +620,46 @@
   </div>
 </section>
 
+<section class="mark-3" id="appsec-platforms">
+  <div class="shell band split">
+    <div class="marginal">07 / Platforms</div>
+    <div>
+      <h2>OX Security, ArmorCode, Checkmarx and GitHub Advanced Security alternatives</h2>
+      <p class="lede">
+        These four are application security platforms for a company's code, dependencies and pipelines. None of them records what a coding agent did on a developer's machine, so the right alternative depends on which of those two jobs you need done.
+      </p>
+      <div class="scroll" style="margin-top:28px">
+      <table class="stack">
+        <thead><tr><th>Platform</th><th>How it describes itself</th><th>Free tools for the same job</th></tr></thead>
+        <tbody>
+          <tr><td><strong>OX Security</strong></td>
+              <td data-label="How it describes itself">&ldquo;Prompt to runtime&rdquo; application security, from AI-generated code to cloud runtime</td>
+              <td data-label="Free tools for the same job">Semgrep Community Edition for code, Trivy or OSV-Scanner for dependencies and containers</td></tr>
+          <tr><td><strong>ArmorCode</strong></td>
+              <td data-label="How it describes itself">An agentic AI platform for unified exposure management, pulling findings from many scanners into one place</td>
+              <td data-label="Free tools for the same job">OWASP DefectDojo, which collects and de-duplicates scanner findings</td></tr>
+          <tr><td><strong>Checkmarx One</strong></td>
+              <td data-label="How it describes itself">Agentic application security testing: code, dependency and runtime scanning with AI agents</td>
+              <td data-label="Free tools for the same job">Semgrep Community Edition for code, OSV-Scanner for dependencies, ZAP for running web apps</td></tr>
+          <tr><td><strong>GitHub Advanced Security</strong></td>
+              <td data-label="How it describes itself">Built-in protection for every repository: CodeQL code scanning, secret scanning with push protection, Dependabot</td>
+              <td data-label="Free tools for the same job">The same features are free on public repositories; Gitleaks or TruffleHog for secrets in private ones</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:22px">
+        What all four leave out is the agent itself: the commands Claude Code, Cursor or Codex ran, the files it read, and the API keys that ended up in its transcripts on a laptop. That is what the seven tools ranked above are for. Most teams that use AI coding agents need one of each: a platform or a free scanner for the code that gets merged, and an agent tool for the machines the agents run on.
+      </p>
+      <p>
+        We have not tested these platforms. The descriptions are their own, from their home pages, read on 27 November 2026.
+      </p>
+    </div>
+  </div>
+</section>
+
 <section class="mark-2" id="results">
   <div class="shell band split">
-    <div class="marginal">07 / Results</div>
+    <div class="marginal">08 / Results</div>
     <div>
       <h2>What results look like</h2>
       <p class="lede">
@@ -656,7 +693,7 @@ Read locally. Nothing was transmitted.</pre></div>
 
 <section class="mark-3" id="faq">
   <div class="shell band split">
-    <div class="marginal">08 / Questions</div>
+    <div class="marginal">09 / Questions</div>
     <div>
       <h2>Common questions</h2>
       <div class="faqs">
@@ -675,7 +712,7 @@ Read locally. Nothing was transmitted.</pre></div>
 
 <section class="mark-4" id="try">
   <div class="shell band split">
-    <div class="marginal">09 / Try it</div>
+    <div class="marginal">10 / Try it</div>
     <div>
       <h2>Try ranwhat free (no account needed)</h2>
       <p class="lede">
@@ -719,6 +756,10 @@ Read locally. Nothing was transmitted.</pre></div>
         ourselves.
       </p>
       <ul class="follow">
+        <li><a href="https://www.ox.security/">OX Security<span>home page description, read 27 November 2026</span></a></li>
+        <li><a href="https://www.armorcode.com/">ArmorCode<span>home page description, read 27 November 2026</span></a></li>
+        <li><a href="https://checkmarx.com/">Checkmarx<span>home page description, read 27 November 2026</span></a></li>
+        <li><a href="https://github.com/security/advanced-security">GitHub Advanced Security<span>features, read 27 November 2026</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/docs/reference.md">ranwhat reference<span>agents, rules, hook, what goes online</span></a></li>
         <li><a href="https://github.com/MatijaMiki/ranwhat/blob/main/LICENSE">ranwhat LICENSE<span>MIT</span></a></li>
         <li><a href="https://github.com/AGGIB/Stroq">Stroq on GitHub<span>agents, hooks, local-only statement, Node.js 22, Apache-2.0</span></a></li>

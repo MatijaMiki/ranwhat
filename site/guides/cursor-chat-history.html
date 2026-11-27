@@ -36,7 +36,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/cursor-chat-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Cursor stores your chat and agent history","description":"Cursor keeps every editor chat in one SQLite file, state.vscdb, and the CLI in ~/.cursor/chats. The path per OS, what the tables hold, and how to read it safely.","datePublished":"2026-11-16","dateModified":"2026-11-26","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/cursor-chat-history","about":[{"@type":"Thing","name":"Cursor"},{"@type":"Thing","name":"Chat history"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Cursor chat history","item":"https://ranwhat.com/guides/cursor-chat-history"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/cursor-chat-history#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Where Cursor stores your chat and agent history","description":"Cursor keeps every editor chat in one SQLite file, state.vscdb, and the CLI in ~/.cursor/chats. The path per OS, what the tables hold, and how to read it safely.","datePublished":"2026-11-16","dateModified":"2026-11-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/cursor-chat-history","about":[{"@type":"Thing","name":"Cursor"},{"@type":"Thing","name":"Chat history"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"Cursor chat history","item":"https://ranwhat.com/guides/cursor-chat-history"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -126,7 +126,7 @@
       <a class="ghost" href="/install" style="padding:11px 15px">Install</a>
     </div>
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
-      Paths and keys are the ones ranwhat's Cursor reader uses, checked against a real Cursor 3.6 session and the open-source readers under Sources. Published 16 November 2026, updated <time datetime="2026-11-26">26 November 2026</time>.
+      Paths and keys are the ones ranwhat's Cursor reader uses, checked against a real Cursor 3.6 session and the open-source readers under Sources. Published 16 November 2026, updated <time datetime="2026-11-27">27 November 2026</time>.
     </p>
   </div>
 </section>
@@ -280,6 +280,7 @@ rm -r ~/cursor-copy</pre></div>
         <div class="faq"><h3>Is Cursor chat history encrypted?</h3><p>The chat values ranwhat reads are plain JSON inside SQLite, so file permissions are the only protection. Anything running as you can read them, and so can whatever backs up your home folder.</p></div>
         <div class="faq"><h3>Where are Cursor chats for one project?</h3><p>In the same global database. Each chat records its workspace, and <span class="icode">composer.composerHeaders</span> lists every chat with it; <span class="icode">workspaceStorage/&lt;id&gt;/workspace.json</span> maps a workspace id to its folder.</p></div>
         <div class="faq"><h3>Are archived Cursor chats deleted?</h3><p>No. An archived chat is hidden from the list but still in <span class="icode">state.vscdb</span>; restore it from the Archived group. See <a href="/guides/cursor-archived-chats">Cursor archived chats</a>.</p></div>
+        <div class="faq"><h3>Does Cursor remember across conversations?</h3><p>Not by itself any more. Cursor had a Memories feature that saved facts from chats, but its settings were removed in Cursor 2.1, and Cursor's docs now point to Rules instead: User Rules apply to every chat, Project Rules to one repository. Each new chat otherwise starts without the earlier ones, even though all of them stay saved in <span class="icode">state.vscdb</span>.</p></div>
         <div class="faq"><h3>Why is Cursor's state.vscdb so large?</h3><p>It holds every chat, every message and the before and after text of every file the agent edited, in one file.</p></div>
       </div>
     </div>

@@ -36,7 +36,7 @@
 <link rel="preload" href="/fonts/ibmplexmono-11ced52d.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 <script src="/theme.js"></script>
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/mcp-server-security-coding-agents#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Securing MCP servers for coding agents","description":"Claude Code does not sandbox MCP servers: a local one can run any command you can. Read what is configured, scope it, and see what each server can reach.","datePublished":"2026-10-09","dateModified":"2026-11-16","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/mcp-server-security-coding-agents","about":[{"@type":"Thing","name":"Model Context Protocol"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"MCP server security","item":"https://ranwhat.com/guides/mcp-server-security-coding-agents"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://ranwhat.com/guides/mcp-server-security-coding-agents#article","image":"https://ranwhat.com/og-c85b8f42.png","headline":"Securing MCP servers for coding agents","description":"Claude Code does not sandbox MCP servers: a local one can run any command you can. Read what is configured, scope it, and see what each server can reach.","datePublished":"2026-10-09","dateModified":"2026-11-27","author":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"publisher":{"@type":"Organization","name":"ranwhat","url":"https://ranwhat.com"},"mainEntityOfPage":"https://ranwhat.com/guides/mcp-server-security-coding-agents","about":[{"@type":"Thing","name":"Model Context Protocol"},{"@type":"Thing","name":"Claude Code"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"ranwhat","item":"https://ranwhat.com/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://ranwhat.com/guides"},{"@type":"ListItem","position":3,"name":"MCP server security","item":"https://ranwhat.com/guides/mcp-server-security-coding-agents"}]}]}</script>
 </head>
 <body class="in-guides">
 <header>
@@ -128,7 +128,7 @@
     <p class="mono" style="margin:18px 0 0;font-size:12px;color:var(--faint)">
       Checked against Claude Code's documentation, the MCP specification's
       security guidance, the research under Sources, and ranwhat's source.
-      Published 9 October 2026, updated <time datetime="2026-11-16">16 November 2026</time>.
+      Published 9 October 2026, updated <time datetime="2026-11-27">27 November 2026</time>.
     </p>
   </div>
 </section>
@@ -371,9 +371,30 @@ claude mcp reset-project-choices <span class="c-mut"># forget your .mcp.json app
   </div>
 </section>
 
+<section class="mark-4" id="vet">
+  <div class="shell band split">
+    <div class="marginal">07 / Vet</div>
+    <div>
+      <h2>How do I vet an MCP server before installing it?</h2>
+      <p class="lede">
+        Check who publishes it, read exactly what it tells the model, and decide what it may hold, before the first <span class="icode">claude mcp add</span>.
+      </p>
+      <ol style="margin-top:22px">
+        <li><b>Who publishes it.</b> Prefer the vendor's own repository or its entry in the official MCP Registry. Check that the package name in the install command is the one the repository names, because look-alike names are an easy trap.</li>
+        <li><b>What it tells the model.</b> Open it in the MCP Inspector (<span class="icode">npx @modelcontextprotocol/inspector</span>) and read every tool's name, description and input schema. That text goes to the model, and it is where tool-poisoning instructions hide.</li>
+        <li><b>What it runs as.</b> A local server runs as you, with your files, your shell and your network. A remote one receives whatever the agent sends it. Decide which you are comfortable with.</li>
+        <li><b>What it needs.</b> Give it a token scoped to the one job, never your main key. <a href="/guides/ai-agent-token-scopes">Token scopes</a> has the narrow scopes for the common providers.</li>
+        <li><b>Which version.</b> Pin it, for example <span class="icode">npx -y package@1.4.2</span>, so a new release can't change what you approved. <span class="icode">uvx ranwhat reach</span> flags unpinned servers.</li>
+        <li><b>A scan.</b> Run a scanner built for MCP servers, such as <a href="/guides/best-ai-coding-agent-security-tools#snyk">Snyk Agent Scan</a>, which looks for hidden instructions in tool descriptions.</li>
+        <li><b>Again after updates.</b> A server can change its tool descriptions after you approved it. Repeat steps 2 and 6 when you update it.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
 <section class="mark-5">
   <div class="shell band split">
-    <div class="marginal">07 / Next</div>
+    <div class="marginal">08 / Next</div>
     <div>
       <h2>A short routine</h2>
       <div class="term">
